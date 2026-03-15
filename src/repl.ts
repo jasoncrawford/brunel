@@ -2,7 +2,6 @@ import fs from "fs";
 import { fileURLToPath } from "url";
 import { query, type HookCallback } from "@anthropic-ai/claude-agent-sdk";
 import * as display from "./display.js";
-export * from "./display.js";
 import { WebSocket } from "ws";
 import { getWorkerId } from "./worker-id.js";
 import { buildInitialPrompt, buildEventPrompt } from "./templates.js";
