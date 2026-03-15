@@ -256,6 +256,13 @@ export const HOOK_FMT: FmtTable = {
   _default:           { verbose: (h) => c.sageGreen(`hook: ${h._event}`) },
 };
 
+export const FOREMAN_MESSAGE_FMT: FmtTable = {
+  task_assigned:      (m) => c.lavender(`  Task assigned: #${m.issue.number} — ${m.issue.title}`),
+  event_notification: (m) => c.darkGray(`  Event received: ${m.event.name}`),
+  standby:            (_m) => c.darkGray("  Standby — waiting for tasks..."),
+  _default:           (m) => c.darkGray(`  foreman/${m.type}`),
+};
+
 // ── Printing engine ───────────────────────────────────────────────────────────
 
 let _statusText = "";
@@ -343,4 +350,9 @@ export function printMessage(msg: unknown) {
 
 export function printHook(event: string, input: unknown) {
   print(resolve(HOOK_FMT, event, { ...(input as any), _event: event }));
+}
+
+export function printForemanMessage(msg: unknown) {
+  const m = msg as any;
+  print(resolve(FOREMAN_MESSAGE_FMT, m.type, m));
 }

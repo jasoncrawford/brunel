@@ -627,6 +627,8 @@ export async function workerMain() {
       let msg: ForemanMessage;
       try { msg = JSON.parse(data.toString()); } catch { return; }
 
+      printForemanMessage(msg);
+
       if (msg.type === "task_assigned") {
         currentTaskId = msg.taskId;
         currentIssue = msg.issue;
@@ -637,8 +639,6 @@ export async function workerMain() {
         pendingEvents.push(msg.event);
         resolveWsInput?.(WS_EVENT);
         resolveWsInput = null;
-      } else if (msg.type === "standby") {
-        display.print(display.c.darkGray("  Standby — waiting for tasks..."));
       }
     });
 
@@ -670,7 +670,6 @@ export async function workerMain() {
     // synchronously before calling resolveWsInput, so currentIssue is always
     // populated by the time ask() resolves with WS_TASK_ASSIGNED.
     if (input === WS_TASK_ASSIGNED && currentIssue) {
-      display.print(display.c.lavender(`  Task assigned: #${currentIssue.number} — ${currentIssue.title}`));
       const prompt = buildInitialPrompt(currentIssue);
       currentSessionId = await runQuery(prompt, currentSessionId);
       continue;
