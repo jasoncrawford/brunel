@@ -10,7 +10,7 @@ import {
   toolUseNames,
   setVerbose,
   _statusActive,
-} from "../src/repl.js";
+} from "../src/display.js";
 
 function captureOutput(fn: () => void): string {
   let output = "";

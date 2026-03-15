@@ -14,7 +14,8 @@ vi.mock("fs", () => ({
 }));
 
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { runQuery, toolUseNames, stopStatus, setVerbose } from "../src/repl.js";
+import { runQuery } from "../src/repl.js";
+import { toolUseNames, stopStatus, setVerbose } from "../src/display.js";
 
 function mockQueryMessages(messages: object[]) {
   (query as any).mockImplementation((_opts: any) => {

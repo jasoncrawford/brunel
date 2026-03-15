@@ -11,7 +11,7 @@ import {
   fmtEditResult,
   fmtHunk,
   c,
-} from "../src/repl.js";
+} from "../src/display.js";
 
 describe("trunc", () => {
   it("returns short string unchanged", () => {

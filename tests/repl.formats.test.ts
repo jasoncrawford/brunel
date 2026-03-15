@@ -12,7 +12,7 @@ import {
   MESSAGE_FMT,
   HOOK_FMT,
   type FmtTable,
-} from "../src/repl.js";
+} from "../src/display.js";
 
 // Helper to call resolve and strip ANSI
 function r(table: FmtTable, key: string, data: any): string | null {
