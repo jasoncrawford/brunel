@@ -4,6 +4,7 @@ import "dotenv/config";
 import { WebSocketServer } from "ws";
 import type { WebSocket as WsSocket } from "ws";
 import type { WorkerMessage, ForemanMessage, GitHubEvent } from "./types.js";
+export { summaryEvent } from "./display.js";
 
 type R = Record<string, unknown>;
 
@@ -206,38 +207,6 @@ if (webhooks) {
     printEvent(id, name as string, payload);
     routeEventToWorker(id, name as string, payload);
   });
-}
-
-function truncTitle(title: unknown, max = 50): string {
-  const s = String(title ?? "").replace(/\s+/g, " ").trim();
-  return s.length > max ? s.slice(0, max - 1) + "…" : s;
-}
-
-export function summaryEvent(id: string, name: string, payload: unknown): string {
-  const p = payload as Record<string, unknown>;
-  const action = typeof p.action === "string" ? `/${p.action}` : "";
-  const repo = (p.repository as Record<string, unknown> | undefined)?.full_name;
-  const sender = (p.sender as Record<string, unknown> | undefined)?.login;
-
-  let detail = "";
-  const issue = p.issue as Record<string, unknown> | undefined;
-  const pr = p.pull_request as Record<string, unknown> | undefined;
-
-  if (issue) {
-    detail = ` #${issue.number} "${truncTitle(issue.title)}"`;
-  } else if (pr) {
-    detail = ` #${pr.number} "${truncTitle(pr.title)}"`;
-  } else if (name === "push") {
-    const ref = String(p.ref ?? "");
-    const count = (p.commits as unknown[] | undefined)?.length ?? 0;
-    detail = ` ${ref} (${count} commit${count === 1 ? "" : "s"})`;
-  }
-
-  const parts: string[] = [`${name}${action}${detail}`];
-  if (sender) parts.push(`by ${sender}`);
-  if (repo) parts.push(`(${repo})`);
-
-  return `[event] ${parts.join(" ")}`;
 }
 
 function printEvent(id: string, name: string, payload: unknown) {

@@ -344,3 +344,52 @@ export function printMessage(msg: unknown) {
 export function printHook(event: string, input: unknown) {
   print(resolve(HOOK_FMT, event, { ...(input as any), _event: event }));
 }
+
+// ── GitHub event formatting ────────────────────────────────────────────────────
+
+function truncTitle(title: unknown, max = 50): string {
+  const t = String(title ?? "").replace(/\s+/g, " ").trim();
+  return t.length > max ? t.slice(0, max - 1) + "…" : t;
+}
+
+export function summaryEvent(id: string, name: string, payload: unknown): string {
+  const p = payload as Record<string, unknown>;
+  const action = typeof p.action === "string" ? `/${p.action}` : "";
+  const repo = (p.repository as Record<string, unknown> | undefined)?.full_name;
+  const sender = (p.sender as Record<string, unknown> | undefined)?.login;
+
+  let detail = "";
+  const issue = p.issue as Record<string, unknown> | undefined;
+  const pr = p.pull_request as Record<string, unknown> | undefined;
+
+  if (issue) {
+    detail = ` #${issue.number} "${truncTitle(issue.title)}"`;
+  } else if (pr) {
+    detail = ` #${pr.number} "${truncTitle(pr.title)}"`;
+  } else if (name === "push") {
+    const ref = String(p.ref ?? "");
+    const count = (p.commits as unknown[] | undefined)?.length ?? 0;
+    detail = ` ${ref} (${count} commit${count === 1 ? "" : "s"})`;
+  }
+
+  const parts: string[] = [`${name}${action}${detail}`];
+  if (sender) parts.push(`by ${sender}`);
+  if (repo) parts.push(`(${repo})`);
+
+  return `[event] ${parts.join(" ")}`;
+}
+
+// ── Foreman → Worker message formatting ───────────────────────────────────────
+
+import type { ForemanMessage } from "./types.js";
+
+/**
+ * Returns a display string for a ForemanMessage received by a worker, or null
+ * if the message type handles its own printing elsewhere in the worker loop.
+ */
+export function formatForemanMessage(msg: ForemanMessage): string | null {
+  if (msg.type === "event_notification") {
+    return summaryEvent(msg.event.id, msg.event.name, msg.event.payload);
+  }
+  return null;
+}

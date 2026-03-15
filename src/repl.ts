@@ -634,6 +634,7 @@ export async function workerMain() {
         resolveWsInput?.(WS_TASK_ASSIGNED);
         resolveWsInput = null;
       } else if (msg.type === "event_notification") {
+        display.print(display.c.darkGray(`  ${display.formatForemanMessage(msg)}`));
         pendingEvents.push(msg.event);
         resolveWsInput?.(WS_EVENT);
         resolveWsInput = null;
