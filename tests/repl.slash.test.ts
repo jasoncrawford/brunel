@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseSlashCommand, resolveCommandFilePath, loadCommandFile, dispatchInput } from "../src/repl.js";
+import { parseSlashCommand, resolveCommandFilePath, loadCommandFile, dispatchInput } from "../src/input.js";
 
 describe("parseSlashCommand", () => {
   it("returns null for non-slash input", () => {

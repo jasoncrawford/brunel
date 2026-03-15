@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { dispatchInput } from "../src/repl.js";
+import { dispatchInput } from "../src/input.js";
 
 describe("dispatchInput", () => {
   it("empty input returns { type: 'skip' }", async () => {
