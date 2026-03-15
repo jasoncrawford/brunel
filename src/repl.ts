@@ -292,7 +292,7 @@ export function ask(
     process.stdout.write(promptStr);
 
     if (abort) {
-      abort.then((value) => {
+      void abort.then((value) => {
         if (!done) {
           // Clear current line and submit the abort value
           process.stdout.write("\r\x1b[K");
@@ -745,8 +745,8 @@ export async function workerMain() {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (process.argv.includes("--worker-mode")) {
-    workerMain();
+    void workerMain();
   } else {
-    main();
+    void main();
   }
 }
