@@ -260,6 +260,7 @@ export const FOREMAN_MESSAGE_FMT: FmtTable = {
   task_assigned:      (m) => c.lavender(`  Task assigned: #${m.issue.number} — ${m.issue.title}`),
   event_notification: (m) => c.darkGray(`  Event received: ${m.event.name}`),
   standby:            (_m) => c.darkGray("  Standby — waiting for tasks..."),
+  _default:           (m) => c.darkGray(`  foreman/${m.type}`),
 };
 
 // ── Printing engine ───────────────────────────────────────────────────────────
