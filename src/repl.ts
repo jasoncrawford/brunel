@@ -8,23 +8,6 @@ import { getWorkerId } from "./worker-id.js";
 import { buildInitialPrompt, buildEventPrompt } from "./templates.js";
 import type { ForemanMessage, GitHubEvent, TaskIssue } from "./types.js";
 
-// ── Foreman message display ───────────────────────────────────────────────────
-
-/**
- * Print a concise one-liner for every message received from the foreman.
- * Called immediately when the WebSocket message arrives, regardless of
- * whether the worker is idle or busy running a query.
- */
-export function printForemanMessage(msg: ForemanMessage) {
-  if (msg.type === "task_assigned") {
-    display.print(display.c.lavender(`  Task assigned: #${msg.issue.number} — ${msg.issue.title}`));
-  } else if (msg.type === "event_notification") {
-    display.print(display.c.darkGray(`  Event received: ${msg.event.name}`));
-  } else if (msg.type === "standby") {
-    display.print(display.c.darkGray("  Standby — waiting for tasks..."));
-  }
-}
-
 // ── Log file ──────────────────────────────────────────────────────────────────
 
 const LOG_FILE = "repl.log";

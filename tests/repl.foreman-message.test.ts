@@ -4,7 +4,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { stripAnsi } from "./helpers.js";
-import { printForemanMessage, stopStatus, setVerbose } from "../src/repl.js";
+import { printForemanMessage, stopStatus, setVerbose } from "../src/display.js";
 import type { ForemanMessage } from "../src/types.js";
 
 function captureOutput(fn: () => void): string {
