@@ -11,7 +11,8 @@
     "repl": "tsx src/repl.ts",
     "worker": "tsx src/repl.ts --worker-mode",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "smoke": "tsx tests/smoke.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.74",
