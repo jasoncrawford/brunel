@@ -140,23 +140,6 @@ export class TaskQueue {
   }
 }
 
-// ── Module-level wiring ───────────────────────────────────────────────────────
-
-const registry = new WorkerRegistry();
-const taskQueue = new TaskQueue();
-// Placeholder — assigned synchronously by createForemanWss before any requests arrive
-let routeEventToWorker: (id: string, name: string, payload: unknown) => void = () => {};
-
-// ── Webhook handler ───────────────────────────────────────────────────────────
-
-const webhooks = WEBHOOK_SECRET ? new Webhooks({ secret: WEBHOOK_SECRET }) : null;
-
-if (webhooks) {
-  webhooks.onAny(({ id, name, payload }) => {
-    printEvent(id, name as string, payload);
-    routeEventToWorker(id, name as string, payload);
-  });
-}
 
 function truncTitle(title: unknown, max = 50): string {
   const s = String(title ?? "").replace(/\s+/g, " ").trim();
@@ -194,63 +177,68 @@ function printEvent(id: string, name: string, payload: unknown) {
   console.log(summaryEvent(id, name, payload));
 }
 
-// ── HTTP server ───────────────────────────────────────────────────────────────
+// ── HTTP server factory ───────────────────────────────────────────────────────
 
-const server = http.createServer(async (req, res) => {
-  if (req.method === "POST" && req.url === "/webhook") {
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) {
-      chunks.push(chunk as Buffer);
-    }
-    const rawBody = Buffer.concat(chunks).toString();
+function createHttpServer(
+  webhooks: InstanceType<typeof Webhooks> | null,
+  routeEvent: (id: string, name: string, payload: unknown) => void,
+): http.Server {
+  return http.createServer(async (req, res) => {
+    if (req.method === "POST" && req.url === "/webhook") {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) {
+        chunks.push(chunk as Buffer);
+      }
+      const rawBody = Buffer.concat(chunks).toString();
 
-    const id = (req.headers["x-github-delivery"] as string) ?? "unknown";
-    const name = req.headers["x-github-event"] as string;
-    const signature = req.headers["x-hub-signature-256"] as string;
+      const id = (req.headers["x-github-delivery"] as string) ?? "unknown";
+      const name = req.headers["x-github-event"] as string;
+      const signature = req.headers["x-hub-signature-256"] as string;
 
-    if (!name) {
-      res.writeHead(400);
-      res.end("Missing x-github-event header");
+      if (!name) {
+        res.writeHead(400);
+        res.end("Missing x-github-event header");
+        return;
+      }
+
+      try {
+        if (webhooks) {
+          if (!signature) {
+            res.writeHead(401);
+            res.end("Missing signature");
+            return;
+          }
+          await webhooks.verifyAndReceive({
+            id,
+            name: name as Parameters<typeof webhooks.verifyAndReceive>[0]["name"],
+            signature,
+            payload: rawBody,
+          });
+        } else {
+          const parsed = JSON.parse(rawBody);
+          printEvent(id, name, parsed);
+          routeEvent(id, name, parsed);
+        }
+        res.writeHead(200);
+        res.end("OK");
+      } catch (err) {
+        console.error("Webhook processing error:", err);
+        res.writeHead(400);
+        res.end("Bad Request");
+      }
       return;
     }
 
-    try {
-      if (webhooks) {
-        if (!signature) {
-          res.writeHead(401);
-          res.end("Missing signature");
-          return;
-        }
-        await webhooks.verifyAndReceive({
-          id,
-          name: name as Parameters<typeof webhooks.verifyAndReceive>[0]["name"],
-          signature,
-          payload: rawBody,
-        });
-      } else {
-        const parsed = JSON.parse(rawBody);
-        printEvent(id, name, parsed);
-        routeEventToWorker(id, name, parsed);
-      }
-      res.writeHead(200);
-      res.end("OK");
-    } catch (err) {
-      console.error("Webhook processing error:", err);
-      res.writeHead(400);
-      res.end("Bad Request");
+    if (req.url === "/") {
+      res.writeHead(200, { "Content-Type": "text/plain" });
+      res.end("GitHub webhook listener running. POST events to /webhook");
+      return;
     }
-    return;
-  }
 
-  if (req.url === "/") {
-    res.writeHead(200, { "Content-Type": "text/plain" });
-    res.end("GitHub webhook listener running. POST events to /webhook");
-    return;
-  }
-
-  res.writeHead(404);
-  res.end("Not Found");
-});
+    res.writeHead(404);
+    res.end("Not Found");
+  });
+}
 
 // ── WebSocket server factory ──────────────────────────────────────────────────
 
@@ -258,7 +246,14 @@ export function createForemanWss(
   taskQueue: TaskQueue,
   registry: WorkerRegistry,
   server: http.Server,
+  options?: {
+    taskLabel?: string;
+    labelDone?: (issueNumber: number) => Promise<void>;
+  },
 ): { wss: WebSocketServer; routeEventToWorker: (id: string, name: string, payload: unknown) => void } {
+  const taskLabel = options?.taskLabel ?? process.env.TASK_LABEL ?? "brunel:ready";
+  const labelDone = options?.labelDone ?? labelIssueDone;
+
   function log(wid: string, line: string) {
     console.log(`[worker ${wid.slice(0, 8)}] ${line}`);
   }
@@ -274,7 +269,6 @@ export function createForemanWss(
 
     // If the issue isn't queued yet, check if this webhook should enqueue it.
     if (!task && name === "issues" && issue) {
-      const taskLabel = process.env.TASK_LABEL ?? "brunel:ready";
       const action = p.action as string | undefined;
       const labeledNow =
         action === "labeled" &&
@@ -390,7 +384,7 @@ export function createForemanWss(
         const task = taskQueue.get(msg.taskId);
         if (task) {
           taskQueue.completeTask(msg.taskId);
-          labelIssueDone(task.issueNumber).catch(err =>
+          labelDone(task.issueNumber).catch(err =>
             console.error("Failed to label issue done:", err)
           );
         }
@@ -423,7 +417,22 @@ import { fileURLToPath } from "url";
 import { loadIssuesToQueue } from "./github.js";
 const isMain = process.argv[1] === fileURLToPath(import.meta.url);
 if (isMain) {
-  ({ routeEventToWorker } = createForemanWss(taskQueue, registry, server));
+  const registry = new WorkerRegistry();
+  const taskQueue = new TaskQueue();
+  const webhooks = WEBHOOK_SECRET ? new Webhooks({ secret: WEBHOOK_SECRET }) : null;
+
+  // Use a mutable reference so routeEvent can be wired after createForemanWss returns it.
+  let routeEvent: (id: string, name: string, payload: unknown) => void = () => {};
+  const server = createHttpServer(webhooks, (id, name, payload) => routeEvent(id, name, payload));
+  ({ routeEventToWorker: routeEvent } = createForemanWss(taskQueue, registry, server));
+
+  if (webhooks) {
+    webhooks.onAny(({ id, name, payload }) => {
+      printEvent(id, name as string, payload);
+      routeEvent(id, name as string, payload);
+    });
+  }
+
   server.listen(PORT, async () => {
     console.log(`\nListening on http://localhost:${PORT}/webhook`);
     console.log("WebSocket workers: ws://localhost:" + PORT + "/worker");

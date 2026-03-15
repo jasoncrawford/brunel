@@ -51,6 +51,7 @@ let registry: WorkerRegistry;
 let httpServer: http.Server;
 let wss: WebSocketServer;
 let routeEvent: (id: string, name: string, payload: unknown) => void;
+let labelDone: ReturnType<typeof vi.fn>;
 let port: number;
 const openClients: WebSocket[] = [];
 
@@ -59,15 +60,12 @@ function connect(): Promise<WebSocket> {
 }
 
 beforeEach(() => {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
-  process.env.GITHUB_REPO = "owner/repo";
-  process.env.GITHUB_TOKEN = "token";
-  process.env.DONE_LABEL = "brunel:done";
+  labelDone = vi.fn().mockResolvedValue(undefined);
 
   queue = new TaskQueue();
   registry = new WorkerRegistry();
   httpServer = http.createServer();
-  ({ wss, routeEventToWorker: routeEvent } = createForemanWss(queue, registry, httpServer));
+  ({ wss, routeEventToWorker: routeEvent } = createForemanWss(queue, registry, httpServer, { labelDone }));
 
   return new Promise<void>((resolve) => {
     httpServer.listen(0, () => {
@@ -78,10 +76,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  vi.unstubAllGlobals();
-  delete process.env.GITHUB_REPO;
-  delete process.env.GITHUB_TOKEN;
-  delete process.env.DONE_LABEL;
 
   return new Promise<void>((resolve) => {
     const clients = openClients.splice(0);
@@ -150,10 +144,7 @@ describe("foreman WebSocket protocol", () => {
     expect(msg.type).toBe("task_assigned");
     expect((msg as any).issue.number).toBe(2);
 
-    expect(fetch).toHaveBeenCalledWith(
-      expect.stringContaining("/issues/1/labels"),
-      expect.objectContaining({ method: "POST" }),
-    );
+    expect(labelDone).toHaveBeenCalledWith(1);
     expect(queue.get("1")?.status).toBe("complete");
   });
 
@@ -252,7 +243,7 @@ describe("foreman WebSocket protocol", () => {
   });
 
   it("labelIssueDone failure does not break task_complete flow", async () => {
-    vi.mocked(fetch).mockRejectedValueOnce(new Error("Network error"));
+    labelDone.mockRejectedValueOnce(new Error("Network error"));
     queue.addTask(makeTask(1));
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
