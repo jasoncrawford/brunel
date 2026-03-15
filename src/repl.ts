@@ -627,7 +627,7 @@ export async function workerMain() {
       let msg: ForemanMessage;
       try { msg = JSON.parse(data.toString()); } catch { return; }
 
-      printForemanMessage(msg);
+      display.printForemanMessage(msg);
 
       if (msg.type === "task_assigned") {
         currentTaskId = msg.taskId;
