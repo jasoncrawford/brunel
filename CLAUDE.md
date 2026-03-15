@@ -37,6 +37,15 @@ Required env vars (in `.env`):
 - Always create a feature branch and PR for changes — never commit directly to `main`.
 - Do NOT auto-merge PRs — leave merging to the user after UAT.
 
+## Useful scripts
+
+- `npm test` — unit tests (vitest)
+- `npm run smoke` — end-to-end smoke test: spawns real foreman + worker and asserts they connect
+- `npm run lint` — ESLint (`no-floating-promises` as error, `no-explicit-any` as warn)
+- `npx tsc --noEmit` — type check
+
+All four run in CI on every PR.
+
 ## Key conventions
 
 - TypeScript with ESM (`"type": "module"`). New dependencies must be ESM-compatible.
