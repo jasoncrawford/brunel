@@ -622,7 +622,7 @@ export async function workerMain() {
   let resolveWsInput: ((v: string) => void) | null = null;
 
   process.stdout.write("\x1b[?2004h");
-  process.stdin.setRawMode(true);
+  if (process.stdin.isTTY) process.stdin.setRawMode(true);
   process.stdin.resume();
   process.stdin.setEncoding("utf8");
 
