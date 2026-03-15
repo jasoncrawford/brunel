@@ -12,7 +12,8 @@
     "worker": "tsx src/repl.ts --worker-mode",
     "test": "vitest run",
     "test:watch": "vitest",
-    "smoke": "tsx tests/smoke.ts"
+    "smoke": "tsx tests/smoke.ts",
+    "lint": "eslint src"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.74",
@@ -24,6 +25,9 @@
   "devDependencies": {
     "@types/node": "^20.0.0",
     "@types/ws": "^8.18.1",
+    "@typescript-eslint/eslint-plugin": "^8.57.0",
+    "@typescript-eslint/parser": "^8.57.0",
+    "eslint": "^10.0.3",
     "typescript": "^5.0.0",
     "vitest": "^4.1.0"
   }
