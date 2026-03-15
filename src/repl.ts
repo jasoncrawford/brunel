@@ -557,6 +557,8 @@ async function main() {
       continue;
     }
 
+    if (action.type !== "query") continue;
+
     try {
       sessionId = await runQuery(action.prompt, sessionId);
     } catch (err) {
@@ -629,7 +631,7 @@ export async function workerMain() {
   display.print(display.c.lavender(`  Worker ID: ${workerId} | Foreman: ${FOREMAN_URL}`));
   display.print(display.c.sageGreen(display.hr("═")));
 
-  let ws: WebSocket;
+  let ws!: WebSocket;
 
   function connectWs(): void {
     ws = connectToForeman(FOREMAN_URL, workerId, currentTaskId);
