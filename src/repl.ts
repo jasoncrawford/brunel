@@ -573,6 +573,21 @@ async function main() {
  * the initial worker_hello handshake. Returns the WebSocket for the caller to
  * attach message/close/error handlers.
  */
+export function handleForemanMessage(
+  msg: ForemanMessage,
+  callbacks: {
+    onTaskAssigned: (taskId: string, issue: TaskIssue) => void;
+    onEventNotification: (event: GitHubEvent) => void;
+  }
+): void {
+  display.printForemanMessage(msg);
+  if (msg.type === "task_assigned") {
+    callbacks.onTaskAssigned(msg.taskId, msg.issue);
+  } else if (msg.type === "event_notification") {
+    callbacks.onEventNotification(msg.event);
+  }
+}
+
 export function connectToForeman(foremanUrl: string, workerId: string, taskId?: string): WebSocket {
   const ws = new WebSocket(`${foremanUrl}/worker`);
   ws.on("open", () => {
@@ -627,19 +642,20 @@ export async function workerMain() {
       let msg: ForemanMessage;
       try { msg = JSON.parse(data.toString()); } catch { return; }
 
-      display.printForemanMessage(msg);
-
-      if (msg.type === "task_assigned") {
-        currentTaskId = msg.taskId;
-        currentIssue = msg.issue;
-        currentSessionId = undefined;
-        resolveWsInput?.(WS_TASK_ASSIGNED);
-        resolveWsInput = null;
-      } else if (msg.type === "event_notification") {
-        pendingEvents.push(msg.event);
-        resolveWsInput?.(WS_EVENT);
-        resolveWsInput = null;
-      }
+      handleForemanMessage(msg, {
+        onTaskAssigned: (taskId, issue) => {
+          currentTaskId = taskId;
+          currentIssue = issue;
+          currentSessionId = undefined;
+          resolveWsInput?.(WS_TASK_ASSIGNED);
+          resolveWsInput = null;
+        },
+        onEventNotification: (event) => {
+          pendingEvents.push(event);
+          resolveWsInput?.(WS_EVENT);
+          resolveWsInput = null;
+        },
+      });
     });
 
     ws.on("close", () => {
