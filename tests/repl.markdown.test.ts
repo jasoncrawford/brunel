@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { stripAnsi } from "./helpers.js";
-import { mdInline, renderMarkdown, s } from "../src/repl.js";
+import { mdInline, renderMarkdown, s } from "../src/display.js";
 
 describe("mdInline", () => {
   it("bold with **", () => {

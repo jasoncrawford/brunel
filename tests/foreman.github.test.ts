@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { loadIssuesToQueue, labelIssueDone } from "../src/foreman.js";
+import { loadIssuesToQueue, labelIssueDone } from "../src/github.js";
 import { TaskQueue } from "../src/foreman.js";
 
 const mockIssues = [

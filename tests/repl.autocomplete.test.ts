@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PassThrough } from "stream";
-import { ask, matchCommands, listCommandNames, type ListDir } from "../src/repl.js";
+import { ask, matchCommands, listCommandNames, type ListDir } from "../src/input.js";
 
 // ── Test harness for ask() integration tests ──────────────────────────────────
 
