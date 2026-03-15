@@ -320,7 +320,40 @@ export function createForemanWss(
     if (issueNumber === null) return;
 
     const evt: GitHubEvent = { id, name, payload: p };
-    const task = taskQueue.getTaskForIssue(issueNumber);
+    let task = taskQueue.getTaskForIssue(issueNumber);
+
+    // If the issue isn't queued yet, check if this webhook should enqueue it.
+    if (!task && name === "issues" && issue) {
+      const { taskLabel } = ghEnv();
+      const action = p.action as string | undefined;
+      const labeledNow =
+        action === "labeled" &&
+        (p.label as Record<string, unknown> | undefined)?.name === taskLabel;
+      const openedWithLabel =
+        action === "opened" &&
+        (issue.labels as Array<{ name: string }> | undefined)?.some((l) => l.name === taskLabel);
+
+      if (labeledNow || openedWithLabel) {
+        const repoUrl =
+          ((p.repository as Record<string, unknown> | undefined)?.html_url as string | undefined) ?? "";
+        const labels =
+          (issue.labels as Array<{ name: string }> | undefined)?.map((l) => l.name) ?? [];
+        taskQueue.addTask({
+          taskId: String(issueNumber),
+          issueNumber,
+          title: String(issue.title ?? ""),
+          body: String(issue.body ?? ""),
+          labels,
+          repoUrl,
+        });
+        console.log(`[task #${issueNumber}] enqueued via ${name}/${action}`);
+        task = taskQueue.getTaskForIssue(issueNumber)!;
+        const idle = registry.getIdleWorker();
+        if (idle) tryAssignWork(idle.workerId);
+        return;
+      }
+    }
+
     if (!task) return;
 
     if (task.status === "assigned" && task.assignedWorkerId) {
