@@ -165,7 +165,7 @@ export function ask(
     process.stdout.write(promptStr);
 
     if (abort) {
-      abort.then((value) => {
+      void abort.then((value) => {
         if (!done) {
           // Clear current line and submit the abort value
           process.stdout.write("\r\x1b[K");

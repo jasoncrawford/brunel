@@ -184,8 +184,8 @@ async function main() {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (process.argv.includes("--worker-mode")) {
-    workerMain(runQuery);
+    void workerMain(runQuery);
   } else {
-    main();
+    void main();
   }
 }

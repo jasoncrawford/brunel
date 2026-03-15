@@ -194,7 +194,7 @@ export async function workerMain(runQueryFn: RunQuery): Promise<void> {
   const session = new WorkerSession(workerId, wsFactory, runQueryFn, workerDisplay);
 
   process.stdout.write("\x1b[?2004h"); // enable bracketed paste mode
-  process.stdin.setRawMode(true);
+  if (process.stdin.isTTY) process.stdin.setRawMode(true);
   process.stdin.resume();
   process.stdin.setEncoding("utf8");
 
@@ -216,4 +216,8 @@ export async function workerMain(runQueryFn: RunQuery): Promise<void> {
       display.print(display.c.boldRed(`\nERROR: ${err}`));
     }
   }
+
+  process.stdout.write("\x1b[?2004l\r\n");
+  if (process.stdin.isTTY) process.stdin.setRawMode(false);
+  process.stdin.pause();
 }
