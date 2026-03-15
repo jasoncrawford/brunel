@@ -276,3 +276,58 @@ describe("foreman WebSocket protocol", () => {
     expect(registry.get("w1")?.status).toBe("idle");
   });
 });
+
+// ── Worker WebSocket connection integration tests ─────────────────────────────
+// Moved from tests/repl.worker.test.ts — guard real network behavior.
+
+function makeConnectToForeman(port: number) {
+  const ws = new WebSocket(`ws://localhost:${port}/worker`);
+  ws.on("open", () => {
+    ws.send(JSON.stringify({
+      type: "worker_hello",
+      workerId: "test-worker-id",
+      status: "idle",
+    }));
+  });
+  return ws;
+}
+
+describe("worker WebSocket connection", () => {
+  it("worker client connects to foreman and completes handshake", async () => {
+    const server = http.createServer();
+    const { wss } = createForemanWss(new TaskQueue(), new WorkerRegistry(), server);
+    const testPort = await new Promise<number>((resolve) => {
+      server.listen(0, () => resolve((server.address() as AddressInfo).port));
+    });
+
+    const ws = makeConnectToForeman(testPort);
+
+    const msg = await new Promise<ForemanMessage>((resolve, reject) => {
+      ws.on("message", (data) => resolve(JSON.parse(data.toString())));
+      ws.on("error", reject);
+    });
+
+    expect(msg.type).toBe("standby");
+
+    ws.close();
+    await new Promise<void>((resolve) => wss.close(() => server.close(resolve)));
+  });
+
+  it("foreman rejects connections not at /worker path (regression guard)", async () => {
+    const server = http.createServer();
+    const { wss } = createForemanWss(new TaskQueue(), new WorkerRegistry(), server);
+    const testPort = await new Promise<number>((resolve) => {
+      server.listen(0, () => resolve((server.address() as AddressInfo).port));
+    });
+
+    const ws = new WebSocket(`ws://localhost:${testPort}`);
+    await expect(
+      new Promise<void>((resolve, reject) => {
+        ws.on("open", resolve);
+        ws.on("error", reject);
+      })
+    ).rejects.toThrow();
+
+    await new Promise<void>((resolve) => wss.close(() => server.close(resolve)));
+  });
+});
