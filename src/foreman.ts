@@ -208,144 +208,40 @@ if (webhooks) {
   });
 }
 
-function printEvent(id: string, name: string, payload: unknown) {
+function truncTitle(title: unknown, max = 50): string {
+  const s = String(title ?? "").replace(/\s+/g, " ").trim();
+  return s.length > max ? s.slice(0, max - 1) + "…" : s;
+}
+
+export function summaryEvent(id: string, name: string, payload: unknown): string {
   const p = payload as Record<string, unknown>;
-  const action = typeof p.action === "string" ? ` / ${p.action}` : "";
+  const action = typeof p.action === "string" ? `/${p.action}` : "";
+  const repo = (p.repository as Record<string, unknown> | undefined)?.full_name;
+  const sender = (p.sender as Record<string, unknown> | undefined)?.login;
 
-  console.log(`\n${"═".repeat(70)}`);
-  console.log(`EVENT   ${name}${action}`);
-  console.log(`ID      ${id}`);
-  console.log("─".repeat(70));
+  let detail = "";
+  const issue = p.issue as Record<string, unknown> | undefined;
+  const pr = p.pull_request as Record<string, unknown> | undefined;
 
-  const repo = p.repository as R | undefined;
-  const sender = p.sender as R | undefined;
-  if (repo) console.log(`REPO    ${repo.full_name}`);
-  if (sender) console.log(`BY      ${sender.login}`);
-
-  details(name, p);
-  console.log("═".repeat(70));
-}
-
-function field(label: string, value: unknown) {
-  if (value == null || value === "" || value === false) return;
-  console.log(`${label.padEnd(8)}${value}`);
-}
-
-function body(label: string, text: unknown) {
-  const s = String(text ?? "").trim();
-  if (!s) return;
-  console.log(`\n${label}:\n${s}`);
-}
-
-function logins(items: R[] | undefined) {
-  return items?.map((i) => i.login).join(", ") ?? "";
-}
-
-function labels(items: { name: string }[] | undefined) {
-  return items?.map((l) => l.name).join(", ") ?? "";
-}
-
-function details(name: string, p: R) {
-  const issue = p.issue as R | undefined;
-  const pr = p.pull_request as R | undefined;
-  const comment = p.comment as R | undefined;
-  const review = p.review as R | undefined;
-
-  switch (name) {
-    case "issues": {
-      if (!issue) break;
-      field("ISSUE", `#${issue.number}: ${issue.title}`);
-      field("STATE", issue.state);
-      field("LABELS", labels(issue.labels as { name: string }[]));
-      field("ASSIGN", logins(issue.assignees as R[]));
-      body("BODY", issue.body);
-      if (p.action === "labeled" || p.action === "unlabeled") {
-        field("LABEL", (p.label as R)?.name);
-      }
-      break;
-    }
-
-    case "issue_comment": {
-      if (!issue || !comment) break;
-      field("ISSUE", `#${issue.number}: ${issue.title}`);
-      field("STATE", issue.state);
-      field("LABELS", labels(issue.labels as { name: string }[]));
-      body("COMMENT", comment.body);
-      break;
-    }
-
-    case "pull_request": {
-      if (!pr) break;
-      const head = pr.head as R;
-      const base = pr.base as R;
-      field("PR", `#${pr.number}: ${pr.title}`);
-      field("BRANCH", `${head.ref} → ${base.ref}`);
-      field("STATE", `${pr.state}${pr.draft ? " (draft)" : ""}${pr.merged ? " (merged)" : ""}`);
-      field("LABELS", labels(pr.labels as { name: string }[]));
-      field("ASSIGN", logins(pr.assignees as R[]));
-      field("REVIEW", logins(pr.requested_reviewers as R[]));
-      body("BODY", pr.body);
-      break;
-    }
-
-    case "pull_request_review": {
-      if (!pr || !review) break;
-      field("PR", `#${pr.number}: ${pr.title}`);
-      field("STATE", review.state);
-      body("REVIEW", review.body);
-      break;
-    }
-
-    case "pull_request_review_comment": {
-      if (!pr || !comment) break;
-      field("PR", `#${pr.number}: ${pr.title}`);
-      field("FILE", `${comment.path} (line ${comment.original_line ?? comment.line ?? "?"})`);
-      body("DIFF", comment.diff_hunk);
-      body("COMMENT", comment.body);
-      break;
-    }
-
-    case "push": {
-      const commits = p.commits as R[] | undefined;
-      field("REF", p.ref);
-      field("COMMITS", commits?.length ?? 0);
-      commits?.forEach((c) => {
-        const author = (c.author as R)?.name ?? "?";
-        const sha = String(c.id).slice(0, 7);
-        console.log(`  ${sha}  ${c.message}  (${author})`);
-      });
-      break;
-    }
-
-    case "check_run": {
-      const run = p.check_run as R;
-      const output = run.output as R | undefined;
-      field("CHECK", run.name);
-      field("STATUS", `${run.status} / ${run.conclusion ?? "pending"}`);
-      if (output?.title) body("OUTPUT", `${output.title}\n${output.summary ?? ""}`);
-      break;
-    }
-
-    case "workflow_run": {
-      const run = p.workflow_run as R;
-      field("WORKFLOW", run.name);
-      field("BRANCH", run.head_branch);
-      field("STATUS", `${run.status} / ${run.conclusion ?? "pending"}`);
-      break;
-    }
-
-    case "create":
-    case "delete":
-      field("REF", `${p.ref} (${p.ref_type})`);
-      break;
-
-    case "release": {
-      const release = p.release as R;
-      field("RELEASE", `${release.tag_name}: ${release.name}`);
-      body("BODY", release.body);
-      break;
-    }
+  if (issue) {
+    detail = ` #${issue.number} "${truncTitle(issue.title)}"`;
+  } else if (pr) {
+    detail = ` #${pr.number} "${truncTitle(pr.title)}"`;
+  } else if (name === "push") {
+    const ref = String(p.ref ?? "");
+    const count = (p.commits as unknown[] | undefined)?.length ?? 0;
+    detail = ` ${ref} (${count} commit${count === 1 ? "" : "s"})`;
   }
+
+  const parts: string[] = [`${name}${action}${detail}`];
+  if (sender) parts.push(`by ${sender}`);
+  if (repo) parts.push(`(${repo})`);
+
+  return `[event] ${parts.join(" ")}`;
+}
+
+function printEvent(id: string, name: string, payload: unknown) {
+  console.log(summaryEvent(id, name, payload));
 }
 
 // ── HTTP server ───────────────────────────────────────────────────────────────
