@@ -82,6 +82,59 @@ export function loadCommandFile(
   return readFile(filePath);
 }
 
+/**
+ * Resolve the raw content for a command name by trying three locations in order:
+ * 1. ~/.claude/commands/<command-path>.md  (custom command file)
+ * 2. ~/.claude/skills/<command>/SKILL.md   (user skill)
+ * 3. <plugin installPath>/skills/<skill>/SKILL.md  (plugin skill, for "plugin:skill" names)
+ * Returns raw file content, or null if not found.
+ * Does NOT apply arguments — that is left to the caller.
+ */
+export function resolveContent(
+  command: string,
+  readFile: (path: string) => string | null = defaultReadFile,
+): string | null {
+  // 1. Command file
+  const cmdPath = resolveCommandFilePath(command);
+  const cmdContent = readFile(cmdPath);
+  if (cmdContent !== null) return cmdContent;
+
+  const home = process.env.HOME ?? process.env.USERPROFILE ?? "";
+
+  // 2. User skill
+  const userSkillPath = `${home}/.claude/skills/${command}/SKILL.md`;
+  const userContent = readFile(userSkillPath);
+  if (userContent !== null) return userContent;
+
+  // 3. Plugin skill (plugin:skill format only)
+  const colonIdx = command.indexOf(":");
+  if (colonIdx > 0) {
+    const pluginName = command.slice(0, colonIdx);
+    const skillName = command.slice(colonIdx + 1);
+    const pluginsJson = readFile(`${home}/.claude/plugins/installed_plugins.json`);
+    if (pluginsJson) {
+      try {
+        const parsed = JSON.parse(pluginsJson) as {
+          plugins: Record<string, Array<{ installPath: string }>>;
+        };
+        for (const [key, entries] of Object.entries(parsed.plugins ?? {})) {
+          if (key.split("@")[0] === pluginName) {
+            for (const entry of entries) {
+              const skillPath = `${entry.installPath}/skills/${skillName}/SKILL.md`;
+              const content = readFile(skillPath);
+              if (content !== null) return content;
+            }
+          }
+        }
+      } catch {
+        // malformed JSON — return null
+      }
+    }
+  }
+
+  return null;
+}
+
 function defaultReadFile(path: string): string | null {
   try {
     return fs.readFileSync(path, "utf8");

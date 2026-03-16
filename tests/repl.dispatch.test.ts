@@ -25,6 +25,62 @@ describe("applyArguments", () => {
   });
 });
 
+// ── resolveContent ────────────────────────────────────────────────────────────
+
+describe("resolveContent", () => {
+  it("returns command file content when command file exists", () => {
+    const readFile = (_path: string) => "Command content.";
+    expect(resolveContent("mycommand", readFile)).toBe("Command content.");
+  });
+
+  it("returns null when nothing resolves", () => {
+    expect(resolveContent("nope", () => null)).toBeNull();
+  });
+
+  it("tries user skill path when command file is missing", () => {
+    const home = process.env.HOME ?? "";
+    const readFile = (path: string) => {
+      if (path === `${home}/.claude/skills/my-skill/SKILL.md`) return "Skill content.";
+      return null;
+    };
+    expect(resolveContent("my-skill", readFile)).toBe("Skill content.");
+  });
+
+  it("tries plugin skill when command is plugin:skill format", () => {
+    const home = process.env.HOME ?? "";
+    const pluginsJson = JSON.stringify({
+      plugins: {
+        "myplugin@marketplace": [{ installPath: "/plugins/myplugin/1.0" }],
+      },
+    });
+    const readFile = (path: string) => {
+      if (path === `${home}/.claude/plugins/installed_plugins.json`) return pluginsJson;
+      if (path === "/plugins/myplugin/1.0/skills/foo/SKILL.md") return "Plugin skill content.";
+      return null;
+    };
+    expect(resolveContent("myplugin:foo", readFile)).toBe("Plugin skill content.");
+  });
+
+  it("returns null for plugin:skill when installed_plugins.json is malformed", () => {
+    const home = process.env.HOME ?? "";
+    const readFile = (path: string) => {
+      if (path === `${home}/.claude/plugins/installed_plugins.json`) return "INVALID_JSON{";
+      return null;
+    };
+    expect(resolveContent("myplugin:foo", readFile)).toBeNull();
+  });
+
+  it("command file wins over same-named user skill", () => {
+    const home = process.env.HOME ?? "";
+    const readFile = (path: string) => {
+      if (path.includes("/.claude/commands/")) return "Command wins.";
+      if (path === `${home}/.claude/skills/foo/SKILL.md`) return "Skill content.";
+      return null;
+    };
+    expect(resolveContent("foo", readFile)).toBe("Command wins.");
+  });
+});
+
 describe("dispatchInput", () => {
   it("empty input returns { type: 'skip' }", async () => {
     const result = await dispatchInput("", () => null);
