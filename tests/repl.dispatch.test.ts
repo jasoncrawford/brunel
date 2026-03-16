@@ -116,4 +116,38 @@ describe("dispatchInput", () => {
     const result = await dispatchInput("/mycommand some extra args", (_path) => "Base prompt.");
     expect(result).toEqual({ type: "query", prompt: "Base prompt.\nARGUMENTS: some extra args" });
   });
+
+  it("executes a skill with $ARGUMENTS substitution", async () => {
+    const home = process.env.HOME ?? "";
+    const readFile = (path: string) => {
+      if (path === `${home}/.claude/skills/my-skill/SKILL.md`) return "Do $ARGUMENTS please.";
+      return null;
+    };
+    const result = await dispatchInput("/my-skill the thing", readFile);
+    expect(result).toEqual({ type: "query", prompt: "Do the thing please." });
+  });
+
+  it("executes a skill without $ARGUMENTS, appending ARGUMENTS:", async () => {
+    const home = process.env.HOME ?? "";
+    const readFile = (path: string) => {
+      if (path === `${home}/.claude/skills/my-skill/SKILL.md`) return "Do a thing.";
+      return null;
+    };
+    const result = await dispatchInput("/my-skill extra args", readFile);
+    expect(result).toEqual({ type: "query", prompt: "Do a thing.\nARGUMENTS: extra args" });
+  });
+
+  it("executes a plugin skill", async () => {
+    const home = process.env.HOME ?? "";
+    const pluginsJson = JSON.stringify({
+      plugins: { "myplugin@marketplace": [{ installPath: "/plugins/myplugin/1.0" }] },
+    });
+    const readFile = (path: string) => {
+      if (path === `${home}/.claude/plugins/installed_plugins.json`) return pluginsJson;
+      if (path === "/plugins/myplugin/1.0/skills/foo/SKILL.md") return "Plugin skill $ARGUMENTS.";
+      return null;
+    };
+    const result = await dispatchInput("/myplugin:foo bar baz", readFile);
+    expect(result).toEqual({ type: "query", prompt: "Plugin skill bar baz." });
+  });
 });

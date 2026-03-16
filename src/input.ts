@@ -165,12 +165,12 @@ export async function dispatchInput(
   if (slash) {
     if (slash.type === "exit" || slash.type === "clear") return slash;
     if (slash.type === "task_complete") return slash;
-    // unknown_command: look up file
+    // unknown_command: look up command file or skill
     const { command } = slash;
-    const content = loadCommandFile(command, readFile);
+    const content = resolveContent(command, readFile);
     if (content === null) return { type: "unknown_command", command };
     const args = input.slice(1 + command.length).trim();
-    const prompt = args ? `${content}\n${args}` : content;
+    const prompt = applyArguments(content, args);
     return { type: "query", prompt };
   }
 
