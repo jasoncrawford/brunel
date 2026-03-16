@@ -32,6 +32,15 @@ function buildSingleEventPrompt(event: GitHubEvent): string {
       return `CI check "${run?.name}" completed with conclusion: ${conclusion}.`;
     }
 
+    case "check_suite": {
+      const suite = p.check_suite as Record<string, unknown>;
+      const conclusion = suite?.conclusion ?? "unknown";
+      if (conclusion === "failure" || conclusion === "action_required") {
+        return `CI suite failed (${conclusion}). Please review the failing checks on your PR and fix any issues.`;
+      }
+      return `CI suite completed with conclusion: ${conclusion}.`;
+    }
+
     case "pull_request_review": {
       const review = p.review as Record<string, unknown>;
       const pr = p.pull_request as Record<string, unknown>;

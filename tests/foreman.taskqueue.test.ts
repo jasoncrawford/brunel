@@ -66,4 +66,29 @@ describe("TaskQueue", () => {
     q.addTask(baseTask);
     expect(q.getTaskForIssue(42)?.taskId).toBe("42");
   });
+
+  it("registerPr + getTaskForPr looks up task by PR number", () => {
+    q.addTask(baseTask);
+    q.registerPr(10, "42");
+    expect(q.getTaskForPr(10)?.taskId).toBe("42");
+  });
+
+  it("getTaskForPr returns undefined for unknown PR number", () => {
+    expect(q.getTaskForPr(999)).toBeUndefined();
+  });
+
+  it("registerPr for unknown taskId returns no task from getTaskForPr", () => {
+    q.registerPr(10, "nonexistent");
+    expect(q.getTaskForPr(10)).toBeUndefined();
+  });
+
+  it("registerBranch + getTaskForBranch looks up task by branch name", () => {
+    q.addTask(baseTask);
+    q.registerBranch("fix-issue-42", "42");
+    expect(q.getTaskForBranch("fix-issue-42")?.taskId).toBe("42");
+  });
+
+  it("getTaskForBranch returns undefined for unknown branch", () => {
+    expect(q.getTaskForBranch("unknown-branch")).toBeUndefined();
+  });
 });
