@@ -19,6 +19,24 @@ export function parseFrontmatter(content: string): Record<string, string> {
   return result;
 }
 
+// ── Argument application ──────────────────────────────────────────────────────
+
+/**
+ * Apply args to a loaded command/skill content string.
+ * If content contains $ARGUMENTS, all occurrences are replaced with args (even if empty).
+ * Otherwise, if args is non-empty, appends "\nARGUMENTS: <args>".
+ * Otherwise returns content unchanged.
+ */
+export function applyArguments(content: string, args: string): string {
+  if (content.includes("$ARGUMENTS")) {
+    return content.replaceAll("$ARGUMENTS", args);
+  }
+  if (args) {
+    return `${content}\nARGUMENTS: ${args}`;
+  }
+  return content;
+}
+
 // ── Slash commands ────────────────────────────────────────────────────────────
 
 export type SlashCommandResult =

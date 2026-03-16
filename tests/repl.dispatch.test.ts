@@ -1,5 +1,29 @@
 import { describe, it, expect } from "vitest";
-import { dispatchInput } from "../src/input.js";
+import { dispatchInput, applyArguments, resolveContent } from "../src/input.js";
+
+// ── applyArguments ────────────────────────────────────────────────────────────
+
+describe("applyArguments", () => {
+  it("replaces $ARGUMENTS with args when present", () => {
+    expect(applyArguments("Do $ARGUMENTS now.", "the thing")).toBe("Do the thing now.");
+  });
+
+  it("replaces $ARGUMENTS with empty string when args is empty", () => {
+    expect(applyArguments("Do $ARGUMENTS now.", "")).toBe("Do  now.");
+  });
+
+  it("replaces multiple $ARGUMENTS occurrences", () => {
+    expect(applyArguments("$ARGUMENTS and $ARGUMENTS", "x")).toBe("x and x");
+  });
+
+  it("appends ARGUMENTS: <args> when no $ARGUMENTS and args non-empty", () => {
+    expect(applyArguments("Base prompt.", "extra stuff")).toBe("Base prompt.\nARGUMENTS: extra stuff");
+  });
+
+  it("returns content unchanged when no $ARGUMENTS and args is empty", () => {
+    expect(applyArguments("Base prompt.", "")).toBe("Base prompt.");
+  });
+});
 
 describe("dispatchInput", () => {
   it("empty input returns { type: 'skip' }", async () => {
@@ -34,6 +58,6 @@ describe("dispatchInput", () => {
 
   it("/command with extra args appends args to prompt", async () => {
     const result = await dispatchInput("/mycommand some extra args", (_path) => "Base prompt.");
-    expect(result).toEqual({ type: "query", prompt: "Base prompt.\nsome extra args" });
+    expect(result).toEqual({ type: "query", prompt: "Base prompt.\nARGUMENTS: some extra args" });
   });
 });
