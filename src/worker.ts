@@ -1,7 +1,7 @@
 import "dotenv/config";
+import crypto from "crypto";
 import { WebSocket } from "ws";
 import * as display from "./display.js";
-import { getWorkerId } from "./worker-id.js";
 import { buildInitialPrompt, buildEventPrompt } from "./templates.js";
 import { ask, listCommandNames, dispatchInput } from "./input.js";
 import type { ForemanMessage, GitHubEvent, TaskIssue } from "./types.js";
@@ -171,7 +171,7 @@ export class WorkerSession {
 
 export async function workerMain(runQueryFn: RunQuery): Promise<void> {
   const FOREMAN_URL = process.env.FOREMAN_URL ?? "ws://localhost:3000";
-  const workerId = getWorkerId();
+  const workerId = crypto.randomUUID();
 
   const wsFactory: WsFactory = (wid, taskId) => {
     const ws = new WebSocket(`${FOREMAN_URL}/worker`);
