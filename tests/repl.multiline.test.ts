@@ -46,40 +46,56 @@ afterEach(() => {
 // ── Multiline rendering ────────────────────────────────────────────────────────
 
 describe("ask() - multiline rendering", () => {
-  it("typing past terminal line boundary emits cursor-up to redraw from row 0", async () => {
-    // cols=10, prompt="> " (2 chars), so 8 chars of input fills row 0
-    // Visual positions: prompt(2) + 8 chars = col 0-9 (full row 0)
-    // Typing the 9th char: prevCursor=8, prevRow=floor(10/10)=1 → need \x1b[1A
+  it("typing past terminal line boundary redraws from row 0", async () => {
+    // cols=10, prompt="> " (2 chars), so 8 chars fills row 0 exactly (pending-wrap).
+    // cursor=8 is in pending-wrap: still on row 0 (no \x1b[1A should fire for that char).
+    // Typing the 9th char lands on row 1; redraw must navigate correctly.
+    setColumns(10);
+
+    await withFakeStdin(async (stdin) => {
+      const p = ask("> ", () => []);
+      stdin.push("12345678"); // fills row 0 exactly (pending-wrap)
+      stdin.push("9");        // goes to row 1
+      stdin.push("\r");
+      expect(await p).toBe("123456789");
+    });
+  });
+
+  it("pending-wrap: typing char that exactly fills terminal row does not emit cursor-up", async () => {
+    // Bug 1: screenPosOf overcounts rows at pending-wrap boundary.
+    // cols=10, prompt="> " (2 chars), buffer="12345678" (8 chars, fills row 0 exactly).
+    // cursor=8 is pending-wrap — still on row 0.  Typing "9" has prevRow=0 (no cursor-up).
+    // With the bug, screenPosOf(8) returns row=1 → fullRedraw emits \x1b[1A (going above prompt).
     setColumns(10);
     const writeSpy = vi.mocked(process.stdout.write);
 
     await withFakeStdin(async (stdin) => {
       const p = ask("> ", () => []);
-      stdin.push("12345678"); // fills row 0 (visual=10, row=1 for cursor at pos 8)
-      stdin.push("9");        // goes to row 1; fullRedraw from prevCursor=8 → \x1b[1A
+      stdin.push("12345678"); // fills row 0 (pending-wrap at cursor=8, row 0)
+      writeSpy.mockClear();   // clear setup output
+      stdin.push("9");        // prevRow should be 0 → no cursor-up
+      // Must NOT emit \x1b[1A: cursor was on row 0 (pending-wrap), not row 1
+      expect(collectOutput(writeSpy)).not.toContain("\x1b[1A");
+      stdin.push("\r");
+      expect(await p).toBe("123456789");
+    });
+  });
+
+  it("left arrow from row 1 to row 0 emits cursor-up", async () => {
+    // cols=10, prompt="> " (2 chars), buffer="123456789" (9 chars).
+    // cursor=9 is on row 1.  Left arrow → cursor=8 (pending-wrap end of row 0) → \x1b[1A.
+    setColumns(10);
+    const writeSpy = vi.mocked(process.stdout.write);
+
+    await withFakeStdin(async (stdin) => {
+      const p = ask("> ", () => []);
+      stdin.push("123456789"); // cursor=9 on row 1
+      writeSpy.mockClear();
+      stdin.push("\x1b[D");    // left arrow: prevRow=1 → cursor=8 (row 0) → \x1b[1A
       stdin.push("\r");
       expect(await p).toBe("123456789");
     });
 
-    expect(collectOutput(writeSpy)).toContain("\x1b[1A");
-  });
-
-  it("left arrow from start of row 1 to end of row 0 emits cursor-up", async () => {
-    // cols=10, prompt="> " (2 chars), buffer="12345678" (visual=10, cursor at row 1)
-    // Pressing left arrow: prevCursor=8 (row 1) → cursor=7 (row 0, col 9) → \x1b[1A
-    setColumns(10);
-    const writeSpy = vi.mocked(process.stdout.write);
-
-    await withFakeStdin(async (stdin) => {
-      const p = ask("> ", () => []);
-      stdin.push("12345678");  // cursor at 8, visual=10, prevRow=1 on next key
-      writeSpy.mockClear();    // clear output from the inserts above
-      stdin.push("\x1b[D");    // left arrow: prevCursor=8 (row 1) → cursor=7 (row 0)
-      stdin.push("\r");
-      expect(await p).toBe("12345678");
-    });
-
-    // fullRedraw called with prevCursor=8 (row 1) must emit \x1b[1A
     expect(collectOutput(writeSpy)).toContain("\x1b[1A");
   });
 
@@ -130,6 +146,99 @@ describe("ask() - multiline rendering", () => {
     });
 
     expect(collectOutput(writeSpy)).toContain("\x1b[1B");
+  });
+
+  // ── Bug 3: ^U (kill-to-start) on multiline buffer ──────────────────────────
+
+  it("^U on multiline buffer emits cursor-up as the very first action", async () => {
+    // Bug 3: killToStart() mutates buffer before calling fullRedraw, so
+    // screenPosOf(prevCursor) on the now-empty buffer returns row=0 instead of
+    // the actual row the cursor was on.  With the bug, fullRedraw starts with
+    // \r (not \x1b[1A), and the old content on row 0 is never erased.
+    // Fix: compute prevRow from the OLD buffer before mutating, pass it directly.
+    setColumns(10);
+    const writeSpy = vi.mocked(process.stdout.write);
+
+    await withFakeStdin(async (stdin) => {
+      const p = ask("> ", () => []);
+      stdin.push("123456789"); // cursor=9 on row 1
+      writeSpy.mockClear();
+      stdin.push("\x15");      // ^U → kill to start
+      // First write must be \x1b[1A (cursor up to row 0), not \r
+      const firstWrite = String(writeSpy.mock.calls[0]?.[0] ?? "");
+      expect(firstWrite).toBe("\x1b[1A");
+      stdin.push("\r");
+      expect(await p).toBe("");
+    });
+  });
+});
+
+// ── Bug 2: up/down arrow navigation in multiline input ────────────────────────
+
+describe("ask() - up/down arrow navigation", () => {
+  it("up arrow from row 1 moves cursor to row 0", async () => {
+    // cols=10, prompt="> " (2 chars), buffer="123456789X" (10 chars).
+    // screenPosOf(10) = {row:1, col:2}.  Up arrow → row=0, col=2 → cursor=0.
+    // Type "Y" → "Y123456789X".
+    setColumns(10);
+
+    await withFakeStdin(async (stdin) => {
+      const p = ask("> ", () => []);
+      stdin.push("123456789X"); // cursor=10, row=1, col=2
+      stdin.push("\x1b[A");    // up arrow → row=0, col=2 → cursor=0
+      stdin.push("Y");
+      stdin.push("\r");
+      expect(await p).toBe("Y123456789X");
+    });
+  });
+
+  it("down arrow from row 0 moves cursor to row 1", async () => {
+    // cols=10, prompt="> " (2 chars), buffer="123456789X" (10 chars).
+    // ^A → cursor=0 (row=0, col=2).  Down arrow → row=1, col=2 → cursor=0.
+    // But col=2 on row 1 = buffer position past the 8 pending-wrap chars (pos 8) + 0 on row 1 = pos 8.
+    // Actually row 1 starts at buf pos 9 ("9"). col=2 on row 1 isn't reachable (only col=1,"9" and col=2,"X").
+    // Take closest: col=2 → cursor=10 ("X").  Type "Y" → "123456789XY".
+    setColumns(10);
+
+    await withFakeStdin(async (stdin) => {
+      const p = ask("> ", () => []);
+      stdin.push("123456789X"); // cursor=10, row=1
+      stdin.push("\x01");       // ^A → cursor=0, row=0, col=2
+      stdin.push("\x1b[B");     // down arrow → row=1, col=2 → cursor=10
+      stdin.push("Y");
+      stdin.push("\r");
+      expect(await p).toBe("123456789XY");
+    });
+  });
+
+  it("up arrow at row 0 is a no-op", async () => {
+    // Already on top row — up arrow should not move cursor.
+    setColumns(10);
+
+    await withFakeStdin(async (stdin) => {
+      const p = ask("> ", () => []);
+      stdin.push("hello");
+      stdin.push("\x01");    // ^A → cursor=0
+      stdin.push("\x1b[A"); // up arrow at row 0 → no-op
+      stdin.push("X");
+      stdin.push("\r");
+      expect(await p).toBe("Xhello");
+    });
+  });
+
+  it("down arrow at last row is a no-op", async () => {
+    // Already on the last row — down arrow should not move cursor.
+    setColumns(10);
+
+    await withFakeStdin(async (stdin) => {
+      const p = ask("> ", () => []);
+      stdin.push("hello");  // single row
+      stdin.push("\x01");   // ^A → cursor=0
+      stdin.push("\x1b[B"); // down arrow at last row → no-op (stays at cursor=0)
+      stdin.push("X");
+      stdin.push("\r");
+      expect(await p).toBe("Xhello");
+    });
   });
 });
 

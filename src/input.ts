@@ -185,7 +185,7 @@ export function ask(
       for (const ch of disp) {
         if (ch === "\r")      { col = 0; }
         else if (ch === "\n") { row++; col = 0; }
-        else                  { col++; if (col >= cols) { row++; col = 0; } }
+        else                  { if (col >= cols) { row++; col = 0; } col++; }
       }
       return { row, col };
     }
@@ -193,13 +193,11 @@ export function ask(
     // ── Full redraw ───────────────────────────────────────────────────────────
     //
     // Redraws the entire input area (prompt + buffer + suggestion row) from
-    // scratch.  prevCursor is the buffer position where the terminal cursor
-    // currently sits (before this redraw).  After the redraw the terminal
-    // cursor is positioned at the current `cursor` value.
+    // scratch.  prevRow is the screen row where the terminal cursor currently
+    // sits (must be computed from the OLD buffer/cursor BEFORE any mutation).
+    // After the redraw the terminal cursor is positioned at the current `cursor`.
 
-    function fullRedraw(prevCursor: number, suggestions: string[]) {
-      const { row: prevRow } = screenPosOf(prevCursor);
-
+    function fullRedraw(prevRow: number, suggestions: string[]) {
       // 1. Move to start of prompt (row 0, col 0)
       if (prevRow > 0) process.stdout.write(`\x1b[${prevRow}A`);
       process.stdout.write("\r");
@@ -321,57 +319,57 @@ export function ask(
     // ── Editing operations (all use fullRedraw) ──────────────────────────────
 
     function replaceBuffer(newText: string) {
-      const prev = cursor;
+      const prevRow = screenPosOf(cursor).row;
       buffer = newText;
       cursor = newText.length;
-      fullRedraw(prev, computeMatches());
+      fullRedraw(prevRow, computeMatches());
     }
 
     function insert(ch: string) {
-      const prev = cursor;
+      const prevRow = screenPosOf(cursor).row;
       buffer = buffer.slice(0, cursor) + ch + buffer.slice(cursor);
       cursor++;
-      fullRedraw(prev, computeMatches());
+      fullRedraw(prevRow, computeMatches());
     }
 
     function deleteBack() {
       if (cursor === 0) return;
-      const prev = cursor;
+      const prevRow = screenPosOf(cursor).row;
       buffer = buffer.slice(0, cursor - 1) + buffer.slice(cursor);
       cursor--;
-      fullRedraw(prev, computeMatches());
+      fullRedraw(prevRow, computeMatches());
     }
 
     function moveTo(pos: number) {
       pos = Math.max(0, Math.min(buffer.length, pos));
       if (pos === cursor) return;
-      const prev = cursor;
+      const prevRow = screenPosOf(cursor).row;
       cursor = pos;
-      fullRedraw(prev, computeMatches());
+      fullRedraw(prevRow, computeMatches());
     }
 
     function killToEnd() {
-      const prev = cursor;
+      const prevRow = screenPosOf(cursor).row;
       buffer = buffer.slice(0, cursor);
-      fullRedraw(prev, computeMatches());
+      fullRedraw(prevRow, computeMatches());
     }
 
     function killToStart() {
-      const prev = cursor;
+      const prevRow = screenPosOf(cursor).row;
       buffer = buffer.slice(cursor);
       cursor = 0;
-      fullRedraw(prev, computeMatches());
+      fullRedraw(prevRow, computeMatches());
     }
 
     function deleteWord() {
       if (cursor === 0) return;
-      const prev = cursor;
+      const prevRow = screenPosOf(cursor).row;
       let pos = cursor;
       while (pos > 0 && buffer[pos - 1] === " ") pos--;
       while (pos > 0 && buffer[pos - 1] !== " ") pos--;
       buffer = buffer.slice(0, pos) + buffer.slice(cursor);
       cursor = pos;
-      fullRedraw(prev, computeMatches());
+      fullRedraw(prevRow, computeMatches());
     }
 
     function moveWordLeft() {
@@ -388,10 +386,44 @@ export function ask(
       moveTo(pos);
     }
 
+    // Find the buffer position at (targetRow, targetCol), clamping to the
+    // nearest reachable position on that row.  Returns -1 if targetRow doesn't
+    // exist in the current buffer.
+    function bufPosAtRow(targetRow: number, targetCol: number): number {
+      let bestPos = -1;
+      let bestColDiff = Infinity;
+      for (let pos = 0; pos <= buffer.length; pos++) {
+        const { row, col } = screenPosOf(pos);
+        if (row === targetRow) {
+          const diff = Math.abs(col - targetCol);
+          if (diff < bestColDiff) { bestColDiff = diff; bestPos = pos; }
+        } else if (row > targetRow && bestPos !== -1) {
+          break; // past target row
+        }
+      }
+      return bestPos;
+    }
+
+    function moveLineUp() {
+      const { row, col } = screenPosOf(cursor);
+      if (row === 0) return; // already on top row
+      const pos = bufPosAtRow(row - 1, col);
+      if (pos !== -1) moveTo(pos);
+    }
+
+    function moveLineDown() {
+      const { row, col } = screenPosOf(cursor);
+      const pos = bufPosAtRow(row + 1, col);
+      if (pos !== -1) moveTo(pos);
+      // if row+1 doesn't exist, no-op
+    }
+
     function processTyped(data: string) {
       // Substitute known sequences with placeholder chars before stripping
       data = data.replace(/\x1b\[1;3D/g, "\x1c"); // iTerm2 option+left  → 0x1C
       data = data.replace(/\x1b\[1;3C/g, "\x1d"); // iTerm2 option+right → 0x1D
+      data = data.replace(/\x1b\[A/g,    "\x10"); // up arrow             → 0x10
+      data = data.replace(/\x1b\[B/g,    "\x11"); // down arrow           → 0x11
       data = data.replace(/\x1b\[D/g,    "\x1e"); // left arrow           → 0x1E
       data = data.replace(/\x1b\[C/g,    "\x1f"); // right arrow          → 0x1F
       data = data.replace(/\x1b\[[0-9;]*[A-Za-z]/g, ""); // strip remaining CSI
@@ -415,6 +447,8 @@ export function ask(
         else if (ch === "\x0b")                       { killToEnd(); }           // ^K
         else if (ch === "\x15")                       { killToStart(); }         // ^U
         else if (ch === "\x17")                       { deleteWord(); }          // ^W
+        else if (ch === "\x10")                       { moveLineUp(); }          // ↑
+        else if (ch === "\x11")                       { moveLineDown(); }        // ↓
         else if (ch === "\x1c")                       { moveWordLeft(); }        // option+←
         else if (ch === "\x1d")                       { moveWordRight(); }       // option+→
         else if (ch === "\x1e")                       { moveTo(cursor - 1); }    // ←
@@ -432,10 +466,10 @@ export function ask(
     }
 
     function insertPaste(str: string) {
-      const prev = cursor;
+      const prevRow = screenPosOf(cursor).row;
       buffer = buffer.slice(0, cursor) + str + buffer.slice(cursor);
       cursor += str.length;
-      fullRedraw(prev, computeMatches());
+      fullRedraw(prevRow, computeMatches());
     }
 
     function onData(chunk: string) {
