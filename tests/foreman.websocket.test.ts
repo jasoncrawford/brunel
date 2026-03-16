@@ -266,6 +266,46 @@ describe("foreman WebSocket protocol", () => {
     expect(await reply).toEqual({ type: "standby" });
     expect(registry.get("w1")?.status).toBe("idle");
   });
+
+  it("events are routed to the correct worker when multiple workers have different tasks", async () => {
+    // Two tasks pre-loaded
+    queue.addTask(makeTask(53));
+    queue.addTask(makeTask(55));
+
+    // Worker A connects and gets task 53
+    const wsA = await connect();
+    send(wsA, { type: "worker_hello", workerId: "worker-a", status: "idle" });
+    const msgA = await nextMsg(wsA);
+    expect(msgA.type).toBe("task_assigned");
+    expect((msgA as any).issue.number).toBe(53);
+
+    // Worker B connects and gets task 55
+    const wsB = await connect();
+    send(wsB, { type: "worker_hello", workerId: "worker-b", status: "idle" });
+    const msgB = await nextMsg(wsB);
+    expect(msgB.type).toBe("task_assigned");
+    expect((msgB as any).issue.number).toBe(55);
+
+    // Event for issue 55 should go ONLY to worker B
+    const replyB = nextMsg(wsB);
+    const noMsgA = Promise.race([
+      nextMsg(wsA).then(() => "message" as const),
+      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
+    ]);
+    routeEvent("evt-1", "issue_comment", { issue: { number: 55 }, comment: { body: "update" } });
+    expect(await replyB).toMatchObject({ type: "event_notification", taskId: "55" });
+    expect(await noMsgA).toBe("timeout");
+
+    // Event for issue 53 should go ONLY to worker A
+    const replyA = nextMsg(wsA);
+    const noMsgB = Promise.race([
+      nextMsg(wsB).then(() => "message" as const),
+      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
+    ]);
+    routeEvent("evt-2", "issue_comment", { issue: { number: 53 }, comment: { body: "update" } });
+    expect(await replyA).toMatchObject({ type: "event_notification", taskId: "53" });
+    expect(await noMsgB).toBe("timeout");
+  });
 });
 
 // ── Worker WebSocket connection integration tests ─────────────────────────────
