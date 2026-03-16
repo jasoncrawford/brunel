@@ -156,13 +156,118 @@ export function ask(
     let pasteBuffer = "";
     let inPaste = false;
     let done = false;
-    let suggestionsShown = false;
     // Visual length of prompt on the terminal line (excludes any leading \n)
     const promptVisualLen = promptStr.slice(promptStr.lastIndexOf("\n") + 1).length;
+    // Visual part of prompt string used when redrawing
+    const promptLine = promptStr.slice(promptStr.lastIndexOf("\n") + 1);
     let commands: string[] = [];
     try { commands = getCommands(); } catch { /* graceful: use empty */ }
 
+    let cursor = 0; // current cursor position within buffer
+    // Number of rows used by the last full redraw (suggestion row is always included)
+    let totalDrawnRows = 0;
+
     process.stdout.write(promptStr);
+
+    // ── Multiline-aware screen position ──────────────────────────────────────
+    //
+    // Compute the terminal (row, col) of buffer position `pos`, accounting
+    // for both wrapping at terminal width and embedded \n characters (pasted
+    // multiline content is displayed with a "... " continuation prefix).
+    // Row 0 is the line that contains the visual start of the prompt.
+
+    function screenPosOf(pos: number): { row: number; col: number } {
+      const cols = process.stdout.columns || 80;
+      // Pasted newlines are rendered as \r\n    (CR + LF + 4-space indent)
+      const disp = buffer.slice(0, pos).replace(/\n/g, "\r\n    ");
+      let row = 0;
+      let col = promptVisualLen;
+      for (const ch of disp) {
+        if (ch === "\r")      { col = 0; }
+        else if (ch === "\n") { row++; col = 0; }
+        else                  { if (col >= cols) { row++; col = 0; } col++; }
+      }
+      return { row, col };
+    }
+
+    // ── Full redraw ───────────────────────────────────────────────────────────
+    //
+    // Redraws the entire input area (prompt + buffer + suggestion row) from
+    // scratch.  prevRow is the screen row where the terminal cursor currently
+    // sits (must be computed from the OLD buffer/cursor BEFORE any mutation).
+    // After the redraw the terminal cursor is positioned at the current `cursor`.
+
+    function fullRedraw(prevRow: number, suggestions: string[]) {
+      // 1. Move to start of prompt (row 0, col 0)
+      if (prevRow > 0) process.stdout.write(`\x1b[${prevRow}A`);
+      process.stdout.write("\r");
+
+      // 2. Write prompt + buffer (pasted \n → visual continuation "... ")
+      const displayStr = buffer.replace(/\n/g, "\r\n    ");
+      process.stdout.write(promptLine + displayStr);
+
+      const { row: endRow } = screenPosOf(buffer.length);
+
+      // 3. Clear to end of last buffer line, then write suggestion row
+      process.stdout.write("\x1b[K\r\n\x1b[K");
+      if (suggestions.length > 0) {
+        process.stdout.write(display.c.darkGray("  " + suggestions.map(m => "/" + m).join("  ")));
+      }
+
+      const sugRow = endRow + 1;
+
+      // 4. Clear any extra rows left over from a previously longer buffer
+      for (let r = sugRow; r < totalDrawnRows; r++) {
+        process.stdout.write("\r\n\x1b[K");
+      }
+      if (totalDrawnRows > sugRow) {
+        process.stdout.write(`\x1b[${totalDrawnRows - sugRow}A`);
+      }
+      totalDrawnRows = sugRow;
+
+      // 5. Go from suggestion row back to prompt row 0
+      process.stdout.write(`\x1b[${sugRow}A\r`);
+
+      // 6. Navigate to current cursor position
+      const { row: targetRow, col: targetCol } = screenPosOf(cursor);
+      if (targetRow > 0) process.stdout.write(`\x1b[${targetRow}B`);
+      if (targetCol > 0) process.stdout.write(`\x1b[${targetCol}C`);
+    }
+
+    // ── Fresh redraw after external output ───────────────────────────────────
+    //
+    // Called when display.print() writes output while ask() is running (e.g.
+    // a WebSocket message arriving in worker mode).  The terminal cursor is
+    // now at an unknown position below the old prompt, so we start a fresh
+    // prompt on a new line rather than trying to navigate back.
+
+    function drawFresh() {
+      if (done) return;
+      totalDrawnRows = 0; // reset: we're drawing from a new position
+      const displayStr = buffer.replace(/\n/g, "\r\n    ");
+      // Start on a fresh line
+      process.stdout.write("\r\n" + promptLine + displayStr);
+
+      const { row: endRow } = screenPosOf(buffer.length);
+
+      process.stdout.write("\x1b[K\r\n\x1b[K");
+      const matches = computeMatches();
+      if (matches.length > 0) {
+        process.stdout.write(display.c.darkGray("  " + matches.map(m => "/" + m).join("  ")));
+      }
+
+      const sugRow = endRow + 1;
+      totalDrawnRows = sugRow;
+
+      process.stdout.write(`\x1b[${sugRow}A\r`);
+
+      const { row: targetRow, col: targetCol } = screenPosOf(cursor);
+      if (targetRow > 0) process.stdout.write(`\x1b[${targetRow}B`);
+      if (targetCol > 0) process.stdout.write(`\x1b[${targetCol}C`);
+    }
+
+    // Register the fresh-redraw hook so display.print() can notify us
+    display.setInputPrintCallback(drawFresh);
 
     if (abort) {
       void abort.then((value) => {
@@ -174,20 +279,32 @@ export function ask(
       });
     }
 
+    function cleanup() {
+      display.setInputPrintCallback(null);
+      process.stdin.removeListener("data", onData);
+    }
+
     function submit(value: string) {
       if (done) return;
       done = true;
-      process.stdout.write("\r\n");
-      process.stdin.removeListener("data", onData);
+      // Navigate to end of buffer, clear suggestion row, then final newline
+      const { row: curRow } = screenPosOf(cursor);
+      const { row: endRow } = screenPosOf(buffer.length);
+      const rowDiff = endRow - curRow;
+      if (rowDiff > 0) process.stdout.write(`\x1b[${rowDiff}B`);
+      else if (rowDiff < 0) process.stdout.write(`\x1b[${-rowDiff}A`);
+      process.stdout.write("\r\n\x1b[K\r\n");
+      cleanup();
       resolve(value.trim());
     }
 
     function exit() {
+      // Don't call cleanup() here — process.exit() terminates for real;
+      // in tests where exit() is mocked, the listener stays alive so tests
+      // can push "\r" to resolve the dangling promise.
       process.stdout.write("\x1b[?2004l\r\n");
       process.exit(0);
     }
-
-    let cursor = 0; // current cursor position within buffer
 
     // ── Autocomplete ────────────────────────────────────────────────────────
 
@@ -199,91 +316,60 @@ export function ask(
       return matchCommands(prefix, commands).slice(0, 3);
     }
 
-    function refreshSuggestions() {
-      const matches = computeMatches();
-      const fromEnd = buffer.length - cursor;
-      if (fromEnd > 0) process.stdout.write(`\x1b[${fromEnd}C`);
-      process.stdout.write("\r\n\x1b[K");
-      if (matches.length > 0) {
-        process.stdout.write(display.c.darkGray("  " + matches.map(m => "/" + m).join("  ")));
-      }
-      process.stdout.write("\x1b[A\r");
-      const fwd = promptVisualLen + cursor;
-      if (fwd > 0) process.stdout.write(`\x1b[${fwd}C`);
-      suggestionsShown = matches.length > 0;
-    }
-
-    function clearSuggestions() {
-      if (!suggestionsShown) return;
-      const fromEnd = buffer.length - cursor;
-      if (fromEnd > 0) process.stdout.write(`\x1b[${fromEnd}C`);
-      process.stdout.write("\r\n\x1b[K\x1b[A\r");
-      const fwd = promptVisualLen + cursor;
-      if (fwd > 0) process.stdout.write(`\x1b[${fwd}C`);
-      suggestionsShown = false;
-    }
+    // ── Editing operations (all use fullRedraw) ──────────────────────────────
 
     function replaceBuffer(newText: string) {
-      if (cursor > 0) process.stdout.write(`\x1b[${cursor}D`);
-      process.stdout.write(newText + "\x1b[K");
+      const prevRow = screenPosOf(cursor).row;
       buffer = newText;
       cursor = newText.length;
-    }
-
-    // Write suffix from cursor, clear trailing chars, reposition cursor
-    function redrawSuffix() {
-      const rest = buffer.slice(cursor);
-      process.stdout.write(rest + "\x1b[K");
-      if (rest.length) process.stdout.write(`\x1b[${rest.length}D`);
+      fullRedraw(prevRow, computeMatches());
     }
 
     function insert(ch: string) {
+      const prevRow = screenPosOf(cursor).row;
       buffer = buffer.slice(0, cursor) + ch + buffer.slice(cursor);
       cursor++;
-      // Write ch + everything after it, then move back to just after ch
-      const rest = buffer.slice(cursor);
-      process.stdout.write(ch + rest + "\x1b[K");
-      if (rest.length) process.stdout.write(`\x1b[${rest.length}D`);
+      fullRedraw(prevRow, computeMatches());
     }
 
     function deleteBack() {
       if (cursor === 0) return;
+      const prevRow = screenPosOf(cursor).row;
       buffer = buffer.slice(0, cursor - 1) + buffer.slice(cursor);
       cursor--;
-      process.stdout.write("\b");
-      redrawSuffix();
+      fullRedraw(prevRow, computeMatches());
     }
 
     function moveTo(pos: number) {
       pos = Math.max(0, Math.min(buffer.length, pos));
       if (pos === cursor) return;
-      const delta = pos - cursor;
-      process.stdout.write(delta < 0 ? `\x1b[${-delta}D` : `\x1b[${delta}C`);
+      const prevRow = screenPosOf(cursor).row;
       cursor = pos;
+      fullRedraw(prevRow, computeMatches());
     }
 
     function killToEnd() {
+      const prevRow = screenPosOf(cursor).row;
       buffer = buffer.slice(0, cursor);
-      process.stdout.write("\x1b[K");
+      fullRedraw(prevRow, computeMatches());
     }
 
     function killToStart() {
-      const rest = buffer.slice(cursor);
-      buffer = rest;
-      if (cursor) process.stdout.write(`\x1b[${cursor}D`);
+      const prevRow = screenPosOf(cursor).row;
+      buffer = buffer.slice(cursor);
       cursor = 0;
-      redrawSuffix();
+      fullRedraw(prevRow, computeMatches());
     }
 
     function deleteWord() {
       if (cursor === 0) return;
+      const prevRow = screenPosOf(cursor).row;
       let pos = cursor;
       while (pos > 0 && buffer[pos - 1] === " ") pos--;
       while (pos > 0 && buffer[pos - 1] !== " ") pos--;
       buffer = buffer.slice(0, pos) + buffer.slice(cursor);
-      if (cursor - pos) process.stdout.write(`\x1b[${cursor - pos}D`);
       cursor = pos;
-      redrawSuffix();
+      fullRedraw(prevRow, computeMatches());
     }
 
     function moveWordLeft() {
@@ -300,10 +386,44 @@ export function ask(
       moveTo(pos);
     }
 
+    // Find the buffer position at (targetRow, targetCol), clamping to the
+    // nearest reachable position on that row.  Returns -1 if targetRow doesn't
+    // exist in the current buffer.
+    function bufPosAtRow(targetRow: number, targetCol: number): number {
+      let bestPos = -1;
+      let bestColDiff = Infinity;
+      for (let pos = 0; pos <= buffer.length; pos++) {
+        const { row, col } = screenPosOf(pos);
+        if (row === targetRow) {
+          const diff = Math.abs(col - targetCol);
+          if (diff < bestColDiff) { bestColDiff = diff; bestPos = pos; }
+        } else if (row > targetRow && bestPos !== -1) {
+          break; // past target row
+        }
+      }
+      return bestPos;
+    }
+
+    function moveLineUp() {
+      const { row, col } = screenPosOf(cursor);
+      if (row === 0) return; // already on top row
+      const pos = bufPosAtRow(row - 1, col);
+      if (pos !== -1) moveTo(pos);
+    }
+
+    function moveLineDown() {
+      const { row, col } = screenPosOf(cursor);
+      const pos = bufPosAtRow(row + 1, col);
+      if (pos !== -1) moveTo(pos);
+      // if row+1 doesn't exist, no-op
+    }
+
     function processTyped(data: string) {
       // Substitute known sequences with placeholder chars before stripping
       data = data.replace(/\x1b\[1;3D/g, "\x1c"); // iTerm2 option+left  → 0x1C
       data = data.replace(/\x1b\[1;3C/g, "\x1d"); // iTerm2 option+right → 0x1D
+      data = data.replace(/\x1b\[A/g,    "\x10"); // up arrow             → 0x10
+      data = data.replace(/\x1b\[B/g,    "\x11"); // down arrow           → 0x11
       data = data.replace(/\x1b\[D/g,    "\x1e"); // left arrow           → 0x1E
       data = data.replace(/\x1b\[C/g,    "\x1f"); // right arrow          → 0x1F
       data = data.replace(/\x1b\[[0-9;]*[A-Za-z]/g, ""); // strip remaining CSI
@@ -316,27 +436,28 @@ export function ask(
         if (ch === "\r" || ch === "\n") {
           const matches = computeMatches();
           if (matches.length > 0) { replaceBuffer("/" + matches[0]); }
-          clearSuggestions();
           submit(buffer);
           return;
         }
-        else if (ch === "\x7f" || ch === "\x08")      { deleteBack(); refreshSuggestions(); }
+        else if (ch === "\x7f" || ch === "\x08")      { deleteBack(); }
         else if (ch === "\x03") { process.stdout.write("^C"); exit(); }
         else if (ch === "\x04") { if (!buffer) exit(); }
         else if (ch === "\x01")                       { moveTo(0); }             // ^A
         else if (ch === "\x05")                       { moveTo(buffer.length); } // ^E
-        else if (ch === "\x0b")                       { killToEnd(); refreshSuggestions(); }           // ^K
-        else if (ch === "\x15")                       { killToStart(); refreshSuggestions(); }         // ^U
-        else if (ch === "\x17")                       { deleteWord(); refreshSuggestions(); }          // ^W
+        else if (ch === "\x0b")                       { killToEnd(); }           // ^K
+        else if (ch === "\x15")                       { killToStart(); }         // ^U
+        else if (ch === "\x17")                       { deleteWord(); }          // ^W
+        else if (ch === "\x10")                       { moveLineUp(); }          // ↑
+        else if (ch === "\x11")                       { moveLineDown(); }        // ↓
         else if (ch === "\x1c")                       { moveWordLeft(); }        // option+←
         else if (ch === "\x1d")                       { moveWordRight(); }       // option+→
-        else if (ch === "\x1e")                       { moveTo(cursor - 1); }   // ←
-        else if (ch === "\x1f")                       { moveTo(cursor + 1); }   // →
-        else if (ch === "\x09") {                                                            // Tab
+        else if (ch === "\x1e")                       { moveTo(cursor - 1); }    // ←
+        else if (ch === "\x1f")                       { moveTo(cursor + 1); }    // →
+        else if (ch === "\x09") {                                                 // Tab
           const matches = computeMatches();
-          if (matches.length > 0) { replaceBuffer("/" + matches[0]); refreshSuggestions(); }
+          if (matches.length > 0) { replaceBuffer("/" + matches[0]); }
         }
-        else if (code >= 32)                          { insert(ch); refreshSuggestions(); }
+        else if (code >= 32)                          { insert(ch); }
       }
     }
 
@@ -345,12 +466,10 @@ export function ask(
     }
 
     function insertPaste(str: string) {
+      const prevRow = screenPosOf(cursor).row;
       buffer = buffer.slice(0, cursor) + str + buffer.slice(cursor);
       cursor += str.length;
-      // Echo with \r\n... for newlines, then redraw any suffix after cursor
-      process.stdout.write(str.split("\n").join("\r\n... "));
-      redrawSuffix();
-      refreshSuggestions();
+      fullRedraw(prevRow, computeMatches());
     }
 
     function onData(chunk: string) {
