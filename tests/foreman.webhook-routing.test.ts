@@ -67,6 +67,49 @@ function openedPayload(issueNumber: number, labels: string[]) {
   };
 }
 
+function prOpenedPayload(prNumber: number, body: string) {
+  return {
+    action: "opened",
+    pull_request: {
+      number: prNumber,
+      title: `PR ${prNumber}`,
+      body,
+    },
+    repository: { html_url: "https://github.com/owner/repo" },
+  };
+}
+
+function checkRunPayload(prNumber: number, conclusion: string) {
+  return {
+    action: "completed",
+    check_run: {
+      name: "CI",
+      conclusion,
+      output: { summary: "Test output" },
+      pull_requests: [{ number: prNumber }],
+    },
+    repository: { html_url: "https://github.com/owner/repo" },
+  };
+}
+
+function prReviewPayload(prNumber: number) {
+  return {
+    action: "submitted",
+    pull_request: { number: prNumber, title: "PR title" },
+    review: { state: "changes_requested", body: "Please fix this." },
+    repository: { html_url: "https://github.com/owner/repo" },
+  };
+}
+
+function prReviewCommentPayload(prNumber: number) {
+  return {
+    action: "created",
+    pull_request: { number: prNumber, title: "PR title" },
+    comment: { body: "Nit: rename this", path: "src/foo.ts" },
+    repository: { html_url: "https://github.com/owner/repo" },
+  };
+}
+
 // ── Test harness ──────────────────────────────────────────────────────────────
 
 let queue: TaskQueue;
@@ -265,5 +308,122 @@ describe("webhook-triggered task routing", () => {
 
     // But issue 2 should be pending, ready for when the worker finishes
     expect(queue.getTaskForIssue(2)?.status).toBe("pending");
+  });
+});
+
+describe("PR event forwarding to workers", () => {
+  it("pull_request/opened with closing keyword registers PR and routes check_run to worker", async () => {
+    // Set up a task for issue 42
+    queue.addTask({
+      taskId: "42",
+      issueNumber: 42,
+      title: "Issue 42",
+      body: "Body",
+      labels: ["brunel:ready"],
+      repoUrl: "https://github.com/owner/repo",
+    });
+
+    // Worker connects and receives the task
+    const ws = await connect();
+    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    await nextMsg(ws); // task_assigned
+
+    // Worker opens a PR that closes issue #42
+    routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Fixes #42\n\nSome description."));
+
+    // check_run for that PR should now be forwarded to the worker
+    const reply = nextMsg(ws);
+    routeEvent("evt-cr", "check_run", checkRunPayload(10, "failure"));
+
+    const msg = await reply;
+    expect(msg.type).toBe("event_notification");
+    expect((msg as any).event.name).toBe("check_run");
+  });
+
+  it("pull_request_review for a registered PR is forwarded to the worker", async () => {
+    queue.addTask({
+      taskId: "42",
+      issueNumber: 42,
+      title: "Issue 42",
+      body: "Body",
+      labels: ["brunel:ready"],
+      repoUrl: "https://github.com/owner/repo",
+    });
+
+    const ws = await connect();
+    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    await nextMsg(ws); // task_assigned
+
+    routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Closes #42"));
+
+    const reply = nextMsg(ws);
+    routeEvent("evt-rev", "pull_request_review", prReviewPayload(10));
+
+    const msg = await reply;
+    expect(msg.type).toBe("event_notification");
+    expect((msg as any).event.name).toBe("pull_request_review");
+  });
+
+  it("pull_request_review_comment for a registered PR is forwarded to the worker", async () => {
+    queue.addTask({
+      taskId: "42",
+      issueNumber: 42,
+      title: "Issue 42",
+      body: "Body",
+      labels: ["brunel:ready"],
+      repoUrl: "https://github.com/owner/repo",
+    });
+
+    const ws = await connect();
+    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    await nextMsg(ws); // task_assigned
+
+    routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Resolves #42"));
+
+    const reply = nextMsg(ws);
+    routeEvent("evt-cmt", "pull_request_review_comment", prReviewCommentPayload(10));
+
+    const msg = await reply;
+    expect(msg.type).toBe("event_notification");
+    expect((msg as any).event.name).toBe("pull_request_review_comment");
+  });
+
+  it("pull_request/opened without linked issue does not crash and is not forwarded", async () => {
+    queue.addTask({
+      taskId: "42",
+      issueNumber: 42,
+      title: "Issue 42",
+      body: "Body",
+      labels: ["brunel:ready"],
+      repoUrl: "https://github.com/owner/repo",
+    });
+
+    const ws = await connect();
+    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    await nextMsg(ws); // task_assigned
+
+    // PR with no linked issue — should be silently ignored
+    routeEvent("evt-pr", "pull_request", prOpenedPayload(99, "A new PR with no issue reference."));
+
+    // check_run for that PR should not be forwarded
+    routeEvent("evt-cr", "check_run", checkRunPayload(99, "failure"));
+    const raceResult = await Promise.race([
+      nextMsg(ws).then(() => "message" as const),
+      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
+    ]);
+    expect(raceResult).toBe("timeout");
+  });
+
+  it("check_run for unknown PR is silently dropped", async () => {
+    const ws = await connect();
+    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    await nextMsg(ws); // standby
+
+    routeEvent("evt-cr", "check_run", checkRunPayload(999, "failure"));
+    const raceResult = await Promise.race([
+      nextMsg(ws).then(() => "message" as const),
+      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
+    ]);
+    expect(raceResult).toBe("timeout");
   });
 });

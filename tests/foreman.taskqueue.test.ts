@@ -66,4 +66,19 @@ describe("TaskQueue", () => {
     q.addTask(baseTask);
     expect(q.getTaskForIssue(42)?.taskId).toBe("42");
   });
+
+  it("registerPr + getTaskForPr looks up task by PR number", () => {
+    q.addTask(baseTask);
+    q.registerPr(10, "42");
+    expect(q.getTaskForPr(10)?.taskId).toBe("42");
+  });
+
+  it("getTaskForPr returns undefined for unknown PR number", () => {
+    expect(q.getTaskForPr(999)).toBeUndefined();
+  });
+
+  it("registerPr for unknown taskId returns no task from getTaskForPr", () => {
+    q.registerPr(10, "nonexistent");
+    expect(q.getTaskForPr(10)).toBeUndefined();
+  });
 });

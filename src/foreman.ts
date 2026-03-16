@@ -87,6 +87,7 @@ interface Task {
 
 export class TaskQueue {
   private tasks = new Map<string, Task>();
+  private prToTaskId = new Map<number, string>();
 
   addTask(t: Omit<Task, "status" | "assignedWorkerId" | "eventQueue"> & Partial<Pick<Task, "status" | "eventQueue">>) {
     this.tasks.set(t.taskId, {
@@ -137,6 +138,15 @@ export class TaskQueue {
     const events = t.eventQueue.slice();
     t.eventQueue = [];
     return events;
+  }
+
+  registerPr(prNumber: number, taskId: string) {
+    this.prToTaskId.set(prNumber, taskId);
+  }
+
+  getTaskForPr(prNumber: number): Task | undefined {
+    const taskId = this.prToTaskId.get(prNumber);
+    return taskId ? this.tasks.get(taskId) : undefined;
   }
 }
 
@@ -258,13 +268,76 @@ export function createForemanWss(
     console.log(`[worker ${wid.slice(0, 8)}] ${line}`);
   }
 
+  function extractLinkedIssueNumber(body: string): number | null {
+    const match = /(?:closes|fixes|resolves)\s+#(\d+)/i.exec(body);
+    return match ? parseInt(match[1], 10) : null;
+  }
+
+  function forwardEvent(task: Task, evt: GitHubEvent, ref: string) {
+    if (task.status === "assigned" && task.assignedWorkerId) {
+      registry.send(task.assignedWorkerId, { type: "event_notification", taskId: task.taskId, event: evt });
+      log(task.assignedWorkerId, `→ event_notification ${ref} ${evt.name}`);
+    } else if (task.status === "pending") {
+      taskQueue.queueEvent(task.taskId, evt);
+      console.log(`[task ${ref}] ${evt.name} queued (no worker assigned)`);
+    }
+  }
+
   function routeEvent(id: string, name: string, payload: unknown) {
     const p = payload as Record<string, unknown>;
-    const issue = (p.issue ?? p.pull_request) as Record<string, unknown> | undefined;
+    const evt: GitHubEvent = { id, name, payload: p };
+
+    // ── PR events: route by PR number ────────────────────────────────────────
+
+    if (name === "pull_request") {
+      const pr = p.pull_request as Record<string, unknown> | undefined;
+      const prNumber = typeof pr?.number === "number" ? pr.number : null;
+      if (prNumber === null) return;
+
+      // When a PR is opened, register it against a task if the body links an issue.
+      // The worker opened the PR itself, so don't forward this event back to it.
+      if (p.action === "opened" && pr) {
+        const linkedIssue = extractLinkedIssueNumber(String(pr.body ?? ""));
+        if (linkedIssue !== null) {
+          const linkedTask = taskQueue.getTaskForIssue(linkedIssue);
+          if (linkedTask) {
+            taskQueue.registerPr(prNumber, linkedTask.taskId);
+            console.log(`[task #${linkedIssue}] PR #${prNumber} registered`);
+          }
+        }
+        return;
+      }
+
+      const task = taskQueue.getTaskForPr(prNumber);
+      if (task) forwardEvent(task, evt, `PR #${prNumber}`);
+      return;
+    }
+
+    if (name === "pull_request_review" || name === "pull_request_review_comment") {
+      const pr = p.pull_request as Record<string, unknown> | undefined;
+      const prNumber = typeof pr?.number === "number" ? pr.number : null;
+      if (prNumber === null) return;
+      const task = taskQueue.getTaskForPr(prNumber);
+      if (task) forwardEvent(task, evt, `PR #${prNumber}`);
+      return;
+    }
+
+    if (name === "check_run") {
+      const checkRun = p.check_run as Record<string, unknown> | undefined;
+      const prs = checkRun?.pull_requests as Array<{ number: number }> | undefined;
+      if (!prs || prs.length === 0) return;
+      const prNumber = prs[0].number;
+      const task = taskQueue.getTaskForPr(prNumber);
+      if (task) forwardEvent(task, evt, `PR #${prNumber}`);
+      return;
+    }
+
+    // ── Issue events: route by issue number ──────────────────────────────────
+
+    const issue = p.issue as Record<string, unknown> | undefined;
     const issueNumber = typeof issue?.number === "number" ? issue.number : null;
     if (issueNumber === null) return;
 
-    const evt: GitHubEvent = { id, name, payload: p };
     let task = taskQueue.getTaskForIssue(issueNumber);
 
     // If the issue isn't queued yet, check if this webhook should enqueue it.
@@ -299,14 +372,7 @@ export function createForemanWss(
     }
 
     if (!task) return;
-
-    if (task.status === "assigned" && task.assignedWorkerId) {
-      registry.send(task.assignedWorkerId, { type: "event_notification", taskId: task.taskId, event: evt });
-      log(task.assignedWorkerId, `→ event_notification #${issueNumber} ${name}`);
-    } else if (task.status === "pending") {
-      taskQueue.queueEvent(task.taskId, evt);
-      console.log(`[task #${issueNumber}] ${name} queued (no worker assigned)`);
-    }
+    forwardEvent(task, evt, `#${issueNumber}`);
   }
 
   function tryAssignWork(workerId: string) {
