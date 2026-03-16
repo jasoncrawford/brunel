@@ -269,6 +269,13 @@ let _statusText = "";
 export let _statusActive = false;
 let _statusInterval: ReturnType<typeof setInterval> | null = null;
 
+// Callback invoked after print() writes output, so the input layer can redraw
+// the prompt (needed in worker mode when WebSocket messages arrive during ask()).
+let _inputPrintCallback: (() => void) | null = null;
+export function setInputPrintCallback(fn: (() => void) | null) {
+  _inputPrintCallback = fn;
+}
+
 function _clearStatus() {
   if (!_statusActive) return;
   process.stdout.write("\r\x1b[K\x1b[A\x1b[K");
@@ -302,6 +309,7 @@ export function print(line: string | null) {
   _clearStatus();
   console.log(line);
   _drawStatus();
+  _inputPrintCallback?.();
 }
 
 export function resolve(table: FmtTable, key: string, data: any): string | null {
