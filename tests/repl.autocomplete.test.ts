@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PassThrough } from "stream";
-import { ask, matchCommands, listCommandNames, parseFrontmatter, type ListDir } from "../src/input.js";
+import { ask, matchCommands, listCommandNames, parseFrontmatter, listSkillNames, type ListDir } from "../src/input.js";
 
 // ── Test harness for ask() integration tests ──────────────────────────────────
 
@@ -58,6 +58,151 @@ describe("parseFrontmatter", () => {
 
   it("returns empty object for empty string", () => {
     expect(parseFrontmatter("")).toEqual({});
+  });
+});
+
+// ── listSkillNames ────────────────────────────────────────────────────────────
+
+describe("listSkillNames", () => {
+  it("returns empty array when skills dir is missing and no plugins json", () => {
+    expect(listSkillNames(() => null, () => null)).toEqual([]);
+  });
+
+  it("returns user skill names from ~/.claude/skills/", () => {
+    const listDir: ListDir = (dir) => {
+      if (dir.endsWith("/.claude/skills")) {
+        return [
+          { name: "brainstorm", isDir: true },
+          { name: "review", isDir: true },
+        ];
+      }
+      return null;
+    };
+    const readFile = (path: string) => {
+      if (path.endsWith("SKILL.md")) return "---\nname: skill\n---\n# Content";
+      return null;
+    };
+    expect(listSkillNames(listDir, readFile)).toEqual(["brainstorm", "review"]);
+  });
+
+  it("excludes user skills with user-invocable: false", () => {
+    const listDir: ListDir = (dir) => {
+      if (dir.endsWith("/.claude/skills")) {
+        return [
+          { name: "visible", isDir: true },
+          { name: "hidden", isDir: true },
+        ];
+      }
+      return null;
+    };
+    const readFile = (path: string) => {
+      if (path.includes("/hidden/SKILL.md")) return "---\nuser-invocable: false\n---\n";
+      if (path.endsWith("SKILL.md")) return "---\nname: skill\n---\n";
+      return null;
+    };
+    expect(listSkillNames(listDir, readFile)).toEqual(["visible"]);
+  });
+
+  it("ignores non-directory entries in skills dir", () => {
+    const listDir: ListDir = (dir) => {
+      if (dir.endsWith("/.claude/skills")) {
+        return [
+          { name: "myscill", isDir: true },
+          { name: "README.md", isDir: false },
+        ];
+      }
+      return null;
+    };
+    const readFile = () => "---\nname: x\n---\n";
+    expect(listSkillNames(listDir, readFile)).toEqual(["myscill"]);
+  });
+
+  it("skips user skill dir with no SKILL.md", () => {
+    const listDir: ListDir = (dir) => {
+      if (dir.endsWith("/.claude/skills")) return [{ name: "orphan", isDir: true }];
+      return null;
+    };
+    expect(listSkillNames(listDir, () => null)).toEqual([]);
+  });
+
+  it("returns plugin skills with plugin:skill naming", () => {
+    const home = process.env.HOME ?? "";
+    const pluginsJson = JSON.stringify({
+      plugins: {
+        "myplugin@marketplace": [{ installPath: "/plugins/myplugin/1.0" }],
+      },
+    });
+    const listDir: ListDir = (dir) => {
+      if (dir === "/plugins/myplugin/1.0/skills") {
+        return [{ name: "foo", isDir: true }];
+      }
+      return null;
+    };
+    const readFile = (path: string) => {
+      if (path === `${home}/.claude/plugins/installed_plugins.json`) return pluginsJson;
+      if (path.endsWith("SKILL.md")) return "---\nname: foo\n---\n";
+      return null;
+    };
+    expect(listSkillNames(listDir, readFile)).toEqual(["myplugin:foo"]);
+  });
+
+  it("excludes plugin skills with user-invocable: false", () => {
+    const home = process.env.HOME ?? "";
+    const pluginsJson = JSON.stringify({
+      plugins: {
+        "myplugin@marketplace": [{ installPath: "/plugins/myplugin/1.0" }],
+      },
+    });
+    const listDir: ListDir = (dir) => {
+      if (dir === "/plugins/myplugin/1.0/skills") {
+        return [{ name: "blocked", isDir: true }];
+      }
+      return null;
+    };
+    const readFile = (path: string) => {
+      if (path === `${home}/.claude/plugins/installed_plugins.json`) return pluginsJson;
+      if (path.endsWith("SKILL.md")) return "---\nuser-invocable: false\n---\n";
+      return null;
+    };
+    expect(listSkillNames(listDir, readFile)).toEqual([]);
+  });
+
+  it("returns only user skills when installed_plugins.json is missing", () => {
+    const listDir: ListDir = (dir) => {
+      if (dir.endsWith("/.claude/skills")) return [{ name: "local", isDir: true }];
+      return null;
+    };
+    const readFile = (path: string) => {
+      if (path.endsWith("SKILL.md")) return "---\nname: local\n---\n";
+      return null; // installed_plugins.json missing
+    };
+    expect(listSkillNames(listDir, readFile)).toEqual(["local"]);
+  });
+
+  it("returns only user skills when installed_plugins.json is malformed JSON", () => {
+    const home = process.env.HOME ?? "";
+    const listDir: ListDir = (dir) => {
+      if (dir.endsWith("/.claude/skills")) return [{ name: "local", isDir: true }];
+      return null;
+    };
+    const readFile = (path: string) => {
+      if (path === `${home}/.claude/plugins/installed_plugins.json`) return "NOT_JSON{{{";
+      if (path.endsWith("SKILL.md")) return "---\nname: local\n---\n";
+      return null;
+    };
+    expect(listSkillNames(listDir, readFile)).toEqual(["local"]);
+  });
+
+  it("result is sorted alphabetically", () => {
+    const listDir: ListDir = (dir) => {
+      if (dir.endsWith("/.claude/skills")) {
+        return [{ name: "zebra", isDir: true }, { name: "alpha", isDir: true }];
+      }
+      return null;
+    };
+    const readFile = () => "---\nname: x\n---\n";
+    const result = listSkillNames(listDir, readFile);
+    expect(result).toEqual([...result].sort());
   });
 });
 

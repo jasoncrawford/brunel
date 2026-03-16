@@ -176,6 +176,65 @@ export function listCommandNames(listDir: ListDir = defaultListDir): string[] {
   return [...new Set([...builtins, ...fileCommands])].sort();
 }
 
+/**
+ * Return all available skill names: user skills from ~/.claude/skills/ plus
+ * plugin skills from installed_plugins.json.
+ * Skills with `user-invocable: false` in their SKILL.md frontmatter are excluded.
+ * Plugin skills are named "<plugin>:<skill>".
+ * Both listDir and readFile are injectable for testing.
+ */
+export function listSkillNames(
+  listDir: ListDir = defaultListDir,
+  readFile: (path: string) => string | null = defaultReadFile,
+): string[] {
+  const home = process.env.HOME ?? process.env.USERPROFILE ?? "";
+  const results: string[] = [];
+
+  // Plugin skills
+  const pluginsJson = readFile(`${home}/.claude/plugins/installed_plugins.json`);
+  if (pluginsJson) {
+    try {
+      const parsed = JSON.parse(pluginsJson) as {
+        plugins: Record<string, Array<{ installPath: string }>>;
+      };
+      for (const [key, entries] of Object.entries(parsed.plugins ?? {})) {
+        const pluginName = key.split("@")[0];
+        for (const entry of entries) {
+          const skillsDir = `${entry.installPath}/skills`;
+          const skillDirs = listDir(skillsDir);
+          if (!skillDirs) continue;
+          for (const dir of skillDirs) {
+            if (!dir.isDir) continue;
+            const skillMd = readFile(`${skillsDir}/${dir.name}/SKILL.md`);
+            if (!skillMd) continue;
+            const fm = parseFrontmatter(skillMd);
+            if (fm["user-invocable"] === "false") continue;
+            results.push(`${pluginName}:${dir.name}`);
+          }
+        }
+      }
+    } catch {
+      // malformed JSON — skip plugin skills
+    }
+  }
+
+  // User skills
+  const userSkillsDir = `${home}/.claude/skills`;
+  const userSkillDirs = listDir(userSkillsDir);
+  if (userSkillDirs) {
+    for (const dir of userSkillDirs) {
+      if (!dir.isDir) continue;
+      const skillMd = readFile(`${userSkillsDir}/${dir.name}/SKILL.md`);
+      if (!skillMd) continue;
+      const fm = parseFrontmatter(skillMd);
+      if (fm["user-invocable"] === "false") continue;
+      results.push(dir.name);
+    }
+  }
+
+  return [...new Set(results)].sort();
+}
+
 // ── Raw input with bracketed paste support ────────────────────────────────────
 
 // Bracketed paste mode: the terminal wraps pasted text in escape markers
