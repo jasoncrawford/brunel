@@ -81,4 +81,14 @@ describe("TaskQueue", () => {
     q.registerPr(10, "nonexistent");
     expect(q.getTaskForPr(10)).toBeUndefined();
   });
+
+  it("registerBranch + getTaskForBranch looks up task by branch name", () => {
+    q.addTask(baseTask);
+    q.registerBranch("fix-issue-42", "42");
+    expect(q.getTaskForBranch("fix-issue-42")?.taskId).toBe("42");
+  });
+
+  it("getTaskForBranch returns undefined for unknown branch", () => {
+    expect(q.getTaskForBranch("unknown-branch")).toBeUndefined();
+  });
 });

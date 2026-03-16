@@ -88,6 +88,7 @@ interface Task {
 export class TaskQueue {
   private tasks = new Map<string, Task>();
   private prToTaskId = new Map<number, string>();
+  private branchToTaskId = new Map<string, string>();
 
   addTask(t: Omit<Task, "status" | "assignedWorkerId" | "eventQueue"> & Partial<Pick<Task, "status" | "eventQueue">>) {
     this.tasks.set(t.taskId, {
@@ -146,6 +147,15 @@ export class TaskQueue {
 
   getTaskForPr(prNumber: number): Task | undefined {
     const taskId = this.prToTaskId.get(prNumber);
+    return taskId ? this.tasks.get(taskId) : undefined;
+  }
+
+  registerBranch(branch: string, taskId: string) {
+    this.branchToTaskId.set(branch, taskId);
+  }
+
+  getTaskForBranch(branch: string): Task | undefined {
+    const taskId = this.branchToTaskId.get(branch);
     return taskId ? this.tasks.get(taskId) : undefined;
   }
 }
@@ -302,6 +312,8 @@ export function createForemanWss(
           const linkedTask = taskQueue.getTaskForIssue(linkedIssue);
           if (linkedTask) {
             taskQueue.registerPr(prNumber, linkedTask.taskId);
+            const branch = String((pr.head as Record<string, unknown> | undefined)?.ref ?? "");
+            if (branch) taskQueue.registerBranch(branch, linkedTask.taskId);
             console.log(`[task #${linkedIssue}] PR #${prNumber} registered`);
           }
         }
@@ -325,10 +337,22 @@ export function createForemanWss(
     if (name === "check_run" || name === "check_suite") {
       const inner = (name === "check_run" ? p.check_run : p.check_suite) as Record<string, unknown> | undefined;
       const prs = inner?.pull_requests as Array<{ number: number }> | undefined;
-      if (!prs || prs.length === 0) return;
-      const prNumber = prs[0].number;
-      const task = taskQueue.getTaskForPr(prNumber);
-      if (task) forwardEvent(task, evt, `PR #${prNumber}`);
+
+      // Try PR-number lookup first (sometimes populated), fall back to head_branch
+      if (prs && prs.length > 0) {
+        const task = taskQueue.getTaskForPr(prs[0].number);
+        if (task) { forwardEvent(task, evt, `PR #${prs[0].number}`); return; }
+      }
+
+      // GitHub often sends empty pull_requests for branch-push-triggered checks;
+      // use head_branch as the reliable fallback.
+      const headBranch = name === "check_run"
+        ? String((inner?.check_suite as Record<string, unknown> | undefined)?.head_branch ?? "")
+        : String(inner?.head_branch ?? "");
+      if (headBranch) {
+        const task = taskQueue.getTaskForBranch(headBranch);
+        if (task) forwardEvent(task, evt, `branch ${headBranch}`);
+      }
       return;
     }
 

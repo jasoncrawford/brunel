@@ -67,13 +67,41 @@ function openedPayload(issueNumber: number, labels: string[]) {
   };
 }
 
-function prOpenedPayload(prNumber: number, body: string) {
+function prOpenedPayload(prNumber: number, body: string, headBranch = `branch-for-pr-${prNumber}`) {
   return {
     action: "opened",
     pull_request: {
       number: prNumber,
       title: `PR ${prNumber}`,
       body,
+      head: { ref: headBranch },
+    },
+    repository: { html_url: "https://github.com/owner/repo" },
+  };
+}
+
+// Real-world: GitHub sends empty pull_requests for branch-push-triggered check events
+function checkRunPayloadByBranch(headBranch: string, conclusion: string) {
+  return {
+    action: "completed",
+    check_run: {
+      name: "CI",
+      conclusion,
+      output: { summary: "Test output" },
+      pull_requests: [],
+      check_suite: { head_branch: headBranch },
+    },
+    repository: { html_url: "https://github.com/owner/repo" },
+  };
+}
+
+function checkSuitePayloadByBranch(headBranch: string, conclusion: string) {
+  return {
+    action: "completed",
+    check_suite: {
+      conclusion,
+      pull_requests: [],
+      head_branch: headBranch,
     },
     repository: { html_url: "https://github.com/owner/repo" },
   };
@@ -468,6 +496,57 @@ describe("PR event forwarding to workers", () => {
     await nextMsg(ws); // standby
 
     routeEvent("evt-cs", "check_suite", checkSuitePayload(999, "failure"));
+    const raceResult = await Promise.race([
+      nextMsg(ws).then(() => "message" as const),
+      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
+    ]);
+    expect(raceResult).toBe("timeout");
+  });
+
+  it("check_suite with empty pull_requests is routed by head_branch", async () => {
+    queue.addTask({
+      taskId: "42", issueNumber: 42, title: "Issue 42", body: "Body",
+      labels: ["brunel:ready"], repoUrl: "https://github.com/owner/repo",
+    });
+    const ws = await connect();
+    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    await nextMsg(ws); // task_assigned
+
+    routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Closes #42", "fix-issue-42"));
+
+    const reply = nextMsg(ws);
+    routeEvent("evt-cs", "check_suite", checkSuitePayloadByBranch("fix-issue-42", "failure"));
+
+    const msg = await reply;
+    expect(msg.type).toBe("event_notification");
+    expect((msg as any).event.name).toBe("check_suite");
+  });
+
+  it("check_run with empty pull_requests is routed by head_branch", async () => {
+    queue.addTask({
+      taskId: "42", issueNumber: 42, title: "Issue 42", body: "Body",
+      labels: ["brunel:ready"], repoUrl: "https://github.com/owner/repo",
+    });
+    const ws = await connect();
+    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    await nextMsg(ws); // task_assigned
+
+    routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Closes #42", "fix-issue-42"));
+
+    const reply = nextMsg(ws);
+    routeEvent("evt-cr", "check_run", checkRunPayloadByBranch("fix-issue-42", "failure"));
+
+    const msg = await reply;
+    expect(msg.type).toBe("event_notification");
+    expect((msg as any).event.name).toBe("check_run");
+  });
+
+  it("check_suite with empty pull_requests and unknown branch is silently dropped", async () => {
+    const ws = await connect();
+    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    await nextMsg(ws); // standby
+
+    routeEvent("evt-cs", "check_suite", checkSuitePayloadByBranch("unknown-branch", "failure"));
     const raceResult = await Promise.race([
       nextMsg(ws).then(() => "message" as const),
       new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
