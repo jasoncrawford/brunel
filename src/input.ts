@@ -1,6 +1,42 @@
 import fs from "fs";
 import * as display from "./display.js";
 
+// ── Frontmatter parsing ────────────────────────────────────────────────────────
+
+/**
+ * Parse a YAML frontmatter block (---...---) at the top of a string.
+ * Returns key/value pairs as strings. Non-matching lines are silently skipped.
+ * Returns {} if no frontmatter block is present.
+ */
+export function parseFrontmatter(content: string): Record<string, string> {
+  const match = content.match(/^---\n([\s\S]*?)\n---/);
+  if (!match) return {};
+  const result: Record<string, string> = {};
+  for (const line of match[1].split("\n")) {
+    const m = line.match(/^([^:]+):\s*(.*)$/);
+    if (m) result[m[1].trim()] = m[2].trim();
+  }
+  return result;
+}
+
+// ── Argument application ──────────────────────────────────────────────────────
+
+/**
+ * Apply args to a loaded command/skill content string.
+ * If content contains $ARGUMENTS, all occurrences are replaced with args (even if empty).
+ * Otherwise, if args is non-empty, appends "\nARGUMENTS: <args>".
+ * Otherwise returns content unchanged.
+ */
+export function applyArguments(content: string, args: string): string {
+  if (content.includes("$ARGUMENTS")) {
+    return content.replaceAll("$ARGUMENTS", args);
+  }
+  if (args) {
+    return `${content}\nARGUMENTS: ${args}`;
+  }
+  return content;
+}
+
 // ── Slash commands ────────────────────────────────────────────────────────────
 
 export type SlashCommandResult =
@@ -34,16 +70,56 @@ export function resolveCommandFilePath(command: string): string {
 }
 
 /**
- * Load a custom slash command from disk, returning the file content as the
- * query prompt, or null if the file does not exist.
- * The readFile parameter is injectable for testing.
+ * Resolve the raw content for a command name by trying three locations in order:
+ * 1. ~/.claude/commands/<command-path>.md  (custom command file)
+ * 2. ~/.claude/skills/<command>/SKILL.md   (user skill)
+ * 3. <plugin installPath>/skills/<skill>/SKILL.md  (plugin skill, for "plugin:skill" names)
+ * Returns raw file content, or null if not found.
+ * Does NOT apply arguments — that is left to the caller.
  */
-export function loadCommandFile(
+export function resolveContent(
   command: string,
   readFile: (path: string) => string | null = defaultReadFile,
 ): string | null {
-  const filePath = resolveCommandFilePath(command);
-  return readFile(filePath);
+  // 1. Command file
+  const cmdPath = resolveCommandFilePath(command);
+  const cmdContent = readFile(cmdPath);
+  if (cmdContent !== null) return cmdContent;
+
+  const home = process.env.HOME ?? process.env.USERPROFILE ?? "";
+
+  // 2. User skill
+  const userSkillPath = `${home}/.claude/skills/${command}/SKILL.md`;
+  const userContent = readFile(userSkillPath);
+  if (userContent !== null) return userContent;
+
+  // 3. Plugin skill (plugin:skill format only)
+  const colonIdx = command.indexOf(":");
+  if (colonIdx > 0) {
+    const pluginName = command.slice(0, colonIdx);
+    const skillName = command.slice(colonIdx + 1);
+    const pluginsJson = readFile(`${home}/.claude/plugins/installed_plugins.json`);
+    if (pluginsJson) {
+      try {
+        const parsed = JSON.parse(pluginsJson) as {
+          plugins: Record<string, Array<{ installPath: string }>>;
+        };
+        for (const [key, entries] of Object.entries(parsed.plugins ?? {})) {
+          if (key.split("@")[0] === pluginName) {
+            for (const entry of entries) {
+              const skillPath = `${entry.installPath}/skills/${skillName}/SKILL.md`;
+              const content = readFile(skillPath);
+              if (content !== null) return content;
+            }
+          }
+        }
+      } catch {
+        // malformed JSON — return null
+      }
+    }
+  }
+
+  return null;
 }
 
 function defaultReadFile(path: string): string | null {
@@ -76,12 +152,12 @@ export async function dispatchInput(
   if (slash) {
     if (slash.type === "exit" || slash.type === "clear") return slash;
     if (slash.type === "task_complete") return slash;
-    // unknown_command: look up file
+    // unknown_command: look up command file or skill
     const { command } = slash;
-    const content = loadCommandFile(command, readFile);
+    const content = resolveContent(command, readFile);
     if (content === null) return { type: "unknown_command", command };
     const args = input.slice(1 + command.length).trim();
-    const prompt = args ? `${content}\n${args}` : content;
+    const prompt = applyArguments(content, args);
     return { type: "query", prompt };
   }
 
@@ -130,14 +206,78 @@ function defaultListDir(dir: string): Array<{ name: string; isDir: boolean }> | 
  * Return all available command names: builtins ("clear", "exit") plus
  * any .md files found under ~/.claude/commands/ (recursively).
  * Subdirectory names become colon-separated prefixes: foo/bar.md → "foo:bar".
- * The listDir parameter is injectable for testing.
+ * Also includes skill names from listSkillNames.
+ * The listDir and readFile parameters are injectable for testing.
  */
-export function listCommandNames(listDir: ListDir = defaultListDir): string[] {
+export function listCommandNames(
+  listDir: ListDir = defaultListDir,
+  readFile: (path: string) => string | null = defaultReadFile,
+): string[] {
   const builtins = ["clear", "exit"];
   const home = process.env.HOME ?? process.env.USERPROFILE ?? ""; // "" → walks "/.claude/commands" which will silently return null
   const commandsDir = `${home}/.claude/commands`;
   const fileCommands = walkDir(commandsDir, "", listDir);
-  return [...new Set([...builtins, ...fileCommands])].sort();
+  const skillNames = listSkillNames(listDir, readFile);
+  return [...new Set([...builtins, ...fileCommands, ...skillNames])].sort();
+}
+
+/**
+ * Return all available skill names: user skills from ~/.claude/skills/ plus
+ * plugin skills from installed_plugins.json.
+ * Skills with `user-invocable: false` in their SKILL.md frontmatter are excluded.
+ * Plugin skills are named "<plugin>:<skill>".
+ * Both listDir and readFile are injectable for testing.
+ */
+export function listSkillNames(
+  listDir: ListDir = defaultListDir,
+  readFile: (path: string) => string | null = defaultReadFile,
+): string[] {
+  const home = process.env.HOME ?? process.env.USERPROFILE ?? "";
+  const results: string[] = [];
+
+  // Plugin skills
+  const pluginsJson = readFile(`${home}/.claude/plugins/installed_plugins.json`);
+  if (pluginsJson) {
+    try {
+      const parsed = JSON.parse(pluginsJson) as {
+        plugins: Record<string, Array<{ installPath: string }>>;
+      };
+      for (const [key, entries] of Object.entries(parsed.plugins ?? {})) {
+        const pluginName = key.split("@")[0];
+        for (const entry of entries) {
+          const skillsDir = `${entry.installPath}/skills`;
+          const skillDirs = listDir(skillsDir);
+          if (!skillDirs) continue;
+          for (const dir of skillDirs) {
+            if (!dir.isDir) continue;
+            const skillMd = readFile(`${skillsDir}/${dir.name}/SKILL.md`);
+            if (!skillMd) continue;
+            const fm = parseFrontmatter(skillMd);
+            if (fm["user-invocable"] === "false") continue;
+            results.push(`${pluginName}:${dir.name}`);
+          }
+        }
+      }
+    } catch {
+      // malformed JSON — skip plugin skills
+    }
+  }
+
+  // User skills
+  const userSkillsDir = `${home}/.claude/skills`;
+  const userSkillDirs = listDir(userSkillsDir);
+  if (userSkillDirs) {
+    for (const dir of userSkillDirs) {
+      if (!dir.isDir) continue;
+      const skillMd = readFile(`${userSkillsDir}/${dir.name}/SKILL.md`);
+      if (!skillMd) continue;
+      const fm = parseFrontmatter(skillMd);
+      if (fm["user-invocable"] === "false") continue;
+      results.push(dir.name);
+    }
+  }
+
+  return [...new Set(results)].sort();
 }
 
 // ── Raw input with bracketed paste support ────────────────────────────────────
