@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildInitialPrompt, buildEventPrompt } from "../src/templates.js";
+import { buildInitialPrompt, buildEventPrompt, resolveEventTemplate, EVENT_FMT, type EventTemplateFmtTable } from "../src/templates.js";
 import type { GitHubEvent } from "../src/types.js";
 
 describe("buildInitialPrompt", () => {
@@ -173,5 +173,64 @@ describe("buildEventPrompt", () => {
     const evt: GitHubEvent = { id: "e1", name: "deployment", payload: {} };
     const p = buildEventPrompt([evt]);
     expect(p).toContain("deployment");
+  });
+});
+
+describe("resolveEventTemplate", () => {
+  it("dispatches to the matching formatter", () => {
+    const table: EventTemplateFmtTable = {
+      push: (_event) => "pushed!",
+      _default: (event) => `unknown: ${event.name}`,
+    };
+    const evt: GitHubEvent = { id: "e1", name: "push", payload: {} };
+    expect(resolveEventTemplate(table, "push", evt)).toBe("pushed!");
+  });
+
+  it("falls back to _default when key is not in table", () => {
+    const table: EventTemplateFmtTable = {
+      _default: (event) => `fallback: ${event.name}`,
+    };
+    const evt: GitHubEvent = { id: "e1", name: "delete", payload: {} };
+    expect(resolveEventTemplate(table, "delete", evt)).toBe("fallback: delete");
+  });
+
+  it("returns built-in fallback string when table has no _default", () => {
+    const table: EventTemplateFmtTable = {};
+    const evt: GitHubEvent = { id: "e1", name: "star", payload: {} };
+    const result = resolveEventTemplate(table, "star", evt);
+    expect(result).toContain("star");
+  });
+});
+
+describe("EVENT_FMT table", () => {
+  it("check_run action_required triggers failure message", () => {
+    const evt: GitHubEvent = {
+      id: "e1",
+      name: "check_run",
+      payload: {
+        check_run: { name: "lint", conclusion: "action_required", output: { summary: "Action needed" } },
+      },
+    };
+    const result = EVENT_FMT.check_run(evt);
+    expect(result).toContain("lint");
+    expect(result).toContain("action_required");
+    expect(result).toContain("Action needed");
+  });
+
+  it("check_suite action_required triggers failure message", () => {
+    const evt: GitHubEvent = {
+      id: "e1",
+      name: "check_suite",
+      payload: { check_suite: { conclusion: "action_required" } },
+    };
+    const result = EVENT_FMT.check_suite(evt);
+    expect(result).toContain("action_required");
+    expect(result).toContain("failing checks");
+  });
+
+  it("_default includes event name", () => {
+    const evt: GitHubEvent = { id: "e1", name: "workflow_run", payload: {} };
+    const result = EVENT_FMT._default(evt);
+    expect(result).toContain("workflow_run");
   });
 });
