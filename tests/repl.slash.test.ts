@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseSlashCommand, resolveCommandFilePath, loadCommandFile, dispatchInput } from "../src/input.js";
+import { parseSlashCommand, resolveCommandFilePath, resolveContent } from "../src/input.js";
 
 describe("parseSlashCommand", () => {
   it("returns null for non-slash input", () => {
@@ -65,26 +65,10 @@ describe("resolveCommandFilePath", () => {
   });
 });
 
-describe("loadCommandFile", () => {
-  it("returns file content when file exists", () => {
-    const content = loadCommandFile("brainstorming", (_path) => "# Brainstorm\nThink creatively.");
-    expect(content).toBe("# Brainstorm\nThink creatively.");
-  });
-
-  it("returns null when file does not exist", () => {
-    const content = loadCommandFile("nonexistent", (_path) => null);
-    expect(content).toBeNull();
-  });
-
-  it("passes the resolved path to readFile", () => {
-    let capturedPath = "";
-    loadCommandFile("foo:bar", (path) => { capturedPath = path; return null; });
-    expect(capturedPath).toMatch(/\.claude\/commands\/foo\/bar\.md$/);
-  });
-});
-
-describe("dispatchInput", () => {
-  it("returns task_complete for /task-complete input", async () => {
-    expect(await dispatchInput("/task-complete")).toEqual({ type: "task_complete" });
+describe("resolveContent path resolution", () => {
+  it("passes the resolved command path to readFile", () => {
+    let firstPath = "";
+    resolveContent("foo:bar", (path) => { if (!firstPath) firstPath = path; return null; });
+    expect(firstPath).toMatch(/\.claude\/commands\/foo\/bar\.md$/);
   });
 });

@@ -70,19 +70,6 @@ export function resolveCommandFilePath(command: string): string {
 }
 
 /**
- * Load a custom slash command from disk, returning the file content as the
- * query prompt, or null if the file does not exist.
- * The readFile parameter is injectable for testing.
- */
-export function loadCommandFile(
-  command: string,
-  readFile: (path: string) => string | null = defaultReadFile,
-): string | null {
-  const filePath = resolveCommandFilePath(command);
-  return readFile(filePath);
-}
-
-/**
  * Resolve the raw content for a command name by trying three locations in order:
  * 1. ~/.claude/commands/<command-path>.md  (custom command file)
  * 2. ~/.claude/skills/<command>/SKILL.md   (user skill)
