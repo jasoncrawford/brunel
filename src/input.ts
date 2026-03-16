@@ -1,6 +1,24 @@
 import fs from "fs";
 import * as display from "./display.js";
 
+// ── Frontmatter parsing ────────────────────────────────────────────────────────
+
+/**
+ * Parse a YAML frontmatter block (---...---) at the top of a string.
+ * Returns key/value pairs as strings. Non-matching lines are silently skipped.
+ * Returns {} if no frontmatter block is present.
+ */
+export function parseFrontmatter(content: string): Record<string, string> {
+  const match = content.match(/^---\n([\s\S]*?)\n---/);
+  if (!match) return {};
+  const result: Record<string, string> = {};
+  for (const line of match[1].split("\n")) {
+    const m = line.match(/^([^:]+):\s*(.*)$/);
+    if (m) result[m[1].trim()] = m[2].trim();
+  }
+  return result;
+}
+
 // ── Slash commands ────────────────────────────────────────────────────────────
 
 export type SlashCommandResult =

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PassThrough } from "stream";
-import { ask, matchCommands, listCommandNames, type ListDir } from "../src/input.js";
+import { ask, matchCommands, listCommandNames, parseFrontmatter, type ListDir } from "../src/input.js";
 
 // ── Test harness for ask() integration tests ──────────────────────────────────
 
@@ -32,6 +32,34 @@ afterEach(() => {
 });
 
 const cmds = () => ["brainstorm", "clear", "exit"];
+
+// ── parseFrontmatter ──────────────────────────────────────────────────────────
+
+describe("parseFrontmatter", () => {
+  it("returns empty object when no frontmatter", () => {
+    expect(parseFrontmatter("# Just a heading\nNo frontmatter here.")).toEqual({});
+  });
+
+  it("parses key: value pairs from frontmatter block", () => {
+    const content = `---\nname: my-skill\ndescription: Does a thing\n---\n\n# Body`;
+    expect(parseFrontmatter(content)).toEqual({ name: "my-skill", description: "Does a thing" });
+  });
+
+  it("returns false-y user-invocable when set to false", () => {
+    const content = `---\nname: foo\nuser-invocable: false\n---\n`;
+    const fm = parseFrontmatter(content);
+    expect(fm["user-invocable"]).toBe("false");
+  });
+
+  it("silently skips non key:value lines inside frontmatter", () => {
+    const content = `---\nname: my-skill\nnot a kv line\ndescription: ok\n---\n`;
+    expect(parseFrontmatter(content)).toEqual({ name: "my-skill", description: "ok" });
+  });
+
+  it("returns empty object for empty string", () => {
+    expect(parseFrontmatter("")).toEqual({});
+  });
+});
 
 // ── matchCommands ─────────────────────────────────────────────────────────────
 
