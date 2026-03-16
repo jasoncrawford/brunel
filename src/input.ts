@@ -166,14 +166,19 @@ function defaultListDir(dir: string): Array<{ name: string; isDir: boolean }> | 
  * Return all available command names: builtins ("clear", "exit") plus
  * any .md files found under ~/.claude/commands/ (recursively).
  * Subdirectory names become colon-separated prefixes: foo/bar.md → "foo:bar".
- * The listDir parameter is injectable for testing.
+ * Also includes skill names from listSkillNames.
+ * The listDir and readFile parameters are injectable for testing.
  */
-export function listCommandNames(listDir: ListDir = defaultListDir): string[] {
+export function listCommandNames(
+  listDir: ListDir = defaultListDir,
+  readFile: (path: string) => string | null = defaultReadFile,
+): string[] {
   const builtins = ["clear", "exit"];
   const home = process.env.HOME ?? process.env.USERPROFILE ?? ""; // "" → walks "/.claude/commands" which will silently return null
   const commandsDir = `${home}/.claude/commands`;
   const fileCommands = walkDir(commandsDir, "", listDir);
-  return [...new Set([...builtins, ...fileCommands])].sort();
+  const skillNames = listSkillNames(listDir, readFile);
+  return [...new Set([...builtins, ...fileCommands, ...skillNames])].sort();
 }
 
 /**

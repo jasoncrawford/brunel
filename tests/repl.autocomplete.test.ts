@@ -314,6 +314,34 @@ describe("listCommandNames", () => {
     const result = listCommandNames(listDir);
     expect(result).toEqual([...result].sort());
   });
+
+  it("includes skill names from listSkillNames", () => {
+    const listDir: ListDir = (dir) => {
+      if (dir.endsWith("/.claude/skills")) return [{ name: "my-skill", isDir: true }];
+      return null;
+    };
+    const readFile = (path: string) => {
+      if (path.endsWith("SKILL.md")) return "---\nname: my-skill\n---\n";
+      return null;
+    };
+    const result = listCommandNames(listDir, readFile);
+    expect(result).toContain("my-skill");
+  });
+
+  it("deduplicates when skill name matches a command name", () => {
+    const listDir: ListDir = (dir) => {
+      if (dir.endsWith("commands")) return [{ name: "shared.md", isDir: false }];
+      if (dir.endsWith("/.claude/skills")) return [{ name: "shared", isDir: true }];
+      return null;
+    };
+    const readFile = (path: string) => {
+      if (path.endsWith("SKILL.md")) return "---\nname: shared\n---\n";
+      return null;
+    };
+    const result = listCommandNames(listDir, readFile);
+    const shared = result.filter(c => c === "shared");
+    expect(shared).toHaveLength(1);
+  });
 });
 
 // ── Tab completion ────────────────────────────────────────────────────────────
