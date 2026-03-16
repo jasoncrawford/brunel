@@ -322,9 +322,9 @@ export function createForemanWss(
       return;
     }
 
-    if (name === "check_run") {
-      const checkRun = p.check_run as Record<string, unknown> | undefined;
-      const prs = checkRun?.pull_requests as Array<{ number: number }> | undefined;
+    if (name === "check_run" || name === "check_suite") {
+      const inner = (name === "check_run" ? p.check_run : p.check_suite) as Record<string, unknown> | undefined;
+      const prs = inner?.pull_requests as Array<{ number: number }> | undefined;
       if (!prs || prs.length === 0) return;
       const prNumber = prs[0].number;
       const task = taskQueue.getTaskForPr(prNumber);

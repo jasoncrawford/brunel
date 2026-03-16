@@ -110,6 +110,17 @@ function prReviewCommentPayload(prNumber: number) {
   };
 }
 
+function checkSuitePayload(prNumber: number, conclusion: string) {
+  return {
+    action: "completed",
+    check_suite: {
+      conclusion,
+      pull_requests: [{ number: prNumber }],
+    },
+    repository: { html_url: "https://github.com/owner/repo" },
+  };
+}
+
 // ── Test harness ──────────────────────────────────────────────────────────────
 
 let queue: TaskQueue;
@@ -420,6 +431,43 @@ describe("PR event forwarding to workers", () => {
     await nextMsg(ws); // standby
 
     routeEvent("evt-cr", "check_run", checkRunPayload(999, "failure"));
+    const raceResult = await Promise.race([
+      nextMsg(ws).then(() => "message" as const),
+      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
+    ]);
+    expect(raceResult).toBe("timeout");
+  });
+
+  it("check_suite/completed for a registered PR is forwarded to the worker", async () => {
+    queue.addTask({
+      taskId: "42",
+      issueNumber: 42,
+      title: "Issue 42",
+      body: "Body",
+      labels: ["brunel:ready"],
+      repoUrl: "https://github.com/owner/repo",
+    });
+
+    const ws = await connect();
+    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    await nextMsg(ws); // task_assigned
+
+    routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Closes #42"));
+
+    const reply = nextMsg(ws);
+    routeEvent("evt-cs", "check_suite", checkSuitePayload(10, "failure"));
+
+    const msg = await reply;
+    expect(msg.type).toBe("event_notification");
+    expect((msg as any).event.name).toBe("check_suite");
+  });
+
+  it("check_suite for unknown PR is silently dropped", async () => {
+    const ws = await connect();
+    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    await nextMsg(ws); // standby
+
+    routeEvent("evt-cs", "check_suite", checkSuitePayload(999, "failure"));
     const raceResult = await Promise.race([
       nextMsg(ws).then(() => "message" as const),
       new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
