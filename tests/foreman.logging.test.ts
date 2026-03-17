@@ -105,4 +105,134 @@ describe("summaryEvent", () => {
     expect(result).not.toContain("undefined");
     expect(result).not.toContain("null");
   });
+
+  it("includes PR number for check_run with pull_requests", () => {
+    const result = summaryEvent("id-9", "check_run", {
+      action: "completed",
+      check_run: {
+        name: "CI",
+        conclusion: "success",
+        pull_requests: [{ number: 12 }],
+      },
+      sender: { login: "bot" },
+      repository: { full_name: "owner/repo" },
+    });
+    expect(result).toContain("#12");
+    expect(result).not.toContain("\n");
+  });
+
+  it("includes head_branch for check_run when no pull_requests", () => {
+    const result = summaryEvent("id-10", "check_run", {
+      action: "completed",
+      check_run: {
+        name: "CI",
+        conclusion: "success",
+        pull_requests: [],
+        check_suite: { head_branch: "fix/my-branch" },
+      },
+      sender: { login: "bot" },
+      repository: { full_name: "owner/repo" },
+    });
+    expect(result).toContain("fix/my-branch");
+    expect(result).not.toContain("\n");
+  });
+
+  it("includes PR number for check_suite with pull_requests", () => {
+    const result = summaryEvent("id-11", "check_suite", {
+      action: "completed",
+      check_suite: {
+        head_branch: "feature/x",
+        pull_requests: [{ number: 99 }],
+      },
+      sender: { login: "bot" },
+      repository: { full_name: "owner/repo" },
+    });
+    expect(result).toContain("#99");
+    expect(result).not.toContain("\n");
+  });
+
+  it("includes head_branch for check_suite when no pull_requests", () => {
+    const result = summaryEvent("id-12", "check_suite", {
+      action: "completed",
+      check_suite: {
+        head_branch: "feature/my-feature",
+        pull_requests: [],
+      },
+      sender: { login: "bot" },
+      repository: { full_name: "owner/repo" },
+    });
+    expect(result).toContain("feature/my-feature");
+    expect(result).not.toContain("\n");
+  });
+
+  it("includes PR number for workflow_run with pull_requests", () => {
+    const result = summaryEvent("id-13", "workflow_run", {
+      action: "completed",
+      workflow_run: {
+        name: "CI",
+        conclusion: "success",
+        pull_requests: [{ number: 77 }],
+      },
+      sender: { login: "bot" },
+      repository: { full_name: "owner/repo" },
+    });
+    expect(result).toContain("#77");
+    expect(result).not.toContain("\n");
+  });
+
+  it("includes head_branch for workflow_run when no pull_requests", () => {
+    const result = summaryEvent("id-14", "workflow_run", {
+      action: "completed",
+      workflow_run: {
+        name: "CI",
+        head_branch: "fix/53-something",
+        pull_requests: [],
+      },
+      sender: { login: "bot" },
+      repository: { full_name: "owner/repo" },
+    });
+    expect(result).toContain("fix/53-something");
+    expect(result).not.toContain("\n");
+  });
+
+  it("includes PR number for workflow_job with pull_requests", () => {
+    const result = summaryEvent("id-15", "workflow_job", {
+      action: "completed",
+      workflow_job: {
+        name: "build",
+        conclusion: "success",
+        pull_requests: [{ number: 55 }],
+      },
+      sender: { login: "bot" },
+      repository: { full_name: "owner/repo" },
+    });
+    expect(result).toContain("#55");
+    expect(result).not.toContain("\n");
+  });
+
+  it("includes head_branch for workflow_job when no pull_requests", () => {
+    const result = summaryEvent("id-16", "workflow_job", {
+      action: "completed",
+      workflow_job: {
+        name: "build",
+        head_branch: "fix/issue-61",
+        pull_requests: [],
+      },
+      sender: { login: "bot" },
+      repository: { full_name: "owner/repo" },
+    });
+    expect(result).toContain("fix/issue-61");
+    expect(result).not.toContain("\n");
+  });
+
+  it("includes ref for delete events", () => {
+    const result = summaryEvent("id-17", "delete", {
+      ref: "fix/53-webhook-assignment",
+      ref_type: "branch",
+      sender: { login: "alice" },
+      repository: { full_name: "owner/repo" },
+    });
+    expect(result).toContain("fix/53-webhook-assignment");
+    expect(result).not.toContain("\n");
+  });
 });

@@ -184,6 +184,20 @@ export function summaryEvent(id: string, name: string, payload: unknown): string
     const ref = String(p.ref ?? "");
     const count = (p.commits as unknown[] | undefined)?.length ?? 0;
     detail = ` ${ref} (${count} commit${count === 1 ? "" : "s"})`;
+  } else if (name === "delete") {
+    const ref = String(p.ref ?? "");
+    if (ref) detail = ` ${ref}`;
+  } else if (name === "check_run" || name === "check_suite" || name === "workflow_run" || name === "workflow_job") {
+    const inner = p[name] as Record<string, unknown> | undefined;
+    const prs = inner?.pull_requests as Array<{ number: number }> | undefined;
+    if (prs && prs.length > 0) {
+      detail = ` PR #${prs[0].number}`;
+    } else {
+      const headBranch = name === "check_run"
+        ? String((inner?.check_suite as Record<string, unknown> | undefined)?.head_branch ?? "")
+        : String(inner?.head_branch ?? "");
+      if (headBranch) detail = ` ${headBranch}`;
+    }
   }
 
   const parts: string[] = [`${name}${action}${detail}`];
