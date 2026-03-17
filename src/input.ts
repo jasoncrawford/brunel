@@ -214,16 +214,18 @@ function defaultListDir(dir: string): Array<{ name: string; isDir: boolean }> | 
 }
 
 /**
- * Return all available command names for REPL mode: builtins (excluding worker-only
- * commands like "task-complete") plus any .md files under ~/.claude/commands/ and skills.
+ * Return all available command names: builtins plus any .md files under
+ * ~/.claude/commands/ (recursively) and skill names.
  * Subdirectory names become colon-separated prefixes: foo/bar.md → "foo:bar".
+ * Worker-only builtins (e.g. "task-complete") are excluded unless workerMode is true.
  * The listDir and readFile parameters are injectable for testing.
  */
 export function listCommandNames(
   listDir: ListDir = defaultListDir,
   readFile: (path: string) => string | null = defaultReadFile,
+  workerMode = false,
 ): string[] {
-  const builtins = BUILTIN_COMMANDS.filter(c => !c.workerOnly).map(c => c.name);
+  const builtins = BUILTIN_COMMANDS.filter(c => workerMode || !c.workerOnly).map(c => c.name);
   const home = process.env.HOME ?? process.env.USERPROFILE ?? ""; // "" → walks "/.claude/commands" which will silently return null
   const commandsDir = `${home}/.claude/commands`;
   const fileCommands = walkDir(commandsDir, "", listDir);
@@ -232,20 +234,15 @@ export function listCommandNames(
 }
 
 /**
- * Return all available command names for worker mode: same as listCommandNames but
- * also includes worker-only builtins (e.g. "task-complete").
+ * Return all available command names for worker mode — same as listCommandNames
+ * but includes worker-only builtins (e.g. "task-complete").
  * The listDir and readFile parameters are injectable for testing.
  */
 export function listWorkerCommandNames(
   listDir: ListDir = defaultListDir,
   readFile: (path: string) => string | null = defaultReadFile,
 ): string[] {
-  const builtins = BUILTIN_COMMANDS.map(c => c.name);
-  const home = process.env.HOME ?? process.env.USERPROFILE ?? "";
-  const commandsDir = `${home}/.claude/commands`;
-  const fileCommands = walkDir(commandsDir, "", listDir);
-  const skillNames = listSkillNames(listDir, readFile);
-  return [...new Set([...builtins, ...fileCommands, ...skillNames])].sort();
+  return listCommandNames(listDir, readFile, true);
 }
 
 /**
