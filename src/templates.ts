@@ -27,9 +27,8 @@ export function buildEventPrompt(events: GitHubEvent[]): string {
   }).join(", ");
   print(c.darkGray(`Building prompt from events: ${eventList}`));
 
-  const prompt = events.length !== 1
-    ? resolveEventTemplate(EVENT_FMT, "_multiple", { id: "", name: "_multiple", payload: { events } })
-    : resolveEventTemplate(EVENT_FMT, events[0].name, events[0]);
+  const event = events.length === 1 ? events[0] : { id: "", name: "_multiple", payload: { events } };
+  const prompt = resolveEventTemplate(EVENT_FMT, event.name, event);
 
   print(c.amber(prompt));
   return prompt;
