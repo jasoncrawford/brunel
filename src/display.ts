@@ -44,6 +44,10 @@ export function fmtCount(count: number, singular_noun: string, plural_noun?: str
   return `${count} ${noun}`;
 }
 
+export function fmtTimestamp(): string {
+  return new Date().toISOString();
+}
+
 export function fmtDuration(secs: number): string {
   if (secs < 60) return `${secs}s`;
   const m = Math.floor(secs / 60);

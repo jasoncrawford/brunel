@@ -1,6 +1,5 @@
 /**
- * Tests that verify the foreman logs concise one-liners for every message
- * sent to or received from a worker.
+ * Tests that every foreman log line starts with a fixed-width ISO 8601 timestamp.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import http from "http";
@@ -29,13 +28,8 @@ function send(ws: WebSocket, msg: object) {
   ws.send(JSON.stringify(msg));
 }
 
-function closeClient(ws: WebSocket): Promise<void> {
-  return new Promise((resolve) => {
-    if (ws.readyState === WebSocket.CLOSED) { resolve(); return; }
-    ws.once("close", resolve);
-    ws.close();
-  });
-}
+// ISO 8601 timestamp prefix: e.g. "2026-03-17T22:48:59.123Z "
+const ISO_TIMESTAMP_PREFIX = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z /;
 
 // ── Test harness ──────────────────────────────────────────────────────────────
 
@@ -100,36 +94,22 @@ afterEach(() => {
   });
 });
 
-// ── Scenarios ─────────────────────────────────────────────────────────────────
+// ── Tests ─────────────────────────────────────────────────────────────────────
 
-describe("foreman worker message logging", () => {
-  it("logs worker_hello (idle) as a one-liner", async () => {
+describe("foreman log timestamps", () => {
+  it("worker hello/standby log lines start with ISO 8601 timestamp", async () => {
     const ws = await connect();
     const reply = nextMsg(ws);
     send(ws, { type: "worker_hello", workerId: "worker-abc123", status: "idle" });
     await reply;
 
-    // Log format: "<timestamp> [worker <first-8-chars>] ..."
-    const workerLogs = logLines.filter(l => l.includes("[worker "));
-    expect(workerLogs.length).toBeGreaterThan(0);
-    // Each log line must be a single line (no embedded newlines)
-    for (const line of workerLogs) {
-      expect(line).not.toContain("\n");
+    expect(logLines.length).toBeGreaterThan(0);
+    for (const line of logLines) {
+      expect(line).toMatch(ISO_TIMESTAMP_PREFIX);
     }
   });
 
-  it("logs standby sent to worker as a one-liner", async () => {
-    const ws = await connect();
-    const reply = nextMsg(ws);
-    send(ws, { type: "worker_hello", workerId: "worker-abc123", status: "idle" });
-    await reply; // standby
-
-    const standbyLog = logLines.find(l => l.includes("standby"));
-    expect(standbyLog).toBeDefined();
-    expect(standbyLog).not.toContain("\n");
-  });
-
-  it("logs task_assigned sent to worker as a one-liner", async () => {
+  it("task_assigned log line starts with ISO 8601 timestamp", async () => {
     queue.addTask({
       taskId: "1",
       issueNumber: 1,
@@ -142,39 +122,14 @@ describe("foreman worker message logging", () => {
     const ws = await connect();
     const reply = nextMsg(ws);
     send(ws, { type: "worker_hello", workerId: "worker-abc123", status: "idle" });
-    await reply; // task_assigned
+    await reply;
 
-    const taskLog = logLines.find(l => l.includes("task_assigned"));
-    expect(taskLog).toBeDefined();
-    expect(taskLog).not.toContain("\n");
-    // Should include issue number for context
-    expect(taskLog).toMatch(/#1/);
+    for (const line of logLines) {
+      expect(line).toMatch(ISO_TIMESTAMP_PREFIX);
+    }
   });
 
-  it("logs task_complete received from worker as a one-liner", async () => {
-    queue.addTask({
-      taskId: "1",
-      issueNumber: 1,
-      title: "Fix the thing",
-      body: "Body",
-      labels: [],
-      repoUrl: "https://github.com/owner/repo",
-    });
-
-    const ws = await connect();
-    send(ws, { type: "worker_hello", workerId: "worker-abc123", status: "idle" });
-    await nextMsg(ws); // task_assigned
-
-    logLines.length = 0; // reset to focus on task_complete log
-    send(ws, { type: "task_complete", workerId: "worker-abc123", taskId: "1" });
-    await nextMsg(ws); // standby
-
-    const completeLog = logLines.find(l => l.includes("task_complete"));
-    expect(completeLog).toBeDefined();
-    expect(completeLog).not.toContain("\n");
-  });
-
-  it("logs event_notification sent to worker as a one-liner", async () => {
+  it("event_notification log line starts with ISO 8601 timestamp", async () => {
     queue.addTask({
       taskId: "1",
       issueNumber: 1,
@@ -193,8 +148,29 @@ describe("foreman worker message logging", () => {
     routeEvent("evt-1", "issue_comment", { issue: { number: 1 }, comment: { body: "hi" } });
     await reply;
 
-    const eventLog = logLines.find(l => l.includes("event_notification"));
-    expect(eventLog).toBeDefined();
-    expect(eventLog).not.toContain("\n");
+    for (const line of logLines) {
+      expect(line).toMatch(ISO_TIMESTAMP_PREFIX);
+    }
+  });
+
+  it("task enqueue log line starts with ISO 8601 timestamp", async () => {
+    const ws = await connect();
+    send(ws, { type: "worker_hello", workerId: "worker-abc123", status: "idle" });
+    await nextMsg(ws); // standby
+
+    logLines.length = 0;
+    routeEvent("evt-1", "issues", {
+      action: "labeled",
+      label: { name: "brunel:ready" },
+      issue: { number: 5, title: "Do something", body: "", labels: [{ name: "brunel:ready" }] },
+      repository: { html_url: "https://github.com/owner/repo" },
+    });
+    // give a tick for async processing
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(logLines.length).toBeGreaterThan(0);
+    for (const line of logLines) {
+      expect(line).toMatch(ISO_TIMESTAMP_PREFIX);
+    }
   });
 });
