@@ -4,7 +4,7 @@ import { query, type HookCallback } from "@anthropic-ai/claude-agent-sdk";
 import * as display from "./display.js";
 import { ask, listCommandNames, dispatchInput } from "./input.js";
 import { workerMain } from "./worker.js";
-export { parseSlashCommand, resolveCommandFilePath, resolveContent, dispatchInput, matchCommands, listCommandNames, ask } from "./input.js";
+export { parseSlashCommand, resolveCommandFilePath, resolveContent, dispatchInput, matchCommands, listCommandNames, listWorkerCommandNames, ask } from "./input.js";
 export type { SlashCommandResult, DispatchResult, ListDir } from "./input.js";
 
 // ── Log file ──────────────────────────────────────────────────────────────────

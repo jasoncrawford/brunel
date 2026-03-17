@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PassThrough } from "stream";
-import { ask, matchCommands, listCommandNames, parseFrontmatter, listSkillNames, type ListDir } from "../src/input.js";
+import { ask, matchCommands, listCommandNames, listWorkerCommandNames, parseFrontmatter, listSkillNames, type ListDir } from "../src/input.js";
 
 // ── Test harness for ask() integration tests ──────────────────────────────────
 
@@ -328,6 +328,11 @@ describe("listCommandNames", () => {
     expect(result).toContain("my-skill");
   });
 
+  it("does not include task-complete (worker-only command)", () => {
+    const result = listCommandNames(() => null);
+    expect(result).not.toContain("task-complete");
+  });
+
   it("deduplicates when skill name matches a command name", () => {
     const listDir: ListDir = (dir) => {
       if (dir.endsWith("commands")) return [{ name: "shared.md", isDir: false }];
@@ -341,6 +346,26 @@ describe("listCommandNames", () => {
     const result = listCommandNames(listDir, readFile);
     const shared = result.filter(c => c === "shared");
     expect(shared).toHaveLength(1);
+  });
+});
+
+// ── listWorkerCommandNames ────────────────────────────────────────────────────
+
+describe("listWorkerCommandNames", () => {
+  it("includes task-complete", () => {
+    const result = listWorkerCommandNames(() => null);
+    expect(result).toContain("task-complete");
+  });
+
+  it("also includes clear and exit", () => {
+    const result = listWorkerCommandNames(() => null);
+    expect(result).toContain("clear");
+    expect(result).toContain("exit");
+  });
+
+  it("result is sorted alphabetically", () => {
+    const result = listWorkerCommandNames(() => null);
+    expect(result).toEqual([...result].sort());
   });
 });
 

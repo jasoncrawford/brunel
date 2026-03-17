@@ -45,6 +45,18 @@ export type SlashCommandResult =
   | { type: "task_complete" }
   | { type: "unknown_command"; command: string };
 
+type BuiltinCommand = {
+  name: string;
+  result: Exclude<SlashCommandResult, { type: "unknown_command" }>;
+  workerOnly?: boolean;
+};
+
+const BUILTIN_COMMANDS: BuiltinCommand[] = [
+  { name: "clear",         result: { type: "clear" } },
+  { name: "exit",          result: { type: "exit" } },
+  { name: "task-complete", result: { type: "task_complete" }, workerOnly: true },
+];
+
 /**
  * Parse a slash command from raw user input.
  * Returns null if the input is not a slash command.
@@ -53,9 +65,8 @@ export function parseSlashCommand(input: string): SlashCommandResult | null {
   if (!input.startsWith("/")) return null;
   const command = input.slice(1).split(/\s+/)[0];
   if (!command) return null;
-  if (command === "exit") return { type: "exit" };
-  if (command === "clear") return { type: "clear" };
-  if (command === "task-complete") return { type: "task_complete" };
+  const builtin = BUILTIN_COMMANDS.find(c => c.name === command);
+  if (builtin) return builtin.result;
   return { type: "unknown_command", command };
 }
 
@@ -203,18 +214,34 @@ function defaultListDir(dir: string): Array<{ name: string; isDir: boolean }> | 
 }
 
 /**
- * Return all available command names: builtins ("clear", "exit") plus
- * any .md files found under ~/.claude/commands/ (recursively).
+ * Return all available command names for REPL mode: builtins (excluding worker-only
+ * commands like "task-complete") plus any .md files under ~/.claude/commands/ and skills.
  * Subdirectory names become colon-separated prefixes: foo/bar.md → "foo:bar".
- * Also includes skill names from listSkillNames.
  * The listDir and readFile parameters are injectable for testing.
  */
 export function listCommandNames(
   listDir: ListDir = defaultListDir,
   readFile: (path: string) => string | null = defaultReadFile,
 ): string[] {
-  const builtins = ["clear", "exit"];
+  const builtins = BUILTIN_COMMANDS.filter(c => !c.workerOnly).map(c => c.name);
   const home = process.env.HOME ?? process.env.USERPROFILE ?? ""; // "" → walks "/.claude/commands" which will silently return null
+  const commandsDir = `${home}/.claude/commands`;
+  const fileCommands = walkDir(commandsDir, "", listDir);
+  const skillNames = listSkillNames(listDir, readFile);
+  return [...new Set([...builtins, ...fileCommands, ...skillNames])].sort();
+}
+
+/**
+ * Return all available command names for worker mode: same as listCommandNames but
+ * also includes worker-only builtins (e.g. "task-complete").
+ * The listDir and readFile parameters are injectable for testing.
+ */
+export function listWorkerCommandNames(
+  listDir: ListDir = defaultListDir,
+  readFile: (path: string) => string | null = defaultReadFile,
+): string[] {
+  const builtins = BUILTIN_COMMANDS.map(c => c.name);
+  const home = process.env.HOME ?? process.env.USERPROFILE ?? "";
   const commandsDir = `${home}/.claude/commands`;
   const fileCommands = walkDir(commandsDir, "", listDir);
   const skillNames = listSkillNames(listDir, readFile);
