@@ -45,6 +45,16 @@ export type SlashCommandResult =
   | { type: "task_complete" }
   | { type: "unknown_command"; command: string };
 
+// Single source of truth for builtin commands.
+// Both parseSlashCommand (dispatch) and listCommandNames (autocomplete) use this,
+// so adding a command here automatically makes it autocomplete.
+type BuiltinCommandType = Exclude<SlashCommandResult["type"], "unknown_command">;
+const BUILTIN_COMMANDS: Array<{ name: string; type: BuiltinCommandType }> = [
+  { name: "clear",         type: "clear"         },
+  { name: "exit",          type: "exit"           },
+  { name: "task-complete", type: "task_complete"  },
+];
+
 /**
  * Parse a slash command from raw user input.
  * Returns null if the input is not a slash command.
@@ -53,9 +63,8 @@ export function parseSlashCommand(input: string): SlashCommandResult | null {
   if (!input.startsWith("/")) return null;
   const command = input.slice(1).split(/\s+/)[0];
   if (!command) return null;
-  if (command === "exit") return { type: "exit" };
-  if (command === "clear") return { type: "clear" };
-  if (command === "task-complete") return { type: "task_complete" };
+  const builtin = BUILTIN_COMMANDS.find(c => c.name === command);
+  if (builtin) return { type: builtin.type };
   return { type: "unknown_command", command };
 }
 
@@ -203,7 +212,7 @@ function defaultListDir(dir: string): Array<{ name: string; isDir: boolean }> | 
 }
 
 /**
- * Return all available command names: builtins ("clear", "exit") plus
+ * Return all available command names: builtins ("clear", "exit", "task-complete") plus
  * any .md files found under ~/.claude/commands/ (recursively).
  * Subdirectory names become colon-separated prefixes: foo/bar.md → "foo:bar".
  * Also includes skill names from listSkillNames.
@@ -213,7 +222,7 @@ export function listCommandNames(
   listDir: ListDir = defaultListDir,
   readFile: (path: string) => string | null = defaultReadFile,
 ): string[] {
-  const builtins = ["clear", "exit"];
+  const builtins = BUILTIN_COMMANDS.map(c => c.name);
   const home = process.env.HOME ?? process.env.USERPROFILE ?? ""; // "" → walks "/.claude/commands" which will silently return null
   const commandsDir = `${home}/.claude/commands`;
   const fileCommands = walkDir(commandsDir, "", listDir);

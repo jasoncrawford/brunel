@@ -243,9 +243,17 @@ describe("listCommandNames", () => {
     expect(result).toContain("exit");
   });
 
+  it("always includes task-complete builtin", () => {
+    const result = listCommandNames(() => null);
+    expect(result).toContain("task-complete");
+  });
+
   it("returns only builtins when directory is missing", () => {
     const result = listCommandNames(() => null);
-    expect(result).toEqual(["clear", "exit"]);
+    expect(result).toContain("clear");
+    expect(result).toContain("exit");
+    expect(result).toContain("task-complete");
+    expect(result).toHaveLength(3);
   });
 
   it("includes a file at root level", () => {
