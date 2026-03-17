@@ -5,6 +5,11 @@ import { WebSocketServer } from "ws";
 import type { WebSocket as WsSocket } from "ws";
 import type { WorkerMessage, ForemanMessage, GitHubEvent } from "./types.js";
 import { labelIssueDone } from "./github.js";
+import { fmtTimestamp } from "./display.js";
+
+function flog(msg: string) {
+  console.log(`${fmtTimestamp()} ${msg}`);
+}
 
 type R = Record<string, unknown>;
 
@@ -208,7 +213,7 @@ export function summaryEvent(id: string, name: string, payload: unknown): string
 }
 
 function printEvent(id: string, name: string, payload: unknown) {
-  console.log(summaryEvent(id, name, payload));
+  flog(summaryEvent(id, name, payload));
 }
 
 // ── HTTP server factory ───────────────────────────────────────────────────────
@@ -256,7 +261,7 @@ function createHttpServer(
         res.writeHead(200);
         res.end("OK");
       } catch (err) {
-        console.error("Webhook processing error:", err);
+        flog(`ERROR Webhook processing error: ${err}`);
         res.writeHead(400);
         res.end("Bad Request");
       }
@@ -289,7 +294,7 @@ export function createForemanWss(
   const labelDone = options?.labelDone ?? labelIssueDone;
 
   function log(wid: string, line: string) {
-    console.log(`[worker ${wid.slice(0, 8)}] ${line}`);
+    flog(`[worker ${wid.slice(0, 8)}] ${line}`);
   }
 
   function extractLinkedIssueNumber(body: string): number | null {
@@ -303,7 +308,7 @@ export function createForemanWss(
       log(task.assignedWorkerId, `→ event_notification ${ref} ${evt.name}`);
     } else if (task.status === "pending") {
       taskQueue.queueEvent(task.taskId, evt);
-      console.log(`[task ${ref}] ${evt.name} queued (no worker assigned)`);
+      flog(`[task ${ref}] ${evt.name} queued (no worker assigned)`);
     }
   }
 
@@ -328,7 +333,7 @@ export function createForemanWss(
             taskQueue.registerPr(prNumber, linkedTask.taskId);
             const branch = String((pr.head as Record<string, unknown> | undefined)?.ref ?? "");
             if (branch) taskQueue.registerBranch(branch, linkedTask.taskId);
-            console.log(`[task #${linkedIssue}] PR #${prNumber} registered`);
+            flog(`[task #${linkedIssue}] PR #${prNumber} registered`);
           }
         }
         return;
@@ -401,7 +406,7 @@ export function createForemanWss(
           labels,
           repoUrl,
         });
-        console.log(`[task #${issueNumber}] enqueued via ${name}/${action}`);
+        flog(`[task #${issueNumber}] enqueued via ${name}/${action}`);
         task = taskQueue.getTaskForIssue(issueNumber)!;
         const idle = registry.getIdleWorker();
         if (idle) tryAssignWork(idle.workerId);
@@ -489,7 +494,7 @@ export function createForemanWss(
         if (task) {
           taskQueue.completeTask(msg.taskId);
           labelDone(task.issueNumber).catch(err =>
-            console.error("Failed to label issue done:", err)
+            flog(`ERROR Failed to label issue done: ${err}`)
           );
         }
         registry.releaseWorker(workerId);
@@ -538,13 +543,13 @@ if (isMain) {
   }
 
   server.listen(PORT, async () => {
-    console.log(`\nListening on http://localhost:${PORT}/webhook`);
-    console.log("WebSocket workers: ws://localhost:" + PORT + "/worker");
-    console.log("Waiting for events...\n");
+    flog(`Listening on http://localhost:${PORT}/webhook`);
+    flog(`WebSocket workers: ws://localhost:${PORT}/worker`);
+    flog("Waiting for events...");
     try {
       await loadIssuesToQueue(taskQueue);
     } catch (err) {
-      console.error("Warning: failed to load issues from GitHub:", err);
+      flog(`WARNING Failed to load issues from GitHub: ${err}`);
     }
   });
 }

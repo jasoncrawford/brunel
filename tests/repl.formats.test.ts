@@ -10,7 +10,6 @@ import {
   TOOL_ERROR_FMT,
   SYSTEM_FMT,
   MESSAGE_FMT,
-  HOOK_FMT,
   type FmtTable,
 } from "../src/display.js";
 
@@ -314,79 +313,3 @@ describe("MESSAGE_FMT", () => {
   });
 });
 
-describe("HOOK_FMT", () => {
-  afterEach(() => setVerbose(false));
-
-  it("PreToolUse, VERBOSE=false → null", () => {
-    setVerbose(false);
-    expect(resolve(HOOK_FMT, "PreToolUse", { tool_name: "Bash", tool_input: {} })).toBeNull();
-  });
-
-  it("PreToolUse, VERBOSE=true → hook: pre-tool <name>(<args>)", () => {
-    setVerbose(true);
-    const result = r(HOOK_FMT, "PreToolUse", { tool_name: "Bash", tool_input: { command: "ls" } });
-    expect(result).toContain("hook: pre-tool");
-    expect(result).toContain("Bash");
-  });
-
-  it("PostToolUse, VERBOSE=true, no error → (ok)", () => {
-    setVerbose(true);
-    const result = r(HOOK_FMT, "PostToolUse", { tool_name: "Read", tool_error: null });
-    expect(result).toContain("(ok)");
-  });
-
-  it("PostToolUse, VERBOSE=true, with error → (error)", () => {
-    setVerbose(true);
-    const result = r(HOOK_FMT, "PostToolUse", { tool_name: "Read", tool_error: "oops" });
-    expect(result).toContain("(error)");
-  });
-
-  it("Notification, VERBOSE=true → hook: notif \"<message>\"", () => {
-    setVerbose(true);
-    const result = r(HOOK_FMT, "Notification", { message: "hello" });
-    expect(result).toContain('hook: notif "hello"');
-  });
-
-  it("UserPromptSubmit, VERBOSE=true → hook: user prompt \"<prompt>\"", () => {
-    setVerbose(true);
-    const result = r(HOOK_FMT, "UserPromptSubmit", { prompt: "do something" });
-    expect(result).toContain('hook: user prompt "do something"');
-  });
-
-  it("PermissionRequest, VERBOSE=true → hook: permission <name> → <status>", () => {
-    setVerbose(true);
-    const result = r(HOOK_FMT, "PermissionRequest", { tool_name: "Bash", status: "approved" });
-    expect(result).toContain("hook: permission Bash");
-    expect(result).toContain("→ approved");
-  });
-
-  it("Stop, VERBOSE=true → hook: stop reason=<reason>", () => {
-    setVerbose(true);
-    const result = r(HOOK_FMT, "Stop", { stop_reason: "end_turn" });
-    expect(result).toContain("hook: stop reason=end_turn");
-  });
-
-  it("SubagentStart, VERBOSE=true → hook: subagent start id=<id>", () => {
-    setVerbose(true);
-    const result = r(HOOK_FMT, "SubagentStart", { agent_id: "agent-123" });
-    expect(result).toContain("hook: subagent start id=agent-123");
-  });
-
-  it("SubagentStop, VERBOSE=true → hook: subagent stop id=<id>", () => {
-    setVerbose(true);
-    const result = r(HOOK_FMT, "SubagentStop", { agent_id: "agent-123" });
-    expect(result).toContain("hook: subagent stop  id=agent-123");
-  });
-
-  it("TaskCompleted, VERBOSE=true → hook: task completed id=<id>", () => {
-    setVerbose(true);
-    const result = r(HOOK_FMT, "TaskCompleted", { task_id: "task-456" });
-    expect(result).toContain("hook: task completed id=task-456");
-  });
-
-  it("_default, VERBOSE=true → hook: <event name>", () => {
-    setVerbose(true);
-    const result = r(HOOK_FMT, "_default", { _event: "SomeEvent" });
-    expect(result).toContain("hook: SomeEvent");
-  });
-});

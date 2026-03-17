@@ -1,6 +1,6 @@
 import fs from "fs";
 import { fileURLToPath } from "url";
-import { query, type HookCallback } from "@anthropic-ai/claude-agent-sdk";
+import { query } from "@anthropic-ai/claude-agent-sdk";
 import * as display from "./display.js";
 import { ask, listCommandNames, dispatchInput } from "./input.js";
 import { workerMain } from "./worker.js";
@@ -21,44 +21,6 @@ export function logFull(label: string, data: unknown) {
   fs.appendFileSync(LOG_FILE, entry);
 }
 
-// ── Hook factory ──────────────────────────────────────────────────────────────
-
-function makeHook(event: string): HookCallback {
-  return async (input) => {
-    logFull(`HOOK ${event}`, input);
-    display.printHook(event, input);
-    return {};
-  };
-}
-
-const ALL_HOOK_EVENTS = [
-  "PreToolUse",
-  "PostToolUse",
-  "PostToolUseFailure",
-  "Notification",
-  "UserPromptSubmit",
-  "SessionStart",
-  "SessionEnd",
-  "Stop",
-  "SubagentStart",
-  "SubagentStop",
-  "PreCompact",
-  "PermissionRequest",
-  "Setup",
-  "TeammateIdle",
-  "TaskCompleted",
-  "ConfigChange",
-] as const;
-
-type HookEvent = (typeof ALL_HOOK_EVENTS)[number];
-
-const hooks = Object.fromEntries(
-  ALL_HOOK_EVENTS.map((event) => [
-    event,
-    [{ matcher: ".*", hooks: [makeHook(event)] }],
-  ])
-) as Record<HookEvent, [{ matcher: string; hooks: [HookCallback] }]>;
-
 // ── Config ────────────────────────────────────────────────────────────────────
 
 const BYPASS = process.argv.includes("--dangerously-skip-permissions");
@@ -68,11 +30,13 @@ const PERMISSION_MODE = BYPASS ? "bypassPermissions" : "acceptEdits";
 
 export async function runQuery(prompt: string, sessionId: string | undefined) {
   logFull("QUERY", { prompt, sessionId });
-  // Clear the input print callback while the query runs. In worker mode, ask()
-  // registers drawFresh() as the callback so the prompt redraws after background
-  // WebSocket messages — but during a query run the callback fires on every
-  // display.print() call, adding an extra \r\n after each piece of output and
-  // causing double-spacing. ask() re-registers the callback on each new call.
+  // Save and clear the input print callback while the query runs. In worker
+  // mode, ask() registers drawFresh() as the callback so the prompt redraws
+  // after background WebSocket messages — but during a query run the callback
+  // fires on every display.print() call, adding an extra \r\n after each piece
+  // of output and causing double-spacing. After the query finishes we restore
+  // and invoke the callback so the prompt redraws once (fixes issue #108).
+  const savedInputCallback = display.getInputPrintCallback();
   display.setInputPrintCallback(null);
 
   const startTime = Date.now();
@@ -98,7 +62,6 @@ export async function runQuery(prompt: string, sessionId: string | undefined) {
       includePartialMessages: true,
       ...(BYPASS ? { allowDangerouslySkipPermissions: true } : {}),
       ...(sessionId ? { resume: sessionId } : {}),
-      hooks,
     },
   })) {
     if (!(message.type === "stream_event" && (message.event as { type?: string }).type === "content_block_delta")) {
@@ -130,6 +93,12 @@ export async function runQuery(prompt: string, sessionId: string | undefined) {
   }
 
   display.stopStatus(); // no-op if result message already stopped it
+
+  // Restore the callback and redraw the prompt. In worker mode this redraws
+  // the waiting "[worker] > " prompt after query output has scrolled past it.
+  display.setInputPrintCallback(savedInputCallback);
+  savedInputCallback?.();
+
   return capturedSessionId;
 }
 
