@@ -64,6 +64,17 @@ describe("printForemanMessage", () => {
     expect(plain).toContain("issue_comment");
   });
 
+  it("event_notification includes action in name/action format when payload has action", () => {
+    const msg: ForemanMessage = {
+      type: "event_notification",
+      taskId: "task-1",
+      event: { id: "evt-1", name: "check_suite", payload: { action: "completed" } },
+    };
+    const output = captureOutput(() => printForemanMessage(msg));
+    const plain = stripAnsi(output);
+    expect(plain).toContain("check_suite/completed");
+  });
+
   it("event_notification output is a single line (no embedded newlines in content)", () => {
     const msg: ForemanMessage = {
       type: "event_notification",
