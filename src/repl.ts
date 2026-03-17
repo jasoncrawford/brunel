@@ -30,11 +30,13 @@ const PERMISSION_MODE = BYPASS ? "bypassPermissions" : "acceptEdits";
 
 export async function runQuery(prompt: string, sessionId: string | undefined) {
   logFull("QUERY", { prompt, sessionId });
-  // Clear the input print callback while the query runs. In worker mode, ask()
-  // registers drawFresh() as the callback so the prompt redraws after background
-  // WebSocket messages — but during a query run the callback fires on every
-  // display.print() call, adding an extra \r\n after each piece of output and
-  // causing double-spacing. ask() re-registers the callback on each new call.
+  // Save and clear the input print callback while the query runs. In worker
+  // mode, ask() registers drawFresh() as the callback so the prompt redraws
+  // after background WebSocket messages — but during a query run the callback
+  // fires on every display.print() call, adding an extra \r\n after each piece
+  // of output and causing double-spacing. After the query finishes we restore
+  // and invoke the callback so the prompt redraws once (fixes issue #108).
+  const savedInputCallback = display.getInputPrintCallback();
   display.setInputPrintCallback(null);
 
   const startTime = Date.now();
@@ -91,6 +93,12 @@ export async function runQuery(prompt: string, sessionId: string | undefined) {
   }
 
   display.stopStatus(); // no-op if result message already stopped it
+
+  // Restore the callback and redraw the prompt. In worker mode this redraws
+  // the waiting "[worker] > " prompt after query output has scrolled past it.
+  display.setInputPrintCallback(savedInputCallback);
+  savedInputCallback?.();
+
   return capturedSessionId;
 }
 

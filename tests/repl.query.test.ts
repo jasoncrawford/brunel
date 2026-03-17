@@ -13,9 +13,11 @@ vi.mock("fs", () => ({
   },
 }));
 
+import { PassThrough } from "stream";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { runQuery } from "../src/repl.js";
-import { toolUseNames, stopStatus, setVerbose, setInputPrintCallback } from "../src/display.js";
+import { ask } from "../src/input.js";
+import { toolUseNames, stopStatus, setVerbose } from "../src/display.js";
 
 function mockQueryMessages(messages: object[]) {
   (query as any).mockImplementation((_opts: any) => {
@@ -246,56 +248,47 @@ describe("runQuery - error handling", () => {
   });
 });
 
-describe("runQuery - input print callback", () => {
-  it("clears _inputPrintCallback before printing to prevent double-spacing", async () => {
-    mockQueryMessages([
-      { type: "assistant", message: { content: [{ type: "text", text: "hello" }] } },
-      { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } },
-    ]);
-
-    const mockCallback = vi.fn();
-    setInputPrintCallback(mockCallback);
-
-    const cap = captureConsole();
-    try {
-      await runQuery("test", undefined);
-    } finally {
-      cap.restore();
-      setInputPrintCallback(null);
-    }
-
-    expect(mockCallback).not.toHaveBeenCalled();
-  });
-
-  it("does not call _inputPrintCallback re-registered during runQuery (worker race condition)", async () => {
-    // In worker mode, ask() re-registers drawFresh after the WebSocket abort fires and
-    // a new ask() starts — this happens concurrently with runQuery. The callback must
-    // not fire for assistant/tool messages while _statusActive is true (i.e. while the
-    // query is in progress), even if it was re-registered after setInputPrintCallback(null).
-    // It IS allowed to fire for the result message (after stopStatus() clears _statusActive),
-    // which is the correct behavior — it redraws the prompt after the query finishes.
-    const mockCallback = vi.fn();
-    let callsWhileQueryRunning = 0;
-
+describe("runQuery - prompt redraw after query (worker mode integration)", () => {
+  it("redraws input prompt on stdout after query completes, not during query output", async () => {
+    // In worker mode: ask() is waiting for input while runQuery runs in the background.
+    // The prompt should appear on stdout once initially (from ask()) and again after
+    // the query completes (the fix for issue #108). It must NOT appear interleaved
+    // with query output (which would cause double-spacing).
     (query as any).mockImplementation(async function* () {
-      // Simulate ask() re-registering the callback mid-run (worker race condition).
-      // At this point runQuery has already called startStatus(), so _statusActive=true.
-      setInputPrintCallback(mockCallback);
-      yield { type: "assistant", message: { content: [{ type: "text", text: "hello" }] } };
-      // Snapshot call count after the assistant message was processed — _statusActive is
-      // still true here, so the callback must not have fired for that print.
-      callsWhileQueryRunning = mockCallback.mock.calls.length;
+      yield { type: "assistant", message: { content: [{ type: "text", text: "assistant output" }] } };
       yield { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } };
     });
 
-    const cap = captureConsole();
-    try {
-      await runQuery("test", undefined);
-    } finally {
-      cap.restore();
-      setInputPrintCallback(null);
-    }
+    const written: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((s: any) => written.push(String(s)));
+    vi.spyOn(process.stdout, "write").mockImplementation((s: any) => { written.push(String(s)); return true; });
 
-    expect(callsWhileQueryRunning).toBe(0);
+    const origStdin = process.stdin;
+    const fakeStdin = new PassThrough();
+    fakeStdin.setEncoding("utf8");
+    (fakeStdin as any).setRawMode = vi.fn();
+    Object.defineProperty(process, "stdin", { value: fakeStdin, configurable: true });
+
+    try {
+      // Start ask() — writes the prompt and registers drawFresh as the callback
+      const askPromise = ask("[worker] > ", () => []);
+
+      // Run the query to completion — drawFresh should be called once afterward
+      await runQuery("test", undefined);
+
+      const promptIdx = written.findIndex(s => s.includes("[worker] > "));
+      const assistantIdx = written.findIndex(s => stripAnsi(s).includes("assistant output"));
+      const lastPromptIdx = written.map((s, i) => s.includes("[worker] > ") ? i : -1).filter(i => i >= 0).at(-1)!;
+
+      expect(promptIdx).toBeGreaterThan(-1);        // prompt drawn initially by ask()
+      expect(assistantIdx).toBeGreaterThan(-1);     // query output appeared
+      expect(lastPromptIdx).toBeGreaterThan(assistantIdx); // prompt redrawn AFTER query output
+
+      fakeStdin.push("\r");
+      await askPromise;
+    } finally {
+      Object.defineProperty(process, "stdin", { value: origStdin, configurable: true });
+      vi.restoreAllMocks();
+    }
   });
 });
