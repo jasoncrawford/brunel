@@ -15,7 +15,7 @@ vi.mock("fs", () => ({
 
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { runQuery } from "../src/repl.js";
-import { toolUseNames, stopStatus, setVerbose } from "../src/display.js";
+import { toolUseNames, stopStatus, setVerbose, setInputPrintCallback } from "../src/display.js";
 
 function mockQueryMessages(messages: object[]) {
   (query as any).mockImplementation((_opts: any) => {
@@ -241,5 +241,27 @@ describe("runQuery - error handling", () => {
     }
     expect(thrown).toBeInstanceOf(Error);
     expect((thrown as Error).message).toBe("network failure");
+  });
+});
+
+describe("runQuery - input print callback", () => {
+  it("clears _inputPrintCallback before printing to prevent double-spacing", async () => {
+    mockQueryMessages([
+      { type: "assistant", message: { content: [{ type: "text", text: "hello" }] } },
+      { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } },
+    ]);
+
+    const mockCallback = vi.fn();
+    setInputPrintCallback(mockCallback);
+
+    const cap = captureConsole();
+    try {
+      await runQuery("test", undefined);
+    } finally {
+      cap.restore();
+      setInputPrintCallback(null);
+    }
+
+    expect(mockCallback).not.toHaveBeenCalled();
   });
 });
