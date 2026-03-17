@@ -427,13 +427,16 @@ export function ask(
     function submit(value: string) {
       if (done) return;
       done = true;
-      // Navigate to end of buffer, clear suggestion row, then final newline
+      // Navigate to end of buffer then clear the suggestion row. Stop there —
+      // no trailing \r\n. The cleared suggestion row becomes the separator line
+      // that _clearStatus() erases before the first print(), so query output
+      // starts exactly one blank line below the input (not two).
       const { row: curRow } = screenPosOf(cursor);
       const { row: endRow } = screenPosOf(buffer.length);
       const rowDiff = endRow - curRow;
       if (rowDiff > 0) process.stdout.write(`\x1b[${rowDiff}B`);
       else if (rowDiff < 0) process.stdout.write(`\x1b[${-rowDiff}A`);
-      process.stdout.write("\r\n\x1b[K\r\n");
+      process.stdout.write("\r\n\x1b[K");
       cleanup();
       resolve(value.trim());
     }
