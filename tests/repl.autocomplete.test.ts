@@ -402,6 +402,18 @@ describe("ask() - Tab completion", () => {
       expect(result).toBe("/exit");
     });
   });
+
+  it("Tab adds trailing space so arguments can be typed immediately", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = ask("> ", cmds);
+      stdin.push("/ex");
+      stdin.push("\x09");   // Tab — completes to "/exit "
+      stdin.push("arg1");   // type argument right away, no extra space needed
+      stdin.push("\r");
+      const result = await p;
+      expect(result).toBe("/exit arg1");
+    });
+  });
 });
 
 // ── Enter completion ──────────────────────────────────────────────────────────

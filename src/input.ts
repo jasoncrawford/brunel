@@ -595,7 +595,7 @@ export function ask(
         else if (ch === "\x1f")                       { moveTo(cursor + 1); }    // →
         else if (ch === "\x09") {                                                 // Tab
           const matches = computeMatches();
-          if (matches.length > 0) { replaceBuffer("/" + matches[0]); }
+          if (matches.length > 0) { replaceBuffer("/" + matches[0] + " "); }
         }
         else if (code >= 32)                          { insert(ch); }
       }
