@@ -264,4 +264,36 @@ describe("runQuery - input print callback", () => {
 
     expect(mockCallback).not.toHaveBeenCalled();
   });
+
+  it("does not call _inputPrintCallback re-registered during runQuery (worker race condition)", async () => {
+    // In worker mode, ask() re-registers drawFresh after the WebSocket abort fires and
+    // a new ask() starts — this happens concurrently with runQuery. The callback must
+    // not fire for assistant/tool messages while _statusActive is true (i.e. while the
+    // query is in progress), even if it was re-registered after setInputPrintCallback(null).
+    // It IS allowed to fire for the result message (after stopStatus() clears _statusActive),
+    // which is the correct behavior — it redraws the prompt after the query finishes.
+    const mockCallback = vi.fn();
+    let callsWhileQueryRunning = 0;
+
+    (query as any).mockImplementation(async function* () {
+      // Simulate ask() re-registering the callback mid-run (worker race condition).
+      // At this point runQuery has already called startStatus(), so _statusActive=true.
+      setInputPrintCallback(mockCallback);
+      yield { type: "assistant", message: { content: [{ type: "text", text: "hello" }] } };
+      // Snapshot call count after the assistant message was processed — _statusActive is
+      // still true here, so the callback must not have fired for that print.
+      callsWhileQueryRunning = mockCallback.mock.calls.length;
+      yield { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } };
+    });
+
+    const cap = captureConsole();
+    try {
+      await runQuery("test", undefined);
+    } finally {
+      cap.restore();
+      setInputPrintCallback(null);
+    }
+
+    expect(callsWhileQueryRunning).toBe(0);
+  });
 });

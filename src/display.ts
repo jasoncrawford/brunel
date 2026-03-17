@@ -309,7 +309,12 @@ export function print(line: string | null) {
   _clearStatus();
   console.log(line);
   _drawStatus();
-  _inputPrintCallback?.();
+  // Only redraw the input prompt when no query is running. During a query the
+  // status bar is active; calling drawFresh() then would interleave the prompt
+  // with query output and corrupt the display (causing double-spacing and
+  // swallowed output). ask() re-registers the callback on each new call, so
+  // prompt-redrawing after background notifications still works between runs.
+  if (!_statusActive) _inputPrintCallback?.();
 }
 
 export function resolve(table: FmtTable, key: string, data: any): string | null {

@@ -415,3 +415,24 @@ describe("ask() - word movement detail", () => {
     });
   });
 });
+
+describe("ask() - submit output", () => {
+  it("submit clears suggestion row without an extra trailing blank line", async () => {
+    // submit() should write \r\n\x1b[K (move to suggestion row, clear it) and stop.
+    // A trailing \r\n after \x1b[K adds an extra blank line before query output,
+    // causing double-spacing when combined with the \n prefix in text formatters.
+    const writeSpy = vi.mocked(process.stdout.write);
+
+    await withFakeStdin(async (stdin) => {
+      const p = ask("> ", () => []);
+      stdin.push("hello");
+      writeSpy.mockClear(); // ignore prompt/redraw writes from typing
+      stdin.push("\r");
+      await p;
+    });
+
+    const writes = writeSpy.mock.calls.map((c) => String(c[0]));
+    // The suggestion-row clear must NOT include a trailing \r\n
+    expect(writes).not.toContain("\r\n\x1b[K\r\n");
+  });
+});
