@@ -75,6 +75,17 @@ describe("buildEventPrompt", () => {
     expect(p).toContain("Multiple events");
   });
 
+  it("lists event names in multi-event fallback", () => {
+    const events: GitHubEvent[] = [
+      { id: "e1", name: "check_run", payload: {} },
+      { id: "e2", name: "pull_request_review", payload: {} },
+    ];
+    const p = buildEventPrompt(events);
+    expect(p).toContain("check_run");
+    expect(p).toContain("pull_request_review");
+    expect(p).not.toContain("${");
+  });
+
   describe("check_run", () => {
     it("contains check name and summary on failure", () => {
       const evt: GitHubEvent = {

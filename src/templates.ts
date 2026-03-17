@@ -40,7 +40,7 @@ export function resolveEventTemplate(table: EventTemplateFmtTable, key: string, 
 
 export const EVENT_FMT: EventTemplateFmtTable = {
   _multiple: (p) =>
-    "Multiple events have arrived since you last checked: ${p.events.map((e) => e.name).join(', ')}. Please review the current state of your PR and respond accordingly.",
+    `Multiple events have arrived since you last checked: ${(p.events as GitHubEvent[]).map((e) => e.name).join(', ')}. Please review the current state of your PR and respond accordingly.`,
 
   check_run: (p) =>
     (p.check_run?.conclusion === "failure" || p.check_run?.conclusion === "action_required")
