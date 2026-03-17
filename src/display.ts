@@ -246,19 +246,6 @@ export const MESSAGE_FMT: FmtTable = {
   _default:         (m) => c.darkGray(`msg: ${m.type}`),
 };
 
-export const HOOK_FMT: FmtTable = {
-  PreToolUse:         { verbose: (h) => c.sageGreen(`hook: pre-tool  ${h.tool_name}(${fmtArgs(h.tool_input ?? {}, 30)})`) },
-  PostToolUse:        { verbose: (h) => c.sageGreen(`hook: post-tool ${h.tool_name}  (${h.tool_error == null ? "ok" : "error"})`) },
-  PostToolUseFailure: { verbose: (h) => c.sageGreen(`hook: tool fail ${h.tool_name}  ${trunc(String(h.tool_error ?? ""), 50)}`) },
-  Notification:       { verbose: (h) => c.sageGreen(`hook: notif "${trunc(String(h.message ?? ""), 60)}"`) },
-  UserPromptSubmit:   { verbose: (h) => c.sageGreen(`hook: user prompt "${trunc(String(h.prompt ?? ""), 60)}"`) },
-  PermissionRequest:  { verbose: (h) => c.sageGreen(`hook: permission ${h.tool_name ?? h.tool ?? "?"}  → ${h.status ?? h.decision ?? "?"}`) },
-  Stop:               { verbose: (h) => c.sageGreen(`hook: stop reason=${h.stop_reason ?? "?"}`) },
-  SubagentStart:      { verbose: (h) => c.sageGreen(`hook: subagent start id=${h.agent_id ?? "?"}`) },
-  SubagentStop:       { verbose: (h) => c.sageGreen(`hook: subagent stop  id=${h.agent_id ?? "?"}`) },
-  TaskCompleted:      { verbose: (h) => c.sageGreen(`hook: task completed id=${h.task_id ?? "?"}`) },
-  _default:           { verbose: (h) => c.sageGreen(`hook: ${h._event}`) },
-};
 
 export const FOREMAN_MESSAGE_FMT: FmtTable = {
   task_assigned:      (m) => c.lavender(`  Task assigned: #${m.issue.number} — ${m.issue.title}`),
@@ -365,9 +352,6 @@ export function printMessage(msg: unknown) {
   print(resolve(MESSAGE_FMT, m.type, m));
 }
 
-export function printHook(event: string, input: unknown) {
-  print(resolve(HOOK_FMT, event, { ...(input as any), _event: event }));
-}
 
 export function printForemanMessage(msg: unknown) {
   const m = msg as any;

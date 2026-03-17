@@ -1,6 +1,6 @@
 import fs from "fs";
 import { fileURLToPath } from "url";
-import { query, type HookCallback } from "@anthropic-ai/claude-agent-sdk";
+import { query } from "@anthropic-ai/claude-agent-sdk";
 import * as display from "./display.js";
 import { ask, listCommandNames, dispatchInput } from "./input.js";
 import { workerMain } from "./worker.js";
@@ -20,44 +20,6 @@ export function logFull(label: string, data: unknown) {
     "\n";
   fs.appendFileSync(LOG_FILE, entry);
 }
-
-// ── Hook factory ──────────────────────────────────────────────────────────────
-
-function makeHook(event: string): HookCallback {
-  return async (input) => {
-    logFull(`HOOK ${event}`, input);
-    display.printHook(event, input);
-    return {};
-  };
-}
-
-const ALL_HOOK_EVENTS = [
-  "PreToolUse",
-  "PostToolUse",
-  "PostToolUseFailure",
-  "Notification",
-  "UserPromptSubmit",
-  "SessionStart",
-  "SessionEnd",
-  "Stop",
-  "SubagentStart",
-  "SubagentStop",
-  "PreCompact",
-  "PermissionRequest",
-  "Setup",
-  "TeammateIdle",
-  "TaskCompleted",
-  "ConfigChange",
-] as const;
-
-type HookEvent = (typeof ALL_HOOK_EVENTS)[number];
-
-const hooks = Object.fromEntries(
-  ALL_HOOK_EVENTS.map((event) => [
-    event,
-    [{ matcher: ".*", hooks: [makeHook(event)] }],
-  ])
-) as Record<HookEvent, [{ matcher: string; hooks: [HookCallback] }]>;
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -98,7 +60,6 @@ export async function runQuery(prompt: string, sessionId: string | undefined) {
       includePartialMessages: true,
       ...(BYPASS ? { allowDangerouslySkipPermissions: true } : {}),
       ...(sessionId ? { resume: sessionId } : {}),
-      hooks,
     },
   })) {
     const m = message as any;

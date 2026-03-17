@@ -3,7 +3,6 @@ import { stripAnsi } from "./helpers.js";
 import {
   printBlock,
   printMessage,
-  printHook,
   startStatus,
   stopStatus,
   print,
@@ -315,25 +314,6 @@ describe("printMessage", () => {
   });
 });
 
-describe("printHook", () => {
-  afterEach(() => setVerbose(false));
-
-  it("routes hook event through HOOK_FMT, injects _event", () => {
-    setVerbose(true);
-    const output = captureOutput(() => {
-      printHook("Stop", { stop_reason: "end_turn" });
-    });
-    expect(stripAnsi(output)).toContain("hook: stop reason=end_turn");
-  });
-
-  it("verbose=false → null (nothing printed)", () => {
-    setVerbose(false);
-    const output = captureOutput(() => {
-      printHook("PreToolUse", { tool_name: "Bash", tool_input: {} });
-    });
-    expect(output).toBe("");
-  });
-});
 
 describe("print()", () => {
   it("print(null) is a no-op", () => {
