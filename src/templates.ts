@@ -13,53 +13,46 @@ Please implement this issue. Start by understanding the requirements, then creat
 
 export function buildEventPrompt(events: GitHubEvent[]): string {
   if (events.length !== 1) {
-    return "Multiple events have arrived since you last checked. Please review the current state of your PR and respond accordingly.";
+    return resolveEventTemplate(EVENT_FMT, "_multiple", { id: "", name: "_multiple", payload: { count: events.length } });
   }
-  return buildSingleEventPrompt(events[0]);
+  return resolveEventTemplate(EVENT_FMT, events[0].name, events[0]);
 }
 
-function buildSingleEventPrompt(event: GitHubEvent): string {
-  const p = event.payload as Record<string, unknown>;
+// ── Event formatter table ─────────────────────────────────────────────────────
 
-  switch (event.name) {
-    case "check_run": {
-      const run = p.check_run as Record<string, unknown>;
-      const conclusion = run?.conclusion ?? "unknown";
-      const output = run?.output as Record<string, unknown> | undefined;
-      if (conclusion === "failure" || conclusion === "action_required") {
-        return `CI check "${run?.name}" failed (${conclusion}).\n\n${output?.summary ?? ""}`.trim();
-      }
-      return `CI check "${run?.name}" completed with conclusion: ${conclusion}.`;
-    }
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type EventTemplateFmt = (payload: any, event: GitHubEvent) => string;
+export type EventTemplateFmtTable = Record<string, EventTemplateFmt>;
 
-    case "check_suite": {
-      const suite = p.check_suite as Record<string, unknown>;
-      const conclusion = suite?.conclusion ?? "unknown";
-      if (conclusion === "failure" || conclusion === "action_required") {
-        return `CI suite failed (${conclusion}). Please review the failing checks on your PR and fix any issues.`;
-      }
-      return `CI suite completed with conclusion: ${conclusion}.`;
-    }
-
-    case "pull_request_review": {
-      const review = p.review as Record<string, unknown>;
-      const pr = p.pull_request as Record<string, unknown>;
-      return `A review was submitted on PR #${pr?.number}: state=${review?.state}.\n\n${review?.body ?? ""}`.trim();
-    }
-
-    case "pull_request_review_comment": {
-      const comment = p.comment as Record<string, unknown>;
-      const pr = p.pull_request as Record<string, unknown>;
-      return `A review comment was added on PR #${pr?.number} at \`${comment?.path}\`:\n\n${comment?.body ?? ""}`.trim();
-    }
-
-    case "issue_comment": {
-      const comment = p.comment as Record<string, unknown>;
-      const issue = p.issue as Record<string, unknown>;
-      return `A comment was added on issue #${issue?.number}:\n\n${comment?.body ?? ""}`.trim();
-    }
-
-    default:
-      return `GitHub event "${event.name}" received. Please review the current state of your work and respond accordingly.`;
-  }
+export function resolveEventTemplate(table: EventTemplateFmtTable, key: string, event: GitHubEvent): string {
+  const fmt = table[key] ?? table._default;
+  if (!fmt) return "";
+  return fmt(event.payload, event);
 }
+
+export const EVENT_FMT: EventTemplateFmtTable = {
+  _multiple: () =>
+    "Multiple events have arrived since you last checked. Please review the current state of your PR and respond accordingly.",
+
+  check_run: (p) =>
+    (p.check_run?.conclusion === "failure" || p.check_run?.conclusion === "action_required")
+      ? `CI check "${p.check_run?.name}" failed (${p.check_run?.conclusion}).\n\n${p.check_run?.output?.summary ?? ""}`.trim()
+      : `CI check "${p.check_run?.name}" completed with conclusion: ${p.check_run?.conclusion}.`,
+
+  check_suite: (p) =>
+    (p.check_suite?.conclusion === "failure" || p.check_suite?.conclusion === "action_required")
+      ? `CI suite failed (${p.check_suite?.conclusion}). Please review the failing checks on your PR and fix any issues.`
+      : `CI suite completed with conclusion: ${p.check_suite?.conclusion}.`,
+
+  pull_request_review: (p) =>
+    `A review was submitted on PR #${p.pull_request?.number}: state=${p.review?.state}.\n\n${p.review?.body ?? ""}`.trim(),
+
+  pull_request_review_comment: (p) =>
+    `A review comment was added on PR #${p.pull_request?.number} at \`${p.comment?.path}\`:\n\n${p.comment?.body ?? ""}`.trim(),
+
+  issue_comment: (p) =>
+    `A comment was added on issue #${p.issue?.number}:\n\n${p.comment?.body ?? ""}`.trim(),
+
+  _default: (_p, event) =>
+    `GitHub event "${event.name}" received. Please review the current state of your work and respond accordingly.`,
+};
