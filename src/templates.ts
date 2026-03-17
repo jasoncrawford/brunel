@@ -20,10 +20,18 @@ Do not work on any other issues: leave task assignment to the foreman. Do not me
 }
 
 export function buildEventPrompt(events: GitHubEvent[]): string {
-  if (events.length !== 1) {
-    return resolveEventTemplate(EVENT_FMT, "_multiple", { id: "", name: "_multiple", payload: { events } });
-  }
-  return resolveEventTemplate(EVENT_FMT, events[0].name, events[0]);
+  const eventList = events.map(e => {
+    const action = e.payload["action"] as string | undefined;
+    return action ? `${e.name}/${action}` : e.name;
+  }).join(", ");
+  console.log(`Building prompt from events: ${eventList}`);
+
+  const prompt = events.length !== 1
+    ? resolveEventTemplate(EVENT_FMT, "_multiple", { id: "", name: "_multiple", payload: { events } })
+    : resolveEventTemplate(EVENT_FMT, events[0].name, events[0]);
+
+  console.log(prompt);
+  return prompt;
 }
 
 // ── Event formatter table ─────────────────────────────────────────────────────
