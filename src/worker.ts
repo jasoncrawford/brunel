@@ -3,7 +3,7 @@ import crypto from "crypto";
 import { WebSocket } from "ws";
 import * as display from "./display.js";
 import { buildInitialPrompt, buildEventPrompt } from "./templates.js";
-import { ask, listCommandNames, dispatchInput } from "./input.js";
+import { ask, listWorkerCommandNames, dispatchInput } from "./input.js";
 import type { ForemanMessage, GitHubEvent, TaskIssue } from "./types.js";
 
 // ── WorkerSession ─────────────────────────────────────────────────────────────
@@ -207,7 +207,7 @@ export async function workerMain(runQueryFn: RunQuery): Promise<void> {
 
   while (true) {
     const wsAbort = session.createWsInputPromise();
-    const input = await ask("\n[worker] > ", listCommandNames, wsAbort);
+    const input = await ask("\n[worker] > ", listWorkerCommandNames, wsAbort);
 
     try {
       const result = await session.handleUserInput(input);
