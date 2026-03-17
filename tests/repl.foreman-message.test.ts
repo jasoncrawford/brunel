@@ -2,7 +2,7 @@
  * Tests that the worker prints a concise one-liner for every foreman message received.
  * This ensures no message arrives silently, even when the worker is busy running a query.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from "vitest";
 import { stripAnsi } from "./helpers.js";
 import { printForemanMessage, stopStatus, setVerbose } from "../src/display.js";
 import type { ForemanMessage } from "../src/types.js";
@@ -26,6 +26,7 @@ afterEach(() => {
   stopStatus();
   setVerbose(false);
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 describe("printForemanMessage", () => {
@@ -62,6 +63,35 @@ describe("printForemanMessage", () => {
     const output = captureOutput(() => printForemanMessage(msg));
     const plain = stripAnsi(output);
     expect(plain).toContain("issue_comment");
+  });
+
+  it("event_notification includes a timestamp in [HH:MM:SS] format", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-17T14:05:03.000Z"));
+    const msg: ForemanMessage = {
+      type: "event_notification",
+      taskId: "task-1",
+      event: { id: "evt-1", name: "issue_comment", payload: {} },
+    };
+    const output = captureOutput(() => printForemanMessage(msg));
+    const plain = stripAnsi(output);
+    expect(plain).toMatch(/\[\d{2}:\d{2}:\d{2}\]/);
+  });
+
+  it("event_notification includes check_run details", () => {
+    const msg: ForemanMessage = {
+      type: "event_notification",
+      taskId: "task-1",
+      event: {
+        id: "evt-cr",
+        name: "check_run",
+        payload: { action: "completed", check_run: { name: "CI / build", conclusion: "failure" } },
+      },
+    };
+    const output = captureOutput(() => printForemanMessage(msg));
+    const plain = stripAnsi(output);
+    expect(plain).toContain("CI / build");
+    expect(plain).toContain("failure");
   });
 
   it("event_notification includes action in name/action format when payload has action", () => {

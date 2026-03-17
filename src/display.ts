@@ -2,6 +2,8 @@ import type { ForemanMessage } from "./types.js";
 
 // ── Display width ─────────────────────────────────────────────────────────────
 
+import type { GitHubEvent } from "./types.js";
+
 export const W = 70;
 export const hr = (ch = "─") => ch.repeat(W);
 
@@ -80,6 +82,60 @@ export function fmtCount(count: number, singular_noun: string, plural_noun?: str
 
 export function fmtTimestamp(): string {
   return new Date().toISOString();
+}
+
+export function fmtTime(): string {
+  const d = new Date();
+  const h = String(d.getHours()).padStart(2, "0");
+  const m = String(d.getMinutes()).padStart(2, "0");
+  const s = String(d.getSeconds()).padStart(2, "0");
+  return `${h}:${m}:${s}`;
+}
+
+export function fmtEventDetails(event: GitHubEvent): string {
+  const p = event.payload;
+  switch (event.name) {
+    case "check_run": {
+      const run = p.check_run as any;
+      if (!run) return "";
+      const status = run.conclusion ?? run.status ?? "";
+      return `"${run.name}" ${status}`.trim();
+    }
+    case "check_suite": {
+      const suite = p.check_suite as any;
+      if (!suite) return "";
+      return (suite.conclusion ?? suite.status ?? "").trim();
+    }
+    case "issue_comment":
+    case "pull_request_review_comment": {
+      const body = (p.comment as any)?.body;
+      return body ? `"${trunc(body, 60)}"` : "";
+    }
+    case "pull_request_review": {
+      const review = p.review as any;
+      if (!review) return "";
+      const parts: string[] = [review.state ?? ""];
+      if (review.body) parts.push(`"${trunc(review.body, 40)}"`);
+      return parts.filter(Boolean).join(" ");
+    }
+    case "pull_request": {
+      const pr = p.pull_request as any;
+      if (!pr) return "";
+      return `#${pr.number} "${trunc(pr.title, 50)}"`;
+    }
+    case "push": {
+      const commits = (p.commits as any[]) ?? [];
+      return `${commits.length} commit${commits.length === 1 ? "" : "s"} to ${p.ref ?? "?"}`;
+    }
+    case "workflow_run": {
+      const run = p.workflow_run as any;
+      if (!run) return "";
+      const status = run.conclusion ?? run.status ?? "";
+      return `"${run.name}" ${status}`.trim();
+    }
+    default:
+      return "";
+  }
 }
 
 export function fmtDuration(secs: number): string {
@@ -291,7 +347,11 @@ export const MESSAGE_FMT: FmtTable = {
 
 export const FOREMAN_MESSAGE_FMT: FmtTable = {
   task_assigned:      (m) => c.lavender(`  Task assigned: #${m.issue.number} — ${m.issue.title}`),
-  event_notification: (m) => c.darkGray(`  Event received: ${m.event.name}${m.event.payload["action"] ? `/${m.event.payload["action"]}` : ""}`),
+  event_notification: (m) => {
+    const nameAction = `${m.event.name}${m.event.payload["action"] ? `/${m.event.payload["action"]}` : ""}`;
+    const details = fmtEventDetails(m.event as GitHubEvent);
+    return c.darkGray(`  Event received [${fmtTime()}]: ${nameAction}${details ? ` — ${details}` : ""}`);
+  },
   standby:            (_m) => c.darkGray("  Standby — waiting for tasks..."),
   _default:           (m) => c.darkGray(`  foreman/${m.type}`),
 };
