@@ -230,6 +230,9 @@ export function renderMarkdown(text: string): string {
 
 // ── FORMATS ───────────────────────────────────────────────────────────────────
 
+// FmtTable is a mixed-type dispatch table: each entry receives a different
+// runtime-typed value, so `any` is intentional here rather than `unknown`.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type Fmt = (data: any) => string | null;
 export type FmtEntry = Fmt | { quiet?: Fmt; verbose?: Fmt };
 export type FmtTable = Record<string, FmtEntry>;
