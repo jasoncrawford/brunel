@@ -1,4 +1,5 @@
 import type { GitHubEvent, TaskIssue } from "./types.js";
+import { print, c } from "./display.js";
 
 export function buildInitialPrompt(issue: TaskIssue): string {
   return `Please work on GitHub issue #${issue.number}: "${issue.title}" in ${issue.repoUrl}.
@@ -24,13 +25,13 @@ export function buildEventPrompt(events: GitHubEvent[]): string {
     const action = e.payload["action"] as string | undefined;
     return action ? `${e.name}/${action}` : e.name;
   }).join(", ");
-  console.log(`Building prompt from events: ${eventList}`);
+  print(c.darkGray(`Building prompt from events: ${eventList}`));
 
   const prompt = events.length !== 1
     ? resolveEventTemplate(EVENT_FMT, "_multiple", { id: "", name: "_multiple", payload: { events } })
     : resolveEventTemplate(EVENT_FMT, events[0].name, events[0]);
 
-  console.log(prompt);
+  print(c.amber(prompt));
   return prompt;
 }
 

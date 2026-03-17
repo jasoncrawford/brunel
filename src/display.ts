@@ -258,11 +258,7 @@ export const HOOK_FMT: FmtTable = {
 
 export const FOREMAN_MESSAGE_FMT: FmtTable = {
   task_assigned:      (m) => c.lavender(`  Task assigned: #${m.issue.number} — ${m.issue.title}`),
-  event_notification: (m) => {
-    const action = m.event?.payload?.action as string | undefined;
-    const nameAction = action ? `${m.event.name}/${action}` : m.event.name;
-    return c.darkGray(`  Event received: ${nameAction}`);
-  },
+  event_notification: (m) => c.darkGray(`  Event received: ${m.event.name}${m.event.payload["action"] ? `/${m.event.payload["action"]}` : ""}`),
   standby:            (_m) => c.darkGray("  Standby — waiting for tasks..."),
   _default:           (m) => c.darkGray(`  foreman/${m.type}`),
 };

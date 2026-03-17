@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { buildInitialPrompt, buildEventPrompt, resolveEventTemplate, EVENT_FMT, type EventTemplateFmtTable } from "../src/templates.js";
 import type { GitHubEvent } from "../src/types.js";
+import { stripAnsi } from "./helpers.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -195,7 +196,7 @@ describe("buildEventPrompt", () => {
       const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
       const evt: GitHubEvent = { id: "e1", name: "check_suite", payload: { action: "completed" } };
       buildEventPrompt([evt]);
-      const calls = consoleSpy.mock.calls.map(c => String(c[0]));
+      const calls = consoleSpy.mock.calls.map(args => stripAnsi(String(args[0])));
       expect(calls.some(s => s.startsWith("Building prompt from events:"))).toBe(true);
     });
 
@@ -203,7 +204,7 @@ describe("buildEventPrompt", () => {
       const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
       const evt: GitHubEvent = { id: "e1", name: "check_suite", payload: { action: "completed" } };
       buildEventPrompt([evt]);
-      const calls = consoleSpy.mock.calls.map(c => String(c[0]));
+      const calls = consoleSpy.mock.calls.map(args => stripAnsi(String(args[0])));
       const buildingLine = calls.find(s => s.startsWith("Building prompt from events:"));
       expect(buildingLine).toContain("check_suite/completed");
     });
@@ -215,7 +216,7 @@ describe("buildEventPrompt", () => {
         { id: "e2", name: "check_suite", payload: { action: "completed" } },
       ];
       buildEventPrompt(events);
-      const calls = consoleSpy.mock.calls.map(c => String(c[0]));
+      const calls = consoleSpy.mock.calls.map(args => stripAnsi(String(args[0])));
       const buildingLine = calls.find(s => s.startsWith("Building prompt from events:"));
       expect(buildingLine).toContain("check_run/completed");
       expect(buildingLine).toContain("check_suite/completed");
@@ -225,7 +226,7 @@ describe("buildEventPrompt", () => {
       const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
       const evt: GitHubEvent = { id: "e1", name: "deployment", payload: {} };
       buildEventPrompt([evt]);
-      const calls = consoleSpy.mock.calls.map(c => String(c[0]));
+      const calls = consoleSpy.mock.calls.map(args => stripAnsi(String(args[0])));
       const buildingLine = calls.find(s => s.startsWith("Building prompt from events:"));
       expect(buildingLine).toContain("deployment");
       expect(buildingLine).not.toContain("deployment/");
@@ -239,8 +240,8 @@ describe("buildEventPrompt", () => {
         payload: { issue: { number: 5 }, comment: { body: "Hello there" } },
       };
       const prompt = buildEventPrompt([evt]);
-      const calls = consoleSpy.mock.calls.map(c => String(c[0]));
-      expect(calls).toContain(prompt);
+      const calls = consoleSpy.mock.calls.map(args => String(args[0]));
+      expect(calls.some(s => s.includes(prompt))).toBe(true);
     });
   });
 });
