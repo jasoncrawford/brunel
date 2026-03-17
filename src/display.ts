@@ -267,6 +267,10 @@ export function setInputPrintCallback(fn: (() => void) | null) {
   _inputPrintCallback = fn;
 }
 
+export function getInputPrintCallback(): (() => void) | null {
+  return _inputPrintCallback;
+}
+
 function _clearStatus() {
   if (!_statusActive) return;
   process.stdout.write("\r\x1b[K\x1b[A\x1b[K");
