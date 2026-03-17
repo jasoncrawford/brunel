@@ -140,13 +140,15 @@ describe("runQuery - stream event stat accumulation", () => {
       { type: "stream_event", parent_tool_use_id: null, event: { type: "message_stop" } },
       { type: "result", duration_ms: 1000, num_turns: 1, usage: { input_tokens: 50, output_tokens: 10 } },
     ]);
-    // Just verify no errors
     const cap = captureConsole();
     try {
       await runQuery("test", undefined);
     } finally {
       cap.restore();
     }
+    // Subagent tokens (999) must not appear in the stats output; only the top-level 50 in.
+    const plain = cap.lines.map(stripAnsi).join("\n");
+    expect(plain).not.toContain("999");
   });
 });
 

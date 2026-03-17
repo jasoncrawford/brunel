@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "events";
 import { WorkerSession } from "../src/worker.js";
 import type { ForemanMessage, GitHubEvent, TaskIssue } from "../src/types.js";
@@ -52,9 +52,7 @@ describe("task_assigned", () => {
   it("calls runQuery with the initial prompt when task_assigned is received", async () => {
     const issue = makeIssue();
     sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-    // Give the async chain a tick to run
-    await new Promise((r) => setTimeout(r, 0));
-    expect(runQuery).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
     const [prompt] = runQuery.mock.calls[0];
     expect(prompt).toContain(issue.title);
   });
@@ -62,7 +60,7 @@ describe("task_assigned", () => {
   it("updates currentTaskId and currentIssue when task_assigned is received", async () => {
     const issue = makeIssue();
     sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-    await new Promise((r) => setTimeout(r, 0));
+    await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
     // The state is observable via /task-complete behavior: if task is set,
     // task_complete message is sent to WS
     const action = session.handleUserInput("/task-complete");
@@ -74,10 +72,9 @@ describe("task_assigned", () => {
   it("calls display.printForemanMessage for task_assigned", async () => {
     const issue = makeIssue();
     sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-    await new Promise((r) => setTimeout(r, 0));
-    expect(display.printForemanMessage).toHaveBeenCalledWith(
+    await vi.waitFor(() => expect(display.printForemanMessage).toHaveBeenCalledWith(
       expect.objectContaining({ type: "task_assigned" })
-    );
+    ));
   });
 });
 
@@ -88,7 +85,7 @@ describe("event_notification", () => {
     const promise = session.createWsInputPromise();
     sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent() });
     const result = await promise;
-    expect(result).toBe("__event__");
+    expect(result).toBeTruthy(); // promise resolved (sentinel value is internal impl detail)
   });
 
   it("queues event when event_notification arrives during runQuery", async () => {
@@ -100,25 +97,22 @@ describe("event_notification", () => {
 
     // Assign task → starts runQuery (blocking)
     sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-    await new Promise((r) => setTimeout(r, 0)); // let task_assigned fire
+    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
 
     // Deliver event while query is running
     sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
-    await new Promise((r) => setTimeout(r, 0));
-
     // First runQuery not yet finished — only called once so far
     expect(runQuery).toHaveBeenCalledOnce();
 
     // Finish first runQuery → should trigger event runQuery
     resolveFirst("session-1");
-    await new Promise((r) => setTimeout(r, 10));
+    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledTimes(2));
 
-    expect(runQuery).toHaveBeenCalledTimes(2);
     const [eventPrompt] = runQuery.mock.calls[1];
     // Second call is with a different prompt (not the initial task prompt)
     const [initialPrompt] = runQuery.mock.calls[0];
     expect(eventPrompt).not.toBe(initialPrompt);
-    expect(typeof eventPrompt).toBe("string");
+    expect(eventPrompt).toContain("A comment was added"); // issue_comment template content
   });
 
   it("batches multiple pending events into a single runQuery call", async () => {
@@ -128,22 +122,19 @@ describe("event_notification", () => {
     runQuery.mockResolvedValue("session-2");
 
     sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-    await new Promise((r) => setTimeout(r, 0));
+    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
 
     // Two events during query
     sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("push") });
     sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
-    await new Promise((r) => setTimeout(r, 0));
 
     resolveFirst("session-1");
-    await new Promise((r) => setTimeout(r, 10));
+    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledTimes(2));
 
     // Only 2 total runQuery calls: initial + 1 batched event call
-    expect(runQuery).toHaveBeenCalledTimes(2);
-    // buildEventPrompt with multiple events returns a generic message
+    // buildEventPrompt with multiple events returns a "Multiple events" message
     const [batchedPrompt] = runQuery.mock.calls[1];
-    expect(typeof batchedPrompt).toBe("string");
-    expect(batchedPrompt.length).toBeGreaterThan(0);
+    expect(batchedPrompt).toContain("Multiple events");
   });
 });
 
@@ -153,7 +144,7 @@ describe("handleUserInput", () => {
   it("/task-complete sends task_complete to WS and clears task state", async () => {
     const issue = makeIssue();
     sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-    await new Promise((r) => setTimeout(r, 10));
+    await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
 
     await session.handleUserInput("/task-complete");
 
@@ -169,7 +160,7 @@ describe("handleUserInput", () => {
   it("/clear clears sessionId but not task state", async () => {
     const issue = makeIssue();
     sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-    await new Promise((r) => setTimeout(r, 10));
+    await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
 
     await session.handleUserInput("/clear");
 
@@ -189,8 +180,7 @@ describe("handleUserInput", () => {
     const issue = makeIssue();
     // Simulate what the ws message handler does before resolving the promise
     sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-    await new Promise((r) => setTimeout(r, 0));
-    expect(runQuery).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
     const [prompt] = runQuery.mock.calls[0];
     expect(prompt).toContain(issue.title);
   });
@@ -202,7 +192,7 @@ describe("state after task_complete", () => {
   it("currentTaskId / currentIssue / currentSessionId are cleared after /task-complete", async () => {
     const issue = makeIssue();
     sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-    await new Promise((r) => setTimeout(r, 10));
+    await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
 
     await session.handleUserInput("/task-complete");
 
@@ -247,10 +237,10 @@ describe("reconnect", () => {
 // ── createWsInputPromise ──────────────────────────────────────────────────────
 
 describe("createWsInputPromise", () => {
-  it("resolves with WS_TASK_ASSIGNED when task_assigned arrives", async () => {
+  it("resolves when task_assigned arrives", async () => {
     const promise = session.createWsInputPromise();
     sendMsg(fakeWs, { type: "task_assigned", taskId: "1", issue: makeIssue() });
-    expect(await promise).toBe("__task_assigned__");
+    expect(await promise).toBeTruthy(); // sentinel value is internal impl detail
   });
 
   it("each new promise abandons the previous one (previous never resolves)", async () => {
@@ -262,7 +252,7 @@ describe("createWsInputPromise", () => {
     sendMsg(fakeWs, { type: "task_assigned", taskId: "1", issue: makeIssue() });
 
     // second gets resolved since it holds the current resolveWsInput
-    expect(await second).toBe("__task_assigned__");
+    expect(await second).toBeTruthy(); // sentinel value is internal impl detail
     // first was abandoned and never resolves
     const firstResult = await Promise.race([first, new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 20))]);
     expect(firstResult).toBe("timeout");

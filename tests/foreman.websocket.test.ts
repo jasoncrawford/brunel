@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import assert from "node:assert";
 import http from "http";
 import { WebSocket, WebSocketServer } from "ws";
 import type { AddressInfo } from "net";
@@ -111,9 +112,9 @@ describe("foreman WebSocket protocol", () => {
     const reply = nextMsg(ws);
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
     const msg = await reply;
-    expect(msg.type).toBe("task_assigned");
-    expect((msg as any).issue.number).toBe(1);
-    expect((msg as any).taskId).toBe("1");
+    assert(msg.type === "task_assigned");
+    expect(msg.issue.number).toBe(1);
+    expect(msg.taskId).toBe("1");
     expect(queue.get("1")?.status).toBe("assigned");
     expect(registry.get("w1")?.status).toBe("busy");
   });
@@ -135,14 +136,14 @@ describe("foreman WebSocket protocol", () => {
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
     const first = await nextMsg(ws);
-    expect(first.type).toBe("task_assigned");
-    expect((first as any).issue.number).toBe(1);
+    assert(first.type === "task_assigned");
+    expect(first.issue.number).toBe(1);
 
     const second = nextMsg(ws);
     send(ws, { type: "task_complete", workerId: "w1", taskId: "1" });
     const msg = await second;
-    expect(msg.type).toBe("task_assigned");
-    expect((msg as any).issue.number).toBe(2);
+    assert(msg.type === "task_assigned");
+    expect(msg.issue.number).toBe(2);
 
     expect(labelDone).toHaveBeenCalledWith(1);
     expect(queue.get("1")?.status).toBe("complete");
@@ -194,9 +195,9 @@ describe("foreman WebSocket protocol", () => {
     const reply = nextMsg(ws);
     routeEvent("evt-1", "issue_comment", { issue: { number: 1 }, comment: { body: "hi" } });
     const msg = await reply;
-    expect(msg.type).toBe("event_notification");
-    expect((msg as any).taskId).toBe("1");
-    expect((msg as any).event.name).toBe("issue_comment");
+    assert(msg.type === "event_notification");
+    expect(msg.taskId).toBe("1");
+    expect(msg.event.name).toBe("issue_comment");
   });
 
   it("routeEventToWorker queues event when no worker is assigned", () => {
@@ -276,15 +277,15 @@ describe("foreman WebSocket protocol", () => {
     const wsA = await connect();
     send(wsA, { type: "worker_hello", workerId: "worker-a", status: "idle" });
     const msgA = await nextMsg(wsA);
-    expect(msgA.type).toBe("task_assigned");
-    expect((msgA as any).issue.number).toBe(53);
+    assert(msgA.type === "task_assigned");
+    expect(msgA.issue.number).toBe(53);
 
     // Worker B connects and gets task 55
     const wsB = await connect();
     send(wsB, { type: "worker_hello", workerId: "worker-b", status: "idle" });
     const msgB = await nextMsg(wsB);
-    expect(msgB.type).toBe("task_assigned");
-    expect((msgB as any).issue.number).toBe(55);
+    assert(msgB.type === "task_assigned");
+    expect(msgB.issue.number).toBe(55);
 
     // Event for issue 55 should go ONLY to worker B
     const replyB = nextMsg(wsB);
