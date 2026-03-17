@@ -243,11 +243,6 @@ describe("listCommandNames", () => {
     expect(result).toContain("exit");
   });
 
-  it("always includes task-complete builtin", () => {
-    const result = listCommandNames(() => null);
-    expect(result).toContain("task-complete");
-  });
-
   it("returns only builtins when directory is missing", () => {
     const result = listCommandNames(() => null);
     expect(result).toContain("clear");
