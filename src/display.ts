@@ -1,8 +1,6 @@
-import type { ForemanMessage } from "./types.js";
+import type { ForemanMessage, GitHubEvent } from "./types.js";
 
 // ── Display width ─────────────────────────────────────────────────────────────
-
-import type { GitHubEvent } from "./types.js";
 
 export const W = 70;
 export const hr = (ch = "─") => ch.repeat(W);
@@ -92,46 +90,59 @@ export function fmtTime(): string {
   return `${h}:${m}:${s}`;
 }
 
+interface CheckRun { name: string; conclusion: string | null; status: string }
+interface CheckSuite { conclusion: string | null; status: string }
+interface Comment { body: string }
+interface Review { state: string; body: string }
+interface PullRequest { number: number; title: string }
+interface WorkflowRun { name: string; conclusion: string | null; status: string }
+
+function asObj(v: unknown): Record<string, unknown> | null {
+  return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+}
+function str(v: unknown): string { return typeof v === "string" ? v : ""; }
+function num(v: unknown): number { return typeof v === "number" ? v : 0; }
+
 export function fmtEventDetails(event: GitHubEvent): string {
   const p = event.payload;
   switch (event.name) {
     case "check_run": {
-      const run = p.check_run as any;
+      const run = asObj(p.check_run) as CheckRun | null;
       if (!run) return "";
-      const status = run.conclusion ?? run.status ?? "";
-      return `"${run.name}" ${status}`.trim();
+      const status = str(run.conclusion || run.status);
+      return `"${str(run.name)}" ${status}`.trim();
     }
     case "check_suite": {
-      const suite = p.check_suite as any;
+      const suite = asObj(p.check_suite) as CheckSuite | null;
       if (!suite) return "";
-      return (suite.conclusion ?? suite.status ?? "").trim();
+      return str(suite.conclusion || suite.status).trim();
     }
     case "issue_comment":
     case "pull_request_review_comment": {
-      const body = (p.comment as any)?.body;
-      return body ? `"${trunc(body, 60)}"` : "";
+      const comment = asObj(p.comment) as Comment | null;
+      return comment?.body ? `"${trunc(str(comment.body), 60)}"` : "";
     }
     case "pull_request_review": {
-      const review = p.review as any;
+      const review = asObj(p.review) as Review | null;
       if (!review) return "";
-      const parts: string[] = [review.state ?? ""];
-      if (review.body) parts.push(`"${trunc(review.body, 40)}"`);
+      const parts: string[] = [str(review.state)];
+      if (review.body) parts.push(`"${trunc(str(review.body), 40)}"`);
       return parts.filter(Boolean).join(" ");
     }
     case "pull_request": {
-      const pr = p.pull_request as any;
+      const pr = asObj(p.pull_request) as PullRequest | null;
       if (!pr) return "";
-      return `#${pr.number} "${trunc(pr.title, 50)}"`;
+      return `#${num(pr.number)} "${trunc(str(pr.title), 50)}"`;
     }
     case "push": {
-      const commits = (p.commits as any[]) ?? [];
-      return `${commits.length} commit${commits.length === 1 ? "" : "s"} to ${p.ref ?? "?"}`;
+      const commits = Array.isArray(p.commits) ? p.commits : [];
+      return `${commits.length} commit${commits.length === 1 ? "" : "s"} to ${str(p.ref) || "?"}`;
     }
     case "workflow_run": {
-      const run = p.workflow_run as any;
+      const run = asObj(p.workflow_run) as WorkflowRun | null;
       if (!run) return "";
-      const status = run.conclusion ?? run.status ?? "";
-      return `"${run.name}" ${status}`.trim();
+      const status = str(run.conclusion || run.status);
+      return `"${str(run.name)}" ${status}`.trim();
     }
     default:
       return "";
