@@ -1,3 +1,5 @@
+import type { ForemanMessage } from "./types.js";
+
 // ── Display width ─────────────────────────────────────────────────────────────
 
 export const W = 70;
@@ -31,6 +33,38 @@ export const s = {
   underline:     (s: string) => `\x1b[4m${s}\x1b[24m`,
   strikethrough: (s: string) => `\x1b[9m${s}\x1b[29m`,
 };
+
+// ── Content block types ───────────────────────────────────────────────────────
+
+export interface ToolUseBlock {
+  type: "tool_use";
+  id: string;
+  name: string;
+  input: Record<string, unknown>;
+}
+
+export interface Hunk {
+  oldStart: number;
+  oldLines: number;
+  newStart: number;
+  newLines: number;
+  lines: string[];
+}
+
+export interface ToolResultBlock {
+  type: "tool_result";
+  tool_use_id: string;
+  is_error?: boolean;
+  content: string | Array<{ type: string; text?: string; tool_name?: string }>;
+  _msg?: { tool_use_result?: { structuredPatch?: Hunk[] } };
+}
+
+export type ContentBlock =
+  | ToolUseBlock
+  | ToolResultBlock
+  | { type: "text"; text?: string; _isSynthetic?: boolean }
+  | { type: "thinking"; thinking?: string }
+  | { type: string };
 
 // ── Formatting helpers ────────────────────────────────────────────────────────
 
@@ -72,16 +106,16 @@ export function fmtArgs(input: Record<string, unknown>, maxVal = 50): string {
     .join(", ");
 }
 
-export function fmtToolCall(b: any, fmt: string) {
+export function fmtToolCall(b: ToolUseBlock, fmt: string) {
   fmt = c.skyBlue(`\n${fmt}`);
   if (b.input?.description) fmt += c.gray(` # ${b.input.description}`);
   return fmt;
 }
 
-export function fmtHunk(hunk: any): string {
+export function fmtHunk(hunk: Hunk): string {
   const header = c.darkGray(`@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`);
   const width = process.stdout.columns ?? 80;
-  const lines = (hunk.lines as string[]).map(line => {
+  const lines = hunk.lines.map(line => {
     if (line.startsWith("+")) return c.bgGreen(line.padEnd(width));
     if (line.startsWith("-")) return c.bgRed(line.padEnd(width));
     return c.darkGray(line);
@@ -89,20 +123,25 @@ export function fmtHunk(hunk: any): string {
   return [header, ...lines].join("\n");
 }
 
-export function fmtEditResult(b: any) {
+export function fmtEditResult(b: ToolResultBlock) {
   const patch = b._msg?.tool_use_result?.structuredPatch;
   if (patch && patch.length > 0) return patch.map(fmtHunk).join("\n");
   return c.darkGray(`→ ${trunc(toolResultText(b), 100)}`);
 }
 
-export function toolResultText(b: any): string {
+export function toolResultText(b: { content: unknown }): string {
   const raw = b.content;
   if (typeof raw === "string") return raw;
-  return (Array.isArray(raw) ? raw : [raw])
-    .map((x: any) => {
-      if (x?.type === "text") return x.text;
-      if (x?.type === "tool_reference") return `[tool:${x.tool_name}]`;
-      return `[${x?.type ?? "?"}]`;
+  const items = Array.isArray(raw) ? raw : [raw];
+  return items
+    .map((x) => {
+      if (x != null && typeof x === "object" && "type" in x) {
+        const item = x as { type: string; text?: string; tool_name?: string };
+        if (item.type === "text") return item.text ?? "";
+        if (item.type === "tool_reference") return `[tool:${item.tool_name}]`;
+        return `[${item.type}]`;
+      }
+      return "[?]";
     })
     .join(" ");
 }
@@ -317,7 +356,7 @@ export function print(line: string | null) {
   if (!_statusActive) _inputPrintCallback?.();
 }
 
-export function resolve(table: FmtTable, key: string, data: any): string | null {
+export function resolve(table: FmtTable, key: string, data: unknown): string | null {
   const entry = table[key] ?? table._default;
   if (!entry) return null;
   if (typeof entry === "function") return entry(data);
@@ -327,15 +366,19 @@ export function resolve(table: FmtTable, key: string, data: any): string | null 
 
 export const toolUseNames = new Map<string, string>();
 
-export function printBlock(b: any, role: "assistant" | "user", msg?: any) {
+export function printBlock(b: ContentBlock, role: "assistant" | "user", msg?: Record<string, unknown>) {
   if (b.type === "tool_use") {
-    toolUseNames.set(b.id, b.name);
-    print(resolve(TOOL_CALL_FMT, b.name, b));
+    // Safe cast: we checked b.type === "tool_use" at runtime
+    const tu = b as ToolUseBlock;
+    toolUseNames.set(tu.id, tu.name);
+    print(resolve(TOOL_CALL_FMT, tu.name, tu));
     return;
   }
   if (b.type === "tool_result") {
-    const name = toolUseNames.get(b.tool_use_id) ?? "";
-    print(resolve(b.is_error ? TOOL_ERROR_FMT : TOOL_RESULT_FMT, name, { ...b, _msg: msg }));
+    // Safe cast: we checked b.type === "tool_result" at runtime
+    const tr = b as ToolResultBlock;
+    const name = toolUseNames.get(tr.tool_use_id) ?? "";
+    print(resolve(tr.is_error ? TOOL_ERROR_FMT : TOOL_RESULT_FMT, name, { ...tr, _msg: msg }));
     return;
   }
   const blockFmt = role === "assistant" ? ASSISTANT_BLOCK_FMT : USER_BLOCK_FMT;
@@ -343,29 +386,37 @@ export function printBlock(b: any, role: "assistant" | "user", msg?: any) {
 }
 
 export function printMessage(msg: unknown) {
-  const m = msg as any;
+  if (msg === null || typeof msg !== "object") return;
+  const m = msg as Record<string, unknown>;
+
   if (m.parent_tool_use_id != null) return;
 
   if (m.type === "system") {
-    print(resolve(SYSTEM_FMT, m.subtype, m));
+    const subtype = typeof m.subtype === "string" ? m.subtype : "_default";
+    print(resolve(SYSTEM_FMT, subtype, m));
     return;
   }
 
   if (m.type === "assistant" || m.type === "user") {
-    const content: any[] = m.message?.content ?? [];
+    const role = m.type as "assistant" | "user";
+    const message = m.message as { content?: ContentBlock[] } | undefined;
+    const content = message?.content ?? [];
     if (!content.length) { print(resolve(MESSAGE_FMT, "_empty", m)); return; }
-    for (const b of content) printBlock(b, m.type, m);
+    for (const b of content) printBlock(b, role, m);
     return;
   }
 
-  print(resolve(MESSAGE_FMT, m.type, m));
+  const type = typeof m.type === "string" ? m.type : "_default";
+  print(resolve(MESSAGE_FMT, type, m));
 }
 
 export function printHook(event: string, input: unknown) {
-  print(resolve(HOOK_FMT, event, { ...(input as any), _event: event }));
+  const data = typeof input === "object" && input !== null
+    ? { ...(input as Record<string, unknown>), _event: event }
+    : { _event: event };
+  print(resolve(HOOK_FMT, event, data));
 }
 
-export function printForemanMessage(msg: unknown) {
-  const m = msg as any;
-  print(resolve(FOREMAN_MESSAGE_FMT, m.type, m));
+export function printForemanMessage(msg: ForemanMessage) {
+  print(resolve(FOREMAN_MESSAGE_FMT, msg.type, msg));
 }

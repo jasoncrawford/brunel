@@ -12,7 +12,7 @@ export type WsFactory = (workerId: string, taskId?: string) => WebSocket;
 export type RunQuery = (prompt: string, sessionId: string | undefined) => Promise<string | undefined>;
 export type WorkerDisplay = {
   print: (line: string | null) => void;
-  printForemanMessage: (msg: unknown) => void;
+  printForemanMessage: (msg: ForemanMessage) => void;
 };
 
 // Sentinels used to signal WebSocket events through ask()'s abort param
