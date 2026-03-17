@@ -64,20 +64,20 @@ export async function runQuery(prompt: string, sessionId: string | undefined) {
       ...(sessionId ? { resume: sessionId } : {}),
     },
   })) {
-    const m = message as any;
-
-    if (!(m.type === "stream_event" && m.event?.type === "content_block_delta")) {
+    if (!(message.type === "stream_event" && (message.event as { type?: string }).type === "content_block_delta")) {
       logFull("MESSAGE", message);
     }
 
-    if (m.type === "system" && m.subtype === "init" && !capturedSessionId) {
-      capturedSessionId = m.session_id;
+    if (message.type === "system" && message.subtype === "init" && !capturedSessionId) {
+      capturedSessionId = message.session_id;
     }
 
     // Extract turn count and token totals from streaming events.
-    if (m.type === "stream_event") {
-      if (m.parent_tool_use_id == null) {
-        const ev = m.event;
+    if (message.type === "stream_event") {
+      if (message.parent_tool_use_id == null) {
+        // BetaRawMessageStreamEvent is a discriminated union; use a structural type for field access
+        type StreamEvent = { type: string; message?: { usage?: { input_tokens?: number } }; usage?: { output_tokens?: number } };
+        const ev = message.event as StreamEvent;
         if (ev.type === "message_start")       { stats.turns++; stats.inputTokens += ev.message?.usage?.input_tokens ?? 0; }
         if (ev.type === "message_delta")       stats.currentOutputTokens = ev.usage?.output_tokens ?? stats.currentOutputTokens;
         if (ev.type === "message_stop")        { stats.completedOutputTokens += stats.currentOutputTokens; stats.currentOutputTokens = 0; }
@@ -87,7 +87,7 @@ export async function runQuery(prompt: string, sessionId: string | undefined) {
 
     // Stop the status line before printing the result so it transitions
     // cleanly into the permanent summary line.
-    if (m.type === "result") display.stopStatus();
+    if (message.type === "result") display.stopStatus();
 
     display.printMessage(message);
   }
