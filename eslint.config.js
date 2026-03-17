@@ -14,6 +14,7 @@ export default [
     rules: {
       "@typescript-eslint/no-floating-promises": "error",
       "@typescript-eslint/no-explicit-any": "warn",
+      "no-template-curly-in-string": "error",
     },
   },
 ];
