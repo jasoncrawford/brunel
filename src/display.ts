@@ -333,7 +333,20 @@ export const TOOL_RESULT_FMT: FmtTable = {
   _default: (b) => c.darkGray(`→ ${trunc(toolResultText(b), 100)}`),
   Read:     (b) => c.darkGray(`→ ${fmtCount(toolResultText(b).split("\n").length, "line")}`),
   Edit:     (b) => fmtEditResult(b),
-  Skill:    (b) => null,
+  Skill:    (_b) => c.darkGray(`→ Success`),
+  Bash:     (b) => {
+    const text = toolResultText(b).trim();
+    if (!text || text === "(Bash completed with no output)") return c.darkGray(`→ Success`);
+    return c.darkGray(`→ ${trunc(text, 100)}`);
+  },
+  Write:    (b) => {
+    const content = b._input?.content as string | undefined;
+    if (content == null) return c.darkGray(`→ ${trunc(toolResultText(b), 100)}`);
+    const lines = content.split("\n").length;
+    const isNew = /created/i.test(toolResultText(b));
+    const verb = isNew ? "Created" : "Updated";
+    return c.darkGray(`→ ${verb} ${fmtCount(lines, "line")}`);
+  },
 };
 
 export const TOOL_ERROR_FMT: FmtTable = {
@@ -438,12 +451,14 @@ export function resolve(table: FmtTable, key: string, data: unknown): string | n
 }
 
 export const toolUseNames = new Map<string, string>();
+export const toolUseInputs = new Map<string, Record<string, unknown>>();
 
 export function printBlock(b: ContentBlock, role: "assistant" | "user", msg?: Record<string, unknown>) {
   if (b.type === "tool_use") {
     // Safe cast: we checked b.type === "tool_use" at runtime
     const tu = b as ToolUseBlock;
     toolUseNames.set(tu.id, tu.name);
+    toolUseInputs.set(tu.id, tu.input);
     print(resolve(TOOL_CALL_FMT, tu.name, tu));
     return;
   }
@@ -451,7 +466,8 @@ export function printBlock(b: ContentBlock, role: "assistant" | "user", msg?: Re
     // Safe cast: we checked b.type === "tool_result" at runtime
     const tr = b as ToolResultBlock;
     const name = toolUseNames.get(tr.tool_use_id) ?? "";
-    print(resolve(tr.is_error ? TOOL_ERROR_FMT : TOOL_RESULT_FMT, name, { ...tr, _msg: msg }));
+    const _input = toolUseInputs.get(tr.tool_use_id);
+    print(resolve(tr.is_error ? TOOL_ERROR_FMT : TOOL_RESULT_FMT, name, { ...tr, _msg: msg, _input }));
     return;
   }
   const blockFmt = role === "assistant" ? ASSISTANT_BLOCK_FMT : USER_BLOCK_FMT;

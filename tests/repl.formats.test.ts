@@ -216,8 +216,53 @@ describe("TOOL_RESULT_FMT", () => {
     expect(result).toContain("→ edited ok");
   });
 
-  it("Skill: returns null (suppressed)", () => {
-    expect(resolve(TOOL_RESULT_FMT, "Skill", { content: "anything" })).toBeNull();
+  it("Skill: shows → Success", () => {
+    const raw = resolve(TOOL_RESULT_FMT, "Skill", { content: "Base directory for this skill: /some/path\n..." })!;
+    expect(stripAnsi(raw)).toBe("→ Success");
+  });
+
+  it("Bash: empty result → → Success", () => {
+    const raw = resolve(TOOL_RESULT_FMT, "Bash", { content: "" })!;
+    expect(stripAnsi(raw)).toBe("→ Success");
+  });
+
+  it("Bash: no-output message → → Success", () => {
+    const raw = resolve(TOOL_RESULT_FMT, "Bash", { content: "(Bash completed with no output)" })!;
+    expect(stripAnsi(raw)).toBe("→ Success");
+  });
+
+  it("Bash: with output → shows truncated output", () => {
+    const raw = resolve(TOOL_RESULT_FMT, "Bash", { content: "hello world" })!;
+    expect(stripAnsi(raw)).toBe("→ hello world");
+  });
+
+  it("Bash: result in darkGray", () => {
+    const raw = resolve(TOOL_RESULT_FMT, "Bash", { content: "" })!;
+    expect(raw).toContain("\x1b[90m");
+  });
+
+  it("Write new file with _input.content: shows → Created N lines", () => {
+    const b = { content: "File created successfully at: /path/file.md", _input: { content: "line1\nline2\nline3" } };
+    const raw = resolve(TOOL_RESULT_FMT, "Write", b)!;
+    expect(stripAnsi(raw)).toBe("→ Created 3 lines");
+  });
+
+  it("Write new file 1 line: singular form", () => {
+    const b = { content: "File created successfully at: /path/file.md", _input: { content: "only one line" } };
+    const raw = resolve(TOOL_RESULT_FMT, "Write", b)!;
+    expect(stripAnsi(raw)).toBe("→ Created 1 line");
+  });
+
+  it("Write updated file with _input.content: shows → Updated N lines", () => {
+    const b = { content: "The file /path/file.md has been updated successfully.", _input: { content: "line1\nline2" } };
+    const raw = resolve(TOOL_RESULT_FMT, "Write", b)!;
+    expect(stripAnsi(raw)).toBe("→ Updated 2 lines");
+  });
+
+  it("Write without _input: falls back to → <text>", () => {
+    const b = { content: "File created successfully at: /path/file.md" };
+    const raw = resolve(TOOL_RESULT_FMT, "Write", b)!;
+    expect(stripAnsi(raw)).toContain("→ File created");
   });
 });
 
