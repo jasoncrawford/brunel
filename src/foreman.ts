@@ -212,7 +212,12 @@ export function summaryEvent(id: string, name: string, payload: unknown): string
   return `[event] ${parts.join(" ")}`;
 }
 
+export function isMutedEvent(name: string): boolean {
+  return name === "workflow_job" || name === "workflow_run";
+}
+
 function printEvent(id: string, name: string, payload: unknown) {
+  if (isMutedEvent(name)) return;
   flog(summaryEvent(id, name, payload));
 }
 
