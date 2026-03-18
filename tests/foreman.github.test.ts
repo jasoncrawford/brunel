@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { loadIssuesToQueue, labelIssueDone } from "../src/github.js";
+import { loadIssuesToQueue, labelIssueDone, fetchIssueStates, fetchNativeBlockers } from "../src/github.js";
 import { TaskQueue } from "../src/foreman.js";
 
 const mockIssues = [
@@ -61,5 +61,75 @@ describe("labelIssueDone", () => {
   it("throws on non-ok response", async () => {
     vi.mocked(fetch).mockResolvedValueOnce({ ok: false, status: 422 } as any);
     await expect(labelIssueDone(42)).rejects.toThrow("422");
+  });
+});
+
+describe("fetchIssueStates", () => {
+  it("returns open/closed state for each issue number", async () => {
+    // The implementation fetches one issue at a time via Promise.all,
+    // so mock each individual call separately.
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ number: 1, state: "open" }) } as any)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ number: 2, state: "closed" }) } as any);
+    const states = await fetchIssueStates([1, 2]);
+    expect(states.get(1)).toBe("open");
+    expect(states.get(2)).toBe("closed");
+  });
+
+  it("returns empty map for empty input without calling fetch", async () => {
+    const states = await fetchIssueStates([]);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(states.size).toBe(0);
+  });
+
+  it("throws on non-ok response", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({ ok: false, status: 500 } as any);
+    await expect(fetchIssueStates([1])).rejects.toThrow("500");
+  });
+});
+
+describe("fetchNativeBlockers", () => {
+  it("returns blocker issue numbers from GraphQL response", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        data: {
+          repository: {
+            issue: {
+              blockedBy: {
+                nodes: [{ number: 5 }, { number: 7 }],
+              },
+            },
+          },
+        },
+      }),
+    } as any);
+    const blockers = await fetchNativeBlockers(42);
+    expect(blockers).toEqual([5, 7]);
+  });
+
+  it("returns empty array when issue has no blockers", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        data: { repository: { issue: { blockedBy: { nodes: [] } } } },
+      }),
+    } as any);
+    expect(await fetchNativeBlockers(42)).toEqual([]);
+  });
+
+  it("returns empty array when GraphQL field is null (feature unavailable)", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        data: { repository: { issue: { blockedBy: null } } },
+      }),
+    } as any);
+    expect(await fetchNativeBlockers(42)).toEqual([]);
+  });
+
+  it("throws on non-ok HTTP response", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({ ok: false, status: 403 } as any);
+    await expect(fetchNativeBlockers(42)).rejects.toThrow("403");
   });
 });

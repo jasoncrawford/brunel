@@ -50,3 +50,48 @@ export async function labelIssueDone(issueNumber: number): Promise<void> {
   });
   if (!res.ok) throw new Error(`GitHub API error: ${res.status}`);
 }
+
+export async function fetchIssueStates(
+  issueNumbers: number[],
+): Promise<Map<number, "open" | "closed">> {
+  if (issueNumbers.length === 0) return new Map();
+  const { repo, token } = ghEnv();
+  const [owner, repoName] = repo.split("/");
+  const result = new Map<number, "open" | "closed">();
+  await Promise.all(
+    issueNumbers.map(async (n) => {
+      const url = `https://api.github.com/repos/${owner}/${repoName}/issues/${n}`;
+      const res = await fetch(url, { headers: ghHeaders(token) });
+      if (!res.ok) throw new Error(`GitHub API error: ${res.status}`);
+      const issue = await res.json() as { number: number; state: string };
+      result.set(issue.number, issue.state === "open" ? "open" : "closed");
+    }),
+  );
+  return result;
+}
+
+export async function fetchNativeBlockers(issueNumber: number): Promise<number[]> {
+  const { repo, token } = ghEnv();
+  const [owner, repoName] = repo.split("/");
+  const query = `
+    query($owner: String!, $repo: String!, $number: Int!) {
+      repository(owner: $owner, name: $repo) {
+        issue(number: $number) {
+          blockedBy(first: 50) {
+            nodes { number }
+          }
+        }
+      }
+    }
+  `;
+  const res = await fetch("https://api.github.com/graphql", {
+    method: "POST",
+    headers: { ...ghHeaders(token), "Content-Type": "application/json" },
+    body: JSON.stringify({ query, variables: { owner, repo: repoName, number: issueNumber } }),
+  });
+  if (!res.ok) throw new Error(`GitHub API error: ${res.status}`);
+  const body = await res.json() as {
+    data?: { repository?: { issue?: { blockedBy?: { nodes: Array<{ number: number }> } | null } | null } | null };
+  };
+  return body.data?.repository?.issue?.blockedBy?.nodes?.map((n) => n.number) ?? [];
+}
