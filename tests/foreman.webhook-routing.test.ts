@@ -138,6 +138,15 @@ function prReviewCommentPayload(prNumber: number) {
   };
 }
 
+function issueCommentPayload(prOrIssueNumber: number, body = "LGTM") {
+  return {
+    action: "created",
+    issue: { number: prOrIssueNumber, title: `Issue/PR ${prOrIssueNumber}`, pull_request: {} },
+    comment: { body, user: { login: "reviewer" } },
+    repository: { html_url: "https://github.com/owner/repo" },
+  };
+}
+
 function checkSuitePayload(prNumber: number, conclusion: string) {
   return {
     action: "completed",
@@ -554,6 +563,32 @@ describe("PR event forwarding to workers", () => {
     expect(raceResult).toBe("timeout");
   });
 });
+
+  it("issue_comment/created on a PR is forwarded to the worker handling that issue", async () => {
+    queue.addTask({
+      taskId: "42",
+      issueNumber: 42,
+      title: "Issue 42",
+      body: "Body",
+      labels: ["brunel:ready"],
+      repoUrl: "https://github.com/owner/repo",
+    });
+
+    const ws = await connect();
+    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    await nextMsg(ws); // task_assigned
+
+    // Worker opens PR #10 that closes issue #42
+    routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Closes #42"));
+
+    // User posts a top-level comment on PR #10 — issue.number = 10 (the PR number)
+    const reply = nextMsg(ws);
+    routeEvent("evt-cmt", "issue_comment", issueCommentPayload(10, "Please address the nit above."));
+
+    const msg = await reply;
+    expect(msg.type).toBe("event_notification");
+    expect((msg as any).event.name).toBe("issue_comment");
+  });
 
 describe("foreman event filtering", () => {
   it("pull_request/synchronize is dropped and not forwarded to worker", async () => {

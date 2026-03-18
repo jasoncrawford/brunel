@@ -391,6 +391,10 @@ export function createForemanWss(
 
     let task = taskQueue.getTaskForIssue(issueNumber);
 
+    // GitHub issue_comment events on PRs have the PR number in issue.number.
+    // Fall back to PR lookup so comments on worker-opened PRs are forwarded.
+    if (!task) task = taskQueue.getTaskForPr(issueNumber);
+
     // If the issue isn't queued yet, check if this webhook should enqueue it.
     if (!task && name === "issues" && issue) {
       const action = p.action as string | undefined;
