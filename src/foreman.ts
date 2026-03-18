@@ -114,9 +114,9 @@ export class TaskQueue {
     return undefined;
   }
 
-  nextPending(): Task | null {
+  nextPending(isReady?: (t: Task) => boolean): Task | null {
     for (const t of this.tasks.values()) {
-      if (t.status === "pending") return t;
+      if (t.status === "pending" && (isReady === undefined || isReady(t))) return t;
     }
     return null;
   }

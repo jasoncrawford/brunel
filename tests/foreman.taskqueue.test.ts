@@ -92,3 +92,27 @@ describe("TaskQueue", () => {
     expect(q.getTaskForBranch("unknown-branch")).toBeUndefined();
   });
 });
+
+describe("nextPending with predicate", () => {
+  let q: TaskQueue;
+  beforeEach(() => { q = new TaskQueue(); });
+
+  it("returns null when all pending tasks fail the predicate", () => {
+    q.addTask({ ...baseTask, taskId: "1", issueNumber: 1 });
+    q.addTask({ ...baseTask, taskId: "2", issueNumber: 2 });
+    expect(q.nextPending(() => false)).toBeNull();
+  });
+
+  it("skips tasks that fail predicate and returns first that passes", () => {
+    q.addTask({ ...baseTask, taskId: "1", issueNumber: 1 });
+    q.addTask({ ...baseTask, taskId: "2", issueNumber: 2 });
+    const t = q.nextPending((task) => task.issueNumber === 2);
+    expect(t?.taskId).toBe("2");
+  });
+
+  it("no predicate behaves as before (returns first pending)", () => {
+    q.addTask({ ...baseTask, taskId: "1", issueNumber: 1 });
+    q.addTask({ ...baseTask, taskId: "2", issueNumber: 2 });
+    expect(q.nextPending()?.taskId).toBe("1");
+  });
+});
