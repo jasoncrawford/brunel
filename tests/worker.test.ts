@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "events";
-import { WorkerSession } from "../src/worker.js";
+import { WorkerSession, classifyEvent } from "../src/worker.js";
 import type { ForemanMessage, GitHubEvent, TaskIssue } from "../src/types.js";
 import { stripAnsi } from "./helpers.js";
 
@@ -90,9 +90,9 @@ describe("task_assigned", () => {
 // ── Event handling during query ───────────────────────────────────────────────
 
 describe("event_notification", () => {
-  it("resolves WS input promise when event_notification is received", async () => {
+  it("resolves WS input promise when actionable event_notification is received", async () => {
     const promise = session.createWsInputPromise();
-    sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent() });
+    sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
     const result = await promise;
     expect(result).toBeTruthy(); // promise resolved (sentinel value is internal impl detail)
   });
@@ -125,17 +125,24 @@ describe("event_notification", () => {
   });
 
   it("prints 'Building prompt from events:' diagnostic and prompt in amber when event runs a query", async () => {
-    const issue = makeIssue();
-    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+    vi.useFakeTimers();
+    try {
+      const issue = makeIssue();
+      sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
 
-    display.print.mockClear();
-    sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
-    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledTimes(2));
+      display.print.mockClear();
+      sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
+      // Advance past the debounce timer
+      await vi.runAllTimersAsync();
+      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledTimes(2));
 
-    const printCalls = display.print.mock.calls.map(args => stripAnsi(String(args[0])));
-    expect(printCalls.some(s => s.startsWith("Building prompt from events:"))).toBe(true);
-    expect(printCalls.some(s => s.includes("A comment was added"))).toBe(true);
+      const printCalls = display.print.mock.calls.map(args => stripAnsi(String(args[0])));
+      expect(printCalls.some(s => s.startsWith("Building prompt from events:"))).toBe(true);
+      expect(printCalls.some(s => s.includes("A comment was added"))).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("batches multiple pending events into a single runQuery call", async () => {
@@ -147,9 +154,9 @@ describe("event_notification", () => {
     sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
     await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
 
-    // Two events during query
-    sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("push") });
+    // Two actionable events during query (both get queued in pendingEvents)
     sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
+    sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("pull_request_review") });
 
     resolveFirst("session-1");
     await vi.waitFor(() => expect(runQuery).toHaveBeenCalledTimes(2));
@@ -279,5 +286,176 @@ describe("createWsInputPromise", () => {
     // first was abandoned and never resolves
     const firstResult = await Promise.race([first, new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 20))]);
     expect(firstResult).toBe("timeout");
+  });
+});
+
+// ── classifyEvent ─────────────────────────────────────────────────────────────
+
+describe("classifyEvent", () => {
+  function evt(name: string, action?: string): GitHubEvent {
+    return { id: "e1", name, payload: action ? { action } : {} };
+  }
+
+  describe("log_only events", () => {
+    it("check_run/created is log_only", () => {
+      expect(classifyEvent(evt("check_run", "created"))).toBe("log_only");
+    });
+    it("check_run/completed is log_only", () => {
+      expect(classifyEvent(evt("check_run", "completed"))).toBe("log_only");
+    });
+    it("check_suite/requested is log_only", () => {
+      expect(classifyEvent(evt("check_suite", "requested"))).toBe("log_only");
+    });
+    it("check_suite/in_progress is log_only", () => {
+      expect(classifyEvent(evt("check_suite", "in_progress"))).toBe("log_only");
+    });
+    it("check_suite/rerequested is log_only", () => {
+      expect(classifyEvent(evt("check_suite", "rerequested"))).toBe("log_only");
+    });
+    it("pull_request/labeled is log_only", () => {
+      expect(classifyEvent(evt("pull_request", "labeled"))).toBe("log_only");
+    });
+    it("pull_request/synchronize is log_only", () => {
+      expect(classifyEvent(evt("pull_request", "synchronize"))).toBe("log_only");
+    });
+    it("pull_request/reopened is log_only", () => {
+      expect(classifyEvent(evt("pull_request", "reopened"))).toBe("log_only");
+    });
+    it("unrecognised event is log_only", () => {
+      expect(classifyEvent(evt("deployment", "created"))).toBe("log_only");
+    });
+    it("unrecognised event with no action is log_only", () => {
+      expect(classifyEvent(evt("push"))).toBe("log_only");
+    });
+  });
+
+  describe("actionable events", () => {
+    it("check_suite/completed is actionable", () => {
+      expect(classifyEvent(evt("check_suite", "completed"))).toBe("actionable");
+    });
+    it("pull_request_review/submitted is actionable", () => {
+      expect(classifyEvent(evt("pull_request_review", "submitted"))).toBe("actionable");
+    });
+    it("pull_request_review_comment/created is actionable", () => {
+      expect(classifyEvent(evt("pull_request_review_comment", "created"))).toBe("actionable");
+    });
+    it("issue_comment/created is actionable", () => {
+      expect(classifyEvent(evt("issue_comment", "created"))).toBe("actionable");
+    });
+    it("issue_comment/edited is actionable", () => {
+      expect(classifyEvent(evt("issue_comment", "edited"))).toBe("actionable");
+    });
+    it("pull_request/closed is actionable", () => {
+      expect(classifyEvent(evt("pull_request", "closed"))).toBe("actionable");
+    });
+  });
+});
+
+// ── log_only filtering ────────────────────────────────────────────────────────
+
+describe("log_only event filtering", () => {
+  it("log_only event is not pushed to pendingEvents and does not trigger query", async () => {
+    vi.useFakeTimers();
+    try {
+      const issue = makeIssue();
+      sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+
+      runQuery.mockClear();
+      // check_run is log_only
+      sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: { id: "e1", name: "check_run", payload: { action: "completed" } } });
+      await vi.runAllTimersAsync();
+
+      // No additional runQuery call
+      expect(runQuery).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("log_only event does not resolve WS input promise", async () => {
+    const promise = session.createWsInputPromise();
+    sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: { id: "e1", name: "check_run", payload: { action: "completed" } } });
+    const result = await Promise.race([
+      promise,
+      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 30)),
+    ]);
+    expect(result).toBe("timeout");
+  });
+});
+
+// ── debounce ──────────────────────────────────────────────────────────────────
+
+describe("debounce", () => {
+  it("actionable event when no query running sets debounce timer (no immediate dispatch)", async () => {
+    vi.useFakeTimers();
+    try {
+      const issue = makeIssue();
+      sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+
+      runQuery.mockClear();
+      sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
+
+      // runQuery not yet called (debounce timer pending)
+      expect(runQuery).not.toHaveBeenCalled();
+
+      // Advance past the debounce delay
+      await vi.runAllTimersAsync();
+
+      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("multiple actionable events arriving within debounce window are batched into one query", async () => {
+    vi.useFakeTimers();
+    try {
+      const issue = makeIssue();
+      sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+
+      runQuery.mockClear();
+      sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
+      sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("pull_request_review") });
+
+      // Advance past the debounce delay
+      await vi.runAllTimersAsync();
+
+      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+      const [prompt] = runQuery.mock.calls[0];
+      expect(prompt).toContain("Multiple events");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("debounce timer is cancelled when runQueryLoop starts (e.g., via user input)", async () => {
+    vi.useFakeTimers();
+    try {
+      const issue = makeIssue();
+      sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+
+      runQuery.mockClear();
+      // Actionable event sets the debounce timer
+      sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
+      expect(runQuery).not.toHaveBeenCalled();
+
+      // User input fires a query before the timer fires.
+      // runQueryLoop cancels the debounce, runs the user's query, then drains
+      // the pending issue_comment event — total 2 runQuery calls.
+      const userQueryPromise = session.handleUserInput("what's the status?");
+      await userQueryPromise;
+
+      // Advance past the original debounce delay — the cancelled timer must
+      // NOT fire a third runQuery call.
+      await vi.runAllTimersAsync();
+
+      expect(runQuery).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

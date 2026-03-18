@@ -554,3 +554,36 @@ describe("PR event forwarding to workers", () => {
     expect(raceResult).toBe("timeout");
   });
 });
+
+describe("foreman event filtering", () => {
+  it("pull_request/synchronize is dropped and not forwarded to worker", async () => {
+    queue.addTask({
+      taskId: "42",
+      issueNumber: 42,
+      title: "Issue 42",
+      body: "Body",
+      labels: ["brunel:ready"],
+      repoUrl: "https://github.com/owner/repo",
+    });
+
+    const ws = await connect();
+    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    await nextMsg(ws); // task_assigned
+
+    // Register PR for the task
+    routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Closes #42"));
+
+    // synchronize event should be silently dropped
+    routeEvent("evt-sync", "pull_request", {
+      action: "synchronize",
+      pull_request: { number: 10, title: "PR 10", body: "Closes #42", head: { ref: "branch" } },
+      repository: { html_url: "https://github.com/owner/repo" },
+    });
+
+    const raceResult = await Promise.race([
+      nextMsg(ws).then(() => "message" as const),
+      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
+    ]);
+    expect(raceResult).toBe("timeout");
+  });
+});
