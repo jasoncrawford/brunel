@@ -15,8 +15,11 @@ export function classifyEvent(event: GitHubEvent): "actionable" | "log_only" {
     case "check_run":
       return "log_only";
 
-    case "check_suite":
-      return action === "completed" ? "actionable" : "log_only";
+    case "check_suite": {
+      if (action !== "completed") return "log_only";
+      const conclusion = (event.payload.check_suite as Record<string, unknown> | undefined)?.conclusion;
+      return conclusion === "skipped" ? "log_only" : "actionable";
+    }
 
     case "pull_request":
       return action === "closed" ? "actionable" : "log_only";

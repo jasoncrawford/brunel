@@ -347,8 +347,8 @@ describe("waitUntilIdle", () => {
 // ── classifyEvent ─────────────────────────────────────────────────────────────
 
 describe("classifyEvent", () => {
-  function evt(name: string, action?: string): GitHubEvent {
-    return { id: "e1", name, payload: action ? { action } : {} };
+  function evt(name: string, action?: string, extra?: Record<string, unknown>): GitHubEvent {
+    return { id: "e1", name, payload: { ...(action ? { action } : {}), ...extra } };
   }
 
   describe("log_only events", () => {
@@ -366,6 +366,9 @@ describe("classifyEvent", () => {
     });
     it("check_suite/rerequested is log_only", () => {
       expect(classifyEvent(evt("check_suite", "rerequested"))).toBe("log_only");
+    });
+    it("check_suite/completed with conclusion skipped is log_only", () => {
+      expect(classifyEvent(evt("check_suite", "completed", { check_suite: { conclusion: "skipped" } }))).toBe("log_only");
     });
     it("pull_request/labeled is log_only", () => {
       expect(classifyEvent(evt("pull_request", "labeled"))).toBe("log_only");
