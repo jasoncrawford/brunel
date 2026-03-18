@@ -409,8 +409,9 @@ export function ask(
       if (done) return;
       totalDrawnRows = 0; // reset: we're drawing from a new position
       const displayStr = buffer.replace(/\n/g, "\r\n    ");
-      // Start on a fresh line
-      process.stdout.write("\r\n" + promptLine + displayStr);
+      // display.print() already moved the cursor to a new line via console.log's
+      // trailing \n; \r ensures we're at column 0 without adding an extra blank line.
+      process.stdout.write("\r" + promptLine + displayStr);
 
       const { row: endRow } = screenPosOf(buffer.length);
 
