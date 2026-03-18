@@ -200,6 +200,20 @@ export function fmtEditResult(b: ToolResultBlock) {
   return c.darkGray(`→ ${trunc(toolResultText(b), 100)}`);
 }
 
+export function fmtBashResult(b: ToolResultBlock) {
+  const text = toolResultText(b).trim();
+  if (!text || text === "(Bash completed with no output)") return c.darkGray(`→ Success`);
+  return c.darkGray(`→ ${trunc(text, 100)}`);
+}
+
+export function fmtWriteResult(b: ToolResultBlock & { _input?: Record<string, unknown> }) {
+  const content = b._input?.content as string | undefined;
+  if (content == null) return c.darkGray(`→ ${trunc(toolResultText(b), 100)}`);
+  const lines = content.split("\n").length;
+  const verb = /created/i.test(toolResultText(b)) ? "Created" : "Updated";
+  return c.darkGray(`→ ${verb} ${fmtCount(lines, "line")}`);
+}
+
 export function toolResultText(b: { content: unknown }): string {
   const raw = b.content;
   if (typeof raw === "string") return raw;
@@ -334,19 +348,8 @@ export const TOOL_RESULT_FMT: FmtTable = {
   Read:     (b) => c.darkGray(`→ ${fmtCount(toolResultText(b).split("\n").length, "line")}`),
   Edit:     (b) => fmtEditResult(b),
   Skill:    (_b) => c.darkGray(`→ Success`),
-  Bash:     (b) => {
-    const text = toolResultText(b).trim();
-    if (!text || text === "(Bash completed with no output)") return c.darkGray(`→ Success`);
-    return c.darkGray(`→ ${trunc(text, 100)}`);
-  },
-  Write:    (b) => {
-    const content = b._input?.content as string | undefined;
-    if (content == null) return c.darkGray(`→ ${trunc(toolResultText(b), 100)}`);
-    const lines = content.split("\n").length;
-    const isNew = /created/i.test(toolResultText(b));
-    const verb = isNew ? "Created" : "Updated";
-    return c.darkGray(`→ ${verb} ${fmtCount(lines, "line")}`);
-  },
+  Bash:     (b) => fmtBashResult(b),
+  Write:    (b) => fmtWriteResult(b),
 };
 
 export const TOOL_ERROR_FMT: FmtTable = {
