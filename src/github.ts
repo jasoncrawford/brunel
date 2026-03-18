@@ -1,4 +1,6 @@
 import type { TaskQueue } from "./foreman.js";
+import { fetchBlockers, setBlockers } from "./dependencies.js";
+import type { DependencyGraph } from "./dependencies.js";
 
 // ── GitHub API helpers ────────────────────────────────────────────────────────
 // Read env vars inside function bodies (not at module load) so that tests can
@@ -21,22 +23,46 @@ function ghHeaders(token: string) {
   };
 }
 
-export async function loadIssuesToQueue(queue: TaskQueue): Promise<void> {
+export async function loadIssuesToQueue(
+  queue: TaskQueue,
+  graph: DependencyGraph,
+  openIssues: Set<number>,
+): Promise<void> {
   const { repo, token, taskLabel } = ghEnv();
   const [owner, repoName] = repo.split("/");
   const url = `https://api.github.com/repos/${owner}/${repoName}/issues?labels=${encodeURIComponent(taskLabel)}&state=open&per_page=100`;
   const res = await fetch(url, { headers: ghHeaders(token) });
   if (!res.ok) throw new Error(`GitHub API error: ${res.status}`);
-  const issues = await res.json() as Array<{ number: number; title: string; body: string | null; labels: Array<{ name: string }> }>;
+  const issues = await res.json() as Array<{
+    number: number; title: string; body: string | null; labels: Array<{ name: string }>;
+  }>;
+
+  const allBlockerNumbers = new Set<number>();
+
+  // Note: fetchBlockers is awaited sequentially inside the loop (not Promise.all).
+  // This is intentional: for the typical case of a small number of brunel:ready issues,
+  // sequential is fine and avoids thundering-herd at startup.
   for (const issue of issues) {
     queue.addTask({
       taskId: String(issue.number),
       issueNumber: issue.number,
       title: issue.title,
       body: issue.body ?? "",
-      labels: issue.labels.map(l => l.name),
+      labels: issue.labels.map((l) => l.name),
       repoUrl: `https://github.com/${owner}/${repoName}`,
     });
+    // brunel:ready issues are open by definition
+    openIssues.add(issue.number);
+    const blockers = await fetchBlockers(issue.number, issue.body ?? "");
+    setBlockers(issue.number, blockers, graph);
+    for (const b of blockers) allBlockerNumbers.add(b);
+  }
+
+  if (allBlockerNumbers.size > 0) {
+    const states = await fetchIssueStates(Array.from(allBlockerNumbers));
+    for (const [num, state] of states) {
+      if (state === "open") openIssues.add(num);
+    }
   }
 }
 
