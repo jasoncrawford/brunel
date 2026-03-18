@@ -47,14 +47,15 @@ export type SlashCommandResult =
 
 type BuiltinCommand = {
   name: string;
+  description: string;
   result: Exclude<SlashCommandResult, { type: "unknown_command" }>;
   workerOnly?: boolean;
 };
 
 const BUILTIN_COMMANDS: BuiltinCommand[] = [
-  { name: "clear",         result: { type: "clear" } },
-  { name: "exit",          result: { type: "exit" } },
-  { name: "task-complete", result: { type: "task_complete" }, workerOnly: true },
+  { name: "clear",         description: "Clear the conversation",      result: { type: "clear" } },
+  { name: "exit",          description: "Exit the REPL",               result: { type: "exit" } },
+  { name: "task-complete", description: "Mark the current task as done", result: { type: "task_complete" }, workerOnly: true },
 ];
 
 /**
@@ -216,8 +217,8 @@ export function listCommands(
 ): CommandSuggestion[] {
   const names = listCommandNames(listDir, readFile, workerMode);
   return names.map(name => {
-    const isBuiltin = BUILTIN_COMMANDS.some(c => c.name === name);
-    if (isBuiltin) return { name, description: "" };
+    const builtin = BUILTIN_COMMANDS.find(c => c.name === name);
+    if (builtin) return { name, description: builtin.description };
     const content = resolveContent(name, readFile);
     return { name, description: content ? extractDescription(content) : "" };
   });

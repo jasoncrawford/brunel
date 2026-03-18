@@ -365,13 +365,14 @@ describe("listCommands", () => {
     }
   });
 
-  it("builtins have empty description", () => {
+  it("builtins have non-empty descriptions", () => {
     const result = listCommands(() => null);
     const clear = result.find(c => c.name === "clear");
     expect(clear).toBeDefined();
-    expect(clear!.description).toBe("");
+    expect(clear!.description).toBeTruthy();
     const exit = result.find(c => c.name === "exit");
-    expect(exit!.description).toBe("");
+    expect(exit).toBeDefined();
+    expect(exit!.description).toBeTruthy();
   });
 
   it("skill with description frontmatter uses that as description", () => {
