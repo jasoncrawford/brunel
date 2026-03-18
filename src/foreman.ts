@@ -6,6 +6,9 @@ import type { WebSocket as WsSocket } from "ws";
 import type { WorkerMessage, ForemanMessage, GitHubEvent } from "./types.js";
 import { labelIssueDone } from "./github.js";
 import { fmtTimestamp } from "./display.js";
+import { isBlocked, setBlockers, fetchBlockers } from "./dependencies.js";
+import { fetchIssueStates } from "./github.js";
+import type { DependencyGraph } from "./dependencies.js";
 
 function flog(msg: string) {
   console.log(`${fmtTimestamp()} ${msg}`);
@@ -45,6 +48,10 @@ export class WorkerRegistry {
       if (w.status === "idle") return w;
     }
     return null;
+  }
+
+  getIdleWorkers(): WorkerState[] {
+    return [...this.workers.values()].filter((w) => w.status === "idle");
   }
 
   getWorkerForTask(taskId: string): WorkerState | null {
@@ -293,10 +300,14 @@ export function createForemanWss(
   options?: {
     taskLabel?: string;
     labelDone?: (issueNumber: number) => Promise<void>;
+    graph?: DependencyGraph;
+    openIssues?: Set<number>;
   },
 ): { wss: WebSocketServer; routeEventToWorker: (id: string, name: string, payload: unknown) => void } {
   const taskLabel = options?.taskLabel ?? process.env.TASK_LABEL ?? "brunel:ready";
   const labelDone = options?.labelDone ?? labelIssueDone;
+  const graph = options?.graph ?? new Map<number, Set<number>>();
+  const openIssues = options?.openIssues ?? new Set<number>();
 
   function log(wid: string, line: string) {
     flog(`[worker ${wid.slice(0, 8)}] ${line}`);
@@ -431,7 +442,9 @@ export function createForemanWss(
   }
 
   function tryAssignWork(workerId: string) {
-    const task = taskQueue.nextPending();
+    const task = taskQueue.nextPending(
+      (t) => !isBlocked(t.issueNumber, graph, openIssues),
+    );
     if (task) {
       taskQueue.assignTask(task.taskId, workerId);
       registry.assignTask(workerId, task.taskId);
