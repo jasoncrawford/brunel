@@ -57,19 +57,13 @@ export const EVENT_FMT: EventTemplateFmtTable = {
     const pr = p.pull_request as Record<string, unknown> | undefined;
     const prNumber = pr?.number;
     if (p.action === "closed") {
-      if (pr?.merged === true) {
-        return `PR #${prNumber} was merged.
+      return `PR #${prNumber} was ${pr?.merged ? 'merged' : 'closed without merging'}. Before we end this session:
 
-The PR has been merged. Please do the following:
-1. Delete the feature branch (remotely and locally in the worktree).
-2. Verify the issue was automatically closed (it should be, via "Closes #N" in the PR body).
-3. Remove the worktree you created for this task.
-4. Report back with a brief summary of what was done.`;
-      } else {
-        return `PR #${prNumber} was closed without merging.
+* Are there any followup issues we should file?
+* Are there any updates to skills that we should make, or new skills to record?
+* Are there any updates to be made to project documentation?
 
-The PR was closed without merging. Please check whether there is anything to clean up (branch, worktree), then ask the user how they'd like to proceed.`;
-      }
+Please do the above if necessary. Then summarize what you did, and anything else the user should know.`;
     }
     return "";
   },
