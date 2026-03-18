@@ -1,11 +1,6 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
-import { buildInitialPrompt, buildEventPrompt, resolveEventTemplate, EVENT_FMT, type EventTemplateFmtTable } from "../src/templates.js";
+import { describe, it, expect } from "vitest";
+import { buildInitialPrompt, buildEventPrompt, fmtEventList, resolveEventTemplate, EVENT_FMT, type EventTemplateFmtTable } from "../src/templates.js";
 import type { GitHubEvent } from "../src/types.js";
-import { stripAnsi } from "./helpers.js";
-
-afterEach(() => {
-  vi.restoreAllMocks();
-});
 
 describe("buildInitialPrompt", () => {
   it("includes issue number, title, body, labels, and repoUrl", () => {
@@ -69,20 +64,6 @@ describe("buildInitialPrompt", () => {
     expect(p).toContain("brunel:ready");
   });
 
-  describe("diagnostic logging", () => {
-    it("logs the built prompt to console", () => {
-      const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-      const prompt = buildInitialPrompt({
-        number: 42,
-        title: "Fix bug",
-        body: "It crashes",
-        labels: ["bug"],
-        repoUrl: "https://github.com/x/y",
-      });
-      const calls = consoleSpy.mock.calls.map(args => String(args[0]));
-      expect(calls.some(s => s.includes(prompt))).toBe(true);
-    });
-  });
 });
 
 describe("buildEventPrompt", () => {
@@ -206,58 +187,28 @@ describe("buildEventPrompt", () => {
     expect(p).toContain("deployment");
   });
 
-  describe("diagnostic logging", () => {
-    it("logs 'Building prompt from events:' before building", () => {
-      const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-      const evt: GitHubEvent = { id: "e1", name: "check_suite", payload: { action: "completed" } };
-      buildEventPrompt([evt]);
-      const calls = consoleSpy.mock.calls.map(args => stripAnsi(String(args[0])));
-      expect(calls.some(s => s.startsWith("Building prompt from events:"))).toBe(true);
-    });
+});
 
-    it("logs event name/action in building message", () => {
-      const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-      const evt: GitHubEvent = { id: "e1", name: "check_suite", payload: { action: "completed" } };
-      buildEventPrompt([evt]);
-      const calls = consoleSpy.mock.calls.map(args => stripAnsi(String(args[0])));
-      const buildingLine = calls.find(s => s.startsWith("Building prompt from events:"));
-      expect(buildingLine).toContain("check_suite/completed");
-    });
+describe("fmtEventList", () => {
+  it("formats a single event with action as name/action", () => {
+    const events: GitHubEvent[] = [{ id: "e1", name: "check_suite", payload: { action: "completed" } }];
+    expect(fmtEventList(events)).toBe("check_suite/completed");
+  });
 
-    it("logs multiple events as comma-separated name/action pairs in building message", () => {
-      const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-      const events: GitHubEvent[] = [
-        { id: "e1", name: "check_run", payload: { action: "completed" } },
-        { id: "e2", name: "check_suite", payload: { action: "completed" } },
-      ];
-      buildEventPrompt(events);
-      const calls = consoleSpy.mock.calls.map(args => stripAnsi(String(args[0])));
-      const buildingLine = calls.find(s => s.startsWith("Building prompt from events:"));
-      expect(buildingLine).toContain("check_run/completed");
-      expect(buildingLine).toContain("check_suite/completed");
-    });
+  it("formats a single event without action as just the name", () => {
+    const events: GitHubEvent[] = [{ id: "e1", name: "deployment", payload: {} }];
+    expect(fmtEventList(events)).toBe("deployment");
+    expect(fmtEventList(events)).not.toContain("deployment/");
+  });
 
-    it("logs event name without action when payload has no action", () => {
-      const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-      const evt: GitHubEvent = { id: "e1", name: "deployment", payload: {} };
-      buildEventPrompt([evt]);
-      const calls = consoleSpy.mock.calls.map(args => stripAnsi(String(args[0])));
-      const buildingLine = calls.find(s => s.startsWith("Building prompt from events:"));
-      expect(buildingLine).toContain("deployment");
-      expect(buildingLine).not.toContain("deployment/");
-    });
-
-    it("logs the built prompt after building", () => {
-      const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-      const evt: GitHubEvent = {
-        id: "e1",
-        name: "issue_comment",
-        payload: { issue: { number: 5 }, comment: { body: "Hello there" } },
-      };
-      const prompt = buildEventPrompt([evt]);
-      const calls = consoleSpy.mock.calls.map(args => String(args[0]));
-      expect(calls.some(s => s.includes(prompt))).toBe(true);
-    });
+  it("formats multiple events as comma-separated name/action pairs", () => {
+    const events: GitHubEvent[] = [
+      { id: "e1", name: "check_run", payload: { action: "completed" } },
+      { id: "e2", name: "check_suite", payload: { action: "completed" } },
+    ];
+    const result = fmtEventList(events);
+    expect(result).toContain("check_run/completed");
+    expect(result).toContain("check_suite/completed");
   });
 });
 

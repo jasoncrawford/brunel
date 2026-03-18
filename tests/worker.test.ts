@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "events";
 import { WorkerSession } from "../src/worker.js";
 import type { ForemanMessage, GitHubEvent, TaskIssue } from "../src/types.js";
+import { stripAnsi } from "./helpers.js";
 
 // ── Fake WebSocket ─────────────────────────────────────────────────────────────
 
@@ -76,6 +77,14 @@ describe("task_assigned", () => {
       expect.objectContaining({ type: "task_assigned" })
     ));
   });
+
+  it("prints the initial prompt in amber when task_assigned is received", async () => {
+    const issue = makeIssue();
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+    const printCalls = display.print.mock.calls.map(args => stripAnsi(String(args[0])));
+    expect(printCalls.some(s => s.includes(issue.title))).toBe(true);
+  });
 });
 
 // ── Event handling during query ───────────────────────────────────────────────
@@ -113,6 +122,20 @@ describe("event_notification", () => {
     const [initialPrompt] = runQuery.mock.calls[0];
     expect(eventPrompt).not.toBe(initialPrompt);
     expect(eventPrompt).toContain("A comment was added"); // issue_comment template content
+  });
+
+  it("prints 'Building prompt from events:' diagnostic and prompt in amber when event runs a query", async () => {
+    const issue = makeIssue();
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+
+    display.print.mockClear();
+    sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
+    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledTimes(2));
+
+    const printCalls = display.print.mock.calls.map(args => stripAnsi(String(args[0])));
+    expect(printCalls.some(s => s.startsWith("Building prompt from events:"))).toBe(true);
+    expect(printCalls.some(s => s.includes("A comment was added"))).toBe(true);
   });
 
   it("batches multiple pending events into a single runQuery call", async () => {
