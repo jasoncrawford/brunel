@@ -413,7 +413,7 @@ export const MESSAGE_FMT: FmtTable = {
 
 export const FOREMAN_MESSAGE_FMT: FmtTable = {
   task_assigned:      (m) => c.lavender(`Task assigned: #${m.issue.number}, ${m.issue.title}`),
-  event_notification: (m) => c.darkGray(`  Event received [${fmtTime()}]: ${fmtEvent(m.event as GitHubEvent)}`),
+  event_notification: (m) => c.darkGray(`Event received [${fmtTime()}]: ${fmtEvent(m.event as GitHubEvent)}`),
   standby:            (m) => c.darkGray("Standby: waiting for tasks..."),
   _default:           (m) => c.darkGray(`Unknown foreman message: ${m.type}`),
 };

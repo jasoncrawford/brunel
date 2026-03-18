@@ -447,7 +447,7 @@ describe("ask() - drawFresh after print()", () => {
       const p = ask("> ", () => []);
 
       // Simulate display.print() being called (e.g., an event notification arriving)
-      display.print("  Event received: some_event");
+      display.print("Event received: some_event");
 
       // The drawFresh callback redraws the prompt. Collect all write calls made
       // during/after the print.
