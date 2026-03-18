@@ -1,3 +1,5 @@
+import { fetchNativeBlockers } from "./github.js";
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 /** Maps an issue number to the set of issue numbers that block it. */
@@ -41,4 +43,16 @@ export function isBlocked(
     if (openIssues.has(b)) return true;
   }
   return false;
+}
+
+/**
+ * Fetch all blockers for an issue from both body text and GitHub native relationships.
+ * Results are merged and deduplicated.
+ */
+export async function fetchBlockers(issueNumber: number, body: string): Promise<number[]> {
+  const [bodyBlockers, nativeBlockers] = await Promise.all([
+    Promise.resolve(parseBodyBlockers(body)),
+    fetchNativeBlockers(issueNumber),
+  ]);
+  return Array.from(new Set([...bodyBlockers, ...nativeBlockers]));
 }

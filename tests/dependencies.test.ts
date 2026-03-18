@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { parseBodyBlockers, isBlocked, setBlockers } from "../src/dependencies.js";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { parseBodyBlockers, isBlocked, setBlockers, fetchBlockers } from "../src/dependencies.js";
 import type { DependencyGraph } from "../src/dependencies.js";
 
 describe("parseBodyBlockers", () => {
@@ -79,5 +79,48 @@ describe("isBlocked", () => {
     const graph: DependencyGraph = new Map([[42, new Set([10])]]);
     expect(isBlocked(42, graph, new Set([11]))).toBe(false);
     expect(isBlocked(42, graph, new Set([10]))).toBe(true);
+  });
+});
+
+describe("fetchBlockers", () => {
+  beforeEach(() => {
+    vi.stubGlobal("fetch", vi.fn());
+    process.env.GITHUB_REPO = "owner/repo";
+    process.env.GITHUB_TOKEN = "token123";
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete process.env.GITHUB_REPO;
+    delete process.env.GITHUB_TOKEN;
+  });
+
+  it("returns body-parsed blockers when native returns empty", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ data: { repository: { issue: { blockedBy: { nodes: [] } } } } }),
+    } as any);
+    const blockers = await fetchBlockers(42, "Depends on #5\nBlocked by #6");
+    expect(blockers).toEqual(expect.arrayContaining([5, 6]));
+    expect(blockers).toHaveLength(2);
+  });
+
+  it("merges and deduplicates body and native blockers", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        data: { repository: { issue: { blockedBy: { nodes: [{ number: 5 }, { number: 9 }] } } } },
+      }),
+    } as any);
+    const blockers = await fetchBlockers(42, "Depends on #5"); // #5 in both
+    expect(new Set(blockers)).toEqual(new Set([5, 9]));
+  });
+
+  it("returns empty array when no deps in body or native", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ data: { repository: { issue: { blockedBy: { nodes: [] } } } } }),
+    } as any);
+    expect(await fetchBlockers(42, "No dependencies here")).toEqual([]);
   });
 });
