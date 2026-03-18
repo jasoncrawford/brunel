@@ -10,6 +10,9 @@ import {
   TOOL_ERROR_FMT,
   SYSTEM_FMT,
   MESSAGE_FMT,
+  fmtTodoWriteInput,
+  fmtToolSearchOutput,
+  fmtTodoWriteOutput,
   type FmtTable,
 } from "../src/display.js";
 
@@ -263,6 +266,145 @@ describe("TOOL_RESULT_FMT", () => {
     const b = { content: "File created successfully at: /path/file.md" };
     const raw = resolve(TOOL_RESULT_FMT, "Write", b)!;
     expect(stripAnsi(raw)).toContain("→ File created");
+  });
+});
+
+describe("fmtTodoWriteInput()", () => {
+  it("returns count string for an array of todos", () => {
+    const todos = [{ content: "a", status: "pending" }, { content: "b", status: "pending" }];
+    expect(fmtTodoWriteInput(todos)).toBe("2 todos");
+  });
+
+  it("uses singular for 1 todo", () => {
+    expect(fmtTodoWriteInput([{ content: "only" }])).toBe("1 todo");
+  });
+
+  it("returns 0 todos for an empty array", () => {
+    expect(fmtTodoWriteInput([])).toBe("0 todos");
+  });
+
+  it("returns 0 todos for non-array input", () => {
+    expect(fmtTodoWriteInput(null)).toBe("0 todos");
+    expect(fmtTodoWriteInput(undefined)).toBe("0 todos");
+  });
+});
+
+describe("fmtToolSearchOutput()", () => {
+  it("returns loaded: <name> for a single tool_reference", () => {
+    const content = [{ type: "tool_reference", tool_name: "TodoWrite" }];
+    expect(fmtToolSearchOutput(content)).toBe("loaded: TodoWrite");
+  });
+
+  it("joins multiple tool references with comma", () => {
+    const content = [
+      { type: "tool_reference", tool_name: "TodoWrite" },
+      { type: "tool_reference", tool_name: "TodoRead" },
+    ];
+    expect(fmtToolSearchOutput(content)).toContain("TodoWrite");
+    expect(fmtToolSearchOutput(content)).toContain("TodoRead");
+  });
+
+  it("returns loaded: ? when no tool references found", () => {
+    expect(fmtToolSearchOutput([])).toBe("loaded: ?");
+    expect(fmtToolSearchOutput([{ type: "text", text: "something" }])).toBe("loaded: ?");
+  });
+});
+
+describe("fmtTodoWriteOutput()", () => {
+  it("returns count and status breakdown when newTodos present", () => {
+    const b = {
+      content: "Todos modified.",
+      _msg: {
+        tool_use_result: {
+          newTodos: [
+            { content: "task a", status: "in_progress" },
+            { content: "task b", status: "pending" },
+            { content: "task c", status: "pending" },
+          ],
+        },
+      },
+    };
+    const result = fmtTodoWriteOutput(b as any);
+    expect(result).toContain("3 todos");
+    expect(result).toContain("in_progress");
+    expect(result).toContain("pending");
+  });
+
+  it("returns 'todos cleared' when newTodos is empty", () => {
+    const b = { content: "Todos modified.", _msg: { tool_use_result: { newTodos: [] } } };
+    expect(fmtTodoWriteOutput(b as any)).toBe("todos cleared");
+  });
+
+  it("falls back to text when no tool_use_result", () => {
+    const b = { content: "Todos have been modified successfully." };
+    const result = fmtTodoWriteOutput(b as any);
+    expect(result).toContain("Todos have been modified");
+  });
+});
+
+describe("TOOL_CALL_FMT — ToolSearch and TodoWrite", () => {
+  it("ToolSearch: shows • ToolSearch(<query>) without key= prefix", () => {
+    const result = r(TOOL_CALL_FMT, "ToolSearch", { input: { query: "TodoWrite" } });
+    expect(result).toContain("• ToolSearch(TodoWrite)");
+    expect(result).not.toContain("query=");
+  });
+
+  it("TodoWrite: shows • TodoWrite(<N> todo(s)) with count, not [object Object]", () => {
+    const todos = [
+      { content: "task a", status: "in_progress" },
+      { content: "task b", status: "pending" },
+      { content: "task c", status: "pending" },
+    ];
+    const result = r(TOOL_CALL_FMT, "TodoWrite", { input: { todos } });
+    expect(result).toContain("• TodoWrite(3 todos)");
+    expect(result).not.toContain("[object Object]");
+  });
+
+  it("TodoWrite: singular for 1 todo", () => {
+    const result = r(TOOL_CALL_FMT, "TodoWrite", { input: { todos: [{ content: "x" }] } });
+    expect(result).toContain("• TodoWrite(1 todo)");
+  });
+});
+
+describe("TOOL_RESULT_FMT — ToolSearch and TodoWrite", () => {
+  it("ToolSearch: shows → loaded: <tool name> from tool_reference", () => {
+    const b = { content: [{ type: "tool_reference", tool_name: "TodoWrite" }] };
+    const result = r(TOOL_RESULT_FMT, "ToolSearch", b)!;
+    expect(result).toContain("→ loaded: TodoWrite");
+    expect(result).not.toContain("[tool:");
+  });
+
+  it("ToolSearch: result in darkGray", () => {
+    const b = { content: [{ type: "tool_reference", tool_name: "TodoWrite" }] };
+    const raw = resolve(TOOL_RESULT_FMT, "ToolSearch", b)!;
+    expect(raw).toContain("\x1b[90m");
+  });
+
+  it("TodoWrite: shows → <N> todos: <status counts>", () => {
+    const b = {
+      content: "Todos modified.",
+      _msg: {
+        tool_use_result: {
+          newTodos: [
+            { content: "a", status: "in_progress" },
+            { content: "b", status: "pending" },
+          ],
+        },
+      },
+    };
+    const result = r(TOOL_RESULT_FMT, "TodoWrite", b)!;
+    expect(result).toContain("→ 2 todos");
+    expect(result).toContain("in_progress");
+    expect(result).not.toContain("modified successfully");
+  });
+
+  it("TodoWrite: result in darkGray", () => {
+    const b = {
+      content: "Todos modified.",
+      _msg: { tool_use_result: { newTodos: [{ content: "a", status: "done" }] } },
+    };
+    const raw = resolve(TOOL_RESULT_FMT, "TodoWrite", b)!;
+    expect(raw).toContain("\x1b[90m");
   });
 });
 

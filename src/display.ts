@@ -214,6 +214,36 @@ export function fmtWriteOutput(b: ToolResultBlock & { _input?: Record<string, un
   return `${verb} ${fmtCount(lines, "line")}`;
 }
 
+export function fmtTodoWriteInput(todos: unknown): string {
+  const items = Array.isArray(todos) ? todos : [];
+  return fmtCount(items.length, "todo");
+}
+
+export function fmtToolSearchOutput(content: unknown): string {
+  const items = Array.isArray(content) ? content : [];
+  const names = items
+    .filter((x): x is { type: string; tool_name?: string } =>
+      x != null && typeof x === "object" && (x as { type: string }).type === "tool_reference")
+    .map((x) => x.tool_name)
+    .filter(Boolean)
+    .join(", ");
+  return `loaded: ${names || "?"}`;
+}
+
+export function fmtTodoWriteOutput(b: ToolResultBlock): string {
+  const newTodos = (b._msg?.tool_use_result as Record<string, unknown> | undefined)?.newTodos;
+  const todos = Array.isArray(newTodos) ? newTodos : null;
+  if (!todos) return trunc(toolResultText(b), 100);
+  if (!todos.length) return "todos cleared";
+  const counts: Record<string, number> = {};
+  for (const t of todos) {
+    const status = (t as { status?: string }).status ?? "unknown";
+    counts[status] = (counts[status] ?? 0) + 1;
+  }
+  const parts = Object.entries(counts).map(([st, n]) => `${n} ${st}`);
+  return `${fmtCount(todos.length, "todo")}: ${parts.join(", ")}`;
+}
+
 export function toolResultText(b: { content: unknown }): string {
   const raw = b.content;
   if (typeof raw === "string") return raw;
@@ -332,24 +362,28 @@ export const USER_BLOCK_FMT: FmtTable = {
 };
 
 export const TOOL_CALL_FMT: FmtTable = {
-  Bash:     (b) => fmtToolCall(b, `$ ${trunc(b.input?.command ?? "", 80)}`),
-  Read:     (b) => fmtToolCall(b, `• Read(${b.input?.file_path ?? "?"})`),
-  Write:    (b) => fmtToolCall(b, `• Write(${b.input?.file_path ?? "?"})`),
-  Edit:     (b) => fmtToolCall(b, `• Edit(${b.input?.file_path ?? "?"})`),
-  Glob:     (b) => fmtToolCall(b, `• Glob(${b.input?.pattern ?? "?"})`),
-  Grep:     (b) => fmtToolCall(b, `• grep ${trunc(b.input?.pattern ?? "?", 30)} ${b.input?.path ?? "."}`),
-  Skill:    (b) => fmtToolCall(b, `• Skill(${b.input?.skill ?? "?"})`),
-  Agent:    (b) => fmtToolCall(b, `• ${b.input?.subagent_type ?? "Agent"}(${trunc(b.input?.prompt ?? "", 80)})`),
-  _default: (b) => fmtToolCall(b, `• ${b.name}(${fmtArgs(b.input)})`),
+  Bash:       (b) => fmtToolCall(b, `$ ${trunc(b.input?.command ?? "", 80)}`),
+  Read:       (b) => fmtToolCall(b, `• Read(${b.input?.file_path ?? "?"})`),
+  Write:      (b) => fmtToolCall(b, `• Write(${b.input?.file_path ?? "?"})`),
+  Edit:       (b) => fmtToolCall(b, `• Edit(${b.input?.file_path ?? "?"})`),
+  Glob:       (b) => fmtToolCall(b, `• Glob(${b.input?.pattern ?? "?"})`),
+  Grep:       (b) => fmtToolCall(b, `• grep ${trunc(b.input?.pattern ?? "?", 30)} ${b.input?.path ?? "."}`),
+  Skill:      (b) => fmtToolCall(b, `• Skill(${b.input?.skill ?? "?"})`),
+  Agent:      (b) => fmtToolCall(b, `• ${b.input?.subagent_type ?? "Agent"}(${trunc(b.input?.prompt ?? "", 80)})`),
+  ToolSearch: (b) => fmtToolCall(b, `• ToolSearch(${b.input?.query ?? "?"})`),
+  TodoWrite:  (b) => fmtToolCall(b, `• TodoWrite(${fmtTodoWriteInput(b.input?.todos)})`),
+  _default:   (b) => fmtToolCall(b, `• ${b.name}(${fmtArgs(b.input)})`),
 };
 
 export const TOOL_RESULT_FMT: FmtTable = {
-  _default: (b) => c.darkGray(`→ ${trunc(toolResultText(b), 100)}`),
-  Read:     (b) => c.darkGray(`→ ${fmtCount(toolResultText(b).split("\n").length, "line")}`),
-  Edit:     (b) => fmtEditResult(b),
-  Skill:    (_b) => c.darkGray(`→ Success`),
-  Bash:     (b) => c.darkGray(`→ ${fmtBashOutput(toolResultText(b))}`),
-  Write:    (b) => c.darkGray(`→ ${fmtWriteOutput(b)}`),
+  _default:   (b) => c.darkGray(`→ ${trunc(toolResultText(b), 100)}`),
+  Read:       (b) => c.darkGray(`→ ${fmtCount(toolResultText(b).split("\n").length, "line")}`),
+  Edit:       (b) => fmtEditResult(b),
+  Skill:      (_b) => c.darkGray(`→ Success`),
+  Bash:       (b) => c.darkGray(`→ ${fmtBashOutput(toolResultText(b))}`),
+  Write:      (b) => c.darkGray(`→ ${fmtWriteOutput(b)}`),
+  ToolSearch: (b) => c.darkGray(`→ ${fmtToolSearchOutput(b.content)}`),
+  TodoWrite:  (b) => c.darkGray(`→ ${fmtTodoWriteOutput(b)}`),
 };
 
 export const TOOL_ERROR_FMT: FmtTable = {
