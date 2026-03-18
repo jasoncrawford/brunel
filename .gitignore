@@ -6,3 +6,4 @@ dist/
 .env
 repl.log
 .worker-id
+coverage/
