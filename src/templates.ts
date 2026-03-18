@@ -62,6 +62,7 @@ export const EVENT_FMT: EventTemplateFmtTable = {
 * Are there any followup issues we should file?
 * Are there any updates to skills that we should make, or new skills to record?
 * Are there any updates to be made to project documentation?
+* Clean up your worktree by running \`git worktree remove <path>\` on the worktree you created for this task.
 
 Please do the above if necessary. Then summarize what you did, and anything else the user should know.`;
     }
