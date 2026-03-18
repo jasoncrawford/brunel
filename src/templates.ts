@@ -1,5 +1,4 @@
 import type { GitHubEvent, TaskIssue } from "./types.js";
-import { print, c } from "./display.js";
 
 export function buildInitialPrompt(issue: TaskIssue): string {
   return `Please work on GitHub issue #${issue.number}: "${issue.title}" in ${issue.repoUrl}.
@@ -22,17 +21,15 @@ Do not work on any other issues: leave task assignment to the foreman. Do not me
 }
 
 export function buildEventPrompt(events: GitHubEvent[]): string {
-  const eventList = events.map(e => {
+  const event = events.length === 1 ? events[0] : { id: "", name: "_multiple", payload: { events } };
+  return resolveEventTemplate(EVENT_FMT, event.name, event);
+}
+
+export function fmtEventList(events: GitHubEvent[]): string {
+  return events.map(e => {
     const action = e.payload["action"] as string | undefined;
     return action ? `${e.name}/${action}` : e.name;
   }).join(", ");
-  print(c.darkGray(`Building prompt from events: ${eventList}`));
-
-  const event = events.length === 1 ? events[0] : { id: "", name: "_multiple", payload: { events } };
-  const prompt = resolveEventTemplate(EVENT_FMT, event.name, event);
-
-  print(c.amber(prompt));
-  return prompt;
 }
 
 // ── Event formatter table ─────────────────────────────────────────────────────

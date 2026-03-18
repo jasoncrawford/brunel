@@ -2,7 +2,7 @@ import "dotenv/config";
 import crypto from "crypto";
 import { WebSocket } from "ws";
 import * as display from "./display.js";
-import { buildInitialPrompt, buildEventPrompt } from "./templates.js";
+import { buildInitialPrompt, buildEventPrompt, fmtEventList } from "./templates.js";
 import { ask, listWorkerCommandNames, dispatchInput } from "./input.js";
 import type { ForemanMessage, GitHubEvent, TaskIssue } from "./types.js";
 
@@ -109,14 +109,16 @@ export class WorkerSession {
       this.currentSessionId = undefined;
       this.resolveWsInput?.(WS_TASK_ASSIGNED);
       this.resolveWsInput = null;
-      void this.runQueryLoop(buildInitialPrompt(msg.issue));
+      const initialPrompt = buildInitialPrompt(msg.issue);
+      this.display.print(display.c.amber(initialPrompt));
+      void this.runQueryLoop(initialPrompt);
     } else if (msg.type === "event_notification") {
       this.pendingEvents.push(msg.event);
       this.resolveWsInput?.(WS_EVENT);
       this.resolveWsInput = null;
       if (!this.isRunningQuery && this.currentTaskId && this.currentIssue) {
         const events = this.pendingEvents.splice(0);
-        void this.runQueryLoop(buildEventPrompt(events));
+        void this.runQueryLoop(this.buildAndLogEventPrompt(events));
       }
     }
   }
@@ -131,7 +133,7 @@ export class WorkerSession {
 
     while (this.pendingEvents.length > 0 && this.currentTaskId && this.currentIssue) {
       const events = this.pendingEvents.splice(0);
-      const prompt = buildEventPrompt(events);
+      const prompt = this.buildAndLogEventPrompt(events);
       this.isRunningQuery = true;
       try {
         this.currentSessionId = await this.runQuery(prompt, this.currentSessionId) ?? this.currentSessionId;
@@ -139,6 +141,13 @@ export class WorkerSession {
         this.isRunningQuery = false;
       }
     }
+  }
+
+  private buildAndLogEventPrompt(events: GitHubEvent[]): string {
+    this.display.print(display.c.darkGray(`Building prompt from events: ${fmtEventList(events)}`));
+    const prompt = buildEventPrompt(events);
+    this.display.print(display.c.amber(prompt));
+    return prompt;
   }
 
   private async handleSlashCommand(input: string): Promise<void> {
