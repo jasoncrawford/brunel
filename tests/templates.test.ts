@@ -69,7 +69,7 @@ describe("buildInitialPrompt", () => {
 describe("buildEventPrompt", () => {
   it("returns multi-event fallback for 2+ events", () => {
     const events: GitHubEvent[] = [
-      { id: "e1", name: "check_run", payload: {} },
+      { id: "e1", name: "issue_comment", payload: {} },
       { id: "e2", name: "pull_request_review", payload: {} },
     ];
     const p = buildEventPrompt(events);
@@ -78,63 +78,13 @@ describe("buildEventPrompt", () => {
 
   it("lists event names in multi-event fallback", () => {
     const events: GitHubEvent[] = [
-      { id: "e1", name: "check_run", payload: {} },
+      { id: "e1", name: "issue_comment", payload: {} },
       { id: "e2", name: "pull_request_review", payload: {} },
     ];
     const p = buildEventPrompt(events);
-    expect(p).toContain("check_run");
+    expect(p).toContain("issue_comment");
     expect(p).toContain("pull_request_review");
     expect(p).not.toContain("${");
-  });
-
-  describe("check_run", () => {
-    it("contains check name and summary on failure", () => {
-      const evt: GitHubEvent = {
-        id: "e1",
-        name: "check_run",
-        payload: {
-          check_run: {
-            name: "unit-tests",
-            conclusion: "failure",
-            output: { summary: "5 tests failed" },
-          },
-        },
-      };
-      const p = buildEventPrompt([evt]);
-      expect(p).toContain("unit-tests");
-      expect(p).toContain("failure");
-      expect(p).toContain("5 tests failed");
-    });
-
-    it("produces a different (non-failure) message on success", () => {
-      const failEvt: GitHubEvent = {
-        id: "e1",
-        name: "check_run",
-        payload: {
-          check_run: {
-            name: "unit-tests",
-            conclusion: "failure",
-            output: { summary: "5 tests failed" },
-          },
-        },
-      };
-      const successEvt: GitHubEvent = {
-        id: "e2",
-        name: "check_run",
-        payload: {
-          check_run: {
-            name: "unit-tests",
-            conclusion: "success",
-            output: { summary: "All tests passed" },
-          },
-        },
-      };
-      const failPrompt = buildEventPrompt([failEvt]);
-      const successPrompt = buildEventPrompt([successEvt]);
-      expect(successPrompt).toContain("unit-tests");
-      expect(successPrompt).toContain("success");
-      expect(successPrompt).not.toBe(failPrompt);
-    });
   });
 
   it("pull_request_review — contains PR number, review state, and body", () => {
@@ -181,10 +131,40 @@ describe("buildEventPrompt", () => {
     expect(p).toContain("Can you also handle edge case Y?");
   });
 
-  it("unknown event type — returns a fallback message mentioning the event name", () => {
+  it("unknown event type — returns empty string (unrecognised events are log_only, never reach prompt builder)", () => {
     const evt: GitHubEvent = { id: "e1", name: "deployment", payload: {} };
     const p = buildEventPrompt([evt]);
-    expect(p).toContain("deployment");
+    expect(p).toBe("");
+  });
+
+  describe("pull_request/closed", () => {
+    it("merged PR — includes PR number and 'merged'", () => {
+      const evt: GitHubEvent = {
+        id: "e1",
+        name: "pull_request",
+        payload: {
+          action: "closed",
+          pull_request: { number: 10, merged: true },
+        },
+      };
+      const p = buildEventPrompt([evt]);
+      expect(p).toContain("PR #10");
+      expect(p).toContain("merged");
+    });
+
+    it("closed-without-merge PR — includes PR number and 'closed without merging'", () => {
+      const evt: GitHubEvent = {
+        id: "e1",
+        name: "pull_request",
+        payload: {
+          action: "closed",
+          pull_request: { number: 10, merged: false },
+        },
+      };
+      const p = buildEventPrompt([evt]);
+      expect(p).toContain("PR #10");
+      expect(p).toContain("closed without merging");
+    });
   });
 
 });
@@ -203,11 +183,11 @@ describe("fmtEventList", () => {
 
   it("formats multiple events as comma-separated name/action pairs", () => {
     const events: GitHubEvent[] = [
-      { id: "e1", name: "check_run", payload: { action: "completed" } },
+      { id: "e1", name: "issue_comment", payload: { action: "created" } },
       { id: "e2", name: "check_suite", payload: { action: "completed" } },
     ];
     const result = fmtEventList(events);
-    expect(result).toContain("check_run/completed");
+    expect(result).toContain("issue_comment/created");
     expect(result).toContain("check_suite/completed");
   });
 });
@@ -230,6 +210,14 @@ describe("resolveEventTemplate", () => {
     expect(resolveEventTemplate(table, "delete", evt)).toBe("fallback: delete");
   });
 
+  it("returns empty string when key not in table and no _default", () => {
+    const table: EventTemplateFmtTable = {
+      push: () => "pushed!",
+    };
+    const evt: GitHubEvent = { id: "e1", name: "unknown", payload: {} };
+    expect(resolveEventTemplate(table, "unknown", evt)).toBe("");
+  });
+
   it("passes payload as first argument to formatter", () => {
     const table: EventTemplateFmtTable = {
       push: (p) => `ref: ${p.ref}`,
@@ -240,20 +228,6 @@ describe("resolveEventTemplate", () => {
 });
 
 describe("EVENT_FMT table", () => {
-  it("check_run action_required triggers failure message", () => {
-    const evt: GitHubEvent = {
-      id: "e1",
-      name: "check_run",
-      payload: {
-        check_run: { name: "lint", conclusion: "action_required", output: { summary: "Action needed" } },
-      },
-    };
-    const result = EVENT_FMT.check_run(evt.payload, evt);
-    expect(result).toContain("lint");
-    expect(result).toContain("action_required");
-    expect(result).toContain("Action needed");
-  });
-
   it("check_suite action_required triggers failure message", () => {
     const evt: GitHubEvent = {
       id: "e1",
@@ -265,9 +239,34 @@ describe("EVENT_FMT table", () => {
     expect(result).toContain("failing checks");
   });
 
-  it("_default includes event name", () => {
-    const evt: GitHubEvent = { id: "e1", name: "workflow_run", payload: {} };
-    const result = EVENT_FMT._default(evt.payload, evt);
-    expect(result).toContain("workflow_run");
+  it("check_suite/completed success — prompts to verify merge-readiness", () => {
+    const evt: GitHubEvent = {
+      id: "e1",
+      name: "check_suite",
+      payload: { check_suite: { conclusion: "success" } },
+    };
+    const result = EVENT_FMT.check_suite(evt.payload, evt);
+    expect(result).toContain("success");
+  });
+
+  it("pull_request/closed merged — instructs cleanup", () => {
+    const evt: GitHubEvent = {
+      id: "e1",
+      name: "pull_request",
+      payload: { action: "closed", pull_request: { number: 5, merged: true } },
+    };
+    const result = EVENT_FMT.pull_request(evt.payload, evt);
+    expect(result).toContain("merged");
+    expect(result).toContain("PR #5");
+  });
+
+  it("pull_request/closed not merged — asks how to proceed", () => {
+    const evt: GitHubEvent = {
+      id: "e1",
+      name: "pull_request",
+      payload: { action: "closed", pull_request: { number: 7, merged: false } },
+    };
+    const result = EVENT_FMT.pull_request(evt.payload, evt);
+    expect(result).toContain("closed without merging");
   });
 });

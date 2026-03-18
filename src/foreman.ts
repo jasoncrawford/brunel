@@ -323,6 +323,9 @@ export function createForemanWss(
       const prNumber = typeof pr?.number === "number" ? pr.number : null;
       if (prNumber === null) return;
 
+      // Drop synchronize events — the worker pushed these commits itself.
+      if (p.action === "synchronize") return;
+
       // When a PR is opened, register it against a task if the body links an issue.
       // The worker opened the PR itself, so don't forward this event back to it.
       if (p.action === "opened" && pr) {

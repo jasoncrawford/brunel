@@ -6,6 +6,31 @@ import { buildInitialPrompt, buildEventPrompt, fmtEventList } from "./templates.
 import { ask, listWorkerCommandNames, dispatchInput } from "./input.js";
 import type { ForemanMessage, GitHubEvent, TaskIssue } from "./types.js";
 
+// ── Event classification ───────────────────────────────────────────────────────
+
+export function classifyEvent(event: GitHubEvent): "actionable" | "log_only" {
+  const action = event.payload["action"] as string | undefined;
+
+  switch (event.name) {
+    case "check_run":
+      return "log_only";
+
+    case "check_suite":
+      return action === "completed" ? "actionable" : "log_only";
+
+    case "pull_request":
+      return action === "closed" ? "actionable" : "log_only";
+
+    case "pull_request_review":
+    case "pull_request_review_comment":
+    case "issue_comment":
+      return "actionable";
+
+    default:
+      return "log_only";
+  }
+}
+
 // ── WorkerSession ─────────────────────────────────────────────────────────────
 
 export type WsFactory = (workerId: string, taskId?: string) => WebSocket;
@@ -27,6 +52,8 @@ export class WorkerSession {
   private ws: WebSocket | undefined;
   private resolveWsInput: ((v: string) => void) | null = null;
   private isRunningQuery = false;
+  private debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly DEBOUNCE_MS = 3000;
 
   constructor(
     private workerId: string,
@@ -113,17 +140,39 @@ export class WorkerSession {
       this.display.print(display.c.amber(initialPrompt));
       void this.runQueryLoop(initialPrompt);
     } else if (msg.type === "event_notification") {
+      const classification = classifyEvent(msg.event);
+      if (classification === "log_only") {
+        // Already logged via printForemanMessage above; no further action.
+        return;
+      }
+
+      // Actionable event: queue it and schedule dispatch.
       this.pendingEvents.push(msg.event);
       this.resolveWsInput?.(WS_EVENT);
       this.resolveWsInput = null;
+
       if (!this.isRunningQuery && this.currentTaskId && this.currentIssue) {
-        const events = this.pendingEvents.splice(0);
-        void this.runQueryLoop(this.buildAndLogEventPrompt(events));
+        // No query running: start/reset debounce timer to batch rapid events.
+        if (this.debounceTimer) clearTimeout(this.debounceTimer);
+        this.debounceTimer = setTimeout(() => {
+          this.debounceTimer = null;
+          if (!this.isRunningQuery && this.currentTaskId && this.currentIssue) {
+            const events = this.pendingEvents.splice(0);
+            void this.runQueryLoop(this.buildAndLogEventPrompt(events));
+          }
+        }, this.DEBOUNCE_MS);
       }
+      // If a query IS running, events drain at the end of runQueryLoop.
     }
   }
 
   private async runQueryLoop(initialPrompt: string): Promise<void> {
+    // Cancel any pending debounce — events will drain naturally at the end of this loop.
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
+    }
+
     this.isRunningQuery = true;
     try {
       this.currentSessionId = await this.runQuery(initialPrompt, this.currentSessionId) ?? this.currentSessionId;
