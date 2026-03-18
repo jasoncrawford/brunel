@@ -260,6 +260,16 @@ describe("EVENT_FMT table", () => {
     expect(result).toContain("PR #5");
   });
 
+  it("pull_request/closed — instructs worker to clean up its worktree", () => {
+    const evt: GitHubEvent = {
+      id: "e1",
+      name: "pull_request",
+      payload: { action: "closed", pull_request: { number: 5, merged: true } },
+    };
+    const result = EVENT_FMT.pull_request(evt.payload, evt);
+    expect(result).toContain("worktree");
+  });
+
   it("pull_request/closed not merged — asks how to proceed", () => {
     const evt: GitHubEvent = {
       id: "e1",
