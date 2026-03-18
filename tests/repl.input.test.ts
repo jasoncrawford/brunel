@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PassThrough } from "stream";
 import { ask } from "../src/input.js";
+import * as display from "../src/display.js";
 
 function makeStdin() {
   const stream = new PassThrough();
@@ -434,5 +435,31 @@ describe("ask() - submit output", () => {
     const writes = writeSpy.mock.calls.map((c) => String(c[0]));
     // The suggestion-row clear must NOT include a trailing \r\n
     expect(writes).not.toContain("\r\n\x1b[K\r\n");
+  });
+});
+
+describe("ask() - drawFresh after print()", () => {
+  it("print() while ask() is running does not add a blank line before the redrawn prompt", async () => {
+    const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await withFakeStdin(async (stdin) => {
+      const p = ask("> ", () => []);
+
+      // Simulate display.print() being called (e.g., an event notification arriving)
+      display.print("  Event received: some_event");
+
+      // The drawFresh callback redraws the prompt. Collect all write calls made
+      // during/after the print.
+      const writes = writeSpy.mock.calls.map((c) => String(c[0]));
+
+      // drawFresh should NOT write \r\n before the prompt — that creates a blank
+      // line between the event text and the redrawn prompt (issue #132).
+      const hasLeadingBlankLine = writes.some((w) => w.startsWith("\r\n"));
+      expect(hasLeadingBlankLine).toBe(false);
+
+      stdin.push("\r");
+      await p;
+    });
   });
 });

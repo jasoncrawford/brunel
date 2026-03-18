@@ -277,10 +277,11 @@ describe("display.print() callback for ask() redraw", () => {
       // Simulate display.print() being called while ask() is running
       display.print("  Connected to foreman.");
 
-      // The prompt should be redrawn after print
+      // The prompt should be redrawn after print, starting with \r (not \r\n —
+      // console.log already moved to a new line, so no extra blank line needed)
       const output = collectOutput(writeSpy);
       // Should write the prompt again (either "> " or the buffer)
-      expect(output).toMatch(/\r\n.*>/);
+      expect(output).toMatch(/\r.*>/);
 
       stdin.push("\r");
       expect(await p).toBe("hello");
