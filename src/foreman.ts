@@ -429,11 +429,72 @@ export function createForemanWss(
           labels,
           repoUrl,
         });
+        // Track open state for newly-enqueued brunel:ready issues
+        openIssues.add(issueNumber);
         flog(`[task #${issueNumber}] enqueued via ${name}/${action}`);
         task = taskQueue.getTaskForIssue(issueNumber)!;
-        const idle = registry.getIdleWorker();
-        if (idle) tryAssignWork(idle.workerId);
+
+        // Fetch deps before assigning (graph must be current)
+        fetchBlockers(issueNumber, String(issue.body ?? ""))
+          .then((blockers) => {
+            setBlockers(issueNumber, blockers, graph);
+            return blockers.length > 0 ? fetchIssueStates(blockers) : Promise.resolve(new Map<number, "open" | "closed">());
+          })
+          .then((states) => {
+            for (const [num, state] of states) {
+              if (state === "open") openIssues.add(num);
+            }
+            // Only one task was just enqueued, so assigning one idle worker is sufficient.
+            const idle = registry.getIdleWorker();
+            if (idle) tryAssignWork(idle.workerId);
+          })
+          .catch((err) => flog(`ERROR fetching deps for #${issueNumber}: ${err}`));
         return;
+      }
+    }
+
+    // ── Dependency graph updates ───────────────────────────────────────────────
+
+    if (name === "issues" && issue) {
+      const action = p.action as string | undefined;
+
+      if (action === "closed") {
+        openIssues.delete(issueNumber);
+        for (const w of registry.getIdleWorkers()) {
+          tryAssignWork(w.workerId);
+        }
+        return;
+      }
+
+      if (action === "reopened") {
+        openIssues.add(issueNumber);
+        return;
+      }
+
+      if (action === "edited") {
+        const changes = p.changes as Record<string, unknown> | undefined;
+        if (changes?.body) {
+          const body = String(issue.body ?? "");
+          fetchBlockers(issueNumber, body)
+            .then((blockers) => {
+              setBlockers(issueNumber, blockers, graph);
+              return fetchIssueStates(blockers);
+            })
+            .then((states) => {
+              for (const [num, state] of states) {
+                // Only update state for the newly-fetched blockers of this issue.
+                // openIssues may contain entries from other tasks; we only touch
+                // what fetchIssueStates returned, so other tasks' blockers are unaffected.
+                if (state === "open") openIssues.add(num);
+                else openIssues.delete(num);
+              }
+              for (const w of registry.getIdleWorkers()) {
+                tryAssignWork(w.workerId);
+              }
+            })
+            .catch((err) => flog(`ERROR updating deps for #${issueNumber}: ${err}`));
+        }
+        // fall through: let existing forwardEvent logic run for assigned tasks
       }
     }
 
