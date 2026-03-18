@@ -68,6 +68,21 @@ describe("buildInitialPrompt", () => {
     expect(p).toContain("help wanted");
     expect(p).toContain("brunel:ready");
   });
+
+  describe("diagnostic logging", () => {
+    it("logs the built prompt to console", () => {
+      const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const prompt = buildInitialPrompt({
+        number: 42,
+        title: "Fix bug",
+        body: "It crashes",
+        labels: ["bug"],
+        repoUrl: "https://github.com/x/y",
+      });
+      const calls = consoleSpy.mock.calls.map(args => String(args[0]));
+      expect(calls.some(s => s.includes(prompt))).toBe(true);
+    });
+  });
 });
 
 describe("buildEventPrompt", () => {

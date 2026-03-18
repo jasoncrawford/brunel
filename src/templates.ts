@@ -2,7 +2,7 @@ import type { GitHubEvent, TaskIssue } from "./types.js";
 import { print, c } from "./display.js";
 
 export function buildInitialPrompt(issue: TaskIssue): string {
-  return `Please work on GitHub issue #${issue.number}: "${issue.title}" in ${issue.repoUrl}.
+  const prompt = `Please work on GitHub issue #${issue.number}: "${issue.title}" in ${issue.repoUrl}.
 
 Issue description:
 ${issue.body || "(no description)"}
@@ -19,6 +19,9 @@ Remember key practices:
 4. Create a PR when done, and include the text "Closes #${issue.number}".
 
 Do not work on any other issues: leave task assignment to the foreman. Do not merge any PRs or set them to auto-merge: leave merging to the user after UAT.`;
+
+  print(c.amber(prompt));
+  return prompt;
 }
 
 export function buildEventPrompt(events: GitHubEvent[]): string {
