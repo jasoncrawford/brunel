@@ -53,7 +53,7 @@ export class WorkerSession {
   private resolveWsInput: ((v: string) => void) | null = null;
   private isRunningQuery = false;
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
-  private readonly DEBOUNCE_MS = 5000;
+  private readonly DEBOUNCE_MS = 3000;
 
   constructor(
     private workerId: string,
