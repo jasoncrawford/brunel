@@ -1,0 +1,44 @@
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+/** Maps an issue number to the set of issue numbers that block it. */
+export type DependencyGraph = Map<number, Set<number>>;
+
+// ── Pure graph utilities ──────────────────────────────────────────────────────
+
+/**
+ * Parse "Depends on #N" / "Blocked by #N" lines from an issue body.
+ * Returns a deduplicated list of blocker issue numbers.
+ */
+export function parseBodyBlockers(body: string): number[] {
+  const pattern = /(?:^|\s)(?:depends\s+on|blocked\s+by)\s+#(\d+)/gi;
+  const numbers = new Set<number>();
+  let m: RegExpExecArray | null;
+  while ((m = pattern.exec(body)) !== null) {
+    numbers.add(parseInt(m[1], 10));
+  }
+  return Array.from(numbers);
+}
+
+/**
+ * Overwrite the blocker set for `issueNumber` in `graph`.
+ * Passing an empty array clears the entry.
+ */
+export function setBlockers(issueNumber: number, blockers: number[], graph: DependencyGraph): void {
+  graph.set(issueNumber, new Set(blockers));
+}
+
+/**
+ * Returns true if any blocker for `issueNumber` is present in `openIssues`.
+ */
+export function isBlocked(
+  issueNumber: number,
+  graph: DependencyGraph,
+  openIssues: Set<number>,
+): boolean {
+  const blockers = graph.get(issueNumber);
+  if (!blockers || blockers.size === 0) return false;
+  for (const b of blockers) {
+    if (openIssues.has(b)) return true;
+  }
+  return false;
+}
