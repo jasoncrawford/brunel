@@ -289,6 +289,61 @@ describe("createWsInputPromise", () => {
   });
 });
 
+// ── waitUntilIdle ─────────────────────────────────────────────────────────────
+
+describe("waitUntilIdle", () => {
+  it("resolves immediately when no query is running", async () => {
+    // No task assigned — not running a query
+    const result = await Promise.race([
+      session.waitUntilIdle().then(() => "idle"),
+      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
+    ]);
+    expect(result).toBe("idle");
+  });
+
+  it("waits until runQuery completes when a query is running", async () => {
+    let resolveQuery!: (v: string | undefined) => void;
+    runQuery.mockReturnValueOnce(new Promise<string | undefined>((r) => { resolveQuery = r; }));
+
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "1", issue: makeIssue() });
+    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+
+    // waitUntilIdle should not resolve while query is running
+    const idlePromise = session.waitUntilIdle();
+    const raceResult1 = await Promise.race([
+      idlePromise.then(() => "idle"),
+      new Promise<"pending">((r) => setTimeout(() => r("pending"), 20)),
+    ]);
+    expect(raceResult1).toBe("pending");
+
+    // Resolve the query
+    resolveQuery("session-done");
+
+    // Now waitUntilIdle should resolve
+    const raceResult2 = await Promise.race([
+      idlePromise.then(() => "idle"),
+      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 100)),
+    ]);
+    expect(raceResult2).toBe("idle");
+  });
+
+  it("multiple waitUntilIdle callers all resolve when query completes", async () => {
+    let resolveQuery!: (v: string | undefined) => void;
+    runQuery.mockReturnValueOnce(new Promise<string | undefined>((r) => { resolveQuery = r; }));
+
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "1", issue: makeIssue() });
+    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+
+    const p1 = session.waitUntilIdle();
+    const p2 = session.waitUntilIdle();
+
+    resolveQuery("session-done");
+
+    await expect(p1).resolves.toBeUndefined();
+    await expect(p2).resolves.toBeUndefined();
+  });
+});
+
 // ── classifyEvent ─────────────────────────────────────────────────────────────
 
 describe("classifyEvent", () => {
