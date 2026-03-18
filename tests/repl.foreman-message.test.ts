@@ -132,8 +132,8 @@ describe("printForemanMessage", () => {
 });
 
 describe("printForemanMessage - _default", () => {
-  it("unknown type prints foreman/<type>", () => {
+  it("unknown type prints <type>", () => {
     const output = captureOutput(() => printForemanMessage({ type: "unknown_future_type" } as any));
-    expect(stripAnsi(output)).toContain("foreman/unknown_future_type");
+    expect(stripAnsi(output)).toContain("unknown_future_type");
   });
 });
