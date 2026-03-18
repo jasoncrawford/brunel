@@ -185,6 +185,55 @@ export function matchCommands(prefix: string, commands: string[]): string[] {
   return commands.filter(cmd => cmd.startsWith(prefix));
 }
 
+/** A command name paired with a display description for autocomplete. */
+export type CommandSuggestion = { name: string; description: string };
+
+/**
+ * Extract the best one-line description from file content.
+ * Uses `description` frontmatter if present; otherwise the first non-empty
+ * line of the body (after the frontmatter block).
+ */
+function extractDescription(content: string): string {
+  const fm = parseFrontmatter(content);
+  if (fm.description) return fm.description;
+  const body = content.replace(/^---\n[\s\S]*?\n---\n?/, "");
+  for (const line of body.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed) return trimmed;
+  }
+  return "";
+}
+
+/**
+ * Like listCommandNames but returns CommandSuggestion objects that include a
+ * one-line description for each command (sourced from frontmatter or first
+ * line of the command file / skill).
+ */
+export function listCommands(
+  listDir: ListDir = defaultListDir,
+  readFile: (path: string) => string | null = defaultReadFile,
+  workerMode = false,
+): CommandSuggestion[] {
+  const names = listCommandNames(listDir, readFile, workerMode);
+  return names.map(name => {
+    const isBuiltin = BUILTIN_COMMANDS.some(c => c.name === name);
+    if (isBuiltin) return { name, description: "" };
+    const content = resolveContent(name, readFile);
+    return { name, description: content ? extractDescription(content) : "" };
+  });
+}
+
+/**
+ * listCommands for worker mode (includes worker-only builtins such as
+ * "task-complete").
+ */
+export function listWorkerCommands(
+  listDir: ListDir = defaultListDir,
+  readFile: (path: string) => string | null = defaultReadFile,
+): CommandSuggestion[] {
+  return listCommands(listDir, readFile, true);
+}
+
 export type ListDir = (dir: string) => Array<{ name: string; isDir: boolean }> | null;
 
 function walkDir(dir: string, prefix: string, listDir: ListDir): string[] {
@@ -312,7 +361,7 @@ export function listSkillNames(
 
 export function ask(
   promptStr: string,
-  getCommands: () => string[] = () => listCommandNames(),
+  getCommands: () => CommandSuggestion[] = () => listCommands(),
   abort?: Promise<string>,
 ): Promise<string> {
   return new Promise((resolve) => {
@@ -324,7 +373,7 @@ export function ask(
     const promptVisualLen = promptStr.slice(promptStr.lastIndexOf("\n") + 1).length;
     // Visual part of prompt string used when redrawing
     const promptLine = promptStr.slice(promptStr.lastIndexOf("\n") + 1);
-    let commands: string[] = [];
+    let commands: CommandSuggestion[] = [];
     try { commands = getCommands(); } catch { /* graceful: use empty */ }
 
     let cursor = 0; // current cursor position within buffer
@@ -361,7 +410,29 @@ export function ask(
     // sits (must be computed from the OLD buffer/cursor BEFORE any mutation).
     // After the redraw the terminal cursor is positioned at the current `cursor`.
 
-    function fullRedraw(prevRow: number, suggestions: string[]) {
+    // ── Suggestion rendering ─────────────────────────────────────────────────
+    //
+    // Each suggestion is rendered on its own line. Command names are padded so
+    // descriptions start at the same column across all visible suggestions.
+
+    function renderSuggestions(suggestions: CommandSuggestion[]): string[] {
+      if (suggestions.length === 0) return [];
+      const cols = process.stdout.columns || 80;
+      const maxNameLen = Math.max(...suggestions.map(s => s.name.length));
+      return suggestions.map(s => {
+        const prefix = "  /" + s.name.padEnd(maxNameLen + 2);
+        const remaining = cols - prefix.length;
+        let desc = s.description;
+        if (remaining > 3 && desc) {
+          if (desc.length > remaining) desc = desc.slice(0, remaining - 1) + "…";
+        } else {
+          desc = "";
+        }
+        return display.c.darkGray(prefix + desc);
+      });
+    }
+
+    function fullRedraw(prevRow: number, suggestions: CommandSuggestion[]) {
       // 1. Move to start of prompt (row 0, col 0)
       if (prevRow > 0) process.stdout.write(`\x1b[${prevRow}A`);
       process.stdout.write("\r");
@@ -372,25 +443,30 @@ export function ask(
 
       const { row: endRow } = screenPosOf(buffer.length);
 
-      // 3. Clear to end of last buffer line, then write suggestion row
-      process.stdout.write("\x1b[K\r\n\x1b[K");
-      if (suggestions.length > 0) {
-        process.stdout.write(display.c.darkGray("  " + suggestions.map(m => "/" + m).join("  ")));
+      // 3. Clear to end of last buffer line, then write suggestion rows.
+      // The buffer-line clear and the first newline are combined into one write
+      // so that no individual write call starts with \r\n.
+      const sugLines = renderSuggestions(suggestions);
+      const firstSugLine = sugLines.length > 0 ? sugLines[0] : "";
+      process.stdout.write("\x1b[K\r\n\x1b[K" + firstSugLine);
+      for (let i = 1; i < sugLines.length; i++) {
+        process.stdout.write("\r\n\x1b[K" + sugLines[i]);
       }
 
-      const sugRow = endRow + 1;
+      const sugLastRow = endRow + Math.max(1, sugLines.length);
 
-      // 4. Clear any extra rows left over from a previously longer buffer
-      for (let r = sugRow; r < totalDrawnRows; r++) {
+      // 4. Clear any extra rows left over from a previously longer buffer or
+      //    more suggestions
+      for (let r = sugLastRow; r < totalDrawnRows; r++) {
         process.stdout.write("\r\n\x1b[K");
       }
-      if (totalDrawnRows > sugRow) {
-        process.stdout.write(`\x1b[${totalDrawnRows - sugRow}A`);
+      if (totalDrawnRows > sugLastRow) {
+        process.stdout.write(`\x1b[${totalDrawnRows - sugLastRow}A`);
       }
-      totalDrawnRows = sugRow;
+      totalDrawnRows = sugLastRow;
 
-      // 5. Go from suggestion row back to prompt row 0
-      process.stdout.write(`\x1b[${sugRow}A\r`);
+      // 5. Go from last suggestion row back to prompt row 0
+      process.stdout.write(`\x1b[${sugLastRow}A\r`);
 
       // 6. Navigate to current cursor position
       const { row: targetRow, col: targetCol } = screenPosOf(cursor);
@@ -415,16 +491,18 @@ export function ask(
 
       const { row: endRow } = screenPosOf(buffer.length);
 
-      process.stdout.write("\x1b[K\r\n\x1b[K");
       const matches = computeMatches();
-      if (matches.length > 0) {
-        process.stdout.write(display.c.darkGray("  " + matches.map(m => "/" + m).join("  ")));
+      const sugLines = renderSuggestions(matches);
+      const firstSugLine = sugLines.length > 0 ? sugLines[0] : "";
+      process.stdout.write("\x1b[K\r\n\x1b[K" + firstSugLine);
+      for (let i = 1; i < sugLines.length; i++) {
+        process.stdout.write("\r\n\x1b[K" + sugLines[i]);
       }
 
-      const sugRow = endRow + 1;
-      totalDrawnRows = sugRow;
+      const sugLastRow = endRow + Math.max(1, sugLines.length);
+      totalDrawnRows = sugLastRow;
 
-      process.stdout.write(`\x1b[${sugRow}A\r`);
+      process.stdout.write(`\x1b[${sugLastRow}A\r`);
 
       const { row: targetRow, col: targetCol } = screenPosOf(cursor);
       if (targetRow > 0) process.stdout.write(`\x1b[${targetRow}B`);
@@ -455,16 +533,18 @@ export function ask(
     function submit(value: string) {
       if (done) return;
       done = true;
-      // Navigate to end of buffer then clear the suggestion row. Stop there —
-      // no trailing \r\n. The cleared suggestion row becomes the separator line
+      // Navigate to end of buffer then clear the suggestion area. Stop there —
+      // no trailing \r\n. The first cleared row becomes the separator line
       // that _clearStatus() erases before the first print(), so query output
       // starts exactly one blank line below the input (not two).
+      // \x1b[J erases from the cursor to the end of the screen, clearing all
+      // suggestion rows regardless of how many there are.
       const { row: curRow } = screenPosOf(cursor);
       const { row: endRow } = screenPosOf(buffer.length);
       const rowDiff = endRow - curRow;
       if (rowDiff > 0) process.stdout.write(`\x1b[${rowDiff}B`);
       else if (rowDiff < 0) process.stdout.write(`\x1b[${-rowDiff}A`);
-      process.stdout.write("\r\n\x1b[K");
+      process.stdout.write("\r\n\x1b[J");
       cleanup();
       resolve(value.trim());
     }
@@ -479,12 +559,12 @@ export function ask(
 
     // ── Autocomplete ────────────────────────────────────────────────────────
 
-    function computeMatches(): string[] {
+    function computeMatches(): CommandSuggestion[] {
       if (!buffer.startsWith("/")) return [];
       if (buffer.slice(1).includes(" ")) return [];
       const prefix = buffer.slice(1).split(/\s+/)[0];
-      // prefix is "" when buffer is exactly "/" — matchCommands("", ...) returns all
-      return matchCommands(prefix, commands).slice(0, 3);
+      // prefix is "" when buffer is exactly "/" — filter("", ...) returns all
+      return commands.filter(c => c.name.startsWith(prefix)).slice(0, 5);
     }
 
     // ── Editing operations (all use fullRedraw) ──────────────────────────────
@@ -606,7 +686,7 @@ export function ask(
         const code = ch.charCodeAt(0);
         if (ch === "\r" || ch === "\n") {
           const matches = computeMatches();
-          if (matches.length > 0) { replaceBuffer("/" + matches[0]); }
+          if (matches.length > 0) { replaceBuffer("/" + matches[0].name); }
           submit(buffer);
           return;
         }
@@ -626,7 +706,7 @@ export function ask(
         else if (ch === "\x1f")                       { moveTo(cursor + 1); }    // →
         else if (ch === "\x09") {                                                 // Tab
           const matches = computeMatches();
-          if (matches.length > 0) { replaceBuffer("/" + matches[0] + " "); }
+          if (matches.length > 0) { replaceBuffer("/" + matches[0].name + " "); }
         }
         else if (code >= 32)                          { insert(ch); }
       }
