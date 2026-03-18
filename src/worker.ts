@@ -54,6 +54,7 @@ export class WorkerSession {
   private isRunningQuery = false;
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly DEBOUNCE_MS = 3000;
+  private queryDoneResolvers: Array<() => void> = [];
 
   constructor(
     private workerId: string,
@@ -74,6 +75,19 @@ export class WorkerSession {
     return new Promise<string>((resolve) => {
       this.resolveWsInput = resolve;
     });
+  }
+
+  /**
+   * Resolves when no query is currently running. If a query is already
+   * running, waits until runQueryLoop completes (including any pending
+   * events it drains). Multiple concurrent callers are all notified.
+   */
+  async waitUntilIdle(): Promise<void> {
+    while (this.isRunningQuery) {
+      await new Promise<void>((resolve) => {
+        this.queryDoneResolvers.push(resolve);
+      });
+    }
   }
 
   /**
@@ -104,6 +118,11 @@ export class WorkerSession {
   }
 
   // ── Private ───────────────────────────────────────────────────────────────
+
+  private notifyQueryDone(): void {
+    const resolvers = this.queryDoneResolvers.splice(0);
+    for (const r of resolvers) r();
+  }
 
   private connect(): void {
     const ws = this.wsFactory(this.workerId, this.currentTaskId);
@@ -190,6 +209,8 @@ export class WorkerSession {
         this.isRunningQuery = false;
       }
     }
+
+    this.notifyQueryDone();
   }
 
   private buildAndLogEventPrompt(events: GitHubEvent[]): string {
@@ -263,9 +284,27 @@ export async function workerMain(runQueryFn: RunQuery): Promise<void> {
 
   session.start();
 
+  // Start with no visible prompt: the worker is waiting for the foreman to
+  // assign a task and is not in a mode that accepts interactive user input.
+  // The prompt becomes visible after the first task query completes.
+  let showPrompt = false;
+
   while (true) {
     const wsAbort = session.createWsInputPromise();
-    const input = await ask("\n[worker] > ", listWorkerCommandNames, wsAbort);
+    // Use an empty prompt string when not ready for interactive input.  An
+    // empty promptLine suppresses the drawFresh callback so incoming messages
+    // are printed cleanly without a prompt preceding or following them.
+    const promptStr = showPrompt ? "\n[worker] > " : "";
+    const input = await ask(promptStr, listWorkerCommandNames, wsAbort);
+
+    const isSentinel = input === WS_TASK_ASSIGNED || input === WS_EVENT;
+    if (isSentinel) {
+      // A WS message arrived. Hide the prompt and wait for the triggered
+      // query to finish before showing it again.
+      showPrompt = false;
+      await session.waitUntilIdle();
+      showPrompt = true;
+    }
 
     try {
       const result = await session.handleUserInput(input);

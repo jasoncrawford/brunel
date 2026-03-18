@@ -415,6 +415,10 @@ export function stopStatus() {
 export function print(line: string | null) {
   if (line === null) return;
   _clearStatus();
+  // If ask() is waiting with a visible prompt, erase the prompt line before
+  // printing so the message appears on a clean line (not appended to the
+  // prompt). The prompt is then redrawn below via _inputPrintCallback.
+  if (_inputPrintCallback) process.stdout.write("\r\x1b[K");
   console.log(line);
   _drawStatus();
   // Only redraw the input prompt when no query is running. During a query the

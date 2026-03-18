@@ -430,8 +430,11 @@ export function ask(
       if (targetCol > 0) process.stdout.write(`\x1b[${targetCol}C`);
     }
 
-    // Register the fresh-redraw hook so display.print() can notify us
-    display.setInputPrintCallback(drawFresh);
+    // Register the fresh-redraw hook so display.print() can notify us.
+    // Only register when there is a visible prompt to redraw — an empty prompt
+    // string means the caller doesn't want any prompt shown (e.g. worker
+    // standby mode), so no redraw is needed and no line-clear should fire.
+    if (promptLine) display.setInputPrintCallback(drawFresh);
 
     if (abort) {
       void abort.then((value) => {

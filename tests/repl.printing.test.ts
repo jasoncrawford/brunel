@@ -9,6 +9,7 @@ import {
   toolUseNames,
   setVerbose,
   _statusActive,
+  setInputPrintCallback,
 } from "../src/display.js";
 
 function captureOutput(fn: () => void): string {
@@ -328,6 +329,30 @@ describe("print()", () => {
       print("hello");
     });
     expect(stripAnsi(output)).toContain("hello");
+  });
+
+  it("print(text) with inputPrintCallback set: clears current line before logging", () => {
+    const cb = vi.fn();
+    setInputPrintCallback(cb);
+    try {
+      const output = captureOutput(() => {
+        print("hello");
+      });
+      // \r\x1b[K (CR + clear to end of line) must appear BEFORE the logged text
+      const clearIdx = output.indexOf("\r\x1b[K");
+      const helloIdx = output.indexOf("hello");
+      expect(clearIdx).toBeGreaterThan(-1);
+      expect(helloIdx).toBeGreaterThan(clearIdx);
+    } finally {
+      setInputPrintCallback(null);
+    }
+  });
+
+  it("print(text) while inactive (no callback): does NOT write \\r\\x1b[K", () => {
+    const output = captureOutput(() => {
+      print("hello");
+    });
+    expect(output).not.toContain("\r\x1b[K");
   });
 });
 
