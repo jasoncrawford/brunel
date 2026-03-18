@@ -138,7 +138,7 @@ describe("buildEventPrompt", () => {
   });
 
   describe("pull_request/closed", () => {
-    it("merged PR — instructs to delete branch, verify issue closed, remove worktree", () => {
+    it("merged PR — includes PR number and 'merged'", () => {
       const evt: GitHubEvent = {
         id: "e1",
         name: "pull_request",
@@ -148,13 +148,11 @@ describe("buildEventPrompt", () => {
         },
       };
       const p = buildEventPrompt([evt]);
-      expect(p).toContain("merged");
       expect(p).toContain("PR #10");
-      expect(p).toContain("Delete");
-      expect(p).toContain("worktree");
+      expect(p).toContain("merged");
     });
 
-    it("closed-without-merge PR — asks user how to proceed", () => {
+    it("closed-without-merge PR — includes PR number and 'closed without merging'", () => {
       const evt: GitHubEvent = {
         id: "e1",
         name: "pull_request",
