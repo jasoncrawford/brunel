@@ -149,6 +149,12 @@ export function fmtEventDetails(event: GitHubEvent): string {
   }
 }
 
+export function fmtEvent(event: GitHubEvent): string {
+  const nameAction = `${event.name}${event.payload["action"] ? `/${event.payload["action"]}` : ""}`;
+  const details = fmtEventDetails(event);
+  return `${nameAction}${details ? ` — ${details}` : ""}`;
+}
+
 export function fmtDuration(secs: number): string {
   if (secs < 60) return `${secs}s`;
   const m = Math.floor(secs / 60);
@@ -379,7 +385,7 @@ export const TOOL_RESULT_FMT: FmtTable = {
   _default:   (b) => c.darkGray(`→ ${trunc(toolResultText(b), 100)}`),
   Read:       (b) => c.darkGray(`→ ${fmtCount(toolResultText(b).split("\n").length, "line")}`),
   Edit:       (b) => fmtEditResult(b),
-  Skill:      (_b) => c.darkGray(`→ Success`),
+  Skill:      (b) => c.darkGray(`→ Loaded skill`),
   Bash:       (b) => c.darkGray(`→ ${fmtBashOutput(toolResultText(b))}`),
   Write:      (b) => c.darkGray(`→ ${fmtWriteOutput(b)}`),
   ToolSearch: (b) => c.darkGray(`→ ${fmtToolSearchOutput(b.content)}`),
@@ -405,16 +411,11 @@ export const MESSAGE_FMT: FmtTable = {
   _default:         (m) => c.darkGray(`msg: ${m.type}`),
 };
 
-
 export const FOREMAN_MESSAGE_FMT: FmtTable = {
-  task_assigned:      (m) => c.lavender(`  Task assigned: #${m.issue.number} — ${m.issue.title}`),
-  event_notification: (m) => {
-    const nameAction = `${m.event.name}${m.event.payload["action"] ? `/${m.event.payload["action"]}` : ""}`;
-    const details = fmtEventDetails(m.event as GitHubEvent);
-    return c.darkGray(`  Event received [${fmtTime()}]: ${nameAction}${details ? ` — ${details}` : ""}`);
-  },
-  standby:            (_m) => c.darkGray("  Standby — waiting for tasks..."),
-  _default:           (m) => c.darkGray(`  foreman/${m.type}`),
+  task_assigned:      (m) => c.lavender(`Task assigned: #${m.issue.number}, ${m.issue.title}`),
+  event_notification: (m) => c.darkGray(`Event received [${fmtTime()}]: ${fmtEvent(m.event as GitHubEvent)}`),
+  standby:            (m) => c.darkGray("Standby: waiting for tasks..."),
+  _default:           (m) => c.darkGray(`Unknown foreman message: ${m.type}`),
 };
 
 // ── Printing engine ───────────────────────────────────────────────────────────

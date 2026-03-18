@@ -221,7 +221,7 @@ describe("TOOL_RESULT_FMT", () => {
 
   it("Skill: shows → Success", () => {
     const raw = resolve(TOOL_RESULT_FMT, "Skill", { content: "Base directory for this skill: /some/path\n..." })!;
-    expect(stripAnsi(raw)).toBe("→ Success");
+    expect(stripAnsi(raw)).toBe("→ Loaded skill");
   });
 
   it("Bash: empty result → → Success", () => {
