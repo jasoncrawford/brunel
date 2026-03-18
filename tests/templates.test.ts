@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildInitialPrompt, buildEventPrompt, fmtEventList, resolveEventTemplate, EVENT_FMT, type EventTemplateFmtTable } from "../src/templates.js";
+import { buildInitialPrompt, buildEventPrompt, fmtEventList, resolveEventTemplate, coalesceEvents, EVENT_FMT, type EventTemplateFmtTable } from "../src/templates.js";
 import type { GitHubEvent } from "../src/types.js";
 
 describe("buildInitialPrompt", () => {
@@ -76,14 +76,12 @@ describe("buildEventPrompt", () => {
     expect(p).toContain("Multiple events");
   });
 
-  it("lists event names in multi-event fallback", () => {
+  it("renders individual event prompts — no raw template literals", () => {
     const events: GitHubEvent[] = [
       { id: "e1", name: "issue_comment", payload: {} },
       { id: "e2", name: "pull_request_review", payload: {} },
     ];
     const p = buildEventPrompt(events);
-    expect(p).toContain("issue_comment");
-    expect(p).toContain("pull_request_review");
     expect(p).not.toContain("${");
   });
 
@@ -278,5 +276,207 @@ describe("EVENT_FMT table", () => {
     };
     const result = EVENT_FMT.pull_request(evt.payload, evt);
     expect(result).toContain("closed without merging");
+  });
+});
+
+describe("coalesceEvents", () => {
+  it("multiple failing check suites → one _check_suites event with status: failed listing only failed names", () => {
+    const events: GitHubEvent[] = [
+      { id: "e1", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "failure", name: "CI / test" } } },
+      { id: "e2", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "failure", name: "CI / lint" } } },
+    ];
+    const result = coalesceEvents(events);
+    expect(result).toHaveLength(1);
+    expect(result[0].name).toBe("_check_suites");
+    expect(result[0].payload.status).toBe("failed");
+    expect(result[0].payload.failed).toEqual(["CI / test", "CI / lint"]);
+    expect(result[0].payload.succeeded).toEqual([]);
+  });
+
+  it("multiple passing check suites → one _check_suites event with status: succeeded listing all names", () => {
+    const events: GitHubEvent[] = [
+      { id: "e1", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success", name: "CI / test" } } },
+      { id: "e2", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success", name: "CI / lint" } } },
+    ];
+    const result = coalesceEvents(events);
+    expect(result).toHaveLength(1);
+    expect(result[0].name).toBe("_check_suites");
+    expect(result[0].payload.status).toBe("succeeded");
+    expect(result[0].payload.failed).toEqual([]);
+    expect(result[0].payload.succeeded).toEqual(["CI / test", "CI / lint"]);
+  });
+
+  it("mixed failing + passing check suites → status: failed, only failed names in failed array", () => {
+    const events: GitHubEvent[] = [
+      { id: "e1", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "failure", name: "CI / test" } } },
+      { id: "e2", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success", name: "CI / lint" } } },
+    ];
+    const result = coalesceEvents(events);
+    expect(result).toHaveLength(1);
+    expect(result[0].payload.status).toBe("failed");
+    expect(result[0].payload.failed).toEqual(["CI / test"]);
+    expect(result[0].payload.succeeded).toEqual(["CI / lint"]);
+  });
+
+  it("single check suite → still coalesced into _check_suites for consistent rendering", () => {
+    const events: GitHubEvent[] = [
+      { id: "e1", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success", name: "CI" } } },
+    ];
+    const result = coalesceEvents(events);
+    expect(result).toHaveLength(1);
+    expect(result[0].name).toBe("_check_suites");
+  });
+
+  it("check suite uses app.name when name is absent", () => {
+    const events: GitHubEvent[] = [
+      { id: "e1", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success", app: { name: "GitHub Actions" } } } },
+    ];
+    const result = coalesceEvents(events);
+    expect(result[0].payload.succeeded).toEqual(["GitHub Actions"]);
+  });
+
+  it("review + review comments → _code_review event with comments array", () => {
+    const events: GitHubEvent[] = [
+      { id: "e1", name: "pull_request_review", payload: { pull_request: { number: 5 }, review: { state: "changes_requested", body: "Please fix" } } },
+      { id: "e2", name: "pull_request_review_comment", payload: { pull_request: { number: 5 }, comment: { path: "src/foo.ts", body: "This is wrong" } } },
+    ];
+    const result = coalesceEvents(events);
+    expect(result).toHaveLength(1);
+    expect(result[0].name).toBe("_code_review");
+    expect(result[0].payload.pull_request).toEqual({ number: 5 });
+    expect(result[0].payload.review).toEqual({ state: "changes_requested", body: "Please fix" });
+    expect(result[0].payload.comments).toEqual([{ path: "src/foo.ts", body: "This is wrong" }]);
+  });
+
+  it("review alone → _code_review with empty comments array", () => {
+    const events: GitHubEvent[] = [
+      { id: "e1", name: "pull_request_review", payload: { pull_request: { number: 5 }, review: { state: "approved", body: "" } } },
+    ];
+    const result = coalesceEvents(events);
+    expect(result).toHaveLength(1);
+    expect(result[0].name).toBe("_code_review");
+    expect(result[0].payload.comments).toEqual([]);
+  });
+
+  it("mixed types (check suites + issue_comment) → both preserved", () => {
+    const events: GitHubEvent[] = [
+      { id: "e1", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success", name: "CI" } } },
+      { id: "e2", name: "issue_comment", payload: { issue: { number: 1 }, comment: { body: "LGTM" } } },
+    ];
+    const result = coalesceEvents(events);
+    expect(result.some(e => e.name === "issue_comment")).toBe(true);
+    expect(result.some(e => e.name === "_check_suites")).toBe(true);
+    expect(result).toHaveLength(2);
+  });
+});
+
+describe("buildEventPrompt — pipeline behavior", () => {
+  it("single event → no 'Multiple events have happened' prefix", () => {
+    const events: GitHubEvent[] = [
+      { id: "e1", name: "issue_comment", payload: { issue: { number: 1 }, comment: { body: "hello" } } },
+    ];
+    const p = buildEventPrompt(events);
+    expect(p).not.toContain("Multiple events have happened");
+  });
+
+  it("multiple events after coalescing → 'Multiple events have happened:' prefix", () => {
+    const events: GitHubEvent[] = [
+      { id: "e1", name: "issue_comment", payload: { issue: { number: 1 }, comment: { body: "hello" } } },
+      { id: "e2", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success", name: "CI" } } },
+    ];
+    const p = buildEventPrompt(events);
+    expect(p).toContain("Multiple events have happened:");
+  });
+
+  it("multiple check suites coalesce to one → no 'Multiple events' prefix", () => {
+    const events: GitHubEvent[] = [
+      { id: "e1", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success", name: "CI / test" } } },
+      { id: "e2", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success", name: "CI / lint" } } },
+    ];
+    const p = buildEventPrompt(events);
+    expect(p).not.toContain("Multiple events have happened");
+  });
+
+  it("multiple events → joined with separator", () => {
+    const events: GitHubEvent[] = [
+      { id: "e1", name: "issue_comment", payload: { issue: { number: 1 }, comment: { body: "hello" } } },
+      { id: "e2", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success", name: "CI" } } },
+    ];
+    const p = buildEventPrompt(events);
+    expect(p).toContain("---");
+  });
+
+  it("issue_comment sorts before _check_suites in multi-event output", () => {
+    const events: GitHubEvent[] = [
+      { id: "e1", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success", name: "CI" } } },
+      { id: "e2", name: "issue_comment", payload: { issue: { number: 1 }, comment: { body: "UAT comment" } } },
+    ];
+    const p = buildEventPrompt(events);
+    const commentIdx = p.indexOf("UAT comment");
+    const checkIdx = p.indexOf("Checks succeeded");
+    expect(commentIdx).toBeLessThan(checkIdx);
+  });
+});
+
+describe("EVENT_FMT — new entries", () => {
+  it("_check_suites with failures → lists only failed suite names and instructs to fix", () => {
+    const evt: GitHubEvent = {
+      id: "e1",
+      name: "_check_suites",
+      payload: { status: "failed", failed: ["CI / test", "CI / lint"], succeeded: ["CI / build"] },
+    };
+    const result = EVENT_FMT._check_suites(evt.payload, evt);
+    expect(result).toContain("Checks have failed");
+    expect(result).toContain("CI / test");
+    expect(result).toContain("CI / lint");
+    expect(result).not.toContain("CI / build");
+    expect(result).toContain("review the failing checks");
+  });
+
+  it("_check_suites all succeeded → lists all suite names and instructs to verify merge-readiness", () => {
+    const evt: GitHubEvent = {
+      id: "e1",
+      name: "_check_suites",
+      payload: { status: "succeeded", failed: [], succeeded: ["CI / test", "CI / build"] },
+    };
+    const result = EVENT_FMT._check_suites(evt.payload, evt);
+    expect(result).toContain("Checks succeeded");
+    expect(result).toContain("CI / test");
+    expect(result).toContain("CI / build");
+    expect(result).toContain("PR can be merged");
+  });
+
+  it("_code_review renders PR number, review state, body, and inline comments", () => {
+    const evt: GitHubEvent = {
+      id: "e1",
+      name: "_code_review",
+      payload: {
+        pull_request: { number: 5 },
+        review: { state: "changes_requested", body: "Please fix the issue" },
+        comments: [{ path: "src/foo.ts", body: "This line is wrong" }],
+      },
+    };
+    const result = EVENT_FMT._code_review(evt.payload, evt);
+    expect(result).toContain("PR #5");
+    expect(result).toContain("changes_requested");
+    expect(result).toContain("Please fix the issue");
+    expect(result).toContain("src/foo.ts");
+    expect(result).toContain("This line is wrong");
+  });
+
+  it("_code_review with no comments renders without error", () => {
+    const evt: GitHubEvent = {
+      id: "e1",
+      name: "_code_review",
+      payload: {
+        pull_request: { number: 3 },
+        review: { state: "approved", body: "LGTM" },
+        comments: [],
+      },
+    };
+    const result = EVENT_FMT._code_review(evt.payload, evt);
+    expect(result).toContain("PR #3");
+    expect(result).toContain("approved");
+    expect(result).toContain("LGTM");
   });
 });

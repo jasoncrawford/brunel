@@ -21,8 +21,105 @@ Do not work on any other issues: leave task assignment to the foreman. Do not me
 }
 
 export function buildEventPrompt(events: GitHubEvent[]): string {
-  const event = events.length === 1 ? events[0] : { id: "", name: "_multiple", payload: { events } };
-  return resolveEventTemplate(EVENT_FMT, event.name, event);
+  const coalesced = coalesceEvents(events);
+  const sorted = sortEvents(coalesced);
+
+  const parts = sorted
+    .map(e => resolveEventTemplate(EVENT_FMT, e.name, e))
+    .filter(Boolean);
+
+  if (parts.length === 0) return "";
+
+  const body = parts.join("\n\n---\n\n");
+
+  if (coalesced.length > 1) {
+    return `Multiple events have happened:\n\n${body}`;
+  }
+
+  return body;
+}
+
+export function coalesceEvents(events: GitHubEvent[]): GitHubEvent[] {
+  const result: GitHubEvent[] = [];
+
+  // Separate check_suite events
+  const checkSuites = events.filter(e => e.name === "check_suite");
+  const nonCheckSuites = events.filter(e => e.name !== "check_suite");
+
+  // Coalesce check_suite events into _check_suites
+  if (checkSuites.length > 0) {
+    const failed: string[] = [];
+    const succeeded: string[] = [];
+    for (const e of checkSuites) {
+      const cs = e.payload.check_suite as Record<string, unknown> | undefined;
+      const csName =
+        (cs?.name as string | undefined) ??
+        ((cs?.app as Record<string, unknown> | undefined)?.name as string | undefined) ??
+        "unknown";
+      const conclusion = cs?.conclusion as string | undefined;
+      if (conclusion === "failure" || conclusion === "action_required") {
+        failed.push(csName);
+      } else {
+        succeeded.push(csName);
+      }
+    }
+    result.push({
+      id: checkSuites[0].id,
+      name: "_check_suites",
+      payload: {
+        status: failed.length > 0 ? "failed" : "succeeded",
+        failed,
+        succeeded,
+      },
+    });
+  }
+
+  // Separate pull_request_review and pull_request_review_comment
+  const reviews = nonCheckSuites.filter(e => e.name === "pull_request_review");
+  const reviewComments = nonCheckSuites.filter(e => e.name === "pull_request_review_comment");
+  const rest = nonCheckSuites.filter(
+    e => e.name !== "pull_request_review" && e.name !== "pull_request_review_comment"
+  );
+
+  // Coalesce review + review comments into _code_review
+  if (reviews.length > 0 || reviewComments.length > 0) {
+    const primary = reviews[0] ?? reviewComments[0];
+    const comments = reviewComments.map(e => {
+      const comment = e.payload.comment as Record<string, unknown> | undefined;
+      return { path: comment?.path, body: comment?.body };
+    });
+    result.push({
+      id: primary.id,
+      name: "_code_review",
+      payload: {
+        pull_request: primary.payload.pull_request ?? reviewComments[0]?.payload.pull_request,
+        review: reviews[0]?.payload.review ?? { state: "", body: "" },
+        comments,
+      },
+    });
+  }
+
+  result.push(...rest);
+
+  return result;
+}
+
+const SORT_PRIORITY: Record<string, number> = {
+  issue_comment: 1,
+  _code_review: 2,
+  pull_request_review: 2,
+  pull_request_review_comment: 2,
+  _check_suites: 3,
+  check_suite: 3,
+  pull_request: 5,
+};
+
+function sortEvents(events: GitHubEvent[]): GitHubEvent[] {
+  return [...events].sort((a, b) => {
+    const pa = SORT_PRIORITY[a.name] ?? 4;
+    const pb = SORT_PRIORITY[b.name] ?? 4;
+    return pa - pb;
+  });
 }
 
 export function fmtEventList(events: GitHubEvent[]): string {
@@ -45,8 +142,34 @@ export function resolveEventTemplate(table: EventTemplateFmtTable, key: string, 
 }
 
 export const EVENT_FMT: EventTemplateFmtTable = {
-  _multiple: (p) =>
-    `Multiple events have arrived since you last checked: ${(p.events as GitHubEvent[]).map((e) => e.name).join(', ')}. Please review the current state of your PR and respond accordingly.`,
+  _check_suites: (p) => {
+    const failed = p.failed as string[];
+    if (p.status === "failed") {
+      return `Checks have failed: ${failed.join(", ")}. Please review the failing checks on your PR and fix any issues.`;
+    }
+    const succeeded = p.succeeded as string[];
+    return `Checks succeeded: ${succeeded.join(", ")}. Check if the branch is up to date, and if not, rebase it. Then check if the PR can be merged. If anything is blocking merge, resolve it, but do not merge yourself.`;
+  },
+
+  _code_review: (p) => {
+    const pr = p.pull_request as Record<string, unknown> | undefined;
+    const review = p.review as Record<string, unknown> | undefined;
+    const comments = p.comments as Array<{ path: unknown; body: unknown }> | undefined;
+    const lines: string[] = [
+      `A review was submitted on PR #${pr?.number}: state=${review?.state}.`,
+    ];
+    if (review?.body) {
+      lines.push(`\n${review.body}`);
+    }
+    if (comments && comments.length > 0) {
+      lines.push("\nInline comments:");
+      for (const c of comments) {
+        lines.push(`\n- \`${c.path}\`: ${c.body}`);
+      }
+    }
+    lines.push("\n\nPlease respond in whatever way you think is most appropriate, replying and/or making code changes.");
+    return lines.join("").trim();
+  },
 
   check_suite: (p) =>
     (p.check_suite?.conclusion === "failure" || p.check_suite?.conclusion === "action_required")
