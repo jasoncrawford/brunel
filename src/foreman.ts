@@ -614,12 +614,14 @@ const isMain = process.argv[1] === fileURLToPath(import.meta.url);
 if (isMain) {
   const registry = new WorkerRegistry();
   const taskQueue = new TaskQueue();
+  const graph: DependencyGraph = new Map();
+  const openIssues = new Set<number>();
   const webhooks = WEBHOOK_SECRET ? new Webhooks({ secret: WEBHOOK_SECRET }) : null;
 
   // Use a mutable reference so routeEvent can be wired after createForemanWss returns it.
   let routeEvent: (id: string, name: string, payload: unknown) => void = () => {};
   const server = createHttpServer(webhooks, (id, name, payload) => routeEvent(id, name, payload));
-  ({ routeEventToWorker: routeEvent } = createForemanWss(taskQueue, registry, server));
+  ({ routeEventToWorker: routeEvent } = createForemanWss(taskQueue, registry, server, { graph, openIssues }));
 
   if (webhooks) {
     webhooks.onAny(({ id, name, payload }) => {
@@ -633,7 +635,7 @@ if (isMain) {
     flog(`WebSocket workers: ws://localhost:${PORT}/worker`);
     flog("Waiting for events...");
     try {
-      await loadIssuesToQueue(taskQueue);
+      await loadIssuesToQueue(taskQueue, graph, openIssues);
     } catch (err) {
       flog(`WARNING Failed to load issues from GitHub: ${err}`);
     }
