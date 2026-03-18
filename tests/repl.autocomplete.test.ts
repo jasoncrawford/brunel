@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PassThrough } from "stream";
-import { ask, matchCommands, listCommandNames, listWorkerCommandNames, parseFrontmatter, listSkillNames, type ListDir } from "../src/input.js";
+import { ask, matchCommands, listCommandNames, listWorkerCommandNames, listCommands, parseFrontmatter, listSkillNames, type ListDir, type CommandSuggestion } from "../src/input.js";
 
 // ── Test harness for ask() integration tests ──────────────────────────────────
 
@@ -31,7 +31,11 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const cmds = () => ["brainstorm", "clear", "exit"];
+const cmds = (): CommandSuggestion[] => [
+  { name: "brainstorm", description: "Brainstorm ideas" },
+  { name: "clear",      description: "Clear conversation" },
+  { name: "exit",       description: "Exit the REPL" },
+];
 
 // ── parseFrontmatter ──────────────────────────────────────────────────────────
 
@@ -349,6 +353,97 @@ describe("listCommandNames", () => {
   });
 });
 
+// ── listCommands ─────────────────────────────────────────────────────────────
+
+describe("listCommands", () => {
+  it("returns CommandSuggestion objects with name and description", () => {
+    const result = listCommands(() => null);
+    expect(result.length).toBeGreaterThan(0);
+    for (const cmd of result) {
+      expect(cmd).toHaveProperty("name");
+      expect(cmd).toHaveProperty("description");
+    }
+  });
+
+  it("builtins have non-empty descriptions", () => {
+    const result = listCommands(() => null);
+    const clear = result.find(c => c.name === "clear");
+    expect(clear).toBeDefined();
+    expect(clear!.description).toBeTruthy();
+    const exit = result.find(c => c.name === "exit");
+    expect(exit).toBeDefined();
+    expect(exit!.description).toBeTruthy();
+  });
+
+  it("skill with description frontmatter uses that as description", () => {
+    const listDir: ListDir = (dir) => {
+      if (dir.endsWith("/.claude/skills")) return [{ name: "my-skill", isDir: true }];
+      return null;
+    };
+    const readFile = (path: string) => {
+      if (path.endsWith("SKILL.md")) return "---\nname: my-skill\ndescription: Does a great thing\n---\n# Body\nSome content";
+      return null;
+    };
+    const result = listCommands(listDir, readFile);
+    const skill = result.find(c => c.name === "my-skill");
+    expect(skill).toBeDefined();
+    expect(skill!.description).toBe("Does a great thing");
+  });
+
+  it("skill without description falls back to first non-empty line of body", () => {
+    const listDir: ListDir = (dir) => {
+      if (dir.endsWith("/.claude/skills")) return [{ name: "my-skill", isDir: true }];
+      return null;
+    };
+    const readFile = (path: string) => {
+      if (path.endsWith("SKILL.md")) return "---\nname: my-skill\n---\n# First line heading\nMore content";
+      return null;
+    };
+    const result = listCommands(listDir, readFile);
+    const skill = result.find(c => c.name === "my-skill");
+    expect(skill).toBeDefined();
+    expect(skill!.description).toBe("# First line heading");
+  });
+
+  it("command file with description frontmatter uses that", () => {
+    const home = process.env.HOME ?? "";
+    const listDir: ListDir = (dir) => {
+      if (dir.endsWith("commands")) return [{ name: "mycmd.md", isDir: false }];
+      return null;
+    };
+    const readFile = (path: string) => {
+      if (path === `${home}/.claude/commands/mycmd.md`) return "---\ndescription: My command description\n---\nDo something";
+      return null;
+    };
+    const result = listCommands(listDir, readFile);
+    const cmd = result.find(c => c.name === "mycmd");
+    expect(cmd).toBeDefined();
+    expect(cmd!.description).toBe("My command description");
+  });
+
+  it("command file without description uses first line", () => {
+    const home = process.env.HOME ?? "";
+    const listDir: ListDir = (dir) => {
+      if (dir.endsWith("commands")) return [{ name: "mycmd.md", isDir: false }];
+      return null;
+    };
+    const readFile = (path: string) => {
+      if (path === `${home}/.claude/commands/mycmd.md`) return "Do something useful\nMore text";
+      return null;
+    };
+    const result = listCommands(listDir, readFile);
+    const cmd = result.find(c => c.name === "mycmd");
+    expect(cmd).toBeDefined();
+    expect(cmd!.description).toBe("Do something useful");
+  });
+
+  it("result is sorted alphabetically by name", () => {
+    const result = listCommands(() => null);
+    const names = result.map(c => c.name);
+    expect(names).toEqual([...names].sort());
+  });
+});
+
 // ── listWorkerCommandNames ────────────────────────────────────────────────────
 
 describe("listWorkerCommandNames", () => {
@@ -500,7 +595,11 @@ describe("ask() - Enter completion", () => {
 describe("ask() - autocomplete edge cases", () => {
   it("bare / shows all commands and Enter picks first", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask("> ", () => ["alpha", "beta", "gamma"]);
+      const p = ask("> ", () => [
+        { name: "alpha", description: "" },
+        { name: "beta",  description: "" },
+        { name: "gamma", description: "" },
+      ]);
       stdin.push("/");
       stdin.push("\r"); // Enter completes with first match
       const result = await p;
@@ -632,6 +731,84 @@ describe("ask() - autocomplete edge cases", () => {
       stdin.push("\r");
       const result = await p;
       expect(result).toBe("");
+    });
+  });
+
+  it("shows up to 5 suggestions (not more)", async () => {
+    const sixCmds = (): CommandSuggestion[] => [
+      { name: "alpha",   description: "d1" },
+      { name: "bravo",   description: "d2" },
+      { name: "charlie", description: "d3" },
+      { name: "delta",   description: "d4" },
+      { name: "echo",    description: "d5" },
+      { name: "foxtrot", description: "d6" },
+    ];
+    await withFakeStdin(async (stdin) => {
+      const p = ask("> ", sixCmds);
+      stdin.push("/");
+      stdin.push("\r");
+      await p;
+      const allOutput = vi.mocked(process.stdout.write).mock.calls.map(c => String(c[0])).join("");
+      // First 5 should appear, 6th should not
+      expect(allOutput).toContain("alpha");
+      expect(allOutput).toContain("echo");
+      expect(allOutput).not.toContain("foxtrot");
+    });
+  });
+
+  it("suggestions appear on separate lines (each on its own line)", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = ask("> ", cmds);
+      stdin.push("/");
+      stdin.push("\r");
+      await p;
+      // Each suggestion after the first is written as its own stdout.write call
+      // starting with \r\n\x1b[K (move to next line + clear it).
+      const writeCalls = vi.mocked(process.stdout.write).mock.calls.map(c => String(c[0]));
+      const clearLine = writeCalls.find(w => w.includes("/clear"));
+      const exitLine  = writeCalls.find(w => w.includes("/exit"));
+      expect(clearLine).toBeDefined();
+      expect(exitLine).toBeDefined();
+      expect(clearLine).toMatch(/^\r\n/);
+      expect(exitLine).toMatch(/^\r\n/);
+    });
+  });
+
+  it("descriptions appear in suggestion output", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = ask("> ", cmds);
+      stdin.push("/");
+      stdin.push("\r");
+      await p;
+      const allOutput = vi.mocked(process.stdout.write).mock.calls.map(c => String(c[0])).join("");
+      expect(allOutput).toContain("Brainstorm ideas");
+      expect(allOutput).toContain("Clear conversation");
+      expect(allOutput).toContain("Exit the REPL");
+    });
+  });
+
+  it("descriptions are left-aligned (same column start)", async () => {
+    const fixedCmds = (): CommandSuggestion[] => [
+      { name: "short",     description: "Short desc" },
+      { name: "muchlonger", description: "Long desc" },
+    ];
+    await withFakeStdin(async (stdin) => {
+      const p = ask("> ", fixedCmds);
+      stdin.push("/");
+      stdin.push("\r");
+      await p;
+      const allOutput = vi.mocked(process.stdout.write).mock.calls.map(c => String(c[0])).join("");
+      // Strip ANSI codes for position analysis
+      const stripped = allOutput.replace(/\x1b\[[0-9;]*m/g, "");
+      const shortDescPos = stripped.indexOf("Short desc");
+      const longDescPos = stripped.indexOf("Long desc");
+      // Both descriptions should be at the same column offset from their command's "/":
+      // find the column of each description on its line
+      const lineContainingShort = stripped.slice(0, shortDescPos).lastIndexOf("\n");
+      const lineContainingLong  = stripped.slice(0, longDescPos).lastIndexOf("\n");
+      const shortCol = shortDescPos - lineContainingShort;
+      const longCol  = longDescPos - lineContainingLong;
+      expect(shortCol).toBe(longCol);
     });
   });
 });

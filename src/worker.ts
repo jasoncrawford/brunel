@@ -3,7 +3,7 @@ import crypto from "crypto";
 import { WebSocket } from "ws";
 import * as display from "./display.js";
 import { buildInitialPrompt, buildEventPrompt, fmtEventList } from "./templates.js";
-import { ask, listWorkerCommandNames, dispatchInput } from "./input.js";
+import { ask, listWorkerCommands, dispatchInput } from "./input.js";
 import type { ForemanMessage, GitHubEvent, TaskIssue } from "./types.js";
 
 // ── Event classification ───────────────────────────────────────────────────────
@@ -298,7 +298,7 @@ export async function workerMain(runQueryFn: RunQuery): Promise<void> {
     // empty promptLine suppresses the drawFresh callback so incoming messages
     // are printed cleanly without a prompt preceding or following them.
     const promptStr = showPrompt ? "\n[worker] > " : "";
-    const input = await ask(promptStr, listWorkerCommandNames, wsAbort);
+    const input = await ask(promptStr, listWorkerCommands, wsAbort);
 
     const isSentinel = input === WS_TASK_ASSIGNED || input === WS_EVENT;
     if (isSentinel) {
