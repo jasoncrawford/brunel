@@ -1,5 +1,31 @@
 import { describe, it, expect } from "vitest";
-import { summaryEvent } from "../src/foreman.js";
+import { summaryEvent, isMutedEvent } from "../src/foreman.js";
+
+describe("isMutedEvent", () => {
+  it("mutes workflow_job events", () => {
+    expect(isMutedEvent("workflow_job")).toBe(true);
+  });
+
+  it("mutes workflow_run events", () => {
+    expect(isMutedEvent("workflow_run")).toBe(true);
+  });
+
+  it("does not mute check_run events", () => {
+    expect(isMutedEvent("check_run")).toBe(false);
+  });
+
+  it("does not mute check_suite events", () => {
+    expect(isMutedEvent("check_suite")).toBe(false);
+  });
+
+  it("does not mute issues events", () => {
+    expect(isMutedEvent("issues")).toBe(false);
+  });
+
+  it("does not mute pull_request events", () => {
+    expect(isMutedEvent("pull_request")).toBe(false);
+  });
+});
 
 describe("summaryEvent", () => {
   it("renders a single line with no newlines", () => {
