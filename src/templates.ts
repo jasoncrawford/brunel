@@ -13,7 +13,7 @@ You should ask for any clarifications you need about requirements or product spe
 Remember key practices:
 
 1. Use proper branch discipline. Pull main to get the latest, then create a new branch.
-2. Create a new worktree to avoid conflicts with other agents. Make no changes in the main workspace, only in the worktree.
+2. Use the EnterWorktree tool to create an isolated worktree for this task. Make no changes in the main workspace, only in the worktree.
 3. As much as possible, use test-driven development.
 4. Create a PR when done, and include the text "Closes #${issue.number}".
 
@@ -62,7 +62,7 @@ export const EVENT_FMT: EventTemplateFmtTable = {
 * Are there any followup issues we should file?
 * Are there any updates to skills that we should make, or new skills to record?
 * Are there any updates to be made to project documentation?
-* Clean up your worktree by running \`git worktree remove <path>\` on the worktree you created for this task.
+* Clean up your worktree by calling ExitWorktree with action: "remove".
 
 Please do the above if necessary. Then summarize what you did, and anything else the user should know.`;
     }
