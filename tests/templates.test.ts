@@ -419,7 +419,7 @@ describe("buildEventPrompt — pipeline behavior", () => {
 });
 
 describe("EVENT_FMT — new entries", () => {
-  it("_check_suites with failures → lists only failed suite names", () => {
+  it("_check_suites with failures → lists only failed suite names and instructs to fix", () => {
     const evt: GitHubEvent = {
       id: "e1",
       name: "_check_suites",
@@ -430,9 +430,10 @@ describe("EVENT_FMT — new entries", () => {
     expect(result).toContain("CI / test");
     expect(result).toContain("CI / lint");
     expect(result).not.toContain("CI / build");
+    expect(result).toContain("review the failing checks");
   });
 
-  it("_check_suites all succeeded → lists all suite names", () => {
+  it("_check_suites all succeeded → lists all suite names and instructs to verify merge-readiness", () => {
     const evt: GitHubEvent = {
       id: "e1",
       name: "_check_suites",
@@ -442,6 +443,7 @@ describe("EVENT_FMT — new entries", () => {
     expect(result).toContain("Checks succeeded");
     expect(result).toContain("CI / test");
     expect(result).toContain("CI / build");
+    expect(result).toContain("PR can be merged");
   });
 
   it("_code_review renders PR number, review state, body, and inline comments", () => {

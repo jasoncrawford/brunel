@@ -145,10 +145,10 @@ export const EVENT_FMT: EventTemplateFmtTable = {
   _check_suites: (p) => {
     const failed = p.failed as string[];
     if (p.status === "failed") {
-      return `Checks have failed: ${failed.join(", ")}`;
+      return `Checks have failed: ${failed.join(", ")}. Please review the failing checks on your PR and fix any issues.`;
     }
     const succeeded = p.succeeded as string[];
-    return `Checks succeeded: ${succeeded.join(", ")}`;
+    return `Checks succeeded: ${succeeded.join(", ")}. Check if the branch is up to date, and if not, rebase it. Then check if the PR can be merged. If anything is blocking merge, resolve it, but do not merge yourself.`;
   },
 
   _code_review: (p) => {
