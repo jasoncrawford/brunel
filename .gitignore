@@ -1,9 +1,0 @@
-.claude/worktrees
-.worktrees
-.claude/settings.local.json
-node_modules/
-dist/
-.env
-repl.log
-.worker-id
-coverage/
