@@ -95,6 +95,8 @@ interface Task {
   status: "pending" | "assigned" | "complete";
   assignedWorkerId?: string;
   eventQueue: GitHubEvent[];
+  /** True once fetchBlockers has resolved and the dependency graph is populated. */
+  depsLoaded: boolean;
 }
 
 export class TaskQueue {
@@ -102,11 +104,12 @@ export class TaskQueue {
   private prToTaskId = new Map<number, string>();
   private branchToTaskId = new Map<string, string>();
 
-  addTask(t: Omit<Task, "status" | "assignedWorkerId" | "eventQueue"> & Partial<Pick<Task, "status" | "eventQueue">>) {
+  addTask(t: Omit<Task, "status" | "assignedWorkerId" | "eventQueue" | "depsLoaded"> & Partial<Pick<Task, "status" | "eventQueue" | "depsLoaded">>) {
     this.tasks.set(t.taskId, {
       ...t,
       status: t.status ?? "pending",
       eventQueue: t.eventQueue ?? [],
+      depsLoaded: t.depsLoaded ?? true,
     });
   }
 
@@ -169,6 +172,13 @@ export class TaskQueue {
   getTaskForBranch(branch: string): Task | undefined {
     const taskId = this.branchToTaskId.get(branch);
     return taskId ? this.tasks.get(taskId) : undefined;
+  }
+
+  markDepsLoaded(issueNumbers: number[]) {
+    for (const n of issueNumbers) {
+      const t = this.tasks.get(String(n));
+      if (t) t.depsLoaded = true;
+    }
   }
 }
 
@@ -428,6 +438,7 @@ export function createForemanWss(
           body: String(issue.body ?? ""),
           labels,
           repoUrl,
+          depsLoaded: false,
         });
         // Track open state for newly-enqueued brunel:ready issues
         openIssues.add(issueNumber);
@@ -444,6 +455,9 @@ export function createForemanWss(
             for (const [num, state] of states) {
               if (state === "open") openIssues.add(num);
             }
+            // Mark deps as loaded so this task is now eligible for assignment.
+            const t = taskQueue.get(String(issueNumber));
+            if (t) t.depsLoaded = true;
             // Only one task was just enqueued, so assigning one idle worker is sufficient.
             const idle = registry.getIdleWorker();
             if (idle) tryAssignWork(idle.workerId);
@@ -504,7 +518,7 @@ export function createForemanWss(
 
   function tryAssignWork(workerId: string) {
     const task = taskQueue.nextPending(
-      (t) => !isBlocked(t.issueNumber, graph, openIssues),
+      (t) => t.depsLoaded && !isBlocked(t.issueNumber, graph, openIssues),
     );
     if (task) {
       taskQueue.assignTask(task.taskId, workerId);

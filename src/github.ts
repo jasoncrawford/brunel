@@ -38,6 +38,7 @@ export async function loadIssuesToQueue(
   }>;
 
   const allBlockerNumbers = new Set<number>();
+  const loadedIssueNumbers: number[] = [];
 
   // Note: fetchBlockers is awaited sequentially inside the loop (not Promise.all).
   // This is intentional: for the typical case of a small number of brunel:ready issues,
@@ -50,12 +51,14 @@ export async function loadIssuesToQueue(
       body: issue.body ?? "",
       labels: issue.labels.map((l) => l.name),
       repoUrl: `https://github.com/${owner}/${repoName}`,
+      depsLoaded: false,
     });
     // brunel:ready issues are open by definition
     openIssues.add(issue.number);
     const blockers = await fetchBlockers(issue.number, issue.body ?? "");
     setBlockers(issue.number, blockers, graph);
     for (const b of blockers) allBlockerNumbers.add(b);
+    loadedIssueNumbers.push(issue.number);
   }
 
   if (allBlockerNumbers.size > 0) {
@@ -64,6 +67,10 @@ export async function loadIssuesToQueue(
       if (state === "open") openIssues.add(num);
     }
   }
+
+  // Mark all loaded tasks as eligible for assignment now that the full
+  // dependency graph and blocker states are known.
+  queue.markDepsLoaded(loadedIssueNumbers);
 }
 
 export async function labelIssueDone(issueNumber: number): Promise<void> {
