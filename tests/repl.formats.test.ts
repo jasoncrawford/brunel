@@ -311,23 +311,49 @@ describe("fmtToolSearchOutput()", () => {
 });
 
 describe("fmtTodoWriteOutput()", () => {
-  it("returns count and status breakdown when newTodos present", () => {
+  it("shows ✓ symbol for completed todos", () => {
+    const b = {
+      content: "Todos modified.",
+      _msg: { tool_use_result: { newTodos: [{ content: "done task", status: "completed" }] } },
+    };
+    expect(fmtTodoWriteOutput(b as any)).toContain("✓ done task");
+  });
+
+  it("shows ► symbol for in_progress todos", () => {
+    const b = {
+      content: "Todos modified.",
+      _msg: { tool_use_result: { newTodos: [{ content: "active task", status: "in_progress" }] } },
+    };
+    expect(fmtTodoWriteOutput(b as any)).toContain("► active task");
+  });
+
+  it("shows ○ symbol for pending todos", () => {
+    const b = {
+      content: "Todos modified.",
+      _msg: { tool_use_result: { newTodos: [{ content: "future task", status: "pending" }] } },
+    };
+    expect(fmtTodoWriteOutput(b as any)).toContain("○ future task");
+  });
+
+  it("renders multiple todos as a checklist with each item on its own line", () => {
     const b = {
       content: "Todos modified.",
       _msg: {
         tool_use_result: {
           newTodos: [
-            { content: "task a", status: "in_progress" },
-            { content: "task b", status: "pending" },
+            { content: "task a", status: "completed" },
+            { content: "task b", status: "in_progress" },
             { content: "task c", status: "pending" },
           ],
         },
       },
     };
     const result = fmtTodoWriteOutput(b as any);
-    expect(result).toContain("3 todos");
-    expect(result).toContain("in_progress");
-    expect(result).toContain("pending");
+    const lines = result.split("\n");
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toContain("✓ task a");
+    expect(lines[1]).toContain("► task b");
+    expect(lines[2]).toContain("○ task c");
   });
 
   it("returns 'todos cleared' when newTodos is empty", () => {
@@ -380,7 +406,7 @@ describe("TOOL_RESULT_FMT — ToolSearch and TodoWrite", () => {
     expect(raw).toContain("\x1b[90m");
   });
 
-  it("TodoWrite: shows → <N> todos: <status counts>", () => {
+  it("TodoWrite: shows → checklist with symbols and content", () => {
     const b = {
       content: "Todos modified.",
       _msg: {
@@ -393,8 +419,8 @@ describe("TOOL_RESULT_FMT — ToolSearch and TodoWrite", () => {
       },
     };
     const result = r(TOOL_RESULT_FMT, "TodoWrite", b)!;
-    expect(result).toContain("→ 2 todos");
-    expect(result).toContain("in_progress");
+    expect(result).toContain("► a");
+    expect(result).toContain("○ b");
     expect(result).not.toContain("modified successfully");
   });
 

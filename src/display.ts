@@ -241,13 +241,13 @@ export function fmtTodoWriteOutput(b: ToolResultBlock): string {
   const todos = Array.isArray(newTodos) ? newTodos : null;
   if (!todos) return trunc(toolResultText(b), 100);
   if (!todos.length) return "todos cleared";
-  const counts: Record<string, number> = {};
-  for (const t of todos) {
-    const status = (t as { status?: string }).status ?? "unknown";
-    counts[status] = (counts[status] ?? 0) + 1;
-  }
-  const parts = Object.entries(counts).map(([st, n]) => `${n} ${st}`);
-  return `${fmtCount(todos.length, "todo")}: ${parts.join(", ")}`;
+  return todos.map((t, i) => {
+    const todo = t as { status?: string; content?: string };
+    const status = todo.status ?? "pending";
+    const content = trunc(String(todo.content ?? ""), 60);
+    const marker = status === "completed" ? "✓" : status === "in_progress" ? "►" : "○";
+    return `${i > 0 ? "  " : ""}${marker} ${content}`;
+  }).join("\n");
 }
 
 export function toolResultText(b: { content: unknown }): string {
