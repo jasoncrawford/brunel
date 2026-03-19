@@ -245,7 +245,7 @@ export function fmtTodoWriteOutput(b: ToolResultBlock): string {
     const todo = t as { status?: string; content?: string };
     const status = todo.status ?? "pending";
     const content = trunc(String(todo.content ?? ""), 60);
-    const marker = status === "completed" ? "✓" : status === "in_progress" ? "►" : "○";
+    const marker = status === "completed" ? "[✓]" : status === "in_progress" ? "[►]" : "[ ]";
     return `${i > 0 ? "  " : ""}${marker} ${content}`;
   }).join("\n");
 }

@@ -311,28 +311,28 @@ describe("fmtToolSearchOutput()", () => {
 });
 
 describe("fmtTodoWriteOutput()", () => {
-  it("shows ✓ symbol for completed todos", () => {
+  it("shows [✓] box for completed todos", () => {
     const b = {
       content: "Todos modified.",
       _msg: { tool_use_result: { newTodos: [{ content: "done task", status: "completed" }] } },
     };
-    expect(fmtTodoWriteOutput(b as any)).toContain("✓ done task");
+    expect(fmtTodoWriteOutput(b as any)).toContain("[✓] done task");
   });
 
-  it("shows ► symbol for in_progress todos", () => {
+  it("shows [►] box for in_progress todos", () => {
     const b = {
       content: "Todos modified.",
       _msg: { tool_use_result: { newTodos: [{ content: "active task", status: "in_progress" }] } },
     };
-    expect(fmtTodoWriteOutput(b as any)).toContain("► active task");
+    expect(fmtTodoWriteOutput(b as any)).toContain("[►] active task");
   });
 
-  it("shows ○ symbol for pending todos", () => {
+  it("shows [ ] box for pending todos", () => {
     const b = {
       content: "Todos modified.",
       _msg: { tool_use_result: { newTodos: [{ content: "future task", status: "pending" }] } },
     };
-    expect(fmtTodoWriteOutput(b as any)).toContain("○ future task");
+    expect(fmtTodoWriteOutput(b as any)).toContain("[ ] future task");
   });
 
   it("renders multiple todos as a checklist with each item on its own line", () => {
@@ -351,9 +351,9 @@ describe("fmtTodoWriteOutput()", () => {
     const result = fmtTodoWriteOutput(b as any);
     const lines = result.split("\n");
     expect(lines).toHaveLength(3);
-    expect(lines[0]).toContain("✓ task a");
-    expect(lines[1]).toContain("► task b");
-    expect(lines[2]).toContain("○ task c");
+    expect(lines[0]).toContain("[✓] task a");
+    expect(lines[1]).toContain("[►] task b");
+    expect(lines[2]).toContain("[ ] task c");
   });
 
   it("returns 'todos cleared' when newTodos is empty", () => {
@@ -419,8 +419,8 @@ describe("TOOL_RESULT_FMT — ToolSearch and TodoWrite", () => {
       },
     };
     const result = r(TOOL_RESULT_FMT, "TodoWrite", b)!;
-    expect(result).toContain("► a");
-    expect(result).toContain("○ b");
+    expect(result).toContain("[►] a");
+    expect(result).toContain("[ ] b");
     expect(result).not.toContain("modified successfully");
   });
 
