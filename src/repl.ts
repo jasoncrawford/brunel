@@ -1,8 +1,9 @@
 import fs from "fs";
 import { fileURLToPath } from "url";
 import { query } from "@anthropic-ai/claude-agent-sdk";
+import type { CanUseTool, PermissionResult } from "@anthropic-ai/claude-agent-sdk";
 import * as display from "./display.js";
-import { ask, listCommandNames, dispatchInput } from "./input.js";
+import { ask, listCommandNames, dispatchInput, pick, pickMultiple } from "./input.js";
 import { workerMain } from "./worker.js";
 export { parseSlashCommand, resolveCommandFilePath, resolveContent, dispatchInput, matchCommands, listCommandNames, listWorkerCommandNames, ask } from "./input.js";
 export type { SlashCommandResult, DispatchResult, ListDir } from "./input.js";
@@ -28,6 +29,46 @@ const PERMISSION_MODE = BYPASS ? "bypassPermissions" : "acceptEdits";
 
 // ── REPL ──────────────────────────────────────────────────────────────────────
 
+type QuestionOption = { label: string; description: string };
+type Question = { question: string; header: string; options: QuestionOption[]; multiSelect: boolean };
+
+export async function handleAskUserQuestion(
+  input: Record<string, unknown>,
+  getStatusText: () => string,
+): Promise<PermissionResult> {
+  display.stopStatus();
+  const questions = (input.questions as Question[]) ?? [];
+  const answers: Record<string, string> = {};
+
+  for (const q of questions) {
+    const lines = q.options.map(o => o.description ? `${o.label} — ${o.description}` : o.label);
+    display.print(display.c.skyBlue(`\n? ${q.question}`));
+    if (q.multiSelect) {
+      const idxs = await pickMultiple(lines);
+      answers[q.question] = idxs.map(i => q.options[i].label).join(", ");
+    } else {
+      const idx = await pick(lines);
+      answers[q.question] = q.options[idx].label;
+    }
+  }
+
+  display.startStatus(getStatusText);
+  return { behavior: "allow", updatedInput: { ...input, answers } };
+}
+
+export async function handleToolPermission(
+  toolName: string,
+  input: Record<string, unknown>,
+  getStatusText: () => string,
+): Promise<PermissionResult> {
+  display.stopStatus();
+  display.print(display.c.amber(`\n⚠ ${toolName}(${display.fmtArgs(input)})`));
+  const idx = await pick(["Allow", "Deny"]);
+  display.startStatus(getStatusText);
+  if (idx === 0) return { behavior: "allow" };
+  return { behavior: "deny", message: "User denied tool request" };
+}
+
 export async function runQuery(prompt: string, sessionId: string | undefined, abortController?: AbortController) {
   logFull("QUERY", { prompt, sessionId });
   // Save and clear the input print callback while the query runs. In worker
@@ -44,11 +85,20 @@ export async function runQuery(prompt: string, sessionId: string | undefined, ab
   // message_delta.usage.output_tokens is cumulative per message, so we sum
   // completed messages and track the current one separately.
   const stats = { turns: 0, inputTokens: 0, completedOutputTokens: 0, currentOutputTokens: 0 };
-  display.startStatus(() => {
+  const getStatusText = () => {
     const secs = Math.floor((Date.now() - startTime) / 1000);
     const outTokens = stats.completedOutputTokens + stats.currentOutputTokens;
     return display.c.darkGray(`Working… ${display.fmtStats(secs, stats.turns || undefined, outTokens || undefined, stats.inputTokens || undefined)}`);
-  });
+  };
+  display.startStatus(getStatusText);
+
+  const canUseTool: CanUseTool = async (toolName, input) => {
+    if (toolName === "AskUserQuestion") {
+      return handleAskUserQuestion(input, getStatusText);
+    }
+    if (BYPASS) return { behavior: "allow" };
+    return handleToolPermission(toolName, input, getStatusText);
+  };
 
   // Use caller-provided AbortController (worker mode) or create our own (REPL mode).
   const ac = abortController ?? new AbortController();
@@ -62,6 +112,7 @@ export async function runQuery(prompt: string, sessionId: string | undefined, ab
       permissionMode: PERMISSION_MODE,
       includePartialMessages: true,
       abortController: ac,
+      canUseTool,
       ...(BYPASS ? { allowDangerouslySkipPermissions: true } : {}),
       ...(sessionId ? { resume: sessionId } : {}),
     },
