@@ -248,6 +248,103 @@ describe("runQuery - error handling", () => {
   });
 });
 
+describe("runQuery - interrupt support", () => {
+  it("passes provided abortController to SDK query options", async () => {
+    mockQueryMessages([
+      { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } },
+    ]);
+    const cap = captureConsole();
+    const ac = new AbortController();
+    try {
+      await runQuery("test", undefined, ac);
+    } finally {
+      cap.restore();
+    }
+    const callArg = (query as any).mock.calls[0][0];
+    expect(callArg.options.abortController).toBe(ac);
+  });
+
+  it("aborted mid-query → returns without throwing, prints Interrupted.", async () => {
+    // Mock a generator that ends when the AbortController is aborted
+    (query as any).mockImplementation((opts: any) => {
+      return (async function* () {
+        // Simulate the SDK: wait until aborted, then end without result message
+        await new Promise<void>((resolve) => {
+          opts.options.abortController.signal.addEventListener("abort", resolve, { once: true });
+        });
+        // No result message emitted — generator just ends
+      })();
+    });
+
+    const cap = captureConsole();
+    const ac = new AbortController();
+    let thrown: unknown;
+    try {
+      // Abort after a short delay
+      setTimeout(() => ac.abort(), 5);
+      await runQuery("test", "sess-1", ac);
+    } catch (err) {
+      thrown = err;
+    } finally {
+      cap.restore();
+    }
+
+    expect(thrown).toBeUndefined(); // no throw
+    const output = cap.lines.map(stripAnsi).join("\n");
+    expect(output).toContain("Interrupted.");
+  });
+
+  it("aborted mid-query → returns sessionId", async () => {
+    (query as any).mockImplementation((opts: any) => {
+      return (async function* () {
+        yield { type: "system", subtype: "init", session_id: "new-sess" };
+        await new Promise<void>((resolve) => {
+          opts.options.abortController.signal.addEventListener("abort", resolve, { once: true });
+        });
+      })();
+    });
+
+    const cap = captureConsole();
+    const ac = new AbortController();
+    let sessionId: string | undefined;
+    try {
+      setTimeout(() => ac.abort(), 5);
+      sessionId = await runQuery("test", undefined, ac);
+    } finally {
+      cap.restore();
+    }
+    expect(sessionId).toBe("new-sess");
+  });
+
+  it("normal completion does not print Interrupted.", async () => {
+    mockQueryMessages([
+      { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } },
+    ]);
+    const cap = captureConsole();
+    try {
+      await runQuery("test", undefined);
+    } finally {
+      cap.restore();
+    }
+    const output = cap.lines.map(stripAnsi).join("\n");
+    expect(output).not.toContain("Interrupted.");
+  });
+
+  it("stdin data listener is removed after normal query completion", async () => {
+    mockQueryMessages([
+      { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } },
+    ]);
+    const before = process.stdin.listenerCount("data");
+    const cap = captureConsole();
+    try {
+      await runQuery("test", undefined);
+    } finally {
+      cap.restore();
+    }
+    expect(process.stdin.listenerCount("data")).toBe(before);
+  });
+});
+
 describe("runQuery - prompt redraw after query (worker mode integration)", () => {
   it("redraws input prompt on stdout after query completes, not during query output", async () => {
     // In worker mode: ask() is waiting for input while runQuery runs in the background.

@@ -692,7 +692,7 @@ export function ask(
           return;
         }
         else if (ch === "\x7f" || ch === "\x08")      { deleteBack(); }
-        else if (ch === "\x03") { process.stdout.write("^C"); exit(); }
+        else if (ch === "\x03") { if (buffer) { replaceBuffer(""); } else { process.stdout.write("^C"); exit(); } }
         else if (ch === "\x04") { if (!buffer) exit(); }
         else if (ch === "\x01")                       { moveTo(0); }             // ^A
         else if (ch === "\x05")                       { moveTo(buffer.length); } // ^E

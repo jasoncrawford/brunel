@@ -280,17 +280,31 @@ describe("ask() - exit conditions", () => {
     });
   });
 
-  it("^C → calls process.exit(0)", async () => {
+  it("^C with empty buffer → calls process.exit(0)", async () => {
     const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => {}) as any);
     await withFakeStdin(async (stdin) => {
       const p = ask("> ", () => []);
-      stdin.push("\x03"); // ^C
-      // p will never resolve (exit is called), but we can check the spy
+      stdin.push("\x03"); // ^C with empty buffer
       await new Promise(r => setTimeout(r, 10));
       expect(exitSpy).toHaveBeenCalledWith(0);
-      // Clean up the dangling promise by triggering submit
       stdin.push("\r");
       await p.catch(() => {});
+    });
+    exitSpy.mockRestore();
+  });
+
+  it("^C with non-empty buffer → clears buffer, does not exit", async () => {
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => {}) as any);
+    await withFakeStdin(async (stdin) => {
+      const p = ask("> ", () => []);
+      stdin.push("hello");
+      stdin.push("\x03"); // ^C with text in buffer — should clear, not exit
+      await new Promise(r => setTimeout(r, 10));
+      expect(exitSpy).not.toHaveBeenCalled();
+      // Buffer should be cleared; pressing Enter should submit empty string
+      stdin.push("\r");
+      const result = await p;
+      expect(result).toBe("");
     });
     exitSpy.mockRestore();
   });
