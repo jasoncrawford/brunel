@@ -399,7 +399,8 @@ export const TOOL_RESULT_FMT: FmtTable = {
 };
 
 export const TOOL_ERROR_FMT: FmtTable = {
-  _default: (b) => c.salmon(`! ${trunc(toolResultText(b), 100)}`),
+  AskUserQuestion: (b) => c.darkGray(`→ ${trunc(toolResultText(b), 100)}`),
+  _default:        (b) => c.salmon(`! ${trunc(toolResultText(b), 100)}`),
 };
 
 export const SYSTEM_FMT: FmtTable = {

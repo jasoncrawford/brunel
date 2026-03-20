@@ -480,6 +480,14 @@ describe("TOOL_ERROR_FMT", () => {
     expect(raw).toContain("\x1b[38;5;203m");
     expect(stripAnsi(raw)).toContain("! something went wrong");
   });
+
+  it("AskUserQuestion: denial rendered in dark gray, not salmon", () => {
+    const raw = resolve(TOOL_ERROR_FMT, "AskUserQuestion", { content: "The user would like to discuss" })!;
+    // darkGray: \x1b[90m, not salmon \x1b[38;5;203m
+    expect(raw).toContain("\x1b[90m");
+    expect(raw).not.toContain("\x1b[38;5;203m");
+    expect(stripAnsi(raw)).toContain("The user would like to discuss");
+  });
 });
 
 describe("SYSTEM_FMT", () => {

@@ -534,14 +534,23 @@ describe("pickQuestion()", () => {
     });
   });
 
-  it("navigating to Other: then entering text returns {type:other}", async () => {
+  it("navigating to Other: activates text entry; type then Enter returns {type:other}", async () => {
     await withFakeStdin(async (stdin) => {
       const p = pickQuestion(opts);
-      // 3 model opts → Other is index 3 → down 3 times, Enter, type text, Enter
-      stdin.push("\x1b[B\x1b[B\x1b[B\r");
+      // Navigate to Other: (textMode activates), then type, then Enter — only one Enter
+      stdin.push("\x1b[B\x1b[B\x1b[B");
       stdin.push("purple\r");
       const result = await p;
       expect(result).toEqual({ type: "other", text: "purple" });
+    });
+  });
+
+  it("Enter on Other: with no text returns {type:other} with empty string", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = pickQuestion(opts);
+      stdin.push("\x1b[B\x1b[B\x1b[B\r"); // navigate to Other: then Enter immediately
+      const result = await p;
+      expect(result).toEqual({ type: "other", text: "" });
     });
   });
 

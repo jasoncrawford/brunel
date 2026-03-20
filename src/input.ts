@@ -978,6 +978,20 @@ export async function pickQuestion(
       for (let i = 0; i < count; i++) {
         process.stdout.write(renderLine(i) + "\x1b[K\r\n");
       }
+      // When Other: is selected, position terminal cursor at end of text entry area
+      if (idx === otherIdx) positionTextCursor();
+    }
+
+    function navigateTo(newIdx: number) {
+      if (idx === otherIdx && textMode) {
+        // Move cursor from Other: line back to below last line before redrawing
+        process.stdout.write(`\x1b[${count - otherIdx}B`);
+        textMode = false;
+        textBuf = "";
+      }
+      idx = newIdx;
+      if (idx === otherIdx) textMode = true;
+      redraw();
     }
 
     function onData(raw: string) {
@@ -995,7 +1009,9 @@ export async function pickQuestion(
             process.stdin.removeListener("data", onData);
             resolve({ type: "other", text: textBuf });
             return;
-          } else if (ch === "\x7f" || ch === "\x08") {
+          } else if (ch === "\x10") { navigateTo((idx - 1 + count) % count); }
+          else if (ch === "\x11")   { navigateTo((idx + 1) % count); }
+          else if (ch === "\x7f" || ch === "\x08") {
             if (textBuf.length > 0) {
               textBuf = textBuf.slice(0, -1);
               process.stdout.write("\x08 \x08");
@@ -1008,18 +1024,18 @@ export async function pickQuestion(
             process.stdout.write(ch);
           }
         } else {
-          if (ch === "\x10") { idx = (idx - 1 + count) % count; redraw(); }
-          else if (ch === "\x11") { idx = (idx + 1) % count; redraw(); }
+          if (ch === "\x10") { navigateTo((idx - 1 + count) % count); }
+          else if (ch === "\x11") { navigateTo((idx + 1) % count); }
           else if (ch === "\r" || ch === "\n") {
             if (idx === discussIdx) {
               done = true;
               process.stdin.removeListener("data", onData);
               resolve({ type: "discuss" });
             } else if (idx === otherIdx) {
-              // Switch to inline text entry on the Other: line
-              textMode = true;
-              redraw();
-              positionTextCursor();
+              // Already in textMode; Enter submits (textBuf is empty if they just navigated here)
+              done = true;
+              process.stdin.removeListener("data", onData);
+              resolve({ type: "other", text: textBuf });
             } else {
               done = true;
               process.stdin.removeListener("data", onData);
@@ -1031,7 +1047,7 @@ export async function pickQuestion(
             process.exit(0);
           } else if (ch >= "1" && ch <= "9") {
             const n = parseInt(ch, 10) - 1;
-            if (n < count) { idx = n; redraw(); }
+            if (n < count) { navigateTo(n); }
           }
         }
       }
