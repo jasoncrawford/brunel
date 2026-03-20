@@ -225,6 +225,11 @@ export function fmtTodoWriteInput(todos: unknown): string {
   return fmtCount(items.length, "todo");
 }
 
+export function fmtAskUserQuestionInput(questions: unknown): string {
+  const items = Array.isArray(questions) ? questions as Array<{question: string}> : [];
+  return items.map((q) => `"${q.question}"`).join(", ");
+}
+
 export function fmtToolSearchOutput(content: unknown): string {
   const items = Array.isArray(content) ? content : [];
   const names = items
@@ -378,11 +383,7 @@ export const TOOL_CALL_FMT: FmtTable = {
   Agent:      (b) => fmtToolCall(b, `• ${b.input?.subagent_type ?? "Agent"}(${trunc(b.input?.prompt ?? "", 80)})`),
   ToolSearch: (b) => fmtToolCall(b, `• ToolSearch(${b.input?.query ?? "?"})`),
   TodoWrite:  (b) => fmtToolCall(b, `• TodoWrite(${fmtTodoWriteInput(b.input?.todos)})`),
-  AskUserQuestion: (b) => {
-    const questions = Array.isArray(b.input?.questions) ? b.input.questions as Array<{question: string}> : [];
-    const text = questions.map((q) => `"${q.question}"`).join(", ");
-    return fmtToolCall(b, `• AskUserQuestion(${text})`);
-  },
+  AskUserQuestion: (b) => fmtToolCall(b, `• AskUserQuestion(${fmtAskUserQuestionInput(b.input?.questions)})`),
   _default:   (b) => fmtToolCall(b, `• ${b.name}(${fmtArgs(b.input)})`),
 };
 

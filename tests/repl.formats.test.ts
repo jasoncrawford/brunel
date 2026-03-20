@@ -11,6 +11,7 @@ import {
   SYSTEM_FMT,
   MESSAGE_FMT,
   fmtTodoWriteInput,
+  fmtAskUserQuestionInput,
   fmtToolSearchOutput,
   fmtTodoWriteOutput,
   type FmtTable,
@@ -285,6 +286,25 @@ describe("TOOL_RESULT_FMT", () => {
     const b = { content: "File created successfully at: /path/file.md" };
     const raw = resolve(TOOL_RESULT_FMT, "Write", b)!;
     expect(stripAnsi(raw)).toContain("→ File created");
+  });
+});
+
+describe("fmtAskUserQuestionInput()", () => {
+  it("returns quoted question text for a single question", () => {
+    expect(fmtAskUserQuestionInput([{ question: "Which approach?" }])).toBe('"Which approach?"');
+  });
+
+  it("joins multiple questions with comma", () => {
+    expect(fmtAskUserQuestionInput([{ question: "A?" }, { question: "B?" }])).toBe('"A?", "B?"');
+  });
+
+  it("returns empty string for empty array", () => {
+    expect(fmtAskUserQuestionInput([])).toBe("");
+  });
+
+  it("returns empty string for non-array input", () => {
+    expect(fmtAskUserQuestionInput(null)).toBe("");
+    expect(fmtAskUserQuestionInput(undefined)).toBe("");
   });
 });
 
