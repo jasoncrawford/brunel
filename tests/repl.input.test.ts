@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PassThrough } from "stream";
-import { ask, pick, pickMultiple } from "../src/input.js";
+import { ask, pick, pickMultiple, promptLine, pickQuestion } from "../src/input.js";
+import type { PickQuestionResult } from "../src/input.js";
 import * as display from "../src/display.js";
 
 function makeStdin() {
@@ -475,6 +476,115 @@ describe("ask() - drawFresh after print()", () => {
       stdin.push("\r");
       await p;
     });
+  });
+});
+
+describe("promptLine()", () => {
+  it("resolves with typed text on Enter", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = promptLine("Enter: ");
+      stdin.push("hello\r");
+      expect(await p).toBe("hello");
+    });
+  });
+
+  it("supports backspace", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = promptLine("Enter: ");
+      stdin.push("hellp\x7fo\r"); // type "hellp", backspace → "hell", type "o" → "hello"
+      expect(await p).toBe("hello");
+    });
+  });
+
+  it("returns empty string for bare Enter", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = promptLine("Enter: ");
+      stdin.push("\r");
+      expect(await p).toBe("");
+    });
+  });
+});
+
+describe("pickQuestion()", () => {
+  const opts = [
+    { label: "Blue",  description: "A cool color" },
+    { label: "Red",   description: "A bold color" },
+    { label: "Green", description: "An earthy color" },
+  ];
+
+  it("Enter on first option returns answer with first label", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = pickQuestion(opts);
+      stdin.push("\r");
+      const result = await p;
+      expect(result).toEqual({ type: "answer", value: "Blue" });
+    });
+  });
+
+  it("down arrow then Enter returns second option", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = pickQuestion(opts);
+      stdin.push("\x1b[B\r");
+      const result = await p;
+      expect(result).toEqual({ type: "answer", value: "Red" });
+    });
+  });
+
+  it("digit key jumps to that 1-based index", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = pickQuestion(opts);
+      stdin.push("3\r");
+      const result = await p;
+      expect(result).toEqual({ type: "answer", value: "Green" });
+    });
+  });
+
+  it("digit out of range is a no-op, cursor stays at 0", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = pickQuestion(opts);
+      stdin.push("9\r"); // 5 total options; 9 is out of range
+      const result = await p;
+      expect(result).toEqual({ type: "answer", value: "Blue" });
+    });
+  });
+
+  it("navigating to Other: then entering text returns {type:other}", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = pickQuestion(opts);
+      // 3 model opts → Other is index 3 → down 3 times, Enter, type text, Enter
+      stdin.push("\x1b[B\x1b[B\x1b[B\r");
+      stdin.push("purple\r");
+      const result = await p;
+      expect(result).toEqual({ type: "other", text: "purple" });
+    });
+  });
+
+  it("navigating to Let's discuss and Enter returns {type:discuss}", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = pickQuestion(opts);
+      // 3 model opts → Discuss is index 4 → down 4 times, Enter
+      stdin.push("\x1b[B\x1b[B\x1b[B\x1b[B\r");
+      const result = await p;
+      expect(result).toEqual({ type: "discuss" });
+    });
+  });
+
+  it("renders option labels to stdout", async () => {
+    const written: string[] = [];
+    vi.spyOn(process.stdout, "write").mockImplementation((s: any) => {
+      written.push(String(s)); return true;
+    });
+    await withFakeStdin(async (stdin) => {
+      const p = pickQuestion(opts);
+      stdin.push("\r");
+      await p;
+    });
+    const out = written.join("");
+    expect(out).toContain("Blue");
+    expect(out).toContain("Red");
+    expect(out).toContain("Green");
+    expect(out).toContain("Other:");
+    expect(out).toContain("discuss");
   });
 });
 
