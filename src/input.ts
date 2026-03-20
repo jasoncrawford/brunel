@@ -936,17 +936,37 @@ export async function pickQuestion(
 
     let idx = 0;
     let done = false;
+    let textMode = false; // true when typing inline answer for Other:
+    let textBuf = "";
 
     function renderLine(i: number): string {
       const num = i + 1;
       const numStr = num <= 9 ? `${num}` : " ";
       const opt = all[i];
-      const text = opt.description
-        ? `${display.s.bold(opt.label)}. ${opt.description}`
-        : display.s.bold(opt.label);
       const marker = i === idx ? "▶ " : "  ";
-      const line = `${marker}${numStr}. ${text}`;
-      return i === idx ? line : display.s.dim(line);
+      if (i === idx) {
+        // Selected: bold label, normal weight description — no dim
+        let text: string;
+        if (i === otherIdx && textMode) {
+          text = `${display.s.bold("Other:")} ${textBuf}`;
+        } else if (opt.description) {
+          text = `${display.s.bold(opt.label)}. ${opt.description}`;
+        } else {
+          text = display.s.bold(opt.label);
+        }
+        return `${marker}${numStr}. ${text}`;
+      } else {
+        // Non-selected: entire line dim, no bold (bold resets dim via \x1b[22m)
+        const text = opt.description ? `${opt.label}. ${opt.description}` : opt.label;
+        return display.s.dim(`${marker}${numStr}. ${text}`);
+      }
+    }
+
+    // After a full redraw (cursor below last line), position cursor at end of Other: text
+    function positionTextCursor() {
+      // Move up from below-last-line to Other: row, then right past the visible prefix
+      // Visible prefix: "▶ "(2) + numStr(1) + ". "(2) + "Other: "(7) = 12 chars + textBuf
+      process.stdout.write(`\x1b[${count - otherIdx}A\r\x1b[${12 + textBuf.length}C`);
     }
 
     for (let i = 0; i < count; i++) {
@@ -968,25 +988,51 @@ export async function pickQuestion(
       data = data.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
       data = data.replace(/\x1b./gs, "");
       for (const ch of data) {
-        if (ch === "\x10") { idx = (idx - 1 + count) % count; redraw(); }
-        else if (ch === "\x11") { idx = (idx + 1) % count; redraw(); }
-        else if (ch === "\r" || ch === "\n") {
-          done = true;
-          process.stdin.removeListener("data", onData);
-          if (idx === discussIdx) {
-            resolve({ type: "discuss" });
-          } else if (idx === otherIdx) {
-            void promptLine("Other: ").then((text) => resolve({ type: "other", text }));
-          } else {
-            resolve({ type: "answer", value: options[idx].label });
+        if (textMode) {
+          // Inline text entry for Other: — write chars directly (cursor already positioned)
+          if (ch === "\r" || ch === "\n") {
+            done = true;
+            process.stdin.removeListener("data", onData);
+            resolve({ type: "other", text: textBuf });
+            return;
+          } else if (ch === "\x7f" || ch === "\x08") {
+            if (textBuf.length > 0) {
+              textBuf = textBuf.slice(0, -1);
+              process.stdout.write("\x08 \x08");
+            }
+          } else if (ch === "\x03") {
+            process.stdout.write("^C\r\n");
+            process.exit(0);
+          } else if (ch.charCodeAt(0) >= 32) {
+            textBuf += ch;
+            process.stdout.write(ch);
           }
-          return;
-        } else if (ch === "\x03") {
-          process.stdout.write("^C\r\n");
-          process.exit(0);
-        } else if (ch >= "1" && ch <= "9") {
-          const n = parseInt(ch, 10) - 1;
-          if (n < count) { idx = n; redraw(); }
+        } else {
+          if (ch === "\x10") { idx = (idx - 1 + count) % count; redraw(); }
+          else if (ch === "\x11") { idx = (idx + 1) % count; redraw(); }
+          else if (ch === "\r" || ch === "\n") {
+            if (idx === discussIdx) {
+              done = true;
+              process.stdin.removeListener("data", onData);
+              resolve({ type: "discuss" });
+            } else if (idx === otherIdx) {
+              // Switch to inline text entry on the Other: line
+              textMode = true;
+              redraw();
+              positionTextCursor();
+            } else {
+              done = true;
+              process.stdin.removeListener("data", onData);
+              resolve({ type: "answer", value: options[idx].label });
+            }
+            return;
+          } else if (ch === "\x03") {
+            process.stdout.write("^C\r\n");
+            process.exit(0);
+          } else if (ch >= "1" && ch <= "9") {
+            const n = parseInt(ch, 10) - 1;
+            if (n < count) { idx = n; redraw(); }
+          }
         }
       }
     }

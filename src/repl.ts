@@ -51,7 +51,7 @@ export async function handleAskUserQuestion(
       const result: PickQuestionResult = await pickQuestion(q.options);
       if (result.type === "discuss") {
         display.startStatus(getStatusText);
-        return { behavior: "deny", message: "Let's discuss" };
+        return { behavior: "deny", message: "The user would like to discuss more before answering. Prompt them to begin the discussion." };
       }
       answers[q.question] = result.type === "answer" ? result.value : result.text;
     }
