@@ -201,9 +201,9 @@ describe("handleUserInput", () => {
     expect(sent.taskId).toBe("42");
   });
 
-  it("regular query text runs runQuery", async () => {
+  it("regular query text runs runQuery with prompt and sessionId", async () => {
     await session.handleUserInput("hello claude");
-    expect(runQuery).toHaveBeenCalledWith("hello claude", undefined);
+    expect(runQuery).toHaveBeenCalledWith("hello claude", undefined, expect.anything());
   });
 
   it("WS_TASK_ASSIGNED sentinel triggers initial runQuery", async () => {
@@ -515,5 +515,60 @@ describe("debounce", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// ── Interrupt (AbortController) ───────────────────────────────────────────────
+
+describe("interrupt", () => {
+  it("runQueryLoop passes an AbortController to runQuery", async () => {
+    const issue = makeIssue();
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+    const ac = runQuery.mock.calls[0][2];
+    expect(ac).toBeInstanceOf(AbortController);
+  });
+
+  it("when runQuery's AbortController is aborted, event drain is skipped", async () => {
+    const issue = makeIssue();
+    // Mock runQuery: abort the controller on first call, then resolve
+    runQuery.mockImplementationOnce(async (_prompt: string, _sessionId: string | undefined, ac: AbortController) => {
+      ac.abort(); // simulate user pressing ^C
+      return "session-1";
+    });
+
+    // Deliver event before query finishes (it will be in pendingEvents)
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+
+    // Queue an event that would normally trigger a second runQuery
+    sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
+
+    // Wait for the loop to settle
+    await vi.waitFor(() => !session["isRunningQuery"]);
+
+    // The event drain should have been skipped — only one runQuery call
+    expect(runQuery).toHaveBeenCalledOnce();
+  });
+
+  it("when runQuery's AbortController is aborted, notifyQueryDone is not called (waitUntilIdle still resolves via isRunningQuery flag)", async () => {
+    const issue = makeIssue();
+    let abortedAc: AbortController | undefined;
+    runQuery.mockImplementationOnce(async (_prompt: string, _sessionId: string | undefined, ac: AbortController) => {
+      abortedAc = ac;
+      ac.abort();
+      return "session-1";
+    });
+
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+
+    // waitUntilIdle should still resolve after the runQuery loop exits
+    const result = await Promise.race([
+      session.waitUntilIdle().then(() => "idle"),
+      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 100)),
+    ]);
+    expect(result).toBe("idle");
+    expect(abortedAc?.signal.aborted).toBe(true);
   });
 });
