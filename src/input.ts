@@ -868,3 +868,129 @@ export async function pickMultiple(options: string[], promptStr?: string): Promi
     process.stdin.on("data", onData);
   });
 }
+
+// ── Question picker (AskUserQuestion) ─────────────────────────────────────────
+
+/**
+ * Minimal single-line text prompt. Reads characters until Enter,
+ * supporting backspace. No autocomplete or multiline support.
+ */
+export async function promptLine(prompt: string): Promise<string> {
+  return new Promise((resolve) => {
+    let buf = "";
+    process.stdout.write(prompt);
+
+    function onData(raw: string) {
+      const data = raw
+        .replace(/\x1b\[[0-9;]*[A-Za-z]/g, "")
+        .replace(/\x1b./gs, "");
+      for (const ch of data) {
+        if (ch === "\r" || ch === "\n") {
+          process.stdout.write("\r\n");
+          process.stdin.removeListener("data", onData);
+          resolve(buf);
+          return;
+        } else if (ch === "\x7f" || ch === "\x08") {
+          if (buf.length > 0) {
+            buf = buf.slice(0, -1);
+            process.stdout.write("\x08 \x08");
+          }
+        } else if (ch === "\x03") {
+          process.stdout.write("^C\r\n");
+          process.exit(0);
+        } else if (ch.charCodeAt(0) >= 32) {
+          buf += ch;
+          process.stdout.write(ch);
+        }
+      }
+    }
+
+    process.stdin.on("data", onData);
+  });
+}
+
+export type PickQuestionResult =
+  | { type: "answer"; value: string }
+  | { type: "other"; text: string }
+  | { type: "discuss" };
+
+/**
+ * Single-selection picker for AskUserQuestion tool calls.
+ * Options are rendered as numbered items with bold label and description.
+ * Non-selected rows are dim; the selected row is normal weight.
+ * "Other:" (free-text entry) and "Let's discuss" (deny) are always appended.
+ * Digit keys 1–9 jump the cursor to that 1-based index.
+ */
+export async function pickQuestion(
+  options: Array<{ label: string; description: string }>,
+): Promise<PickQuestionResult> {
+  return new Promise((resolve) => {
+    const extras = [
+      { label: "Other:",        description: "" },
+      { label: "Let's discuss", description: "" },
+    ];
+    const all = [...options, ...extras];
+    const count = all.length;
+    const otherIdx   = count - 2;
+    const discussIdx = count - 1;
+
+    let idx = 0;
+    let done = false;
+
+    function renderLine(i: number): string {
+      const num = i + 1;
+      const numStr = num <= 9 ? `${num}` : " ";
+      const opt = all[i];
+      const text = opt.description
+        ? `${display.s.bold(opt.label)}. ${opt.description}`
+        : display.s.bold(opt.label);
+      const marker = i === idx ? "▶ " : "  ";
+      const line = `${marker}${numStr}. ${text}`;
+      return i === idx ? line : display.s.dim(line);
+    }
+
+    for (let i = 0; i < count; i++) {
+      process.stdout.write(renderLine(i) + "\r\n");
+    }
+
+    function redraw() {
+      process.stdout.write(`\x1b[${count}A\r`);
+      for (let i = 0; i < count; i++) {
+        process.stdout.write(renderLine(i) + "\x1b[K\r\n");
+      }
+    }
+
+    function onData(raw: string) {
+      if (done) return;
+      let data = raw;
+      data = data.replace(/\x1b\[A/g, "\x10"); // up
+      data = data.replace(/\x1b\[B/g, "\x11"); // down
+      data = data.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
+      data = data.replace(/\x1b./gs, "");
+      for (const ch of data) {
+        if (ch === "\x10") { idx = (idx - 1 + count) % count; redraw(); }
+        else if (ch === "\x11") { idx = (idx + 1) % count; redraw(); }
+        else if (ch === "\r" || ch === "\n") {
+          done = true;
+          process.stdin.removeListener("data", onData);
+          if (idx === discussIdx) {
+            resolve({ type: "discuss" });
+          } else if (idx === otherIdx) {
+            void promptLine("Other: ").then((text) => resolve({ type: "other", text }));
+          } else {
+            resolve({ type: "answer", value: options[idx].label });
+          }
+          return;
+        } else if (ch === "\x03") {
+          process.stdout.write("^C\r\n");
+          process.exit(0);
+        } else if (ch >= "1" && ch <= "9") {
+          const n = parseInt(ch, 10) - 1;
+          if (n < count) { idx = n; redraw(); }
+        }
+      }
+    }
+
+    process.stdin.on("data", onData);
+  });
+}
