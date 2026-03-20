@@ -185,11 +185,30 @@ describe("foreman WebSocket protocol", () => {
     expect(queue.get("1")?.status).toBe("assigned");
   });
 
-  it("worker reconnects as busy with unknown taskId gets standby", async () => {
+  it("worker reconnects as busy with unknown taskId is registered busy and not interrupted", async () => {
     const ws = await connect();
-    const reply = nextMsg(ws);
     send(ws, { type: "worker_hello", workerId: "w1", taskId: "nonexistent", status: "busy" });
-    expect(await reply).toEqual({ type: "standby" });
+    const raceResult = await Promise.race([
+      nextMsg(ws).then(() => "message" as const),
+      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
+    ]);
+    expect(raceResult).toBe("timeout"); // no message — worker continues its existing work
+    expect(registry.get("w1")?.status).toBe("busy");
+    expect(registry.get("w1")?.currentTaskId).toBe("nonexistent");
+  });
+
+  it("worker with pending tasks reconnects as busy with unknown taskId does not receive task_assigned", async () => {
+    queue.addTask(makeTask(1));
+    const ws = await connect();
+    send(ws, { type: "worker_hello", workerId: "w1", taskId: "nonexistent", status: "busy" });
+    const raceResult = await Promise.race([
+      nextMsg(ws).then(() => "message" as const),
+      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
+    ]);
+    expect(raceResult).toBe("timeout"); // must NOT receive task_assigned
+    expect(registry.get("w1")?.status).toBe("busy");
+    // pending task remains available for other workers
+    expect(queue.get("1")?.status).toBe("pending");
   });
 
   it("routeEventToWorker sends event_notification to assigned worker", async () => {
