@@ -571,9 +571,8 @@ export function createForemanWss(
               log(workerId, `→ event_notification #${existing.issueNumber} ${evt.name} (queued)`);
             }
           } else if (!existing) {
-            log(workerId, `hello busy task=#${msg.taskId} — unknown task, treating as idle`);
-            registry.register(workerId, ws, "idle");
-            tryAssignWork(workerId);
+            log(workerId, `hello busy task=#${msg.taskId} — unknown task, respecting busy status`);
+            registry.register(workerId, ws, "busy", msg.taskId);
           } else {
             // Task is assigned to a different worker — standby
             log(workerId, `hello busy task=#${msg.taskId} — task taken by another worker`);
