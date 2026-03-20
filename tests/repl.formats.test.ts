@@ -161,6 +161,25 @@ describe("TOOL_CALL_FMT", () => {
     expect(result).toContain("• Explore(find files)");
   });
 
+  it("AskUserQuestion: shows question text(s)", () => {
+    const result = r(TOOL_CALL_FMT, "AskUserQuestion", {
+      input: { questions: [{ question: "Which approach?", header: "Approach", options: [], multiSelect: false }] },
+    });
+    expect(result).toContain('• AskUserQuestion("Which approach?")');
+  });
+
+  it("AskUserQuestion: shows multiple question texts", () => {
+    const result = r(TOOL_CALL_FMT, "AskUserQuestion", {
+      input: {
+        questions: [
+          { question: "Which approach?", header: "A", options: [], multiSelect: false },
+          { question: "Which format?", header: "B", options: [], multiSelect: false },
+        ],
+      },
+    });
+    expect(result).toContain('• AskUserQuestion("Which approach?", "Which format?")');
+  });
+
   it("_default: shows • <name>(<fmtArgs(input)>)", () => {
     const result = r(TOOL_CALL_FMT, "_default", {
       name: "MyTool",
