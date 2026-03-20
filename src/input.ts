@@ -759,3 +759,112 @@ export function ask(
     process.stdin.on("data", onData);
   });
 }
+
+// ── Interactive pickers (raw-mode arrow-key menus) ─────────────────────────
+
+/**
+ * Single-selection arrow-key picker. Returns the index of the chosen option.
+ * Up/down arrows move the cursor; Enter confirms. Ctrl-C exits the process.
+ * Assumes stdin is already in raw mode.
+ */
+export async function pick(options: string[], promptStr?: string): Promise<number> {
+  return new Promise((resolve) => {
+    let idx = 0;
+    let done = false;
+    const count = options.length;
+
+    if (promptStr) process.stdout.write(promptStr + "\n");
+    for (let i = 0; i < count; i++) {
+      const marker = i === idx ? "▶ " : "  ";
+      process.stdout.write(marker + options[i] + "\n");
+    }
+
+    function redraw() {
+      process.stdout.write(`\x1b[${count}A\r`);
+      for (let i = 0; i < count; i++) {
+        const marker = i === idx ? "▶ " : "  ";
+        process.stdout.write(marker + options[i] + "\x1b[K\r\n");
+      }
+    }
+
+    function onData(raw: string) {
+      if (done) return;
+      let data = raw;
+      data = data.replace(/\x1b\[A/g, "\x10"); // up arrow
+      data = data.replace(/\x1b\[B/g, "\x11"); // down arrow
+      data = data.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
+      data = data.replace(/\x1b./gs, "");
+      for (const ch of data) {
+        if (ch === "\x10") { idx = (idx - 1 + count) % count; redraw(); }
+        else if (ch === "\x11") { idx = (idx + 1) % count; redraw(); }
+        else if (ch === "\r" || ch === "\n") {
+          done = true;
+          process.stdin.removeListener("data", onData);
+          resolve(idx);
+        } else if (ch === "\x03") {
+          process.stdout.write("^C\r\n");
+          process.exit(0);
+        }
+      }
+    }
+
+    process.stdin.on("data", onData);
+  });
+}
+
+/**
+ * Multi-selection arrow-key picker. Returns an array of selected indices.
+ * Up/down arrows move the cursor; Space toggles selection; Enter confirms.
+ * Ctrl-C exits the process.
+ */
+export async function pickMultiple(options: string[], promptStr?: string): Promise<number[]> {
+  return new Promise((resolve) => {
+    let idx = 0;
+    let done = false;
+    const count = options.length;
+    const selected = new Set<number>();
+
+    if (promptStr) process.stdout.write(promptStr + "\n");
+    for (let i = 0; i < count; i++) {
+      const cursor = i === idx ? "▶" : " ";
+      const check = selected.has(i) ? "◉" : "○";
+      process.stdout.write(`${cursor} ${check} ${options[i]}\n`);
+    }
+
+    function redraw() {
+      process.stdout.write(`\x1b[${count}A\r`);
+      for (let i = 0; i < count; i++) {
+        const cursor = i === idx ? "▶" : " ";
+        const check = selected.has(i) ? "◉" : "○";
+        process.stdout.write(`${cursor} ${check} ${options[i]}\x1b[K\r\n`);
+      }
+    }
+
+    function onData(raw: string) {
+      if (done) return;
+      let data = raw;
+      data = data.replace(/\x1b\[A/g, "\x10"); // up arrow
+      data = data.replace(/\x1b\[B/g, "\x11"); // down arrow
+      data = data.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
+      data = data.replace(/\x1b./gs, "");
+      for (const ch of data) {
+        if (ch === "\x10") { idx = (idx - 1 + count) % count; redraw(); }
+        else if (ch === "\x11") { idx = (idx + 1) % count; redraw(); }
+        else if (ch === " ") {
+          if (selected.has(idx)) selected.delete(idx);
+          else selected.add(idx);
+          redraw();
+        } else if (ch === "\r" || ch === "\n") {
+          done = true;
+          process.stdin.removeListener("data", onData);
+          resolve([...selected].sort((a, b) => a - b));
+        } else if (ch === "\x03") {
+          process.stdout.write("^C\r\n");
+          process.exit(0);
+        }
+      }
+    }
+
+    process.stdin.on("data", onData);
+  });
+}
