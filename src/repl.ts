@@ -122,7 +122,7 @@ export async function runQuery(prompt: string, sessionId: string | undefined, ab
   display.stopStatus(); // no-op if result message already stopped it
 
   if (!resultReceived) {
-    display.print("Interrupted.");
+    display.print(display.c.darkGray("\nInterrupted. What should the agent do instead?"));
   }
 
   // Restore the callback and redraw the prompt. In worker mode this redraws
