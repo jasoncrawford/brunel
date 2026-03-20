@@ -345,6 +345,96 @@ describe("runQuery - interrupt support", () => {
   });
 });
 
+describe("runQuery - interrupt via ^C on stdin", () => {
+  it("^C on stdin → calls close() on query iterable, does not echo ^C to stdout", async () => {
+    let closeCalled = false;
+    let resolveClose!: () => void;
+    const closePromise = new Promise<void>((resolve) => { resolveClose = resolve; });
+
+    (query as any).mockImplementation((_opts: any) => {
+      const gen = (async function* () {
+        await closePromise;
+        // generator ends without emitting result
+      })();
+      (gen as any).close = () => { closeCalled = true; resolveClose(); };
+      return gen;
+    });
+
+    const origStdin = process.stdin;
+    const fakeStdin = new PassThrough();
+    fakeStdin.setEncoding("utf8");
+    (fakeStdin as any).setRawMode = vi.fn();
+    Object.defineProperty(process, "stdin", { value: fakeStdin, configurable: true });
+
+    const writtenToStdout: string[] = [];
+    vi.spyOn(process.stdout, "write").mockImplementation((s: any) => { writtenToStdout.push(String(s)); return true; });
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      const queryPromise = runQuery("test", undefined);
+      await new Promise((r) => setTimeout(r, 5));
+      fakeStdin.push("\x03");
+      await queryPromise;
+    } finally {
+      Object.defineProperty(process, "stdin", { value: origStdin, configurable: true });
+      vi.restoreAllMocks();
+    }
+
+    expect(closeCalled).toBe(true);
+    // stdout must NOT contain the "^C" echo
+    const stdoutStr = writtenToStdout.join("");
+    expect(stdoutStr).not.toContain("^C");
+  });
+
+  it("SDK throwing 'aborted by user' error is caught, not rethrown, prints Interrupted.", async () => {
+    (query as any).mockImplementation((_opts: any) => {
+      const gen = (async function* () {
+        throw new Error("Claude Code process aborted by user");
+      })();
+      (gen as any).close = () => {};
+      return gen;
+    });
+
+    const cap = captureConsole();
+    let thrown: unknown;
+    try {
+      await runQuery("test", "sess-1");
+    } catch (err) {
+      thrown = err;
+    } finally {
+      cap.restore();
+    }
+
+    expect(thrown).toBeUndefined();
+    const output = cap.lines.map(stripAnsi).join("\n");
+    expect(output).toContain("Interrupted.");
+  });
+
+  it("SDK throwing unrelated error still propagates", async () => {
+    (query as any).mockImplementation((_opts: any) => {
+      const gen = (async function* () {
+        throw new Error("network failure");
+      })();
+      (gen as any).close = () => {};
+      return gen;
+    });
+
+    const cap = captureConsole();
+    let thrown: unknown;
+    try {
+      await runQuery("test", undefined);
+    } catch (err) {
+      thrown = err;
+    } finally {
+      cap.restore();
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toBe("network failure");
+  });
+});
+
 describe("runQuery - prompt redraw after query (worker mode integration)", () => {
   it("redraws input prompt on stdout after query completes, not during query output", async () => {
     // In worker mode: ask() is waiting for input while runQuery runs in the background.

@@ -53,11 +53,25 @@ export async function runQuery(prompt: string, sessionId: string | undefined, ab
   // Use caller-provided AbortController (worker mode) or create our own (REPL mode).
   const ac = abortController ?? new AbortController();
 
+  const iterable = query({
+    prompt,
+    options: {
+      cwd: process.cwd(),
+      systemPrompt: { type: "preset", preset: "claude_code" },
+      settingSources: ["user", "project"],
+      permissionMode: PERMISSION_MODE,
+      includePartialMessages: true,
+      abortController: ac,
+      ...(BYPASS ? { allowDangerouslySkipPermissions: true } : {}),
+      ...(sessionId ? { resume: sessionId } : {}),
+    },
+  });
+
   // Register a temporary raw-stdin listener to catch ^C and abort the query.
   // The listener is removed in a finally block regardless of how the query ends.
   const onInterrupt = (chunk: string) => {
     if (chunk.includes("\x03")) {
-      process.stdout.write("^C\n");
+      (iterable as unknown as { close?: () => void }).close?.();
       ac.abort();
     }
   };
@@ -67,19 +81,7 @@ export async function runQuery(prompt: string, sessionId: string | undefined, ab
   let resultReceived = false;
 
   try {
-    for await (const message of query({
-      prompt,
-      options: {
-        cwd: process.cwd(),
-        systemPrompt: { type: "preset", preset: "claude_code" },
-        settingSources: ["user", "project"],
-        permissionMode: PERMISSION_MODE,
-        includePartialMessages: true,
-        abortController: ac,
-        ...(BYPASS ? { allowDangerouslySkipPermissions: true } : {}),
-        ...(sessionId ? { resume: sessionId } : {}),
-      },
-    })) {
+    for await (const message of iterable) {
       if (!(message.type === "stream_event" && (message.event as { type?: string }).type === "content_block_delta")) {
         logFull("MESSAGE", message);
       }
@@ -110,6 +112,9 @@ export async function runQuery(prompt: string, sessionId: string | undefined, ab
 
       display.printMessage(message);
     }
+  } catch (err) {
+    // SDK throws when aborted — treat as clean interrupt, not an error
+    if (!(err instanceof Error && /aborted by user/i.test(err.message))) throw err;
   } finally {
     process.stdin.removeListener("data", onInterrupt);
   }
