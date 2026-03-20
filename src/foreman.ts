@@ -6,6 +6,9 @@ import type { WebSocket as WsSocket } from "ws";
 import type { WorkerMessage, ForemanMessage, GitHubEvent } from "./types.js";
 import { labelIssueDone } from "./github.js";
 import { fmtTimestamp } from "./display.js";
+import { isBlocked, setBlockers, fetchBlockers } from "./dependencies.js";
+import { fetchIssueStates } from "./github.js";
+import type { DependencyGraph } from "./dependencies.js";
 
 function flog(msg: string) {
   console.log(`${fmtTimestamp()} ${msg}`);
@@ -45,6 +48,10 @@ export class WorkerRegistry {
       if (w.status === "idle") return w;
     }
     return null;
+  }
+
+  getIdleWorkers(): WorkerState[] {
+    return [...this.workers.values()].filter((w) => w.status === "idle");
   }
 
   getWorkerForTask(taskId: string): WorkerState | null {
@@ -88,6 +95,8 @@ interface Task {
   status: "pending" | "assigned" | "complete";
   assignedWorkerId?: string;
   eventQueue: GitHubEvent[];
+  /** True once fetchBlockers has resolved and the dependency graph is populated. */
+  depsLoaded: boolean;
 }
 
 export class TaskQueue {
@@ -95,11 +104,12 @@ export class TaskQueue {
   private prToTaskId = new Map<number, string>();
   private branchToTaskId = new Map<string, string>();
 
-  addTask(t: Omit<Task, "status" | "assignedWorkerId" | "eventQueue"> & Partial<Pick<Task, "status" | "eventQueue">>) {
+  addTask(t: Omit<Task, "status" | "assignedWorkerId" | "eventQueue" | "depsLoaded"> & Partial<Pick<Task, "status" | "eventQueue" | "depsLoaded">>) {
     this.tasks.set(t.taskId, {
       ...t,
       status: t.status ?? "pending",
       eventQueue: t.eventQueue ?? [],
+      depsLoaded: t.depsLoaded ?? true,
     });
   }
 
@@ -114,9 +124,9 @@ export class TaskQueue {
     return undefined;
   }
 
-  nextPending(): Task | null {
+  nextPending(isReady?: (t: Task) => boolean): Task | null {
     for (const t of this.tasks.values()) {
-      if (t.status === "pending") return t;
+      if (t.status === "pending" && (isReady === undefined || isReady(t))) return t;
     }
     return null;
   }
@@ -162,6 +172,13 @@ export class TaskQueue {
   getTaskForBranch(branch: string): Task | undefined {
     const taskId = this.branchToTaskId.get(branch);
     return taskId ? this.tasks.get(taskId) : undefined;
+  }
+
+  markDepsLoaded(issueNumbers: number[]) {
+    for (const n of issueNumbers) {
+      const t = this.tasks.get(String(n));
+      if (t) t.depsLoaded = true;
+    }
   }
 }
 
@@ -293,10 +310,14 @@ export function createForemanWss(
   options?: {
     taskLabel?: string;
     labelDone?: (issueNumber: number) => Promise<void>;
+    graph?: DependencyGraph;
+    openIssues?: Set<number>;
   },
 ): { wss: WebSocketServer; routeEventToWorker: (id: string, name: string, payload: unknown) => void } {
   const taskLabel = options?.taskLabel ?? process.env.TASK_LABEL ?? "brunel:ready";
   const labelDone = options?.labelDone ?? labelIssueDone;
+  const graph = options?.graph ?? new Map<number, Set<number>>();
+  const openIssues = options?.openIssues ?? new Set<number>();
 
   function log(wid: string, line: string) {
     flog(`[worker ${wid.slice(0, 8)}] ${line}`);
@@ -417,12 +438,77 @@ export function createForemanWss(
           body: String(issue.body ?? ""),
           labels,
           repoUrl,
+          depsLoaded: false,
         });
+        // Track open state for newly-enqueued brunel:ready issues
+        openIssues.add(issueNumber);
         flog(`[task #${issueNumber}] enqueued via ${name}/${action}`);
         task = taskQueue.getTaskForIssue(issueNumber)!;
-        const idle = registry.getIdleWorker();
-        if (idle) tryAssignWork(idle.workerId);
+
+        // Fetch deps before assigning (graph must be current)
+        fetchBlockers(issueNumber, String(issue.body ?? ""))
+          .then((blockers) => {
+            setBlockers(issueNumber, blockers, graph);
+            return blockers.length > 0 ? fetchIssueStates(blockers) : Promise.resolve(new Map<number, "open" | "closed">());
+          })
+          .then((states) => {
+            for (const [num, state] of states) {
+              if (state === "open") openIssues.add(num);
+            }
+            // Mark deps as loaded so this task is now eligible for assignment.
+            const t = taskQueue.get(String(issueNumber));
+            if (t) t.depsLoaded = true;
+            // Only one task was just enqueued, so assigning one idle worker is sufficient.
+            const idle = registry.getIdleWorker();
+            if (idle) tryAssignWork(idle.workerId);
+          })
+          .catch((err) => flog(`ERROR fetching deps for #${issueNumber}: ${err}`));
         return;
+      }
+    }
+
+    // ── Dependency graph updates ───────────────────────────────────────────────
+
+    if (name === "issues" && issue) {
+      const action = p.action as string | undefined;
+
+      if (action === "closed") {
+        openIssues.delete(issueNumber);
+        for (const w of registry.getIdleWorkers()) {
+          tryAssignWork(w.workerId);
+        }
+        return;
+      }
+
+      if (action === "reopened") {
+        openIssues.add(issueNumber);
+        return;
+      }
+
+      if (action === "edited") {
+        const changes = p.changes as Record<string, unknown> | undefined;
+        if (changes?.body) {
+          const body = String(issue.body ?? "");
+          fetchBlockers(issueNumber, body)
+            .then((blockers) => {
+              setBlockers(issueNumber, blockers, graph);
+              return fetchIssueStates(blockers);
+            })
+            .then((states) => {
+              for (const [num, state] of states) {
+                // Only update state for the newly-fetched blockers of this issue.
+                // openIssues may contain entries from other tasks; we only touch
+                // what fetchIssueStates returned, so other tasks' blockers are unaffected.
+                if (state === "open") openIssues.add(num);
+                else openIssues.delete(num);
+              }
+              for (const w of registry.getIdleWorkers()) {
+                tryAssignWork(w.workerId);
+              }
+            })
+            .catch((err) => flog(`ERROR updating deps for #${issueNumber}: ${err}`));
+        }
+        // fall through: let existing forwardEvent logic run for assigned tasks
       }
     }
 
@@ -431,7 +517,9 @@ export function createForemanWss(
   }
 
   function tryAssignWork(workerId: string) {
-    const task = taskQueue.nextPending();
+    const task = taskQueue.nextPending(
+      (t) => t.depsLoaded && !isBlocked(t.issueNumber, graph, openIssues),
+    );
     if (task) {
       taskQueue.assignTask(task.taskId, workerId);
       registry.assignTask(workerId, task.taskId);
@@ -540,12 +628,14 @@ const isMain = process.argv[1] === fileURLToPath(import.meta.url);
 if (isMain) {
   const registry = new WorkerRegistry();
   const taskQueue = new TaskQueue();
+  const graph: DependencyGraph = new Map();
+  const openIssues = new Set<number>();
   const webhooks = WEBHOOK_SECRET ? new Webhooks({ secret: WEBHOOK_SECRET }) : null;
 
   // Use a mutable reference so routeEvent can be wired after createForemanWss returns it.
   let routeEvent: (id: string, name: string, payload: unknown) => void = () => {};
   const server = createHttpServer(webhooks, (id, name, payload) => routeEvent(id, name, payload));
-  ({ routeEventToWorker: routeEvent } = createForemanWss(taskQueue, registry, server));
+  ({ routeEventToWorker: routeEvent } = createForemanWss(taskQueue, registry, server, { graph, openIssues }));
 
   if (webhooks) {
     webhooks.onAny(({ id, name, payload }) => {
@@ -559,7 +649,7 @@ if (isMain) {
     flog(`WebSocket workers: ws://localhost:${PORT}/worker`);
     flog("Waiting for events...");
     try {
-      await loadIssuesToQueue(taskQueue);
+      await loadIssuesToQueue(taskQueue, graph, openIssues);
     } catch (err) {
       flog(`WARNING Failed to load issues from GitHub: ${err}`);
     }

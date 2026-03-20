@@ -5,6 +5,8 @@ import { WebSocket, WebSocketServer } from "ws";
 import type { AddressInfo } from "net";
 import { TaskQueue, WorkerRegistry, createForemanWss } from "../src/foreman.js";
 import type { ForemanMessage } from "../src/types.js";
+import { setBlockers } from "../src/dependencies.js";
+import type { DependencyGraph } from "../src/dependencies.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -54,6 +56,8 @@ let wss: WebSocketServer;
 let routeEvent: (id: string, name: string, payload: unknown) => void;
 let labelDone: ReturnType<typeof vi.fn>;
 let port: number;
+let graph: DependencyGraph;
+let openIssues: Set<number>;
 const openClients: WebSocket[] = [];
 
 function connect(): Promise<WebSocket> {
@@ -65,8 +69,10 @@ beforeEach(() => {
 
   queue = new TaskQueue();
   registry = new WorkerRegistry();
+  graph = new Map();
+  openIssues = new Set();
   httpServer = http.createServer();
-  ({ wss, routeEventToWorker: routeEvent } = createForemanWss(queue, registry, httpServer, { labelDone }));
+  ({ wss, routeEventToWorker: routeEvent } = createForemanWss(queue, registry, httpServer, { labelDone, graph, openIssues }));
 
   return new Promise<void>((resolve) => {
     httpServer.listen(0, () => {
@@ -306,6 +312,82 @@ describe("foreman WebSocket protocol", () => {
     routeEvent("evt-2", "issue_comment", { issue: { number: 53 }, comment: { body: "update" } });
     expect(await replyA).toMatchObject({ type: "event_notification", taskId: "53" });
     expect(await noMsgB).toBe("timeout");
+  });
+});
+
+describe("dependency-aware task assignment", () => {
+  it("idle worker gets standby when the only pending task is blocked", async () => {
+    queue.addTask(makeTask(42));
+    openIssues.add(10); // blocker is open
+    setBlockers(42, [10], graph);
+
+    const ws = await connect();
+    const reply = nextMsg(ws);
+    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    expect(await reply).toEqual({ type: "standby" });
+  });
+
+  it("idle worker gets task_assigned when task has no open blockers", async () => {
+    queue.addTask(makeTask(42));
+    setBlockers(42, [10], graph);
+    // openIssues does NOT contain 10 — blocker is closed
+
+    const ws = await connect();
+    const reply = nextMsg(ws);
+    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    const msg = await reply;
+    expect(msg.type).toBe("task_assigned");
+  });
+
+  it("issues/closed event unblocks a waiting task and sends task_assigned to idle worker", async () => {
+    queue.addTask(makeTask(42));
+    openIssues.add(10);
+    setBlockers(42, [10], graph);
+
+    const ws = await connect();
+    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    const first = await nextMsg(ws);
+    expect(first).toEqual({ type: "standby" });
+
+    const second = nextMsg(ws);
+    routeEvent("evt-1", "issues", {
+      action: "closed",
+      issue: { number: 10, title: "Blocker", body: "", labels: [] },
+    });
+    expect(await second).toMatchObject({ type: "task_assigned", taskId: "42" });
+  });
+
+  it("issues/reopened re-blocks subsequent task assignments", async () => {
+    queue.addTask(makeTask(43));
+    setBlockers(43, [10], graph);
+    // openIssues does not have 10 — starts unblocked
+
+    // Blocker 10 reopens — openIssues now contains 10
+    routeEvent("evt-1", "issues", {
+      action: "reopened",
+      issue: { number: 10, title: "Blocker", body: "", labels: [] },
+    });
+
+    // Worker connects — task 43 is now blocked, so worker gets standby
+    const ws = await connect();
+    const reply = nextMsg(ws);
+    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    expect(await reply).toEqual({ type: "standby" });
+  });
+
+  it("worker gets first unblocked task when queue has mixed blocked/unblocked tasks", async () => {
+    queue.addTask(makeTask(1)); // blocked
+    queue.addTask(makeTask(2)); // unblocked
+    openIssues.add(99);
+    setBlockers(1, [99], graph);
+    // task 2 has no blockers
+
+    const ws = await connect();
+    const reply = nextMsg(ws);
+    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    const msg = await reply;
+    expect(msg.type).toBe("task_assigned");
+    if (msg.type === "task_assigned") expect(msg.issue.number).toBe(2);
   });
 });
 

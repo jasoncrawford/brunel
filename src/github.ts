@@ -1,4 +1,6 @@
 import type { TaskQueue } from "./foreman.js";
+import { fetchBlockers, setBlockers } from "./dependencies.js";
+import type { DependencyGraph } from "./dependencies.js";
 
 // ── GitHub API helpers ────────────────────────────────────────────────────────
 // Read env vars inside function bodies (not at module load) so that tests can
@@ -21,23 +23,54 @@ function ghHeaders(token: string) {
   };
 }
 
-export async function loadIssuesToQueue(queue: TaskQueue): Promise<void> {
+export async function loadIssuesToQueue(
+  queue: TaskQueue,
+  graph: DependencyGraph,
+  openIssues: Set<number>,
+): Promise<void> {
   const { repo, token, taskLabel } = ghEnv();
   const [owner, repoName] = repo.split("/");
   const url = `https://api.github.com/repos/${owner}/${repoName}/issues?labels=${encodeURIComponent(taskLabel)}&state=open&per_page=100`;
   const res = await fetch(url, { headers: ghHeaders(token) });
   if (!res.ok) throw new Error(`GitHub API error: ${res.status}`);
-  const issues = await res.json() as Array<{ number: number; title: string; body: string | null; labels: Array<{ name: string }> }>;
+  const issues = await res.json() as Array<{
+    number: number; title: string; body: string | null; labels: Array<{ name: string }>;
+  }>;
+
+  const allBlockerNumbers = new Set<number>();
+  const loadedIssueNumbers: number[] = [];
+
+  // Note: fetchBlockers is awaited sequentially inside the loop (not Promise.all).
+  // This is intentional: for the typical case of a small number of brunel:ready issues,
+  // sequential is fine and avoids thundering-herd at startup.
   for (const issue of issues) {
     queue.addTask({
       taskId: String(issue.number),
       issueNumber: issue.number,
       title: issue.title,
       body: issue.body ?? "",
-      labels: issue.labels.map(l => l.name),
+      labels: issue.labels.map((l) => l.name),
       repoUrl: `https://github.com/${owner}/${repoName}`,
+      depsLoaded: false,
     });
+    // brunel:ready issues are open by definition
+    openIssues.add(issue.number);
+    const blockers = await fetchBlockers(issue.number, issue.body ?? "");
+    setBlockers(issue.number, blockers, graph);
+    for (const b of blockers) allBlockerNumbers.add(b);
+    loadedIssueNumbers.push(issue.number);
   }
+
+  if (allBlockerNumbers.size > 0) {
+    const states = await fetchIssueStates(Array.from(allBlockerNumbers));
+    for (const [num, state] of states) {
+      if (state === "open") openIssues.add(num);
+    }
+  }
+
+  // Mark all loaded tasks as eligible for assignment now that the full
+  // dependency graph and blocker states are known.
+  queue.markDepsLoaded(loadedIssueNumbers);
 }
 
 export async function labelIssueDone(issueNumber: number): Promise<void> {
@@ -49,4 +82,49 @@ export async function labelIssueDone(issueNumber: number): Promise<void> {
     body: JSON.stringify({ labels: [doneLabel] }),
   });
   if (!res.ok) throw new Error(`GitHub API error: ${res.status}`);
+}
+
+export async function fetchIssueStates(
+  issueNumbers: number[],
+): Promise<Map<number, "open" | "closed">> {
+  if (issueNumbers.length === 0) return new Map();
+  const { repo, token } = ghEnv();
+  const [owner, repoName] = repo.split("/");
+  const result = new Map<number, "open" | "closed">();
+  await Promise.all(
+    issueNumbers.map(async (n) => {
+      const url = `https://api.github.com/repos/${owner}/${repoName}/issues/${n}`;
+      const res = await fetch(url, { headers: ghHeaders(token) });
+      if (!res.ok) throw new Error(`GitHub API error: ${res.status}`);
+      const issue = await res.json() as { number: number; state: string };
+      result.set(issue.number, issue.state === "open" ? "open" : "closed");
+    }),
+  );
+  return result;
+}
+
+export async function fetchNativeBlockers(issueNumber: number): Promise<number[]> {
+  const { repo, token } = ghEnv();
+  const [owner, repoName] = repo.split("/");
+  const query = `
+    query($owner: String!, $repo: String!, $number: Int!) {
+      repository(owner: $owner, name: $repo) {
+        issue(number: $number) {
+          blockedBy(first: 50) {
+            nodes { number }
+          }
+        }
+      }
+    }
+  `;
+  const res = await fetch("https://api.github.com/graphql", {
+    method: "POST",
+    headers: { ...ghHeaders(token), "Content-Type": "application/json" },
+    body: JSON.stringify({ query, variables: { owner, repo: repoName, number: issueNumber } }),
+  });
+  if (!res.ok) throw new Error(`GitHub API error: ${res.status}`);
+  const body = await res.json() as {
+    data?: { repository?: { issue?: { blockedBy?: { nodes: Array<{ number: number }> } | null } | null } | null };
+  };
+  return body.data?.repository?.issue?.blockedBy?.nodes?.map((n) => n.number) ?? [];
 }
