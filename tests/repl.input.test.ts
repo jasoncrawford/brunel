@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PassThrough } from "stream";
-import { ask } from "../src/input.js";
+import { ask, pick, pickMultiple, promptLine, pickQuestion } from "../src/input.js";
+import type { PickQuestionResult } from "../src/input.js";
 import * as display from "../src/display.js";
 
 function makeStdin() {
@@ -474,6 +475,262 @@ describe("ask() - drawFresh after print()", () => {
 
       stdin.push("\r");
       await p;
+    });
+  });
+});
+
+describe("promptLine()", () => {
+  it("resolves with typed text on Enter", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = promptLine("Enter: ");
+      stdin.push("hello\r");
+      expect(await p).toBe("hello");
+    });
+  });
+
+  it("supports backspace", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = promptLine("Enter: ");
+      stdin.push("hellp\x7fo\r"); // type "hellp", backspace → "hell", type "o" → "hello"
+      expect(await p).toBe("hello");
+    });
+  });
+
+  it("returns empty string for bare Enter", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = promptLine("Enter: ");
+      stdin.push("\r");
+      expect(await p).toBe("");
+    });
+  });
+});
+
+describe("pickQuestion()", () => {
+  const opts = [
+    { label: "Blue",  description: "A cool color" },
+    { label: "Red",   description: "A bold color" },
+    { label: "Green", description: "An earthy color" },
+  ];
+
+  it("Enter on first option returns answer with first label", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = pickQuestion(opts);
+      stdin.push("\r");
+      const result = await p;
+      expect(result).toEqual({ type: "answer", value: "Blue" });
+    });
+  });
+
+  it("down arrow then Enter returns second option", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = pickQuestion(opts);
+      stdin.push("\x1b[B\r");
+      const result = await p;
+      expect(result).toEqual({ type: "answer", value: "Red" });
+    });
+  });
+
+  it("digit key jumps to that 1-based index", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = pickQuestion(opts);
+      stdin.push("3\r");
+      const result = await p;
+      expect(result).toEqual({ type: "answer", value: "Green" });
+    });
+  });
+
+  it("digit out of range is a no-op, cursor stays at 0", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = pickQuestion(opts);
+      stdin.push("9\r"); // 5 total options; 9 is out of range
+      const result = await p;
+      expect(result).toEqual({ type: "answer", value: "Blue" });
+    });
+  });
+
+  it("navigating to Other: activates text entry; type then Enter returns {type:other}", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = pickQuestion(opts);
+      // Navigate to Other: (textMode activates), then type, then Enter — only one Enter
+      stdin.push("\x1b[B\x1b[B\x1b[B");
+      stdin.push("purple\r");
+      const result = await p;
+      expect(result).toEqual({ type: "other", text: "purple" });
+    });
+  });
+
+  it("Enter on Other: with no text returns {type:other} with empty string", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = pickQuestion(opts);
+      stdin.push("\x1b[B\x1b[B\x1b[B\r"); // navigate to Other: then Enter immediately
+      const result = await p;
+      expect(result).toEqual({ type: "other", text: "" });
+    });
+  });
+
+  it("navigating to Let's discuss and Enter returns {type:discuss}", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = pickQuestion(opts);
+      // 3 model opts → Discuss is index 4 → down 4 times, Enter
+      stdin.push("\x1b[B\x1b[B\x1b[B\x1b[B\r");
+      const result = await p;
+      expect(result).toEqual({ type: "discuss" });
+    });
+  });
+
+  it("renders option labels to stdout", async () => {
+    const written: string[] = [];
+    vi.spyOn(process.stdout, "write").mockImplementation((s: any) => {
+      written.push(String(s)); return true;
+    });
+    await withFakeStdin(async (stdin) => {
+      const p = pickQuestion(opts);
+      stdin.push("\r");
+      await p;
+    });
+    const out = written.join("");
+    expect(out).toContain("Blue");
+    expect(out).toContain("Red");
+    expect(out).toContain("Green");
+    expect(out).toContain("Other:");
+    expect(out).toContain("discuss");
+  });
+});
+
+describe("pick() - single-selection picker", () => {
+  it("Enter with no navigation → selects first option (index 0)", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = pick(["Alpha", "Beta", "Gamma"]);
+      stdin.push("\r");
+      const result = await p;
+      expect(result).toBe(0);
+    });
+  });
+
+  it("down arrow once, then Enter → selects index 1", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = pick(["Alpha", "Beta", "Gamma"]);
+      stdin.push("\x1b[B"); // down
+      stdin.push("\r");
+      const result = await p;
+      expect(result).toBe(1);
+    });
+  });
+
+  it("down arrow twice, then Enter → selects index 2", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = pick(["Alpha", "Beta", "Gamma"]);
+      stdin.push("\x1b[B");
+      stdin.push("\x1b[B");
+      stdin.push("\r");
+      const result = await p;
+      expect(result).toBe(2);
+    });
+  });
+
+  it("down past last option wraps to index 0", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = pick(["A", "B"]);
+      stdin.push("\x1b[B"); // → 1
+      stdin.push("\x1b[B"); // → wraps to 0
+      stdin.push("\r");
+      const result = await p;
+      expect(result).toBe(0);
+    });
+  });
+
+  it("up arrow from index 0 wraps to last", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = pick(["A", "B", "C"]);
+      stdin.push("\x1b[A"); // up from 0 → wraps to 2
+      stdin.push("\r");
+      const result = await p;
+      expect(result).toBe(2);
+    });
+  });
+
+  it("up then down then Enter → back to index 0", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = pick(["A", "B"]);
+      stdin.push("\x1b[B"); // → 1
+      stdin.push("\x1b[A"); // → 0
+      stdin.push("\r");
+      const result = await p;
+      expect(result).toBe(0);
+    });
+  });
+
+  it("prints all options to stdout on initial render", async () => {
+    const written: string[] = [];
+    vi.spyOn(process.stdout, "write").mockImplementation((s: any) => {
+      written.push(String(s));
+      return true;
+    });
+    await withFakeStdin(async (stdin) => {
+      const p = pick(["Foo", "Bar"]);
+      stdin.push("\r");
+      await p;
+    });
+    const out = written.join("");
+    expect(out).toContain("Foo");
+    expect(out).toContain("Bar");
+  });
+});
+
+describe("pickMultiple() - multi-selection picker", () => {
+  it("Enter with no toggles → returns empty array", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = pickMultiple(["A", "B", "C"]);
+      stdin.push("\r");
+      const result = await p;
+      expect(result).toEqual([]);
+    });
+  });
+
+  it("space on first option then Enter → returns [0]", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = pickMultiple(["A", "B", "C"]);
+      stdin.push(" "); // toggle A
+      stdin.push("\r");
+      const result = await p;
+      expect(result).toEqual([0]);
+    });
+  });
+
+  it("space toggles on and off", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = pickMultiple(["A", "B"]);
+      stdin.push(" "); // select A
+      stdin.push(" "); // deselect A
+      stdin.push("\r");
+      const result = await p;
+      expect(result).toEqual([]);
+    });
+  });
+
+  it("navigate down and select multiple", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = pickMultiple(["A", "B", "C"]);
+      stdin.push(" ");        // select A (index 0)
+      stdin.push("\x1b[B");  // down to B
+      stdin.push("\x1b[B");  // down to C
+      stdin.push(" ");        // select C (index 2)
+      stdin.push("\r");
+      const result = await p;
+      expect(result).toEqual([0, 2]);
+    });
+  });
+
+  it("returns indices in ascending order regardless of selection order", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = pickMultiple(["A", "B", "C"]);
+      stdin.push("\x1b[B"); // down to B
+      stdin.push(" ");       // select B (index 1)
+      stdin.push("\x1b[A"); // up to A
+      stdin.push(" ");       // select A (index 0)
+      stdin.push("\r");
+      const result = await p;
+      expect(result).toEqual([0, 1]);
     });
   });
 });

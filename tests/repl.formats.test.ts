@@ -11,6 +11,7 @@ import {
   SYSTEM_FMT,
   MESSAGE_FMT,
   fmtTodoWriteInput,
+  fmtAskUserQuestionInput,
   fmtToolSearchOutput,
   fmtTodoWriteOutput,
   type FmtTable,
@@ -161,6 +162,25 @@ describe("TOOL_CALL_FMT", () => {
     expect(result).toContain("• Explore(find files)");
   });
 
+  it("AskUserQuestion: shows question text(s)", () => {
+    const result = r(TOOL_CALL_FMT, "AskUserQuestion", {
+      input: { questions: [{ question: "Which approach?", header: "Approach", options: [], multiSelect: false }] },
+    });
+    expect(result).toContain('• AskUserQuestion("Which approach?")');
+  });
+
+  it("AskUserQuestion: shows multiple question texts", () => {
+    const result = r(TOOL_CALL_FMT, "AskUserQuestion", {
+      input: {
+        questions: [
+          { question: "Which approach?", header: "A", options: [], multiSelect: false },
+          { question: "Which format?", header: "B", options: [], multiSelect: false },
+        ],
+      },
+    });
+    expect(result).toContain('• AskUserQuestion("Which approach?", "Which format?")');
+  });
+
   it("_default: shows • <name>(<fmtArgs(input)>)", () => {
     const result = r(TOOL_CALL_FMT, "_default", {
       name: "MyTool",
@@ -266,6 +286,25 @@ describe("TOOL_RESULT_FMT", () => {
     const b = { content: "File created successfully at: /path/file.md" };
     const raw = resolve(TOOL_RESULT_FMT, "Write", b)!;
     expect(stripAnsi(raw)).toContain("→ File created");
+  });
+});
+
+describe("fmtAskUserQuestionInput()", () => {
+  it("returns quoted question text for a single question", () => {
+    expect(fmtAskUserQuestionInput([{ question: "Which approach?" }])).toBe('"Which approach?"');
+  });
+
+  it("joins multiple questions with comma", () => {
+    expect(fmtAskUserQuestionInput([{ question: "A?" }, { question: "B?" }])).toBe('"A?", "B?"');
+  });
+
+  it("returns empty string for empty array", () => {
+    expect(fmtAskUserQuestionInput([])).toBe("");
+  });
+
+  it("returns empty string for non-array input", () => {
+    expect(fmtAskUserQuestionInput(null)).toBe("");
+    expect(fmtAskUserQuestionInput(undefined)).toBe("");
   });
 });
 
@@ -440,6 +479,14 @@ describe("TOOL_ERROR_FMT", () => {
     // salmon: \x1b[38;5;203m
     expect(raw).toContain("\x1b[38;5;203m");
     expect(stripAnsi(raw)).toContain("! something went wrong");
+  });
+
+  it("AskUserQuestion: denial rendered in dark gray, not salmon", () => {
+    const raw = resolve(TOOL_ERROR_FMT, "AskUserQuestion", { content: "The user would like to discuss" })!;
+    // darkGray: \x1b[90m, not salmon \x1b[38;5;203m
+    expect(raw).toContain("\x1b[90m");
+    expect(raw).not.toContain("\x1b[38;5;203m");
+    expect(stripAnsi(raw)).toContain("The user would like to discuss");
   });
 });
 

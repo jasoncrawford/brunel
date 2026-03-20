@@ -13,10 +13,20 @@ vi.mock("fs", () => ({
   },
 }));
 
+vi.mock("../src/input.js", async (importOriginal) => {
+  const actual = await importOriginal() as Record<string, unknown>;
+  return {
+    ...actual,
+    pick:         vi.fn().mockResolvedValue(0),
+    pickMultiple: vi.fn().mockResolvedValue([]),
+    pickQuestion: vi.fn().mockResolvedValue({ type: "answer", value: "Fast" }),
+  };
+});
+
 import { PassThrough } from "stream";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { runQuery } from "../src/repl.js";
-import { ask } from "../src/input.js";
+import { ask, pick, pickMultiple, pickQuestion } from "../src/input.js";
 import { toolUseNames, stopStatus, setVerbose } from "../src/display.js";
 
 function mockQueryMessages(messages: object[]) {
@@ -245,6 +255,185 @@ describe("runQuery - error handling", () => {
     }
     expect(thrown).toBeInstanceOf(Error);
     expect((thrown as Error).message).toBe("network failure");
+  });
+});
+
+describe("runQuery - canUseTool callback registration", () => {
+  it("query() is called with a canUseTool callback defined", async () => {
+    mockQueryMessages([
+      { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } },
+    ]);
+    const cap = captureConsole();
+    try {
+      await runQuery("test", undefined);
+    } finally {
+      cap.restore();
+    }
+    const callArg = (query as any).mock.calls[0][0];
+    expect(typeof callArg.options.canUseTool).toBe("function");
+  });
+});
+
+describe("runQuery - AskUserQuestion handling", () => {
+  const FAKE_OPTIONS = { signal: new AbortController().signal, toolUseID: "tu_1" };
+
+  const singleQuestion = {
+    questions: [{
+      question: "Which approach?",
+      header: "Approach",
+      options: [
+        { label: "Fast", description: "Speed first" },
+        { label: "Safe", description: "Safety first" },
+      ],
+      multiSelect: false,
+    }],
+  };
+
+  it("returns behavior:allow with answer injected for single-select", async () => {
+    vi.mocked(pickQuestion).mockResolvedValueOnce({ type: "answer", value: "Safe" });
+    mockQueryMessages([
+      { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } },
+    ]);
+    const cap = captureConsole();
+    let canUseTool: Function;
+    try {
+      await runQuery("test", undefined);
+      canUseTool = (query as any).mock.calls[0][0].options.canUseTool;
+    } finally {
+      cap.restore();
+    }
+
+    const result = await canUseTool("AskUserQuestion", singleQuestion, FAKE_OPTIONS);
+    expect(result.behavior).toBe("allow");
+    expect(result.updatedInput.answers).toEqual({ "Which approach?": "Safe" });
+  });
+
+  it("returns behavior:deny when user picks Let's discuss", async () => {
+    vi.mocked(pickQuestion).mockResolvedValueOnce({ type: "discuss" });
+    mockQueryMessages([
+      { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } },
+    ]);
+    const cap = captureConsole();
+    let canUseTool: Function;
+    try {
+      await runQuery("test", undefined);
+      canUseTool = (query as any).mock.calls[0][0].options.canUseTool;
+    } finally {
+      cap.restore();
+    }
+
+    const result = await canUseTool("AskUserQuestion", singleQuestion, FAKE_OPTIONS);
+    expect(result.behavior).toBe("deny");
+  });
+
+  it("uses free text as answer when user picks Other:", async () => {
+    vi.mocked(pickQuestion).mockResolvedValueOnce({ type: "other", text: "Something custom" });
+    mockQueryMessages([
+      { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } },
+    ]);
+    const cap = captureConsole();
+    let canUseTool: Function;
+    try {
+      await runQuery("test", undefined);
+      canUseTool = (query as any).mock.calls[0][0].options.canUseTool;
+    } finally {
+      cap.restore();
+    }
+
+    const result = await canUseTool("AskUserQuestion", singleQuestion, FAKE_OPTIONS);
+    expect(result.behavior).toBe("allow");
+    expect(result.updatedInput.answers).toEqual({ "Which approach?": "Something custom" });
+  });
+
+  it("handles multi-select: joins selected labels with comma", async () => {
+    (pickMultiple as any).mockResolvedValue([0, 1]); // user picks both
+    mockQueryMessages([
+      { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } },
+    ]);
+    const cap = captureConsole();
+    let canUseTool: Function;
+    try {
+      await runQuery("test", undefined);
+      canUseTool = (query as any).mock.calls[0][0].options.canUseTool;
+    } finally {
+      cap.restore();
+    }
+
+    const multiInput = {
+      questions: [{
+        question: "Which features?",
+        header: "Features",
+        options: [
+          { label: "Auth", description: "Authentication" },
+          { label: "Logs", description: "Logging" },
+        ],
+        multiSelect: true,
+      }],
+    };
+
+    const result = await canUseTool("AskUserQuestion", multiInput, FAKE_OPTIONS);
+    expect(result.behavior).toBe("allow");
+    expect(result.updatedInput.answers).toEqual({ "Which features?": "Auth, Logs" });
+  });
+
+  it("preserves other input fields in updatedInput", async () => {
+    vi.mocked(pickQuestion).mockResolvedValueOnce({ type: "answer", value: "Fast" });
+    mockQueryMessages([
+      { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } },
+    ]);
+    const cap = captureConsole();
+    let canUseTool: Function;
+    try {
+      await runQuery("test", undefined);
+      canUseTool = (query as any).mock.calls[0][0].options.canUseTool;
+    } finally {
+      cap.restore();
+    }
+
+    const result = await canUseTool("AskUserQuestion", singleQuestion, FAKE_OPTIONS);
+    expect(result.updatedInput.questions).toEqual(singleQuestion.questions);
+  });
+});
+
+describe("runQuery - tool permission handling (non-bypass mode)", () => {
+  // Non-bypass is the default in tests (BYPASS = process.argv.includes("--dangerously-skip-permissions"))
+  const FAKE_OPTIONS = { signal: new AbortController().signal, toolUseID: "tu_2" };
+
+  it("unknown tool: pick index 0 (Allow) → returns behavior:allow", async () => {
+    (pick as any).mockResolvedValue(0); // Allow
+    mockQueryMessages([
+      { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } },
+    ]);
+    const cap = captureConsole();
+    let canUseTool: Function;
+    try {
+      await runQuery("test", undefined);
+      canUseTool = (query as any).mock.calls[0][0].options.canUseTool;
+    } finally {
+      cap.restore();
+    }
+
+    const result = await canUseTool("Bash", { command: "rm -rf /" }, FAKE_OPTIONS);
+    expect(result.behavior).toBe("allow");
+  });
+
+  it("unknown tool: pick index 1 (Deny) → returns behavior:deny with message", async () => {
+    (pick as any).mockResolvedValue(1); // Deny
+    mockQueryMessages([
+      { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } },
+    ]);
+    const cap = captureConsole();
+    let canUseTool: Function;
+    try {
+      await runQuery("test", undefined);
+      canUseTool = (query as any).mock.calls[0][0].options.canUseTool;
+    } finally {
+      cap.restore();
+    }
+
+    const result = await canUseTool("Bash", { command: "rm -rf /" }, FAKE_OPTIONS);
+    expect(result.behavior).toBe("deny");
+    expect(typeof (result as any).message).toBe("string");
   });
 });
 

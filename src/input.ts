@@ -759,3 +759,300 @@ export function ask(
     process.stdin.on("data", onData);
   });
 }
+
+// ── Interactive pickers (raw-mode arrow-key menus) ─────────────────────────
+
+/**
+ * Single-selection arrow-key picker. Returns the index of the chosen option.
+ * Up/down arrows move the cursor; Enter confirms. Ctrl-C exits the process.
+ * Assumes stdin is already in raw mode.
+ */
+export async function pick(options: string[], promptStr?: string): Promise<number> {
+  return new Promise((resolve) => {
+    let idx = 0;
+    let done = false;
+    const count = options.length;
+
+    if (promptStr) process.stdout.write(promptStr + "\n");
+    for (let i = 0; i < count; i++) {
+      const marker = i === idx ? "▶ " : "  ";
+      process.stdout.write(marker + options[i] + "\n");
+    }
+
+    function redraw() {
+      process.stdout.write(`\x1b[${count}A\r`);
+      for (let i = 0; i < count; i++) {
+        const marker = i === idx ? "▶ " : "  ";
+        process.stdout.write(marker + options[i] + "\x1b[K\r\n");
+      }
+    }
+
+    function onData(raw: string) {
+      if (done) return;
+      let data = raw;
+      data = data.replace(/\x1b\[A/g, "\x10"); // up arrow
+      data = data.replace(/\x1b\[B/g, "\x11"); // down arrow
+      data = data.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
+      data = data.replace(/\x1b./gs, "");
+      for (const ch of data) {
+        if (ch === "\x10") { idx = (idx - 1 + count) % count; redraw(); }
+        else if (ch === "\x11") { idx = (idx + 1) % count; redraw(); }
+        else if (ch === "\r" || ch === "\n") {
+          done = true;
+          process.stdin.removeListener("data", onData);
+          resolve(idx);
+        } else if (ch === "\x03") {
+          process.stdout.write("^C\r\n");
+          process.exit(0);
+        }
+      }
+    }
+
+    process.stdin.on("data", onData);
+  });
+}
+
+/**
+ * Multi-selection arrow-key picker. Returns an array of selected indices.
+ * Up/down arrows move the cursor; Space toggles selection; Enter confirms.
+ * Ctrl-C exits the process.
+ */
+export async function pickMultiple(options: string[], promptStr?: string): Promise<number[]> {
+  return new Promise((resolve) => {
+    let idx = 0;
+    let done = false;
+    const count = options.length;
+    const selected = new Set<number>();
+
+    if (promptStr) process.stdout.write(promptStr + "\n");
+    for (let i = 0; i < count; i++) {
+      const cursor = i === idx ? "▶" : " ";
+      const check = selected.has(i) ? "◉" : "○";
+      process.stdout.write(`${cursor} ${check} ${options[i]}\n`);
+    }
+
+    function redraw() {
+      process.stdout.write(`\x1b[${count}A\r`);
+      for (let i = 0; i < count; i++) {
+        const cursor = i === idx ? "▶" : " ";
+        const check = selected.has(i) ? "◉" : "○";
+        process.stdout.write(`${cursor} ${check} ${options[i]}\x1b[K\r\n`);
+      }
+    }
+
+    function onData(raw: string) {
+      if (done) return;
+      let data = raw;
+      data = data.replace(/\x1b\[A/g, "\x10"); // up arrow
+      data = data.replace(/\x1b\[B/g, "\x11"); // down arrow
+      data = data.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
+      data = data.replace(/\x1b./gs, "");
+      for (const ch of data) {
+        if (ch === "\x10") { idx = (idx - 1 + count) % count; redraw(); }
+        else if (ch === "\x11") { idx = (idx + 1) % count; redraw(); }
+        else if (ch === " ") {
+          if (selected.has(idx)) selected.delete(idx);
+          else selected.add(idx);
+          redraw();
+        } else if (ch === "\r" || ch === "\n") {
+          done = true;
+          process.stdin.removeListener("data", onData);
+          resolve([...selected].sort((a, b) => a - b));
+        } else if (ch === "\x03") {
+          process.stdout.write("^C\r\n");
+          process.exit(0);
+        }
+      }
+    }
+
+    process.stdin.on("data", onData);
+  });
+}
+
+// ── Question picker (AskUserQuestion) ─────────────────────────────────────────
+
+/**
+ * Minimal single-line text prompt. Reads characters until Enter,
+ * supporting backspace. No autocomplete or multiline support.
+ */
+export async function promptLine(prompt: string): Promise<string> {
+  return new Promise((resolve) => {
+    let buf = "";
+    process.stdout.write(prompt);
+
+    function onData(raw: string) {
+      const data = raw
+        .replace(/\x1b\[[0-9;]*[A-Za-z]/g, "")
+        .replace(/\x1b./gs, "");
+      for (const ch of data) {
+        if (ch === "\r" || ch === "\n") {
+          process.stdout.write("\r\n");
+          process.stdin.removeListener("data", onData);
+          resolve(buf);
+          return;
+        } else if (ch === "\x7f" || ch === "\x08") {
+          if (buf.length > 0) {
+            buf = buf.slice(0, -1);
+            process.stdout.write("\x08 \x08");
+          }
+        } else if (ch === "\x03") {
+          process.stdout.write("^C\r\n");
+          process.exit(0);
+        } else if (ch.charCodeAt(0) >= 32) {
+          buf += ch;
+          process.stdout.write(ch);
+        }
+      }
+    }
+
+    process.stdin.on("data", onData);
+  });
+}
+
+export type PickQuestionResult =
+  | { type: "answer"; value: string }
+  | { type: "other"; text: string }
+  | { type: "discuss" };
+
+/**
+ * Single-selection picker for AskUserQuestion tool calls.
+ * Options are rendered as numbered items with bold label and description.
+ * Non-selected rows are dim; the selected row is normal weight.
+ * "Other:" (free-text entry) and "Let's discuss" (deny) are always appended.
+ * Digit keys 1–9 jump the cursor to that 1-based index.
+ */
+export async function pickQuestion(
+  options: Array<{ label: string; description: string }>,
+): Promise<PickQuestionResult> {
+  return new Promise((resolve) => {
+    const extras = [
+      { label: "Other:",        description: "" },
+      { label: "Let's discuss", description: "" },
+    ];
+    const all = [...options, ...extras];
+    const count = all.length;
+    const otherIdx   = count - 2;
+    const discussIdx = count - 1;
+
+    let idx = 0;
+    let done = false;
+    let textMode = false; // true when typing inline answer for Other:
+    let textBuf = "";
+
+    function renderLine(i: number): string {
+      const num = i + 1;
+      const numStr = num <= 9 ? `${num}` : " ";
+      const opt = all[i];
+      const marker = i === idx ? "▶ " : "  ";
+      if (i === idx) {
+        // Selected: bold label, normal weight description — no dim
+        let text: string;
+        if (i === otherIdx && textMode) {
+          text = `${display.s.bold("Other:")} ${textBuf}`;
+        } else if (opt.description) {
+          text = `${display.s.bold(opt.label)}. ${opt.description}`;
+        } else {
+          text = display.s.bold(opt.label);
+        }
+        return `${marker}${numStr}. ${text}`;
+      } else {
+        // Non-selected: entire line dim, no bold (bold resets dim via \x1b[22m)
+        const text = opt.description ? `${opt.label}. ${opt.description}` : opt.label;
+        return display.s.dim(`${marker}${numStr}. ${text}`);
+      }
+    }
+
+    // After a full redraw (cursor below last line), position cursor at end of Other: text
+    function positionTextCursor() {
+      // Move up from below-last-line to Other: row, then right past the visible prefix
+      // Visible prefix: "▶ "(2) + numStr(1) + ". "(2) + "Other: "(7) = 12 chars + textBuf
+      process.stdout.write(`\x1b[${count - otherIdx}A\r\x1b[${12 + textBuf.length}C`);
+    }
+
+    for (let i = 0; i < count; i++) {
+      process.stdout.write(renderLine(i) + "\r\n");
+    }
+
+    function redraw() {
+      process.stdout.write(`\x1b[${count}A\r`);
+      for (let i = 0; i < count; i++) {
+        process.stdout.write(renderLine(i) + "\x1b[K\r\n");
+      }
+      // When Other: is selected, position terminal cursor at end of text entry area
+      if (idx === otherIdx) positionTextCursor();
+    }
+
+    function navigateTo(newIdx: number) {
+      if (idx === otherIdx && textMode) {
+        // Move cursor from Other: line back to below last line before redrawing
+        process.stdout.write(`\x1b[${count - otherIdx}B`);
+        textMode = false;
+        textBuf = "";
+      }
+      idx = newIdx;
+      if (idx === otherIdx) textMode = true;
+      redraw();
+    }
+
+    function onData(raw: string) {
+      if (done) return;
+      let data = raw;
+      data = data.replace(/\x1b\[A/g, "\x10"); // up
+      data = data.replace(/\x1b\[B/g, "\x11"); // down
+      data = data.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
+      data = data.replace(/\x1b./gs, "");
+      for (const ch of data) {
+        if (textMode) {
+          // Inline text entry for Other: — write chars directly (cursor already positioned)
+          if (ch === "\r" || ch === "\n") {
+            done = true;
+            process.stdin.removeListener("data", onData);
+            resolve({ type: "other", text: textBuf });
+            return;
+          } else if (ch === "\x10") { navigateTo((idx - 1 + count) % count); }
+          else if (ch === "\x11")   { navigateTo((idx + 1) % count); }
+          else if (ch === "\x7f" || ch === "\x08") {
+            if (textBuf.length > 0) {
+              textBuf = textBuf.slice(0, -1);
+              process.stdout.write("\x08 \x08");
+            }
+          } else if (ch === "\x03") {
+            process.stdout.write("^C\r\n");
+            process.exit(0);
+          } else if (ch.charCodeAt(0) >= 32) {
+            textBuf += ch;
+            process.stdout.write(ch);
+          }
+        } else {
+          if (ch === "\x10") { navigateTo((idx - 1 + count) % count); }
+          else if (ch === "\x11") { navigateTo((idx + 1) % count); }
+          else if (ch === "\r" || ch === "\n") {
+            if (idx === discussIdx) {
+              done = true;
+              process.stdin.removeListener("data", onData);
+              resolve({ type: "discuss" });
+            } else if (idx === otherIdx) {
+              // Already in textMode; Enter submits (textBuf is empty if they just navigated here)
+              done = true;
+              process.stdin.removeListener("data", onData);
+              resolve({ type: "other", text: textBuf });
+            } else {
+              done = true;
+              process.stdin.removeListener("data", onData);
+              resolve({ type: "answer", value: options[idx].label });
+            }
+            return;
+          } else if (ch === "\x03") {
+            process.stdout.write("^C\r\n");
+            process.exit(0);
+          } else if (ch >= "1" && ch <= "9") {
+            const n = parseInt(ch, 10) - 1;
+            if (n < count) { navigateTo(n); }
+          }
+        }
+      }
+    }
+
+    process.stdin.on("data", onData);
+  });
+}
