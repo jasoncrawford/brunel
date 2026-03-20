@@ -248,6 +248,193 @@ describe("runQuery - error handling", () => {
   });
 });
 
+describe("runQuery - interrupt support", () => {
+  it("passes provided abortController to SDK query options", async () => {
+    mockQueryMessages([
+      { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } },
+    ]);
+    const cap = captureConsole();
+    const ac = new AbortController();
+    try {
+      await runQuery("test", undefined, ac);
+    } finally {
+      cap.restore();
+    }
+    const callArg = (query as any).mock.calls[0][0];
+    expect(callArg.options.abortController).toBe(ac);
+  });
+
+  it("aborted mid-query → returns without throwing, prints Interrupted.", async () => {
+    // Mock a generator that ends when the AbortController is aborted
+    (query as any).mockImplementation((opts: any) => {
+      return (async function* () {
+        // Simulate the SDK: wait until aborted, then end without result message
+        await new Promise<void>((resolve) => {
+          opts.options.abortController.signal.addEventListener("abort", resolve, { once: true });
+        });
+        // No result message emitted — generator just ends
+      })();
+    });
+
+    const cap = captureConsole();
+    const ac = new AbortController();
+    let thrown: unknown;
+    try {
+      // Abort after a short delay
+      setTimeout(() => ac.abort(), 5);
+      await runQuery("test", "sess-1", ac);
+    } catch (err) {
+      thrown = err;
+    } finally {
+      cap.restore();
+    }
+
+    expect(thrown).toBeUndefined(); // no throw
+    const output = cap.lines.map(stripAnsi).join("\n");
+    expect(output).toContain("Interrupted.");
+  });
+
+  it("aborted mid-query → returns sessionId", async () => {
+    (query as any).mockImplementation((opts: any) => {
+      return (async function* () {
+        yield { type: "system", subtype: "init", session_id: "new-sess" };
+        await new Promise<void>((resolve) => {
+          opts.options.abortController.signal.addEventListener("abort", resolve, { once: true });
+        });
+      })();
+    });
+
+    const cap = captureConsole();
+    const ac = new AbortController();
+    let sessionId: string | undefined;
+    try {
+      setTimeout(() => ac.abort(), 5);
+      sessionId = await runQuery("test", undefined, ac);
+    } finally {
+      cap.restore();
+    }
+    expect(sessionId).toBe("new-sess");
+  });
+
+  it("normal completion does not print Interrupted.", async () => {
+    mockQueryMessages([
+      { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } },
+    ]);
+    const cap = captureConsole();
+    try {
+      await runQuery("test", undefined);
+    } finally {
+      cap.restore();
+    }
+    const output = cap.lines.map(stripAnsi).join("\n");
+    expect(output).not.toContain("Interrupted.");
+  });
+
+  it("stdin data listener is removed after normal query completion", async () => {
+    mockQueryMessages([
+      { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } },
+    ]);
+    const before = process.stdin.listenerCount("data");
+    const cap = captureConsole();
+    try {
+      await runQuery("test", undefined);
+    } finally {
+      cap.restore();
+    }
+    expect(process.stdin.listenerCount("data")).toBe(before);
+  });
+});
+
+describe("runQuery - interrupt via ^C on stdin", () => {
+  it("^C on stdin → calls close() on query iterable, does not echo ^C to stdout", async () => {
+    let closeCalled = false;
+    let resolveClose!: () => void;
+    const closePromise = new Promise<void>((resolve) => { resolveClose = resolve; });
+
+    (query as any).mockImplementation((_opts: any) => {
+      const gen = (async function* () {
+        await closePromise;
+        // generator ends without emitting result
+      })();
+      (gen as any).close = () => { closeCalled = true; resolveClose(); };
+      return gen;
+    });
+
+    const origStdin = process.stdin;
+    const fakeStdin = new PassThrough();
+    fakeStdin.setEncoding("utf8");
+    (fakeStdin as any).setRawMode = vi.fn();
+    Object.defineProperty(process, "stdin", { value: fakeStdin, configurable: true });
+
+    const writtenToStdout: string[] = [];
+    vi.spyOn(process.stdout, "write").mockImplementation((s: any) => { writtenToStdout.push(String(s)); return true; });
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      const queryPromise = runQuery("test", undefined);
+      await new Promise((r) => setTimeout(r, 5));
+      fakeStdin.push("\x03");
+      await queryPromise;
+    } finally {
+      Object.defineProperty(process, "stdin", { value: origStdin, configurable: true });
+      vi.restoreAllMocks();
+    }
+
+    expect(closeCalled).toBe(true);
+    // stdout must NOT contain the "^C" echo
+    const stdoutStr = writtenToStdout.join("");
+    expect(stdoutStr).not.toContain("^C");
+  });
+
+  it("SDK throwing 'aborted by user' error is caught, not rethrown, prints Interrupted.", async () => {
+    (query as any).mockImplementation((_opts: any) => {
+      const gen = (async function* () {
+        throw new Error("Claude Code process aborted by user");
+      })();
+      (gen as any).close = () => {};
+      return gen;
+    });
+
+    const cap = captureConsole();
+    let thrown: unknown;
+    try {
+      await runQuery("test", "sess-1");
+    } catch (err) {
+      thrown = err;
+    } finally {
+      cap.restore();
+    }
+
+    expect(thrown).toBeUndefined();
+    const output = cap.lines.map(stripAnsi).join("\n");
+    expect(output).toContain("Interrupted.");
+  });
+
+  it("SDK throwing unrelated error still propagates", async () => {
+    (query as any).mockImplementation((_opts: any) => {
+      const gen = (async function* () {
+        throw new Error("network failure");
+      })();
+      (gen as any).close = () => {};
+      return gen;
+    });
+
+    const cap = captureConsole();
+    let thrown: unknown;
+    try {
+      await runQuery("test", undefined);
+    } catch (err) {
+      thrown = err;
+    } finally {
+      cap.restore();
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toBe("network failure");
+  });
+});
+
 describe("runQuery - prompt redraw after query (worker mode integration)", () => {
   it("redraws input prompt on stdout after query completes, not during query output", async () => {
     // In worker mode: ask() is waiting for input while runQuery runs in the background.

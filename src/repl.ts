@@ -28,7 +28,7 @@ const PERMISSION_MODE = BYPASS ? "bypassPermissions" : "acceptEdits";
 
 // ── REPL ──────────────────────────────────────────────────────────────────────
 
-export async function runQuery(prompt: string, sessionId: string | undefined) {
+export async function runQuery(prompt: string, sessionId: string | undefined, abortController?: AbortController) {
   logFull("QUERY", { prompt, sessionId });
   // Save and clear the input print callback while the query runs. In worker
   // mode, ask() registers drawFresh() as the callback so the prompt redraws
@@ -50,9 +50,10 @@ export async function runQuery(prompt: string, sessionId: string | undefined) {
     return display.c.darkGray(`Working… ${display.fmtStats(secs, stats.turns || undefined, outTokens || undefined, stats.inputTokens || undefined)}`);
   });
 
-  let capturedSessionId = sessionId;
+  // Use caller-provided AbortController (worker mode) or create our own (REPL mode).
+  const ac = abortController ?? new AbortController();
 
-  for await (const message of query({
+  const iterable = query({
     prompt,
     options: {
       cwd: process.cwd(),
@@ -60,39 +61,69 @@ export async function runQuery(prompt: string, sessionId: string | undefined) {
       settingSources: ["user", "project"],
       permissionMode: PERMISSION_MODE,
       includePartialMessages: true,
+      abortController: ac,
       ...(BYPASS ? { allowDangerouslySkipPermissions: true } : {}),
       ...(sessionId ? { resume: sessionId } : {}),
     },
-  })) {
-    if (!(message.type === "stream_event" && (message.event as { type?: string }).type === "content_block_delta")) {
-      logFull("MESSAGE", message);
-    }
+  });
 
-    if (message.type === "system" && message.subtype === "init" && !capturedSessionId) {
-      capturedSessionId = message.session_id;
+  // Register a temporary raw-stdin listener to catch ^C and abort the query.
+  // The listener is removed in a finally block regardless of how the query ends.
+  const onInterrupt = (chunk: string) => {
+    if (chunk.includes("\x03")) {
+      (iterable as unknown as { close?: () => void }).close?.();
+      ac.abort();
     }
+  };
+  process.stdin.on("data", onInterrupt);
 
-    // Extract turn count and token totals from streaming events.
-    if (message.type === "stream_event") {
-      if (message.parent_tool_use_id == null) {
-        // BetaRawMessageStreamEvent is a discriminated union; use a structural type for field access
-        type StreamEvent = { type: string; message?: { usage?: { input_tokens?: number } }; usage?: { output_tokens?: number } };
-        const ev = message.event as StreamEvent;
-        if (ev.type === "message_start")       { stats.turns++; stats.inputTokens += ev.message?.usage?.input_tokens ?? 0; }
-        if (ev.type === "message_delta")       stats.currentOutputTokens = ev.usage?.output_tokens ?? stats.currentOutputTokens;
-        if (ev.type === "message_stop")        { stats.completedOutputTokens += stats.currentOutputTokens; stats.currentOutputTokens = 0; }
+  let capturedSessionId = sessionId;
+  let resultReceived = false;
+
+  try {
+    for await (const message of iterable) {
+      if (!(message.type === "stream_event" && (message.event as { type?: string }).type === "content_block_delta")) {
+        logFull("MESSAGE", message);
       }
-      continue; // stream events are display-only; don't pass to printMessage
+
+      if (message.type === "system" && message.subtype === "init" && !capturedSessionId) {
+        capturedSessionId = message.session_id;
+      }
+
+      // Extract turn count and token totals from streaming events.
+      if (message.type === "stream_event") {
+        if (message.parent_tool_use_id == null) {
+          // BetaRawMessageStreamEvent is a discriminated union; use a structural type for field access
+          type StreamEvent = { type: string; message?: { usage?: { input_tokens?: number } }; usage?: { output_tokens?: number } };
+          const ev = message.event as StreamEvent;
+          if (ev.type === "message_start")       { stats.turns++; stats.inputTokens += ev.message?.usage?.input_tokens ?? 0; }
+          if (ev.type === "message_delta")       stats.currentOutputTokens = ev.usage?.output_tokens ?? stats.currentOutputTokens;
+          if (ev.type === "message_stop")        { stats.completedOutputTokens += stats.currentOutputTokens; stats.currentOutputTokens = 0; }
+        }
+        continue; // stream events are display-only; don't pass to printMessage
+      }
+
+      // Stop the status line before printing the result so it transitions
+      // cleanly into the permanent summary line.
+      if (message.type === "result") {
+        resultReceived = true;
+        display.stopStatus();
+      }
+
+      display.printMessage(message);
     }
-
-    // Stop the status line before printing the result so it transitions
-    // cleanly into the permanent summary line.
-    if (message.type === "result") display.stopStatus();
-
-    display.printMessage(message);
+  } catch (err) {
+    // SDK throws when aborted — treat as clean interrupt, not an error
+    if (!(err instanceof Error && /aborted by user/i.test(err.message))) throw err;
+  } finally {
+    process.stdin.removeListener("data", onInterrupt);
   }
 
   display.stopStatus(); // no-op if result message already stopped it
+
+  if (!resultReceived) {
+    display.print(display.c.darkGray("\nInterrupted. What should the agent do instead?"));
+  }
 
   // Restore the callback and redraw the prompt. In worker mode this redraws
   // the waiting "[worker] > " prompt after query output has scrolled past it.

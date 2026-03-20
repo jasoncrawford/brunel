@@ -37,7 +37,7 @@ export function classifyEvent(event: GitHubEvent): "actionable" | "log_only" {
 // ── WorkerSession ─────────────────────────────────────────────────────────────
 
 export type WsFactory = (workerId: string, taskId?: string) => WebSocket;
-export type RunQuery = (prompt: string, sessionId: string | undefined) => Promise<string | undefined>;
+export type RunQuery = (prompt: string, sessionId: string | undefined, abortController?: AbortController) => Promise<string | undefined>;
 export type WorkerDisplay = {
   print: (line: string | null) => void;
   printForemanMessage: (msg: ForemanMessage) => void;
@@ -195,22 +195,28 @@ export class WorkerSession {
       this.debounceTimer = null;
     }
 
+    const ac = new AbortController();
     this.isRunningQuery = true;
     try {
-      this.currentSessionId = await this.runQuery(initialPrompt, this.currentSessionId) ?? this.currentSessionId;
+      this.currentSessionId = await this.runQuery(initialPrompt, this.currentSessionId, ac) ?? this.currentSessionId;
     } finally {
       this.isRunningQuery = false;
     }
 
+    // If the user interrupted (^C), skip the event drain and foreman notification.
+    if (ac.signal.aborted) return;
+
     while (this.pendingEvents.length > 0 && this.currentTaskId && this.currentIssue) {
+      const eventAc = new AbortController();
       const events = this.pendingEvents.splice(0);
       const prompt = this.buildAndLogEventPrompt(events);
       this.isRunningQuery = true;
       try {
-        this.currentSessionId = await this.runQuery(prompt, this.currentSessionId) ?? this.currentSessionId;
+        this.currentSessionId = await this.runQuery(prompt, this.currentSessionId, eventAc) ?? this.currentSessionId;
       } finally {
         this.isRunningQuery = false;
       }
+      if (eventAc.signal.aborted) return;
     }
 
     this.notifyQueryDone();
