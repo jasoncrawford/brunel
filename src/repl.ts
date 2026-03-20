@@ -3,7 +3,8 @@ import { fileURLToPath } from "url";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { CanUseTool, PermissionResult } from "@anthropic-ai/claude-agent-sdk";
 import * as display from "./display.js";
-import { ask, listCommandNames, dispatchInput, pick, pickMultiple } from "./input.js";
+import { ask, listCommandNames, dispatchInput, pick, pickMultiple, pickQuestion } from "./input.js";
+import type { PickQuestionResult } from "./input.js";
 import { workerMain } from "./worker.js";
 export { parseSlashCommand, resolveCommandFilePath, resolveContent, dispatchInput, matchCommands, listCommandNames, listWorkerCommandNames, ask } from "./input.js";
 export type { SlashCommandResult, DispatchResult, ListDir } from "./input.js";
@@ -41,14 +42,18 @@ export async function handleAskUserQuestion(
   const answers: Record<string, string> = {};
 
   for (const q of questions) {
-    const lines = q.options.map(o => o.description ? `${o.label} — ${o.description}` : o.label);
-    display.print(display.c.skyBlue(`\n? ${q.question}`));
+    display.print(display.c.yellow(`\n? ${q.question}`));
     if (q.multiSelect) {
+      const lines = q.options.map(o => o.description ? `${o.label} — ${o.description}` : o.label);
       const idxs = await pickMultiple(lines);
       answers[q.question] = idxs.map(i => q.options[i].label).join(", ");
     } else {
-      const idx = await pick(lines);
-      answers[q.question] = q.options[idx].label;
+      const result: PickQuestionResult = await pickQuestion(q.options);
+      if (result.type === "discuss") {
+        display.startStatus(getStatusText);
+        return { behavior: "deny", message: "Let's discuss" };
+      }
+      answers[q.question] = result.type === "answer" ? result.value : result.text;
     }
   }
 

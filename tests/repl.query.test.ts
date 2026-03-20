@@ -17,15 +17,16 @@ vi.mock("../src/input.js", async (importOriginal) => {
   const actual = await importOriginal() as Record<string, unknown>;
   return {
     ...actual,
-    pick: vi.fn().mockResolvedValue(0),
+    pick:         vi.fn().mockResolvedValue(0),
     pickMultiple: vi.fn().mockResolvedValue([]),
+    pickQuestion: vi.fn().mockResolvedValue({ type: "answer", value: "Fast" }),
   };
 });
 
 import { PassThrough } from "stream";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { runQuery } from "../src/repl.js";
-import { ask, pick, pickMultiple } from "../src/input.js";
+import { ask, pick, pickMultiple, pickQuestion } from "../src/input.js";
 import { toolUseNames, stopStatus, setVerbose } from "../src/display.js";
 
 function mockQueryMessages(messages: object[]) {
@@ -476,7 +477,7 @@ describe("runQuery - AskUserQuestion handling", () => {
   };
 
   it("returns behavior:allow with answer injected for single-select", async () => {
-    (pick as any).mockResolvedValue(1); // user picks index 1 = "Safe"
+    vi.mocked(pickQuestion).mockResolvedValueOnce({ type: "answer", value: "Safe" });
     mockQueryMessages([
       { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } },
     ]);
@@ -492,6 +493,43 @@ describe("runQuery - AskUserQuestion handling", () => {
     const result = await canUseTool("AskUserQuestion", singleQuestion, FAKE_OPTIONS);
     expect(result.behavior).toBe("allow");
     expect(result.updatedInput.answers).toEqual({ "Which approach?": "Safe" });
+  });
+
+  it("returns behavior:deny when user picks Let's discuss", async () => {
+    vi.mocked(pickQuestion).mockResolvedValueOnce({ type: "discuss" });
+    mockQueryMessages([
+      { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } },
+    ]);
+    const cap = captureConsole();
+    let canUseTool: Function;
+    try {
+      await runQuery("test", undefined);
+      canUseTool = (query as any).mock.calls[0][0].options.canUseTool;
+    } finally {
+      cap.restore();
+    }
+
+    const result = await canUseTool("AskUserQuestion", singleQuestion, FAKE_OPTIONS);
+    expect(result.behavior).toBe("deny");
+  });
+
+  it("uses free text as answer when user picks Other:", async () => {
+    vi.mocked(pickQuestion).mockResolvedValueOnce({ type: "other", text: "Something custom" });
+    mockQueryMessages([
+      { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } },
+    ]);
+    const cap = captureConsole();
+    let canUseTool: Function;
+    try {
+      await runQuery("test", undefined);
+      canUseTool = (query as any).mock.calls[0][0].options.canUseTool;
+    } finally {
+      cap.restore();
+    }
+
+    const result = await canUseTool("AskUserQuestion", singleQuestion, FAKE_OPTIONS);
+    expect(result.behavior).toBe("allow");
+    expect(result.updatedInput.answers).toEqual({ "Which approach?": "Something custom" });
   });
 
   it("handles multi-select: joins selected labels with comma", async () => {
@@ -526,7 +564,7 @@ describe("runQuery - AskUserQuestion handling", () => {
   });
 
   it("preserves other input fields in updatedInput", async () => {
-    (pick as any).mockResolvedValue(0);
+    vi.mocked(pickQuestion).mockResolvedValueOnce({ type: "answer", value: "Fast" });
     mockQueryMessages([
       { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } },
     ]);
