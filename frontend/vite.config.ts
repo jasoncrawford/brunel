@@ -8,6 +8,7 @@ export default defineConfig({
     emptyOutDir: true,
   },
   server: {
+    host: true,
     proxy: {
       "/api": "http://localhost:3000",
       "/admin/ws": {
