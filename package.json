@@ -6,6 +6,7 @@
     "brunel": "bin/brunel.cjs"
   },
   "scripts": {
+    "build": "cd frontend && npm install && npm run build",
     "start": "tsx src/foreman.ts",
     "dev": "tsx watch src/foreman.ts",
     "repl": "tsx src/repl.ts",
