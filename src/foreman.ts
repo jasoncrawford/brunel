@@ -589,14 +589,13 @@ export function createForemanWss(
 
       if (action === "closed") {
         openIssues.delete(issueNumber);
-        for (const w of registry.getIdleWorkers()) {
-          tryAssignWork(w.workerId);
-        }
+        reconcile();
         return;
       }
 
       if (action === "reopened") {
         openIssues.add(issueNumber);
+        reconcile();
         return;
       }
 
