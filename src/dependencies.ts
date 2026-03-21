@@ -12,11 +12,16 @@ export type DependencyGraph = Map<number, Set<number>>;
  * Returns a deduplicated list of blocker issue numbers.
  */
 export function parseBodyBlockers(body: string): number[] {
-  const pattern = /(?:^|\s)(?:depends\s+on|blocked\s+by)\s+#(\d+)/gi;
+  // Match a keyword clause followed by one or more comma-separated #N references.
+  const clausePattern = /(?:^|\s)(?:depends\s+on|blocked\s+by)\s+(#\d+(?:\s*,\s*#\d+)*)/gi;
   const numbers = new Set<number>();
   let m: RegExpExecArray | null;
-  while ((m = pattern.exec(body)) !== null) {
-    numbers.add(parseInt(m[1], 10));
+  while ((m = clausePattern.exec(body)) !== null) {
+    const refPattern = /#(\d+)/g;
+    let r: RegExpExecArray | null;
+    while ((r = refPattern.exec(m[1])) !== null) {
+      numbers.add(parseInt(r[1], 10));
+    }
   }
   return Array.from(numbers);
 }

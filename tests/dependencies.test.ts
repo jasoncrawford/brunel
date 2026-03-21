@@ -30,6 +30,18 @@ describe("parseBodyBlockers", () => {
   it("ignores partial matches", () => {
     expect(parseBodyBlockers("closedepends on #5")).toEqual([]);
   });
+
+  it("parses comma-separated list after depends on", () => {
+    expect(parseBodyBlockers("Depends on #181, #182, #183, #184")).toEqual([181, 182, 183, 184]);
+  });
+
+  it("parses comma-separated list after blocked by", () => {
+    expect(parseBodyBlockers("Blocked by #10, #11, #12")).toEqual([10, 11, 12]);
+  });
+
+  it("parses mixed single and comma-separated entries across lines", () => {
+    expect(parseBodyBlockers("Depends on #1\nBlocked by #2, #3, #4")).toEqual([1, 2, 3, 4]);
+  });
 });
 
 describe("setBlockers", () => {
