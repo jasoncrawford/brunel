@@ -86,11 +86,12 @@ async function run(): Promise<void> {
         env: { ...process.env, FOREMAN_URL: foremanUrl, GITHUB_REPO: "test/test", GITHUB_TOKEN: "dummy" },
       });
       worker.stdout!.on("data", (buf: Buffer) => {
+        process.stderr.write(`[worker stdout] ${buf}`);
         const text = buf.toString();
         if (text.includes("Connected to foreman")) { connected = true; check(); }
         if (text.includes("Standby")) { standby = true; check(); }
       });
-      worker.stderr!.on("data", (buf: Buffer) => process.stderr.write(buf));
+      worker.stderr!.on("data", (buf: Buffer) => process.stderr.write(`[worker stderr] ${buf}`));
       worker.on("exit", (code) => {
         if (!connected || !standby)
           reject(new Error(`Worker exited prematurely with code ${code}`));
@@ -98,9 +99,10 @@ async function run(): Promise<void> {
     }
 
     foreman.stdout!.on("data", (buf: Buffer) => {
+      process.stderr.write(`[foreman stdout] ${buf}`);
       if (!worker && buf.toString().includes("Listening on")) spawnWorker();
     });
-    foreman.stderr!.on("data", (buf: Buffer) => process.stderr.write(buf));
+    foreman.stderr!.on("data", (buf: Buffer) => process.stderr.write(`[foreman stderr] ${buf}`));
     foreman.on("exit", (code) => {
       if (!connected || !standby)
         reject(new Error(`Foreman exited prematurely with code ${code}`));

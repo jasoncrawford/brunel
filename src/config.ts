@@ -36,6 +36,7 @@ export type BrunelConfig = z.infer<typeof BrunelConfigSchema> & {
 // ── Cosmiconfig explorer ──────────────────────────────────────────────────────
 
 const explorer = cosmiconfig("brunel", {
+  searchStrategy: "none",
   loaders: {
     ".ts": async (filepath: string) => {
       const mod = await import(filepath);
