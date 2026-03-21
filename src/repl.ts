@@ -1,11 +1,15 @@
+import "dotenv/config";
 import fs from "fs";
 import { fileURLToPath } from "url";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { CanUseTool, PermissionMode, PermissionResult } from "@anthropic-ai/claude-agent-sdk";
 import * as display from "./display.js";
+import { setVerbose } from "./display.js";
 import { ask, listCommandNames, dispatchInput, pick, pickMultiple, pickQuestion } from "./input.js";
 import type { PickQuestionResult } from "./input.js";
 import { workerMain } from "./worker.js";
+import type { RunQuery } from "./worker.js";
+import { loadConfig } from "./config.js";
 export { parseSlashCommand, resolveCommandFilePath, resolveContent, dispatchInput, matchCommands, listCommandNames, listWorkerCommandNames, ask } from "./input.js";
 export type { SlashCommandResult, DispatchResult, ListDir } from "./input.js";
 
@@ -22,61 +26,6 @@ export function logFull(label: string, data: unknown) {
     "\n";
   fs.appendFileSync(LOG_FILE, entry);
 }
-
-// ── Config ────────────────────────────────────────────────────────────────────
-
-export const VALID_PERMISSION_MODES: readonly PermissionMode[] = [
-  "default", "acceptEdits", "bypassPermissions", "plan", "dontAsk",
-];
-
-export type ParsedPermissionConfig = {
-  mode: PermissionMode;
-  allowDangerouslySkipPermissions: boolean;
-};
-
-export function parsePermissionMode(argv: string[]): ParsedPermissionConfig {
-  const hasDangerousFlag = argv.includes("--dangerously-skip-permissions");
-  const modeIdx = argv.indexOf("--permission-mode");
-
-  let explicitMode: string | null = null;
-  if (modeIdx !== -1) {
-    const next = argv[modeIdx + 1];
-    // Missing value: no next token, or next token looks like a flag
-    if (!next || next.startsWith("--")) {
-      process.stderr.write(
-        `Error: --permission-mode requires a value. Valid modes: ${VALID_PERMISSION_MODES.join(", ")}\n`
-      );
-      process.exit(1);
-    }
-    if (!(VALID_PERMISSION_MODES as readonly string[]).includes(next)) {
-      process.stderr.write(
-        `Error: Unknown permission mode "${next}". Valid modes: ${VALID_PERMISSION_MODES.join(", ")}\n`
-      );
-      process.exit(1);
-    }
-    explicitMode = next;
-  }
-
-  // Conflict: --dangerously-skip-permissions implies bypassPermissions;
-  // if --permission-mode is also given and says something different, that's an error.
-  if (hasDangerousFlag && explicitMode !== null && explicitMode !== "bypassPermissions") {
-    process.stderr.write(
-      `Error: --dangerously-skip-permissions conflicts with --permission-mode ${explicitMode}. ` +
-      `Use --permission-mode bypassPermissions or omit --permission-mode.\n`
-    );
-    process.exit(1);
-  }
-
-  if (hasDangerousFlag || explicitMode === "bypassPermissions") {
-    return { mode: "bypassPermissions", allowDangerouslySkipPermissions: true };
-  }
-
-  const mode: PermissionMode = (explicitMode as PermissionMode) ?? "default";
-  return { mode, allowDangerouslySkipPermissions: false };
-}
-
-const { mode: PERMISSION_MODE, allowDangerouslySkipPermissions: ALLOW_BYPASS } =
-  parsePermissionMode(process.argv);
 
 // ── REPL ──────────────────────────────────────────────────────────────────────
 
@@ -124,7 +73,12 @@ export async function handleToolPermission(
   return { behavior: "deny", message: "User denied tool request" };
 }
 
-export async function runQuery(prompt: string, sessionId: string | undefined, abortController?: AbortController) {
+export async function runQuery(
+  permConfig: { permissionMode: PermissionMode; allowDangerouslySkipPermissions: boolean },
+  prompt: string,
+  sessionId: string | undefined,
+  abortController?: AbortController,
+): Promise<string | undefined> {
   logFull("QUERY", { prompt, sessionId });
   // Save and clear the input print callback while the query runs. In worker
   // mode, ask() registers drawFresh() as the callback so the prompt redraws
@@ -151,7 +105,7 @@ export async function runQuery(prompt: string, sessionId: string | undefined, ab
     if (toolName === "AskUserQuestion") {
       return handleAskUserQuestion(input, getStatusText);
     }
-    if (ALLOW_BYPASS) return { behavior: "allow", updatedInput: input };
+    if (permConfig.allowDangerouslySkipPermissions) return { behavior: "allow", updatedInput: input };
     return handleToolPermission(toolName, input, getStatusText);
   };
 
@@ -164,11 +118,11 @@ export async function runQuery(prompt: string, sessionId: string | undefined, ab
       cwd: process.cwd(),
       systemPrompt: { type: "preset", preset: "claude_code" },
       settingSources: ["user", "project"],
-      permissionMode: PERMISSION_MODE,
+      permissionMode: permConfig.permissionMode,
       includePartialMessages: true,
       canUseTool,
       abortController: ac,
-      ...(ALLOW_BYPASS ? { allowDangerouslySkipPermissions: true } : {}),
+      ...(permConfig.allowDangerouslySkipPermissions ? { allowDangerouslySkipPermissions: true } : {}),
       ...(sessionId ? { resume: sessionId } : {}),
     },
   });
@@ -241,7 +195,9 @@ export async function runQuery(prompt: string, sessionId: string | undefined, ab
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
-async function main() {
+async function main(
+  permConfig: { permissionMode: PermissionMode; allowDangerouslySkipPermissions: boolean },
+): Promise<void> {
   process.stdout.write("\x1b[?2004h"); // enable bracketed paste mode
   process.stdin.setRawMode(true);
   process.stdin.resume();
@@ -251,7 +207,7 @@ async function main() {
 
   display.print(display.c.sageGreen(display.hr("═")));
   display.print(display.c.skyBlue(display.s.bold("  Claude Agent SDK REPL")));
-  display.print(display.c.lavender(`  Permissions: ${PERMISSION_MODE} | Output: ${display.VERBOSE ? "verbose" : "quiet"} | Log: ${LOG_FILE}`));
+  display.print(display.c.lavender(`  Permissions: ${permConfig.permissionMode} | Output: ${display.VERBOSE ? "verbose" : "quiet"} | Log: ${LOG_FILE}`));
   display.print(display.c.lavender(`  Type /exit to quit, /clear to start a new session.`));
   display.print(display.c.sageGreen(display.hr("═")));
 
@@ -286,7 +242,7 @@ async function main() {
     }
 
     try {
-      sessionId = await runQuery(action.prompt, sessionId);
+      sessionId = await runQuery(permConfig, action.prompt, sessionId);
     } catch (err) {
       console.error(display.c.boldRed(`\nERROR: ${err}`));
       logFull("ERROR", err instanceof Error ? { message: err.message, stack: err.stack } : err);
@@ -295,9 +251,18 @@ async function main() {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const config = await loadConfig(process.argv);
+  setVerbose(config.verbose);
+  const permConfig = {
+    permissionMode: config.permissionMode,
+    allowDangerouslySkipPermissions: config.allowDangerouslySkipPermissions,
+  };
+  const boundRunQuery: RunQuery = (prompt, sessionId, ac) =>
+    runQuery(permConfig, prompt, sessionId, ac);
+
   if (process.argv.includes("--worker-mode")) {
-    void workerMain(runQuery);
+    void workerMain(boundRunQuery, { foremanUrl: config.foremanUrl });
   } else {
-    void main();
+    void main(permConfig);
   }
 }

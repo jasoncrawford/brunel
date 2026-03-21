@@ -29,6 +29,11 @@ import { runQuery } from "../src/repl.js";
 import { ask, pick, pickMultiple, pickQuestion } from "../src/input.js";
 import { toolUseNames, stopStatus, setVerbose } from "../src/display.js";
 
+const defaultPermConfig = {
+  permissionMode: "default" as const,
+  allowDangerouslySkipPermissions: false,
+};
+
 function mockQueryMessages(messages: object[]) {
   (query as any).mockImplementation((_opts: any) => {
     return (async function* () {
@@ -72,7 +77,7 @@ describe("runQuery - session ID", () => {
     ]);
     const cap = captureConsole();
     try {
-      const sid = await runQuery("hello", undefined);
+      const sid = await runQuery(defaultPermConfig, "hello", undefined);
       expect(sid).toBe("abc-123");
     } finally {
       cap.restore();
@@ -85,7 +90,7 @@ describe("runQuery - session ID", () => {
     ]);
     const cap = captureConsole();
     try {
-      const sid = await runQuery("hello", undefined);
+      const sid = await runQuery(defaultPermConfig, "hello", undefined);
       expect(sid).toBeUndefined();
     } finally {
       cap.restore();
@@ -98,7 +103,7 @@ describe("runQuery - session ID", () => {
     ]);
     const cap = captureConsole();
     try {
-      await runQuery("hello", "existing-session-id");
+      await runQuery(defaultPermConfig, "hello", "existing-session-id");
     } finally {
       cap.restore();
     }
@@ -112,7 +117,7 @@ describe("runQuery - session ID", () => {
     ]);
     const cap = captureConsole();
     try {
-      await runQuery("hello", undefined);
+      await runQuery(defaultPermConfig, "hello", undefined);
     } finally {
       cap.restore();
     }
@@ -135,7 +140,7 @@ describe("runQuery - stream event stat accumulation", () => {
 
     const cap = captureConsole();
     try {
-      await runQuery("test", undefined);
+      await runQuery(defaultPermConfig, "test", undefined);
     } finally {
       cap.restore();
     }
@@ -154,7 +159,7 @@ describe("runQuery - stream event stat accumulation", () => {
     ]);
     const cap = captureConsole();
     try {
-      await runQuery("test", undefined);
+      await runQuery(defaultPermConfig, "test", undefined);
     } finally {
       cap.restore();
     }
@@ -172,7 +177,7 @@ describe("runQuery - message processing", () => {
     ]);
     const cap = captureConsole();
     try {
-      await runQuery("test", undefined);
+      await runQuery(defaultPermConfig, "test", undefined);
     } finally {
       cap.restore();
     }
@@ -189,7 +194,7 @@ describe("runQuery - message processing", () => {
     ]);
     const cap = captureConsole();
     try {
-      await runQuery("test", undefined);
+      await runQuery(defaultPermConfig, "test", undefined);
     } finally {
       cap.restore();
     }
@@ -207,7 +212,7 @@ describe("runQuery - logFull behavior", () => {
     ]);
     const cap = captureConsole();
     try {
-      await runQuery("test", undefined);
+      await runQuery(defaultPermConfig, "test", undefined);
     } finally {
       cap.restore();
     }
@@ -227,7 +232,7 @@ describe("runQuery - logFull behavior", () => {
     ]);
     const cap = captureConsole();
     try {
-      await runQuery("test", undefined);
+      await runQuery(defaultPermConfig, "test", undefined);
     } finally {
       cap.restore();
     }
@@ -247,7 +252,7 @@ describe("runQuery - error handling", () => {
     const cap = captureConsole();
     let thrown: unknown;
     try {
-      await runQuery("test", undefined);
+      await runQuery(defaultPermConfig, "test", undefined);
     } catch (err) {
       thrown = err;
     } finally {
@@ -265,7 +270,7 @@ describe("runQuery - canUseTool callback registration", () => {
     ]);
     const cap = captureConsole();
     try {
-      await runQuery("test", undefined);
+      await runQuery(defaultPermConfig, "test", undefined);
     } finally {
       cap.restore();
     }
@@ -297,7 +302,7 @@ describe("runQuery - AskUserQuestion handling", () => {
     const cap = captureConsole();
     let canUseTool: Function;
     try {
-      await runQuery("test", undefined);
+      await runQuery(defaultPermConfig, "test", undefined);
       canUseTool = (query as any).mock.calls[0][0].options.canUseTool;
     } finally {
       cap.restore();
@@ -316,7 +321,7 @@ describe("runQuery - AskUserQuestion handling", () => {
     const cap = captureConsole();
     let canUseTool: Function;
     try {
-      await runQuery("test", undefined);
+      await runQuery(defaultPermConfig, "test", undefined);
       canUseTool = (query as any).mock.calls[0][0].options.canUseTool;
     } finally {
       cap.restore();
@@ -334,7 +339,7 @@ describe("runQuery - AskUserQuestion handling", () => {
     const cap = captureConsole();
     let canUseTool: Function;
     try {
-      await runQuery("test", undefined);
+      await runQuery(defaultPermConfig, "test", undefined);
       canUseTool = (query as any).mock.calls[0][0].options.canUseTool;
     } finally {
       cap.restore();
@@ -353,7 +358,7 @@ describe("runQuery - AskUserQuestion handling", () => {
     const cap = captureConsole();
     let canUseTool: Function;
     try {
-      await runQuery("test", undefined);
+      await runQuery(defaultPermConfig, "test", undefined);
       canUseTool = (query as any).mock.calls[0][0].options.canUseTool;
     } finally {
       cap.restore();
@@ -384,7 +389,7 @@ describe("runQuery - AskUserQuestion handling", () => {
     const cap = captureConsole();
     let canUseTool: Function;
     try {
-      await runQuery("test", undefined);
+      await runQuery(defaultPermConfig, "test", undefined);
       canUseTool = (query as any).mock.calls[0][0].options.canUseTool;
     } finally {
       cap.restore();
@@ -407,7 +412,7 @@ describe("runQuery - tool permission handling (non-bypass mode)", () => {
     const cap = captureConsole();
     let canUseTool: Function;
     try {
-      await runQuery("test", undefined);
+      await runQuery(defaultPermConfig, "test", undefined);
       canUseTool = (query as any).mock.calls[0][0].options.canUseTool;
     } finally {
       cap.restore();
@@ -427,7 +432,7 @@ describe("runQuery - tool permission handling (non-bypass mode)", () => {
     const cap = captureConsole();
     let canUseTool: Function;
     try {
-      await runQuery("test", undefined);
+      await runQuery(defaultPermConfig, "test", undefined);
       canUseTool = (query as any).mock.calls[0][0].options.canUseTool;
     } finally {
       cap.restore();
@@ -447,7 +452,7 @@ describe("runQuery - interrupt support", () => {
     const cap = captureConsole();
     const ac = new AbortController();
     try {
-      await runQuery("test", undefined, ac);
+      await runQuery(defaultPermConfig, "test", undefined, ac);
     } finally {
       cap.restore();
     }
@@ -473,7 +478,7 @@ describe("runQuery - interrupt support", () => {
     try {
       // Abort after a short delay
       setTimeout(() => ac.abort(), 5);
-      await runQuery("test", "sess-1", ac);
+      await runQuery(defaultPermConfig, "test", "sess-1", ac);
     } catch (err) {
       thrown = err;
     } finally {
@@ -500,7 +505,7 @@ describe("runQuery - interrupt support", () => {
     let sessionId: string | undefined;
     try {
       setTimeout(() => ac.abort(), 5);
-      sessionId = await runQuery("test", undefined, ac);
+      sessionId = await runQuery(defaultPermConfig, "test", undefined, ac);
     } finally {
       cap.restore();
     }
@@ -513,7 +518,7 @@ describe("runQuery - interrupt support", () => {
     ]);
     const cap = captureConsole();
     try {
-      await runQuery("test", undefined);
+      await runQuery(defaultPermConfig, "test", undefined);
     } finally {
       cap.restore();
     }
@@ -528,7 +533,7 @@ describe("runQuery - interrupt support", () => {
     const before = process.stdin.listenerCount("data");
     const cap = captureConsole();
     try {
-      await runQuery("test", undefined);
+      await runQuery(defaultPermConfig, "test", undefined);
     } finally {
       cap.restore();
     }
@@ -563,7 +568,7 @@ describe("runQuery - interrupt via ^C on stdin", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
 
     try {
-      const queryPromise = runQuery("test", undefined);
+      const queryPromise = runQuery(defaultPermConfig, "test", undefined);
       await new Promise((r) => setTimeout(r, 5));
       fakeStdin.push("\x03");
       await queryPromise;
@@ -590,7 +595,7 @@ describe("runQuery - interrupt via ^C on stdin", () => {
     const cap = captureConsole();
     let thrown: unknown;
     try {
-      await runQuery("test", "sess-1");
+      await runQuery(defaultPermConfig, "test", "sess-1");
     } catch (err) {
       thrown = err;
     } finally {
@@ -614,7 +619,7 @@ describe("runQuery - interrupt via ^C on stdin", () => {
     const cap = captureConsole();
     let thrown: unknown;
     try {
-      await runQuery("test", undefined);
+      await runQuery(defaultPermConfig, "test", undefined);
     } catch (err) {
       thrown = err;
     } finally {
@@ -652,7 +657,7 @@ describe("runQuery - prompt redraw after query (worker mode integration)", () =>
       const askPromise = ask("[worker] > ", () => []);
 
       // Run the query to completion — drawFresh should be called once afterward
-      await runQuery("test", undefined);
+      await runQuery(defaultPermConfig, "test", undefined);
 
       const promptIdx = written.findIndex(s => s.includes("[worker] > "));
       const assistantIdx = written.findIndex(s => stripAnsi(s).includes("assistant output"));
