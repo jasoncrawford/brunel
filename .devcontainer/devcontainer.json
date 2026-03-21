@@ -12,6 +12,7 @@
     "VERCEL_TOKEN": "${localEnv:VERCEL_TOKEN}",
     "CLAUDE_CODE_OAUTH_TOKEN": "${localEnv:CLAUDE_CODE_OAUTH_TOKEN}"
   },
+  "forwardPorts": [3000, 5173],
   "postCreateCommand": "npm ci",
   "waitFor": "postStartCommand"
 }
