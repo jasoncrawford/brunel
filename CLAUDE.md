@@ -40,6 +40,9 @@ Optional (all have defaults):
 - `BRUNEL_FOREMAN_URL` — WebSocket URL workers connect to (default: `ws://localhost:3000`); **no legacy fallback for this one**
 - `BRUNEL_VERBOSE` — enable verbose Claude output (default: `false`)
 - `BRUNEL_PERMISSION_MODE` — Claude permission mode: `default`, `acceptEdits`, `bypassPermissions`, `plan`, `dontAsk` (default: `default`)
+- `BRUNEL_SUPABASE_URL` — Supabase project URL (for cloud deployment)
+- `BRUNEL_SUPABASE_SERVICE_ROLE_KEY` — Supabase service role key (for cloud deployment; treat as secret)
+- `BRUNEL_WORKER_SECRET` — shared secret to authenticate workers with the foreman (treat as secret)
 
 ## Git workflow
 
