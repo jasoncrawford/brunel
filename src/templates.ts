@@ -6,8 +6,8 @@ export function formatCommentLocation(
   startLine?: unknown
 ): string {
   const pathStr = `\`${path}\``;
-  if (!line) return pathStr;
-  if (startLine && startLine !== line) return `${pathStr} lines ${startLine}-${line}`;
+  if (line == null) return pathStr;
+  if (startLine != null && startLine !== line) return `${pathStr} lines ${startLine}-${line}`;
   return `${pathStr} line ${line}`;
 }
 
