@@ -588,8 +588,7 @@ Replace the entire `if (labeledNow || openedWithLabel) { ... return; }` block (i
         openIssues.add(issueNumber);
         startDepsLoad(issueNumber, issueData.body);
         reconcile();
-        // Don't return — fall through to let forwardEvent run if task is assigned
-        task = taskQueue.getTaskForIssue(issueNumber);
+        return; // task is always pending here; nothing further to forward
       }
 ```
 
