@@ -7,7 +7,7 @@ export const hr = (ch = "─") => ch.repeat(W);
 
 // ── Verbose flag ──────────────────────────────────────────────────────────────
 
-export let VERBOSE = process.argv.includes("--verbose");
+export let VERBOSE = false;
 export function setVerbose(v: boolean) { VERBOSE = v; }
 
 // ── Colors ────────────────────────────────────────────────────────────────────
