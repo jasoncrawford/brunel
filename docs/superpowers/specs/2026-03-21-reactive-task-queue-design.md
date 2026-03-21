@@ -35,9 +35,9 @@ The `TaskQueue` and its `Task` entries are **derived state** — materialized an
 
 A new private function inside `createForemanWss`, called after every canonical state change. Steps (in order):
 
-1. **Materialize new tasks**: for each `(num, { issue, depsLoaded })` in `labeledIssues`, if `taskQueue` has no task for that issue number → `taskQueue.addTask({ taskId: String(num), issueNumber: num, ...issue, depsLoaded })`. This step is strictly "create if absent" — it never updates an existing task.
+1. **Materialize new tasks**: for each `(num, { issue, depsLoaded })` in `labeledIssues`, if `taskQueue` has no task for that issue number → `taskQueue.addTask({ taskId: String(num), issueNumber: num, ...issue, depsLoaded })`. Always pass `depsLoaded` explicitly — `addTask`'s default is `true`, but we need the caller-supplied value here. This step is strictly "create if absent" — it never updates an existing task.
 
-2. **Sync `depsLoaded`**: for each existing task where `labeledIssues.get(num)?.depsLoaded` is `true` but `task.depsLoaded` is `false` → call `taskQueue.markDepsLoaded([num])`. This is required because `addTask` in step 1 only runs when the task is first created; subsequent updates to `depsLoaded` in `labeledIssues` (from `startDepsLoad`) must be propagated to the existing task here.
+2. **Sync `depsLoaded`**: for each `(num, { depsLoaded: true })` in `labeledIssues` where the corresponding task has `depsLoaded: false` → call `taskQueue.markDepsLoaded([num])`. This step is needed because step 1 only runs when a task is first created; when `startDepsLoad` later marks `labeledIssues.get(num).depsLoaded = true` and calls `reconcile()` again, this step propagates that update to the existing task. Note: `markDepsLoaded` looks up tasks by `String(issueNumber)` — this relies on the invariant that `taskId === String(issueNumber)`, which is established in step 1 and must be maintained throughout. At startup (when `reconcile()` is called after `loadIssuesToQueue`), all `labeledIssues` entries already have `depsLoaded: true`, so step 1 creates tasks with `depsLoaded: true` directly and step 2 is a no-op.
 
 3. **Remove stale pending tasks**: for each pending task whose `issueNumber` is not in `labeledIssues` → `taskQueue.removeTask(taskId)`. Non-pending (assigned or complete) tasks are never removed, enforced by the existing `removeTask` guard.
 
@@ -56,15 +56,19 @@ A new private async helper inside `createForemanWss`, called fire-and-forget (no
    → setBlockers(issueNumber, blockers, graph)
 2. fetchIssueStates(blockers, { repo, token })
    → for each [num, state]: openIssues.add/delete(num)
-     (both add and delete, so stale closed-blocker state is cleaned up)
+     (add and delete, scoped to the fetched blocker numbers only)
 3. if (labeledIssues.has(issueNumber)):
      labeledIssues.get(issueNumber).depsLoaded = true
 4. reconcile()
 ```
 
-This replaces the inline `.then()` chains currently embedded in the `labeled` and `edited` handlers.
+`openIssues` is updated for the current blocker numbers only — numbers not returned by `fetchBlockers` are not touched. This means if two labeled issues share a blocker and `startDepsLoad` for one of them determines the shared blocker is closed, it correctly removes it from `openIssues` (the blocker IS closed, so both tasks should unblock). This is the intended shared-state behavior.
+
+**Error handling**: wrap the async chain in `.catch((err) => flog(\`ERROR fetching deps for #${issueNumber}: ${err}\`))`. A failure in dep loading leaves `depsLoaded: false` in `labeledIssues`; the task remains pending but unassignable until a future reconcile succeeds (e.g., triggered by another webhook event). This matches the existing error-handling behavior.
 
 **Concurrent calls**: if `startDepsLoad` is called twice for the same issue (e.g., rapid re-label or edit while a previous load is in flight), both async chains complete independently. The last one to finish sets `depsLoaded = true` and updates `openIssues` / `graph` with its fetched results. This is a benign last-writer-wins race: at worst, one load's blocker data is immediately overwritten by another, but `depsLoaded` ends up `true` and `reconcile()` fires correctly. No guard or abort mechanism is needed.
+
+This replaces the inline `.then()` chains currently embedded in the `labeled` and `edited` handlers.
 
 ---
 
@@ -79,9 +83,12 @@ Each `issues` action becomes a minimal state update + `reconcile()` call:
 | `opened` (issue already has task label) | same as `labeled` |
 | `closed` | `openIssues.delete(num)` + `reconcile()` |
 | `reopened` | `openIssues.add(num)` + `reconcile()` |
-| `edited` (body changed, issue is labeled) | set `labeledIssues.get(num).depsLoaded = false` + update `labeledIssues` entry's `issue.body` + `startDepsLoad(num, newBody)` (calls `reconcile()` internally) |
+| `edited` (body changed, issue is labeled) | set `labeledIssues.get(num).depsLoaded = false` + update `labeledIssues` entry's `issue.body` + `startDepsLoad(num, newBody)` (calls `reconcile()` internally); then fall through to existing `forwardEvent` logic for any already-assigned task |
 
-Resetting `depsLoaded = false` in the `edited` handler prevents the task from being assigned using stale blocker data while the fresh `startDepsLoad` is in flight.
+Notes:
+- Resetting `depsLoaded = false` in the `edited` handler prevents the task from being assigned using stale blocker data while the fresh `startDepsLoad` is in flight.
+- The `edited` handler **preserves the existing fall-through** to `forwardEvent` so that assigned tasks still receive `edited` events from the foreman.
+- `opened` with the task label already present fires `startDepsLoad` twice if a `labeled` event also fires (see "Concurrent calls" in `startDepsLoad`). This is safe.
 
 PR events, `check_run`/`check_suite`, and `forwardEvent` are **unchanged**.
 
@@ -101,7 +108,7 @@ PR events, `check_run`/`check_suite`, and `forwardEvent` are **unchanged**.
 return { wss, routeEventToWorker: routeEvent, reconcile };
 ```
 
-This allows the startup boot code to call `reconcile()` after `loadIssuesToQueue` returns.
+This allows the startup boot code to call `reconcile()` after `loadIssuesToQueue` returns. Existing test harnesses that destructure only `{ wss, routeEventToWorker }` are unaffected — TypeScript destructuring accepts extra properties.
 
 ### `TaskQueue` — no new methods needed
 
@@ -146,7 +153,7 @@ reconcile();  // creates tasks with depsLoaded: true, assigns to idle workers
 
 ## Testing
 
-All changes follow TDD. New unit tests cover:
+All changes follow TDD. New unit tests (`tests/foreman.reconcile.test.ts`) cover:
 
 - `reconcile()` creates tasks for new `labeledIssues` entries (with correct `depsLoaded` value).
 - `reconcile()` does not duplicate tasks that already exist.
@@ -156,11 +163,17 @@ All changes follow TDD. New unit tests cover:
 - `reconcile()` calls `tryAssignWork` for each idle worker.
 - `labeled` event: task is created; `unlabeled` event: pending task is removed and `openIssues` entry is cleaned up.
 - `closed` event: `openIssues` is updated; previously-blocked task becomes assignable after reconcile.
-- `edited` event: `depsLoaded` is reset to `false` before dep reload.
+- `edited` event: `depsLoaded` is reset to `false` before dep reload; fall-through to forwardEvent is preserved.
+- `startDepsLoad` error: on fetch failure, task remains pending with `depsLoaded: false`.
 - `loadIssuesToQueue` populates `labeledIssues` (not `taskQueue` directly), with `depsLoaded: true` after loading.
 - Startup sequence: `reconcile()` after `loadIssuesToQueue` creates tasks with `depsLoaded: true`.
 
-Existing tests for `WorkerRegistry`, `TaskQueue`, and all existing `foreman.*.test.ts` files are preserved. Integration/smoke tests (`npm run smoke`) are expected to pass without changes.
+Existing tests are updated as needed:
+
+- `tests/foreman.github.test.ts` — update `loadIssuesToQueue` call sites to pass `Map<number, LabeledIssueState>` instead of `TaskQueue`.
+- `tests/foreman.webhook-routing.test.ts`, `tests/foreman.websocket.test.ts`, `tests/foreman.worker-logging.test.ts`, `tests/foreman.timestamps.test.ts` — `createForemanWss` return type change is additive; destructuring `{ wss, routeEventToWorker }` still compiles. These files only need updating if they test webhook-triggered task creation, in which case `labeledIssues` must be added to the `createForemanWss` options.
+
+Integration/smoke tests (`npm run smoke`) are expected to pass without changes.
 
 ---
 
@@ -171,5 +184,10 @@ Existing tests for `WorkerRegistry`, `TaskQueue`, and all existing `foreman.*.te
 | `src/types.ts` | Add `LabeledIssueState` interface |
 | `src/foreman.ts` | Add `reconcile()`, `startDepsLoad()`; simplify `routeEvent`; update `createForemanWss` options/return; update boot code |
 | `src/github.ts` | Change `loadIssuesToQueue` signature to accept `labeledIssues` instead of `queue` |
-| `tests/foreman.reconcile.test.ts` | New test file for `reconcile()` behaviour |
+| `tests/foreman.reconcile.test.ts` | New: unit tests for `reconcile()` behaviour |
+| `tests/foreman.github.test.ts` | Update: `loadIssuesToQueue` call sites |
+| `tests/foreman.webhook-routing.test.ts` | Update: add `labeledIssues` to `createForemanWss` options where needed |
+| `tests/foreman.websocket.test.ts` | Review: likely minor or no changes needed |
+| `tests/foreman.worker-logging.test.ts` | Review: likely minor or no changes needed |
+| `tests/foreman.timestamps.test.ts` | Review: likely minor or no changes needed |
 | `tests/foreman.registry.test.ts` | Unchanged |
