@@ -622,4 +622,56 @@ describe("foreman event filtering", () => {
     ]);
     expect(raceResult).toBe("timeout");
   });
+
+  it('issues/unlabeled with task label removes a pending task from the queue', async () => {
+    // Enqueue task via webhook (no worker connected, so it stays pending)
+    routeEvent("evt-labeled", "issues", labeledPayload(42, "brunel:ready"));
+    expect(queue.getTaskForIssue(42)?.status).toBe("pending");
+
+    // Remove the label — pending task should be dequeued
+    routeEvent("evt-unlabeled", "issues", {
+      action: "unlabeled",
+      label: { name: "brunel:ready" },
+      issue: { number: 42, title: "Issue 42", body: "Body", labels: [] },
+      repository: { html_url: "https://github.com/owner/repo" },
+    });
+
+    expect(queue.getTaskForIssue(42)).toBeUndefined();
+  });
+
+  it('issues/unlabeled with task label does not remove an already-assigned task', async () => {
+    const ws = await connect();
+    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    await nextMsg(ws); // standby
+
+    const reply = nextMsg(ws);
+    routeEvent("evt-labeled", "issues", labeledPayload(42, "brunel:ready"));
+    await reply; // task_assigned
+
+    expect(queue.getTaskForIssue(42)?.status).toBe("assigned");
+
+    // Removing the label should leave the assigned task intact
+    routeEvent("evt-unlabeled", "issues", {
+      action: "unlabeled",
+      label: { name: "brunel:ready" },
+      issue: { number: 42, title: "Issue 42", body: "Body", labels: [] },
+      repository: { html_url: "https://github.com/owner/repo" },
+    });
+
+    expect(queue.getTaskForIssue(42)?.status).toBe("assigned");
+  });
+
+  it('issues/unlabeled with non-task label does not remove a pending task', async () => {
+    routeEvent("evt-labeled", "issues", labeledPayload(42, "brunel:ready"));
+    expect(queue.getTaskForIssue(42)?.status).toBe("pending");
+
+    routeEvent("evt-unlabeled", "issues", {
+      action: "unlabeled",
+      label: { name: "some-other-label" },
+      issue: { number: 42, title: "Issue 42", body: "Body", labels: [{ name: "brunel:ready" }] },
+      repository: { html_url: "https://github.com/owner/repo" },
+    });
+
+    expect(queue.getTaskForIssue(42)).toBeDefined();
+  });
 });
