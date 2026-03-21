@@ -14,6 +14,11 @@ export interface TaskIssue {
   repoUrl: string;
 }
 
+export interface LabeledIssueState {
+  issue: TaskIssue;    // issue metadata (title, body, labels, repoUrl)
+  depsLoaded: boolean; // true once fetchBlockers has resolved for this issue
+}
+
 // Worker → Foreman messages
 export type WorkerMessage =
   | { type: "worker_hello"; workerId: string; taskId?: string; status: "idle" | "busy"; workerSecret?: string }
