@@ -5,7 +5,8 @@ import { WebSocketServer } from "ws";
 import type { WebSocket as WsSocket } from "ws";
 import type { WorkerMessage, ForemanMessage, GitHubEvent } from "./types.js";
 import { labelIssueDone } from "./github.js";
-import { fmtTimestamp } from "./display.js";
+import { fmtTimestamp, setVerbose } from "./display.js";
+import { loadConfig } from "./config.js";
 import { isBlocked, setBlockers, fetchBlockers } from "./dependencies.js";
 import { fetchIssueStates } from "./github.js";
 import type { DependencyGraph } from "./dependencies.js";
@@ -16,8 +17,6 @@ function flog(msg: string) {
 
 type R = Record<string, unknown>;
 
-const PORT = parseInt(process.env.PORT ?? "3000");
-const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 
 // ── WorkerRegistry ────────────────────────────────────────────────────────────
 
@@ -312,12 +311,16 @@ export function createForemanWss(
     labelDone?: (issueNumber: number) => Promise<void>;
     graph?: DependencyGraph;
     openIssues?: Set<number>;
+    repo?: string;
+    token?: string;
   },
 ): { wss: WebSocketServer; routeEventToWorker: (id: string, name: string, payload: unknown) => void } {
-  const taskLabel = options?.taskLabel ?? process.env.TASK_LABEL ?? "brunel:ready";
-  const labelDone = options?.labelDone ?? labelIssueDone;
+  const taskLabel = options?.taskLabel ?? "brunel:ready";
+  const labelDone = options?.labelDone ?? (() => Promise.resolve());
   const graph = options?.graph ?? new Map<number, Set<number>>();
   const openIssues = options?.openIssues ?? new Set<number>();
+  const repo = options?.repo ?? "";
+  const token = options?.token ?? "";
 
   function log(wid: string, line: string) {
     flog(`[worker ${wid.slice(0, 8)}] ${line}`);
@@ -446,10 +449,10 @@ export function createForemanWss(
         task = taskQueue.getTaskForIssue(issueNumber)!;
 
         // Fetch deps before assigning (graph must be current)
-        fetchBlockers(issueNumber, String(issue.body ?? ""))
+        fetchBlockers(issueNumber, String(issue.body ?? ""), { repo, token })
           .then((blockers) => {
             setBlockers(issueNumber, blockers, graph);
-            return blockers.length > 0 ? fetchIssueStates(blockers) : Promise.resolve(new Map<number, "open" | "closed">());
+            return blockers.length > 0 ? fetchIssueStates(blockers, { repo, token }) : Promise.resolve(new Map<number, "open" | "closed">());
           })
           .then((states) => {
             for (const [num, state] of states) {
@@ -489,10 +492,10 @@ export function createForemanWss(
         const changes = p.changes as Record<string, unknown> | undefined;
         if (changes?.body) {
           const body = String(issue.body ?? "");
-          fetchBlockers(issueNumber, body)
+          fetchBlockers(issueNumber, body, { repo, token })
             .then((blockers) => {
               setBlockers(issueNumber, blockers, graph);
-              return fetchIssueStates(blockers);
+              return fetchIssueStates(blockers, { repo, token });
             })
             .then((states) => {
               for (const [num, state] of states) {
@@ -625,16 +628,35 @@ import { fileURLToPath } from "url";
 import { loadIssuesToQueue } from "./github.js";
 const isMain = process.argv[1] === fileURLToPath(import.meta.url);
 if (isMain) {
+  const config = await loadConfig(process.argv);
+  setVerbose(config.verbose);
+
   const registry = new WorkerRegistry();
   const taskQueue = new TaskQueue();
   const graph: DependencyGraph = new Map();
   const openIssues = new Set<number>();
-  const webhooks = WEBHOOK_SECRET ? new Webhooks({ secret: WEBHOOK_SECRET }) : null;
+  const webhooks = config.webhookSecret
+    ? new Webhooks({ secret: config.webhookSecret })
+    : null;
 
-  // Use a mutable reference so routeEvent can be wired after createForemanWss returns it.
   let routeEvent: (id: string, name: string, payload: unknown) => void = () => {};
   const server = createHttpServer(webhooks, (id, name, payload) => routeEvent(id, name, payload));
-  ({ routeEventToWorker: routeEvent } = createForemanWss(taskQueue, registry, server, { graph, openIssues }));
+  ({ routeEventToWorker: routeEvent } = createForemanWss(
+    taskQueue, registry, server,
+    {
+      graph,
+      openIssues,
+      taskLabel: config.taskLabel,
+      repo: config.githubRepo,
+      token: config.githubToken,
+      labelDone: (issueNumber) =>
+        labelIssueDone(issueNumber, {
+          repo: config.githubRepo,
+          token: config.githubToken,
+          doneLabel: config.doneLabel,
+        }),
+    },
+  ));
 
   if (webhooks) {
     webhooks.onAny(({ id, name, payload }) => {
@@ -643,12 +665,16 @@ if (isMain) {
     });
   }
 
-  server.listen(PORT, async () => {
-    flog(`Listening on http://localhost:${PORT}/webhook`);
-    flog(`WebSocket workers: ws://localhost:${PORT}/worker`);
+  server.listen(config.port, async () => {
+    flog(`Listening on http://localhost:${config.port}/webhook`);
+    flog(`WebSocket workers: ws://localhost:${config.port}/worker`);
     flog("Waiting for events...");
     try {
-      await loadIssuesToQueue(taskQueue, graph, openIssues);
+      await loadIssuesToQueue(taskQueue, graph, openIssues, {
+        repo: config.githubRepo,
+        token: config.githubToken,
+        taskLabel: config.taskLabel,
+      });
     } catch (err) {
       flog(`WARNING Failed to load issues from GitHub: ${err}`);
     }
