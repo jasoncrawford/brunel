@@ -10,6 +10,8 @@ import { loadConfig } from "./config.js";
 import { isBlocked, setBlockers, fetchBlockers } from "./dependencies.js";
 import { fetchIssueStates } from "./github.js";
 import type { DependencyGraph } from "./dependencies.js";
+import type { DbLogger } from "./db.js";
+import type { AdminWss, TaskSnapshot, WorkerSnapshot } from "./admin-ws.js";
 
 function flog(msg: string) {
   console.log(`${fmtTimestamp()} ${msg}`);
@@ -79,6 +81,14 @@ export class WorkerRegistry {
     if (w?.ws.readyState === 1 /* OPEN */) {
       w.ws.send(JSON.stringify(msg));
     }
+  }
+
+  getWorkerSnapshots(): WorkerSnapshot[] {
+    return [...this.workers.values()].map((w) => ({
+      workerId: w.workerId,
+      status: w.status,
+      currentTaskId: w.currentTaskId,
+    }));
   }
 }
 
@@ -179,6 +189,16 @@ export class TaskQueue {
       if (t) t.depsLoaded = true;
     }
   }
+
+  getTaskSnapshots(): TaskSnapshot[] {
+    return [...this.tasks.values()].map((t) => ({
+      taskId: t.taskId,
+      issueNumber: t.issueNumber,
+      title: t.title,
+      status: t.status,
+      assignedWorkerId: t.assignedWorkerId,
+    }));
+  }
 }
 
 
@@ -242,6 +262,7 @@ function printEvent(id: string, name: string, payload: unknown) {
 function createHttpServer(
   webhooks: InstanceType<typeof Webhooks> | null,
   routeEvent: (id: string, name: string, payload: unknown) => void,
+  dbLogger?: DbLogger,
 ): http.Server {
   return http.createServer(async (req, res) => {
     if (req.method === "POST" && req.url === "/webhook") {
@@ -295,6 +316,52 @@ function createHttpServer(
       return;
     }
 
+    // ── REST API ──────────────────────────────────────────────────────────────
+    if (req.method === "GET" && req.url?.startsWith("/api/")) {
+      res.setHeader("Content-Type", "application/json");
+      try {
+        if (req.url === "/api/log" || req.url?.startsWith("/api/log?")) {
+          const entries = dbLogger ? await dbLogger.queryLog({ limit: 100 }) : [];
+          res.writeHead(200); res.end(JSON.stringify(entries)); return;
+        }
+        const taskMatch = /^\/api\/tasks\/([^/]+)\/events$/.exec(req.url ?? "");
+        if (taskMatch) {
+          const entries = dbLogger ? await dbLogger.queryTaskEvents(taskMatch[1]) : [];
+          res.writeHead(200); res.end(JSON.stringify(entries)); return;
+        }
+        const workerMatch = /^\/api\/workers\/([^/]+)\/messages$/.exec(req.url ?? "");
+        if (workerMatch) {
+          const entries = dbLogger ? await dbLogger.queryWorkerMessages(workerMatch[1]) : [];
+          res.writeHead(200); res.end(JSON.stringify(entries)); return;
+        }
+      } catch (err) {
+        flog(`ERROR API query failed: ${err}`);
+        res.writeHead(500); res.end(JSON.stringify({ error: "internal error" })); return;
+      }
+    }
+
+    // ── Static files (React SPA) ──────────────────────────────────────────────
+    // Serve dist/ for all other routes. Falls back to index.html for SPA routing.
+    // Only active when dist/ exists (production build); in dev, Vite serves the frontend.
+    const { createReadStream, existsSync } = await import("fs");
+    const { join, extname } = await import("path");
+    const { fileURLToPath } = await import("url");
+    const root = join(fileURLToPath(import.meta.url), "../../dist");
+
+    if (existsSync(root)) {
+      const safePath = (req.url ?? "/").split("?")[0];
+      const filePath = join(root, safePath);
+      const target = existsSync(filePath) && !safePath.endsWith("/")
+        ? filePath : join(root, "index.html");
+      const mime: Record<string, string> = {
+        ".html": "text/html", ".js": "application/javascript",
+        ".css": "text/css", ".svg": "image/svg+xml", ".ico": "image/x-icon",
+      };
+      res.writeHead(200, { "Content-Type": mime[extname(target)] ?? "application/octet-stream" });
+      createReadStream(target).pipe(res);
+      return;
+    }
+
     res.writeHead(404);
     res.end("Not Found");
   });
@@ -313,6 +380,9 @@ export function createForemanWss(
     openIssues?: Set<number>;
     repo?: string;
     token?: string;
+    dbLogger?: DbLogger;
+    adminWss?: AdminWss;
+    workerSecret?: string;
   },
 ): { wss: WebSocketServer; routeEventToWorker: (id: string, name: string, payload: unknown) => void } {
   const taskLabel = options.taskLabel;
@@ -322,9 +392,20 @@ export function createForemanWss(
   // repo and token default to "" for unit tests, which don't exercise GitHub-calling paths
   const repo = options.repo ?? "";
   const token = options.token ?? "";
+  const dbLogger = options.dbLogger;
+  const adminWss = options.adminWss;
+  const workerSecret = options.workerSecret;
 
   function log(wid: string, line: string) {
     flog(`[worker ${wid.slice(0, 8)}] ${line}`);
+  }
+
+  function broadcastSnapshot() {
+    if (!adminWss) return;
+    adminWss.broadcastSnapshot({
+      tasks: taskQueue.getTaskSnapshots(),
+      workers: registry.getWorkerSnapshots(),
+    });
   }
 
   function extractLinkedIssueNumber(body: string): number | null {
@@ -345,6 +426,33 @@ export function createForemanWss(
   function routeEvent(id: string, name: string, payload: unknown) {
     const p = payload as Record<string, unknown>;
     const evt: GitHubEvent = { id, name, payload: p };
+
+    // Log webhook event to DB and broadcast to admin GUI
+    const action = typeof p.action === "string" ? p.action : null;
+    const webhookIssueNumber = typeof (p.issue as Record<string, unknown> | undefined)?.number === "number"
+      ? (p.issue as Record<string, unknown>).number as number : null;
+    const webhookPrNumber = typeof (p.pull_request as Record<string, unknown> | undefined)?.number === "number"
+      ? (p.pull_request as Record<string, unknown>).number as number : null;
+    dbLogger?.logWebhookEvent({
+      deliveryId: id,
+      eventName: name,
+      action,
+      repo: (p.repository as Record<string, unknown> | undefined)?.full_name as string ?? null,
+      sender: (p.sender as Record<string, unknown> | undefined)?.login as string ?? null,
+      issueNumber: webhookIssueNumber,
+      prNumber: webhookPrNumber,
+      branch: null,
+      taskId: null,
+      payload: p,
+    });
+    adminWss?.broadcastLogEvent({
+      kind: "webhook",
+      id: 0,
+      timestamp: new Date().toISOString(),
+      taskId: null,
+      workerId: null,
+      summary: `${name}${action ? `/${action}` : ""}${webhookIssueNumber ? ` #${webhookIssueNumber}` : ""}`,
+    });
 
     // ── PR events: route by PR number ────────────────────────────────────────
 
@@ -446,6 +554,7 @@ export function createForemanWss(
         });
         // Track open state for newly-enqueued brunel:ready issues
         openIssues.add(issueNumber);
+        broadcastSnapshot();
         flog(`[task #${issueNumber}] enqueued via ${name}/${action}`);
         task = taskQueue.getTaskForIssue(issueNumber)!;
 
@@ -527,8 +636,9 @@ export function createForemanWss(
     if (task) {
       taskQueue.assignTask(task.taskId, workerId);
       registry.assignTask(workerId, task.taskId);
+      broadcastSnapshot();
       const queued = taskQueue.drainEvents(task.taskId);
-      registry.send(workerId, {
+      const assignMsg: ForemanMessage = {
         type: "task_assigned",
         taskId: task.taskId,
         issue: {
@@ -538,14 +648,20 @@ export function createForemanWss(
           labels: task.labels,
           repoUrl: task.repoUrl,
         },
-      });
+      };
+      registry.send(workerId, assignMsg);
+      dbLogger?.logForemanMessage({ direction: "sent", workerId, taskId: task.taskId, msgType: assignMsg.type, payload: assignMsg as unknown as Record<string, unknown> });
       log(workerId, `→ task_assigned #${task.issueNumber} "${task.title}"`);
       for (const evt of queued) {
-        registry.send(workerId, { type: "event_notification", taskId: task.taskId, event: evt });
+        const evtMsg: ForemanMessage = { type: "event_notification", taskId: task.taskId, event: evt };
+        registry.send(workerId, evtMsg);
+        dbLogger?.logForemanMessage({ direction: "sent", workerId, taskId: task.taskId, msgType: evtMsg.type, payload: evtMsg as unknown as Record<string, unknown> });
         log(workerId, `→ event_notification #${task.issueNumber} ${evt.name} (queued)`);
       }
     } else {
-      registry.send(workerId, { type: "standby" });
+      const standbyMsg: ForemanMessage = { type: "standby" };
+      registry.send(workerId, standbyMsg);
+      dbLogger?.logForemanMessage({ direction: "sent", workerId, taskId: null, msgType: standbyMsg.type, payload: standbyMsg as unknown as Record<string, unknown> });
       log(workerId, "→ standby");
     }
   }
@@ -559,7 +675,22 @@ export function createForemanWss(
       let msg: WorkerMessage;
       try { msg = JSON.parse(data.toString()); } catch { return; }
 
+      // Log all received messages
+      dbLogger?.logForemanMessage({
+        direction: "received",
+        workerId: workerId || ((msg as { workerId?: string }).workerId ?? null),
+        taskId: (msg as { taskId?: string }).taskId ?? null,
+        msgType: msg.type,
+        payload: msg as unknown as Record<string, unknown>,
+      });
+
       if (msg.type === "worker_hello") {
+        // Reject if workerSecret is configured and the message's secret doesn't match
+        if (workerSecret && msg.workerSecret !== workerSecret) {
+          ws.close(4001, "unauthorized");
+          return;
+        }
+
         workerId = msg.workerId;
 
         if (msg.status === "busy" && msg.taskId) {
@@ -569,6 +700,7 @@ export function createForemanWss(
             log(workerId, `hello busy task=#${msg.taskId} — reclaimed`);
             registry.register(workerId, ws, "busy", msg.taskId);
             taskQueue.assignTask(msg.taskId, workerId);
+            broadcastSnapshot();
             const queued = taskQueue.drainEvents(msg.taskId);
             for (const evt of queued) {
               registry.send(workerId, { type: "event_notification", taskId: msg.taskId, event: evt });
@@ -577,16 +709,21 @@ export function createForemanWss(
           } else if (!existing) {
             log(workerId, `hello busy task=#${msg.taskId} — unknown task, respecting busy status`);
             registry.register(workerId, ws, "busy", msg.taskId);
+            broadcastSnapshot();
           } else {
             // Task is assigned to a different worker — standby
             log(workerId, `hello busy task=#${msg.taskId} — task taken by another worker`);
             registry.register(workerId, ws, "idle");
-            registry.send(workerId, { type: "standby" });
+            broadcastSnapshot();
+            const standbyMsg: ForemanMessage = { type: "standby" };
+            registry.send(workerId, standbyMsg);
+            dbLogger?.logForemanMessage({ direction: "sent", workerId, taskId: null, msgType: standbyMsg.type, payload: standbyMsg as unknown as Record<string, unknown> });
             log(workerId, "→ standby");
           }
         } else {
           log(workerId, "hello idle");
           registry.register(workerId, ws, "idle");
+          broadcastSnapshot();
           tryAssignWork(workerId);
         }
       }
@@ -601,6 +738,7 @@ export function createForemanWss(
           );
         }
         registry.releaseWorker(workerId);
+        broadcastSnapshot();
         tryAssignWork(workerId);
       }
     });
@@ -609,6 +747,7 @@ export function createForemanWss(
       if (workerId) {
         log(workerId, "disconnected");
         registry.remove(workerId);
+        broadcastSnapshot();
       }
     });
   });
@@ -616,7 +755,8 @@ export function createForemanWss(
   server.on("upgrade", (req, socket, head) => {
     if (req.url === "/worker") {
       wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
-    } else {
+    } else if (req.url !== "/admin/ws") {
+      // Destroy connections to unknown paths; /admin/ws is handled by a separate upgrade listener
       socket.destroy();
     }
   });
@@ -640,8 +780,25 @@ if (isMain) {
     ? new Webhooks({ secret: config.webhookSecret })
     : null;
 
+  // DB logger
+  let dbLogger: DbLogger;
+  if (config.supabaseUrl && config.supabaseServiceRoleKey) {
+    const { createClient } = await import("@supabase/supabase-js");
+    const { createDbLogger } = await import("./db.js");
+    dbLogger = createDbLogger(createClient(config.supabaseUrl, config.supabaseServiceRoleKey));
+    flog("Supabase logging enabled");
+  } else {
+    const { createNullDbLogger } = await import("./db.js");
+    dbLogger = createNullDbLogger();
+  }
+
   let routeEvent: (id: string, name: string, payload: unknown) => void = () => {};
-  const server = createHttpServer(webhooks, (id, name, payload) => routeEvent(id, name, payload));
+  const server = createHttpServer(webhooks, (id, name, payload) => routeEvent(id, name, payload), dbLogger);
+
+  // Admin WebSocket broadcaster
+  const { createAdminWss } = await import("./admin-ws.js");
+  const adminWss = createAdminWss(server);
+
   ({ routeEventToWorker: routeEvent } = createForemanWss(
     taskQueue, registry, server,
     {
@@ -650,6 +807,9 @@ if (isMain) {
       taskLabel: config.taskLabel,
       repo: config.githubRepo,
       token: config.githubToken,
+      dbLogger,
+      adminWss,
+      workerSecret: config.workerSecret,
       labelDone: (issueNumber) =>
         labelIssueDone(issueNumber, {
           repo: config.githubRepo,
@@ -669,6 +829,7 @@ if (isMain) {
   server.listen(config.port, async () => {
     flog(`Listening on http://localhost:${config.port}/webhook`);
     flog(`WebSocket workers: ws://localhost:${config.port}/worker`);
+    flog(`Admin WebSocket: ws://localhost:${config.port}/admin/ws`);
     flog("Waiting for events...");
     try {
       await loadIssuesToQueue(taskQueue, graph, openIssues, {

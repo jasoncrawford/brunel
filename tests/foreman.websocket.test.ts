@@ -411,6 +411,51 @@ describe("dependency-aware task assignment", () => {
   });
 });
 
+describe("worker secret enforcement", () => {
+  async function makeSecretServer(secret: string): Promise<{ server: http.Server; secretWss: WebSocketServer; port: number }> {
+    const server = http.createServer();
+    const { wss: secretWss } = createForemanWss(
+      new TaskQueue(), new WorkerRegistry(), server,
+      { taskLabel: DEFAULT_TASK_LABEL, workerSecret: secret },
+    );
+    const p = await new Promise<number>((r) => server.listen(0, () => r((server.address() as AddressInfo).port)));
+    return { server, secretWss, port: p };
+  }
+
+  it("rejects worker_hello with wrong secret when workerSecret is configured", async () => {
+    const { server, secretWss, port } = await makeSecretServer("correct-secret");
+    try {
+      const ws = await connectWorker(port);
+      send(ws, { type: "worker_hello", workerId: "w1", status: "idle", workerSecret: "wrong" });
+      await new Promise<void>((resolve) => ws.once("close", resolve));
+      expect(ws.readyState).toBe(WebSocket.CLOSED);
+    } finally {
+      await new Promise<void>((r) => secretWss.close(() => server.close(r)));
+    }
+  });
+
+  it("accepts worker_hello with correct secret", async () => {
+    const { server, secretWss, port } = await makeSecretServer("correct-secret");
+    try {
+      const ws = await connectWorker(port);
+      send(ws, { type: "worker_hello", workerId: "w1", status: "idle", workerSecret: "correct-secret" });
+      const msg = await nextMsg(ws);
+      expect(msg.type).toBe("standby");
+      ws.close();
+    } finally {
+      await new Promise<void>((r) => secretWss.close(() => server.close(r)));
+    }
+  });
+
+  it("accepts any worker when workerSecret is not configured", async () => {
+    // Default setup (no workerSecret) — already tested elsewhere, just assert no regression
+    const ws = await connect();
+    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    const msg = await nextMsg(ws);
+    expect(msg.type).toBe("standby");
+  });
+});
+
 // ── Worker WebSocket connection integration tests ─────────────────────────────
 // Moved from tests/repl.worker.test.ts — guard real network behavior.
 
