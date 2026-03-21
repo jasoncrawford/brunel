@@ -212,7 +212,7 @@ Please do the above if necessary. Then summarize what you did, and anything else
     `A review was submitted on PR #${p.pull_request?.number}: state=${p.review?.state}.\n\n${p.review?.body ?? ""}\n\nPlease respond in whatever way you think is most appropriate, replying and/or making code changes.`.trim(),
 
   pull_request_review_comment: (p) =>
-    `A review comment was added on PR #${p.pull_request?.number} at \`${p.comment?.path}\`:\n\n${p.comment?.body ?? ""}\n\nPlease respond in whatever way you think is most appropriate, replying and/or making code changes.`.trim(),
+    `A review comment was added on PR #${p.pull_request?.number} at ${formatCommentLocation(p.comment?.path, p.comment?.line, p.comment?.start_line)}:\n\n${p.comment?.body ?? ""}\n\nPlease respond in whatever way you think is most appropriate, replying and/or making code changes.`.trim(),
 
   issue_comment: (p) =>
     `A comment was added on issue #${p.issue?.number}:\n\n${p.comment?.body ?? ""}`.trim(),

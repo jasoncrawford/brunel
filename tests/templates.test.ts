@@ -115,6 +115,22 @@ describe("buildEventPrompt", () => {
     expect(p).toContain("This line is wrong");
   });
 
+  it("pull_request_review_comment with line number → includes line in location", () => {
+    const events: GitHubEvent[] = [
+      {
+        id: "e1",
+        name: "pull_request_review_comment",
+        payload: {
+          action: "created",
+          pull_request: { number: 7 },
+          comment: { body: "Nit: rename this", path: "src/foo.ts", line: 55, start_line: null },
+        },
+      },
+    ];
+    const p = buildEventPrompt(events);
+    expect(p).toContain("`src/foo.ts` line 55");
+  });
+
   it("issue_comment — contains issue number and comment body", () => {
     const evt: GitHubEvent = {
       id: "e1",
