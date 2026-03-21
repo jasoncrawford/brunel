@@ -3,7 +3,7 @@ import http from "http";
 import "dotenv/config";
 import { WebSocketServer } from "ws";
 import type { WebSocket as WsSocket } from "ws";
-import type { WorkerMessage, ForemanMessage, GitHubEvent, LabeledIssueState } from "./types.js";
+import type { WorkerMessage, ForemanMessage, GitHubEvent, TaskIssue, LabeledIssueState } from "./types.js";
 import { labelIssueDone } from "./github.js";
 import { fmtTimestamp, setVerbose } from "./display.js";
 import { loadConfig } from "./config.js";
@@ -555,40 +555,19 @@ export function createForemanWss(
           ((p.repository as Record<string, unknown> | undefined)?.html_url as string | undefined) ?? "";
         const labels =
           (issue.labels as Array<{ name: string }> | undefined)?.map((l) => l.name) ?? [];
-        taskQueue.addTask({
-          taskId: String(issueNumber),
-          issueNumber,
+        const issueData: TaskIssue = {
+          number: issueNumber,
           title: String(issue.title ?? ""),
           body: String(issue.body ?? ""),
           labels,
           repoUrl,
-          depsLoaded: false,
-        });
-        // Track open state for newly-enqueued brunel:ready issues
+        };
+        labeledIssues.set(issueNumber, { issue: issueData, depsLoaded: false });
         openIssues.add(issueNumber);
-        broadcastSnapshot();
+        startDepsLoad(issueNumber, issueData.body);
+        reconcile();
         flog(`[task #${issueNumber}] enqueued via ${name}/${action}`);
-        task = taskQueue.getTaskForIssue(issueNumber)!;
-
-        // Fetch deps before assigning (graph must be current)
-        fetchBlockers(issueNumber, String(issue.body ?? ""), { repo, token })
-          .then((blockers) => {
-            setBlockers(issueNumber, blockers, graph);
-            return blockers.length > 0 ? fetchIssueStates(blockers, { repo, token }) : Promise.resolve(new Map<number, "open" | "closed">());
-          })
-          .then((states) => {
-            for (const [num, state] of states) {
-              if (state === "open") openIssues.add(num);
-            }
-            // Mark deps as loaded so this task is now eligible for assignment.
-            const t = taskQueue.get(String(issueNumber));
-            if (t) t.depsLoaded = true;
-            // Only one task was just enqueued, so assigning one idle worker is sufficient.
-            const idle = registry.getIdleWorker();
-            if (idle) tryAssignWork(idle.workerId);
-          })
-          .catch((err) => flog(`ERROR fetching deps for #${issueNumber}: ${err}`));
-        return;
+        return; // task is always pending here; nothing further to forward
       }
     }
 

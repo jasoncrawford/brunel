@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import http from "http";
 import { TaskQueue, WorkerRegistry, createForemanWss } from "../src/foreman.js";
 import type { LabeledIssueState } from "../src/types.js";
@@ -9,23 +9,24 @@ function makeIssue(n: number): LabeledIssueState["issue"] {
   return { number: n, title: `Issue ${n}`, body: "body", labels: [TASK_LABEL], repoUrl: "https://github.com/o/r" };
 }
 
+let queue: TaskQueue;
+let registry: WorkerRegistry;
+let labeledIssues: Map<number, LabeledIssueState>;
+let reconcile: () => void;
+let routeEventToWorker: (id: string, name: string, payload: unknown) => void;
+
+beforeEach(() => {
+  queue = new TaskQueue();
+  registry = new WorkerRegistry();
+  labeledIssues = new Map();
+  const server = http.createServer();
+  ({ reconcile, routeEventToWorker } = createForemanWss(queue, registry, server, {
+    taskLabel: TASK_LABEL,
+    labeledIssues,
+  }));
+});
+
 describe("reconcile()", () => {
-  let queue: TaskQueue;
-  let registry: WorkerRegistry;
-  let labeledIssues: Map<number, LabeledIssueState>;
-  let reconcile: () => void;
-
-  beforeEach(() => {
-    queue = new TaskQueue();
-    registry = new WorkerRegistry();
-    labeledIssues = new Map();
-    const server = http.createServer();
-    ({ reconcile } = createForemanWss(queue, registry, server, {
-      taskLabel: TASK_LABEL,
-      labeledIssues,
-    }));
-  });
-
   it("is exposed in the return value of createForemanWss", () => {
     expect(typeof reconcile).toBe("function");
   });
@@ -102,5 +103,40 @@ describe("reconcile()", () => {
     expect(fakeWs.send).toHaveBeenCalledWith(expect.stringContaining('"task_assigned"'));
     expect(queue.get("42")?.status).toBe("assigned");
     expect(registry.get("w1")?.status).toBe("busy");
+  });
+});
+
+describe("startDepsLoad() error handling", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("task remains pending with depsLoaded: false when dep fetch fails", async () => {
+    // Mock fetch to reject — this causes fetchNativeBlockers (called by fetchBlockers
+    // inside startDepsLoad) to reject, which propagates to the .catch handler.
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network error")));
+
+    // Trigger startDepsLoad by routing a labeled event
+    routeEventToWorker("evt-1", "issues", {
+      action: "labeled",
+      label: { name: TASK_LABEL },
+      issue: {
+        number: 42,
+        title: "Issue 42",
+        body: "body",
+        labels: [{ name: TASK_LABEL }],
+      },
+      repository: { html_url: "https://github.com/o/r" },
+    });
+
+    // Task created synchronously by reconcile() with depsLoaded: false
+    expect(queue.get("42")?.depsLoaded).toBe(false);
+
+    // Wait for the async startDepsLoad chain to fail and settle
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+
+    // After failure, depsLoaded must still be false and task still pending
+    expect(queue.get("42")?.depsLoaded).toBe(false);
+    expect(queue.get("42")?.status).toBe("pending");
   });
 });
