@@ -210,6 +210,9 @@ export const EVENT_FMT: EventTemplateFmtTable = {
 
 Please do the above if necessary. Then summarize what you did, and anything else the user should know.`;
     }
+    if (p.action === "auto_merge_enabled") {
+      return `Auto-merge was enabled on PR #${prNumber}. ${BRANCH_REVIEW_PROMPT}`;
+    }
     return "";
   },
 

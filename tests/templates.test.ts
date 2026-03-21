@@ -306,6 +306,33 @@ describe("EVENT_FMT table", () => {
   });
 });
 
+describe("pull_request/auto_merge_enabled", () => {
+  it("includes PR number and branch-review instruction", () => {
+    const evt: GitHubEvent = {
+      id: "e1",
+      name: "pull_request",
+      payload: {
+        action: "auto_merge_enabled",
+        pull_request: { number: 42 },
+      },
+    };
+    const result = EVENT_FMT.pull_request(evt.payload, evt);
+    expect(result).toContain("PR #42");
+    expect(result).toContain("Auto-merge was enabled");
+    expect(result).toContain("check if the branch is up to date");
+    expect(result).toContain("do not merge yourself");
+  });
+
+  it("returns empty string for other pull_request actions", () => {
+    const evt: GitHubEvent = {
+      id: "e1",
+      name: "pull_request",
+      payload: { action: "labeled", pull_request: { number: 1 } },
+    };
+    expect(EVENT_FMT.pull_request(evt.payload, evt)).toBe("");
+  });
+});
+
 describe("coalesceEvents", () => {
   it("multiple failing check suites → one _check_suites event with status: failed listing only failed names", () => {
     const events: GitHubEvent[] = [
