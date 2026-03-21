@@ -1,7 +1,7 @@
 import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { useAdminWs } from "./useAdminWs.ts";
-import type { AdminMessage } from "../types.ts";
+import { useAdminWs } from "../src/hooks/useAdminWs.ts";
+import type { AdminMessage } from "../src/types.ts";
 
 // Mock WebSocket
 class MockWebSocket {
