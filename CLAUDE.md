@@ -9,6 +9,7 @@ A GitHub-driven autonomous agent. Labels a GitHub issue `brunel:ready` → the f
 - **`src/config.ts`** — Unified config loader. Merges CLI flags, `BRUNEL_*` env vars, `brunel.config.ts` file, legacy env vars, and built-in defaults via zod schema.
 - **`src/display.ts`** — Shared display/rendering engine used by both foreman and worker.
 - **`src/types.ts`** — Shared types: `WorkerMessage`, `ForemanMessage`, `TaskIssue`, `GitHubEvent`.
+- **`src/admin-ws.ts`** — Admin GUI WebSocket broadcaster. Attaches a WebSocket server at `/admin/ws` and exposes `broadcastSnapshot` and `broadcastLogEvent` for pushing live state to browser clients.
 
 ## Dev workflow
 
