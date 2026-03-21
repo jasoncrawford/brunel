@@ -6,7 +6,7 @@ import type { WebSocket as WsSocket } from "ws";
 import type { WorkerMessage, ForemanMessage, GitHubEvent } from "./types.js";
 import { labelIssueDone } from "./github.js";
 import { fmtTimestamp, setVerbose } from "./display.js";
-import { loadConfig, DEFAULT_TASK_LABEL } from "./config.js";
+import { loadConfig } from "./config.js";
 import { isBlocked, setBlockers, fetchBlockers } from "./dependencies.js";
 import { fetchIssueStates } from "./github.js";
 import type { DependencyGraph } from "./dependencies.js";
@@ -306,8 +306,8 @@ export function createForemanWss(
   taskQueue: TaskQueue,
   registry: WorkerRegistry,
   server: http.Server,
-  options?: {
-    taskLabel?: string;
+  options: {
+    taskLabel: string;
     labelDone?: (issueNumber: number) => Promise<void>;
     graph?: DependencyGraph;
     openIssues?: Set<number>;
@@ -315,13 +315,13 @@ export function createForemanWss(
     token?: string;
   },
 ): { wss: WebSocketServer; routeEventToWorker: (id: string, name: string, payload: unknown) => void } {
-  const taskLabel = options?.taskLabel ?? DEFAULT_TASK_LABEL;
-  const labelDone = options?.labelDone ?? (() => Promise.resolve());
-  const graph = options?.graph ?? new Map<number, Set<number>>();
-  const openIssues = options?.openIssues ?? new Set<number>();
+  const taskLabel = options.taskLabel;
+  const labelDone = options.labelDone ?? (() => Promise.resolve());
+  const graph = options.graph ?? new Map<number, Set<number>>();
+  const openIssues = options.openIssues ?? new Set<number>();
   // repo and token default to "" for unit tests, which don't exercise GitHub-calling paths
-  const repo = options?.repo ?? "";
-  const token = options?.token ?? "";
+  const repo = options.repo ?? "";
+  const token = options.token ?? "";
 
   function log(wid: string, line: string) {
     flog(`[worker ${wid.slice(0, 8)}] ${line}`);

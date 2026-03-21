@@ -72,18 +72,6 @@ const explorer = cosmiconfig("brunel", {
 /** Config keys whose values should never be committed to source control. */
 const SECRET_KEYS = ["githubToken", "webhookSecret"] as const;
 
-/** Maps a secret config key to the recommended env var name for warnings. */
-const SECRET_ENV_VAR: Record<typeof SECRET_KEYS[number], string> = {
-  githubToken:   "BRUNEL_GITHUB_TOKEN",
-  webhookSecret: "BRUNEL_WEBHOOK_SECRET",
-};
-
-/** Maps a secret config key to the CLI flag name for warnings. */
-const SECRET_CLI_FLAG: Record<typeof SECRET_KEYS[number], string> = {
-  githubToken:   "--github-token",
-  webhookSecret: "--webhook-secret",
-};
-
 function warnIfSecretsInFile(
   config: Record<string, unknown>,
   filepath: string | undefined,
@@ -93,7 +81,7 @@ function warnIfSecretsInFile(
       const loc = filepath ? ` (${filepath})` : "";
       console.warn(
         `[brunel] Warning: "${key}" found in config file${loc}. ` +
-        `Use the ${SECRET_ENV_VAR[key]} env var instead to avoid committing secrets.`
+        `Use the BRUNEL_${camelToScreamingSnake(key)} env var instead to avoid committing secrets.`
       );
     }
   }
@@ -151,7 +139,7 @@ function parseCliFlags(argv: string[]): Record<string, unknown> {
 
   // Secret flags: parse value and warn about exposure risk
   for (const key of SECRET_KEYS) {
-    const flag = SECRET_CLI_FLAG[key];
+    const flag = `--${camelToKebab(key)}`;
     const idx = argv.indexOf(flag);
     if (idx !== -1) {
       const next = argv[idx + 1];
@@ -159,7 +147,7 @@ function parseCliFlags(argv: string[]): Record<string, unknown> {
         flags[key] = next;
         console.warn(
           `[brunel] Warning: ${flag} exposes your secret in shell history and process listings. ` +
-          `Use ${SECRET_ENV_VAR[key]} env var instead.`
+          `Use BRUNEL_${camelToScreamingSnake(key)} env var instead.`
         );
       }
     }
