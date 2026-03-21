@@ -120,7 +120,7 @@ export async function handleToolPermission(
   display.print(display.c.amber(`\n⚠ ${toolName}(${display.fmtArgs(input)})`));
   const idx = await pick(["Allow", "Deny"]);
   display.startStatus(getStatusText);
-  if (idx === 0) return { behavior: "allow" };
+  if (idx === 0) return { behavior: "allow", updatedInput: input };
   return { behavior: "deny", message: "User denied tool request" };
 }
 
@@ -151,7 +151,7 @@ export async function runQuery(prompt: string, sessionId: string | undefined, ab
     if (toolName === "AskUserQuestion") {
       return handleAskUserQuestion(input, getStatusText);
     }
-    if (ALLOW_BYPASS) return { behavior: "allow" };
+    if (ALLOW_BYPASS) return { behavior: "allow", updatedInput: input };
     return handleToolPermission(toolName, input, getStatusText);
   };
 
