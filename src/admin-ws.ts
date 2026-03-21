@@ -51,9 +51,8 @@ export function createAdminWss(server: http.Server): AdminWss {
   server.on("upgrade", (req, socket, head) => {
     if (req.url === "/admin/ws") {
       wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
-    } else {
-      socket.destroy();
     }
+    // Other paths (e.g. /worker) are handled by a different upgrade handler
   });
 
   function broadcast(msg: AdminMessage) {

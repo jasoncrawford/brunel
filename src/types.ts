@@ -16,7 +16,7 @@ export interface TaskIssue {
 
 // Worker → Foreman messages
 export type WorkerMessage =
-  | { type: "worker_hello"; workerId: string; taskId?: string; status: "idle" | "busy" }
+  | { type: "worker_hello"; workerId: string; taskId?: string; status: "idle" | "busy"; workerSecret?: string }
   | { type: "task_complete"; workerId: string; taskId: string };
 
 // Foreman → Worker messages

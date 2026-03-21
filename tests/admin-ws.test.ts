@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import http from "http";
+import net from "net";
 import { WebSocket } from "ws";
 import type { AddressInfo } from "net";
 import { createAdminWss } from "../src/admin-ws.js";
@@ -80,9 +81,22 @@ describe("createAdminWss", () => {
 
   it("ignores requests to /worker path (does not hijack worker upgrade)", async () => {
     const { server, port } = await startServer();
-    servers.push(server);
+    // Capture the raw upgrade socket so we can destroy it after the test.
+    // Admin-ws does not handle /worker, so the socket is left open — we must
+    // close it ourselves to allow server.close() to complete promptly.
+    const upgradeSockets: net.Socket[] = [];
+    server.once("upgrade", (_req, socket) => { upgradeSockets.push(socket); });
+
     const ws = new WebSocket(`ws://localhost:${port}/worker`);
-    await new Promise<void>((resolve) => ws.once("error", () => resolve()));
+    // Wait briefly — no upgrade response is sent, so the connection is never opened.
+    await Promise.race([
+      new Promise<void>((r) => ws.once("error", r)),
+      new Promise<void>((r) => setTimeout(r, 50)),
+    ]);
     expect(ws.readyState).not.toBe(WebSocket.OPEN);
+
+    // Destroy captured upgrade sockets so server.close() can complete.
+    for (const s of upgradeSockets) s.destroy();
+    await new Promise<void>((r) => server.close(() => r()));
   });
 });
