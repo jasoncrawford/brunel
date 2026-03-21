@@ -53,8 +53,8 @@ export interface DbLogger {
 // ── Real implementation ────────────────────────────────────────────────────────
 
 export function createDbLogger(supabase: SupabaseClient): DbLogger {
-  function fire(promise: Promise<{ error: unknown }>) {
-    promise.then(({ error }) => {
+  function fire(promise: PromiseLike<{ error: unknown }>) {
+    Promise.resolve(promise).then(({ error }) => {
       if (error) console.error("[db] insert error:", error);
     }).catch((err: unknown) => console.error("[db] unexpected error:", err));
   }
