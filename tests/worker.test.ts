@@ -722,7 +722,7 @@ describe("event-type-specific debounce timers", () => {
 // ── prIsClosed guard ──────────────────────────────────────────────────────────
 
 describe("prIsClosed guard", () => {
-  it("drops non-PR events silently when PR is closed", async () => {
+  it("drops check_suite events silently when PR is closed", async () => {
     vi.useFakeTimers();
     try {
       const issue = makeIssue();
@@ -767,6 +767,30 @@ describe("prIsClosed guard", () => {
       // check_suite event should now work normally (not dropped)
       const csEvt: GitHubEvent = { id: "e2", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success" } } };
       sendMsg(fakeWs, { type: "event_notification", taskId: "99", event: csEvt });
+      await vi.runAllTimersAsync();
+      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still processes issue_comment/created after PR is closed", async () => {
+    vi.useFakeTimers();
+    try {
+      const issue = makeIssue();
+      sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+
+      // Close the PR — should trigger cleanup query
+      const closedEvt: GitHubEvent = { id: "e1", name: "pull_request", payload: { action: "closed", pull_request: { number: 1 } } };
+      sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: closedEvt });
+      await vi.runAllTimersAsync();
+      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledTimes(2));
+      runQuery.mockClear();
+
+      // issue_comment/created should NOT be dropped — still actionable after PR closed
+      const commentEvt: GitHubEvent = { id: "e2", name: "issue_comment", payload: { action: "created" } };
+      sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: commentEvt });
       await vi.runAllTimersAsync();
       await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
     } finally {
