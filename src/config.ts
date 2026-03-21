@@ -8,6 +8,11 @@ export const VALID_PERMISSION_MODES = [
   "default", "acceptEdits", "bypassPermissions", "plan", "dontAsk",
 ] as const satisfies readonly PermissionMode[];
 
+// ── Schema defaults (exported so other modules don't duplicate these values) ──
+
+export const DEFAULT_TASK_LABEL = "brunel:ready";
+export const DEFAULT_DONE_LABEL = "brunel:done";
+
 // ── Schema ────────────────────────────────────────────────────────────────────
 
 const boolPreprocess = (v: unknown) => {
@@ -18,14 +23,31 @@ const boolPreprocess = (v: unknown) => {
 };
 
 const BrunelConfigSchema = z.object({
+  // ── Shared (foreman + worker) ───────────────────────────────────────────────
+
+  /** GitHub repo in "owner/repo" format. Required. */
   githubRepo:     z.string().min(1),
+  /** GitHub personal access token with `repo` scope. Required. Prefer env var over config file. */
   githubToken:    z.string().min(1),
-  taskLabel:      z.string().default("brunel:ready"),
-  doneLabel:      z.string().default("brunel:done"),
+  /** Issue label that triggers work (foreman picks up issues with this label). */
+  taskLabel:      z.string().default(DEFAULT_TASK_LABEL),
+  /** Issue label applied to issues when work is complete. */
+  doneLabel:      z.string().default(DEFAULT_DONE_LABEL),
+  /** Enable verbose output (shows full Claude message stream). */
   verbose:        z.preprocess(boolPreprocess, z.boolean()).default(false),
+
+  // ── Foreman-only ───────────────────────────────────────────────────────────
+
+  /** Port the foreman HTTP/WebSocket server listens on. */
   port:           z.coerce.number().int().positive().default(3000),
+  /** GitHub webhook secret for signature verification. Optional; skip for local dev. */
   webhookSecret:  z.string().optional(),
+
+  // ── Worker-only ────────────────────────────────────────────────────────────
+
+  /** WebSocket URL that workers connect to. */
   foremanUrl:     z.string().default("ws://localhost:3000"),
+  /** Claude permission mode for worker sessions. */
   permissionMode: z.enum(VALID_PERMISSION_MODES).default("default"),
 });
 
@@ -47,20 +69,44 @@ const explorer = cosmiconfig("brunel", {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+/** Config keys whose values should never be committed to source control. */
+const SECRET_KEYS = ["githubToken", "webhookSecret"] as const;
+
+/** Maps a secret config key to the recommended env var name for warnings. */
+const SECRET_ENV_VAR: Record<typeof SECRET_KEYS[number], string> = {
+  githubToken:   "BRUNEL_GITHUB_TOKEN",
+  webhookSecret: "BRUNEL_WEBHOOK_SECRET",
+};
+
+/** Maps a secret config key to the CLI flag name for warnings. */
+const SECRET_CLI_FLAG: Record<typeof SECRET_KEYS[number], string> = {
+  githubToken:   "--github-token",
+  webhookSecret: "--webhook-secret",
+};
+
 function warnIfSecretsInFile(
   config: Record<string, unknown>,
   filepath: string | undefined,
 ): void {
-  const secretKeys = ["githubToken", "webhookSecret"] as const;
-  for (const key of secretKeys) {
+  for (const key of SECRET_KEYS) {
     if (config[key] !== undefined && config[key] !== "") {
       const loc = filepath ? ` (${filepath})` : "";
       console.warn(
         `[brunel] Warning: "${key}" found in config file${loc}. ` +
-        `Use the BRUNEL_${key === "githubToken" ? "GITHUB_TOKEN" : "WEBHOOK_SECRET"} env var instead to avoid committing secrets.`
+        `Use the ${SECRET_ENV_VAR[key]} env var instead to avoid committing secrets.`
       );
     }
   }
+}
+
+/** Converts a camelCase key to SCREAMING_SNAKE_CASE (e.g. "githubRepo" → "GITHUB_REPO"). */
+function camelToScreamingSnake(key: string): string {
+  return key.replace(/([A-Z])/g, "_$1").toUpperCase();
+}
+
+/** Converts a camelCase key to kebab-case (e.g. "githubRepo" → "github-repo"). */
+function camelToKebab(key: string): string {
+  return key.replace(/([A-Z])/g, "-$1").toLowerCase();
 }
 
 function parseCliFlags(argv: string[]): Record<string, unknown> {
@@ -103,30 +149,28 @@ function parseCliFlags(argv: string[]): Record<string, unknown> {
 
   if (argv.includes("--verbose")) flags.verbose = true;
 
-  // --github-token: warn about exposure
-  const tokenIdx = argv.indexOf("--github-token");
-  if (tokenIdx !== -1) {
-    const next = argv[tokenIdx + 1];
-    if (next && !next.startsWith("--")) {
-      flags.githubToken = next;
-      console.warn(
-        "[brunel] Warning: --github-token exposes your token in shell history and process listings. " +
-        "Use BRUNEL_GITHUB_TOKEN env var instead."
-      );
+  // Secret flags: parse value and warn about exposure risk
+  for (const key of SECRET_KEYS) {
+    const flag = SECRET_CLI_FLAG[key];
+    const idx = argv.indexOf(flag);
+    if (idx !== -1) {
+      const next = argv[idx + 1];
+      if (next && !next.startsWith("--")) {
+        flags[key] = next;
+        console.warn(
+          `[brunel] Warning: ${flag} exposes your secret in shell history and process listings. ` +
+          `Use ${SECRET_ENV_VAR[key]} env var instead.`
+        );
+      }
     }
   }
 
-  // Simple key-value flags
-  const flagMap: Array<[string, string]> = [
-    ["--github-repo",    "githubRepo"],
-    ["--task-label",     "taskLabel"],
-    ["--done-label",     "doneLabel"],
-    ["--port",           "port"],
-    ["--webhook-secret", "webhookSecret"],
-    ["--foreman-url",    "foremanUrl"],
-  ];
-
-  for (const [flag, key] of flagMap) {
+  // Simple key-value flags: derived from schema keys via camelToKebab.
+  // Keys handled separately above (permissionMode, verbose, and secret keys) are excluded.
+  const SPECIAL_KEYS = new Set<string>(["permissionMode", "verbose", ...SECRET_KEYS]);
+  for (const key of Object.keys(BrunelConfigSchema.shape)) {
+    if (SPECIAL_KEYS.has(key)) continue;
+    const flag = `--${camelToKebab(key)}`;
     const idx = argv.indexOf(flag);
     if (idx !== -1) {
       const next = argv[idx + 1];
@@ -141,24 +185,17 @@ function parseCliFlags(argv: string[]): Record<string, unknown> {
 
 function readBrunelEnvVars(env: NodeJS.ProcessEnv): Record<string, unknown> {
   const result: Record<string, unknown> = {};
-  const map: Array<[string, string]> = [
-    ["BRUNEL_GITHUB_REPO",      "githubRepo"],
-    ["BRUNEL_GITHUB_TOKEN",     "githubToken"],
-    ["BRUNEL_TASK_LABEL",       "taskLabel"],
-    ["BRUNEL_DONE_LABEL",       "doneLabel"],
-    ["BRUNEL_VERBOSE",          "verbose"],
-    ["BRUNEL_PORT",             "port"],
-    ["BRUNEL_WEBHOOK_SECRET",   "webhookSecret"],
-    ["BRUNEL_FOREMAN_URL",      "foremanUrl"],
-    ["BRUNEL_PERMISSION_MODE",  "permissionMode"],
-  ];
-  for (const [envKey, configKey] of map) {
-    if (env[envKey] !== undefined) result[configKey] = env[envKey];
+  for (const key of Object.keys(BrunelConfigSchema.shape)) {
+    const envKey = `BRUNEL_${camelToScreamingSnake(key)}`;
+    if (env[envKey] !== undefined) result[key] = env[envKey];
   }
   return result;
 }
 
 function readFallbackEnvVars(env: NodeJS.ProcessEnv): Record<string, unknown> {
+  // Legacy env var names supported for backward compatibility.
+  // These are intentionally hardcoded — they don't follow the BRUNEL_* pattern
+  // and the set is fixed (we won't add new legacy names as the system evolves).
   const result: Record<string, unknown> = {};
   if (env.GITHUB_REPO)     result.githubRepo    = env.GITHUB_REPO;
   if (env.GITHUB_TOKEN)    result.githubToken   = env.GITHUB_TOKEN;

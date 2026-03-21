@@ -207,7 +207,7 @@ async function main(
 
   display.print(display.c.sageGreen(display.hr("═")));
   display.print(display.c.skyBlue(display.s.bold("  Claude Agent SDK REPL")));
-  display.print(display.c.lavender(`  Permissions: ${permConfig.permissionMode} | Output: ${display.VERBOSE ? "verbose" : "quiet"} | Log: ${LOG_FILE}`));
+  display.print(display.c.lavender(`  Permissions: ${permConfig.permissionMode} | Output: ${display.verbose ? "verbose" : "quiet"} | Log: ${LOG_FILE}`));
   display.print(display.c.lavender(`  Type /exit to quit, /clear to start a new session.`));
   display.print(display.c.sageGreen(display.hr("═")));
 
