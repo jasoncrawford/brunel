@@ -829,6 +829,7 @@ if (isMain) {
   const taskQueue = new TaskQueue();
   const graph: DependencyGraph = new Map();
   const openIssues = new Set<number>();
+  const labeledIssues = new Map<number, LabeledIssueState>();
   const webhooks = config.webhookSecret
     ? new Webhooks({ secret: config.webhookSecret })
     : null;
@@ -846,17 +847,19 @@ if (isMain) {
   }
 
   let routeEvent: (id: string, name: string, payload: unknown) => void = () => {};
+  let reconcile: () => void = () => {};
   const server = createHttpServer(webhooks, (id, name, payload) => routeEvent(id, name, payload), dbLogger);
 
   // Admin WebSocket broadcaster
   const { createAdminWss } = await import("./admin-ws.js");
   const adminWss = createAdminWss(server);
 
-  ({ routeEventToWorker: routeEvent } = createForemanWss(
+  ({ routeEventToWorker: routeEvent, reconcile } = createForemanWss(
     taskQueue, registry, server,
     {
       graph,
       openIssues,
+      labeledIssues,
       taskLabel: config.taskLabel,
       repo: config.githubRepo,
       token: config.githubToken,
@@ -885,11 +888,12 @@ if (isMain) {
     flog(`Admin WebSocket: ws://localhost:${config.port}/admin/ws`);
     flog("Waiting for events...");
     try {
-      await loadIssuesToQueue(taskQueue, graph, openIssues, {
+      await loadIssuesToQueue(labeledIssues, graph, openIssues, {
         repo: config.githubRepo,
         token: config.githubToken,
         taskLabel: config.taskLabel,
       });
+      reconcile();
     } catch (err) {
       flog(`WARNING Failed to load issues from GitHub: ${err}`);
     }

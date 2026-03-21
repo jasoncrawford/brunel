@@ -1,4 +1,4 @@
-import type { TaskQueue } from "./foreman.js";
+import type { LabeledIssueState, TaskIssue } from "./types.js";
 import { fetchBlockers, setBlockers } from "./dependencies.js";
 import type { DependencyGraph } from "./dependencies.js";
 
@@ -15,7 +15,7 @@ function ghHeaders(token: string) {
 // ── Exported functions ────────────────────────────────────────────────────────
 
 export async function loadIssuesToQueue(
-  queue: TaskQueue,
+  labeledIssues: Map<number, LabeledIssueState>,
   graph: DependencyGraph,
   openIssues: Set<number>,
   opts: { repo: string; token: string; taskLabel: string },
@@ -33,15 +33,14 @@ export async function loadIssuesToQueue(
   const loadedIssueNumbers: number[] = [];
 
   for (const issue of issues) {
-    queue.addTask({
-      taskId: String(issue.number),
-      issueNumber: issue.number,
+    const issueData: TaskIssue = {
+      number: issue.number,
       title: issue.title,
       body: issue.body ?? "",
       labels: issue.labels.map((l) => l.name),
       repoUrl: `https://github.com/${owner}/${repoName}`,
-      depsLoaded: false,
-    });
+    };
+    labeledIssues.set(issue.number, { issue: issueData, depsLoaded: false });
     openIssues.add(issue.number);
     const blockers = await fetchBlockers(issue.number, issue.body ?? "", { repo, token });
     setBlockers(issue.number, blockers, graph);
@@ -56,7 +55,11 @@ export async function loadIssuesToQueue(
     }
   }
 
-  queue.markDepsLoaded(loadedIssueNumbers);
+  // Mark all loaded entries as having their deps resolved
+  for (const num of loadedIssueNumbers) {
+    const entry = labeledIssues.get(num);
+    if (entry) entry.depsLoaded = true;
+  }
 }
 
 export async function labelIssueDone(
