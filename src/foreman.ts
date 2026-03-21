@@ -787,6 +787,26 @@ export function createForemanWss(
     }
   });
 
+  function startDepsLoad(issueNumber: number, body: string): void {
+    fetchBlockers(issueNumber, body, { repo, token })
+      .then((blockers) => {
+        setBlockers(issueNumber, blockers, graph);
+        return blockers.length > 0
+          ? fetchIssueStates(blockers, { repo, token })
+          : Promise.resolve(new Map<number, "open" | "closed">());
+      })
+      .then((states) => {
+        for (const [num, state] of states) {
+          if (state === "open") openIssues.add(num);
+          else openIssues.delete(num);
+        }
+        const entry = labeledIssues.get(issueNumber);
+        if (entry) entry.depsLoaded = true;
+        reconcile();
+      })
+      .catch((err) => flog(`ERROR fetching deps for #${issueNumber}: ${err}`));
+  }
+
   function reconcile() {
     // Step 1: materialise tasks for new labeledIssues entries
     for (const [num, { issue, depsLoaded }] of labeledIssues) {
