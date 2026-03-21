@@ -49,10 +49,14 @@ export function isBlocked(
  * Fetch all blockers for an issue from both body text and GitHub native relationships.
  * Results are merged and deduplicated.
  */
-export async function fetchBlockers(issueNumber: number, body: string): Promise<number[]> {
+export async function fetchBlockers(
+  issueNumber: number,
+  body: string,
+  opts: { repo: string; token: string },
+): Promise<number[]> {
   const [bodyBlockers, nativeBlockers] = await Promise.all([
     Promise.resolve(parseBodyBlockers(body)),
-    fetchNativeBlockers(issueNumber),
+    fetchNativeBlockers(issueNumber, opts),
   ]);
   return Array.from(new Set([...bodyBlockers, ...nativeBlockers]));
 }

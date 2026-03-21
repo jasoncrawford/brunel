@@ -83,16 +83,14 @@ describe("isBlocked", () => {
 });
 
 describe("fetchBlockers", () => {
+  const OPTS = { repo: "owner/repo", token: "token123" };
+
   beforeEach(() => {
     vi.stubGlobal("fetch", vi.fn());
-    process.env.GITHUB_REPO = "owner/repo";
-    process.env.GITHUB_TOKEN = "token123";
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
-    delete process.env.GITHUB_REPO;
-    delete process.env.GITHUB_TOKEN;
   });
 
   it("returns body-parsed blockers when native returns empty", async () => {
@@ -100,7 +98,7 @@ describe("fetchBlockers", () => {
       ok: true,
       json: async () => ({ data: { repository: { issue: { blockedBy: { nodes: [] } } } } }),
     } as any);
-    const blockers = await fetchBlockers(42, "Depends on #5\nBlocked by #6");
+    const blockers = await fetchBlockers(42, "Depends on #5\nBlocked by #6", OPTS);
     expect(blockers).toEqual(expect.arrayContaining([5, 6]));
     expect(blockers).toHaveLength(2);
   });
@@ -112,7 +110,7 @@ describe("fetchBlockers", () => {
         data: { repository: { issue: { blockedBy: { nodes: [{ number: 5 }, { number: 9 }] } } } },
       }),
     } as any);
-    const blockers = await fetchBlockers(42, "Depends on #5"); // #5 in both
+    const blockers = await fetchBlockers(42, "Depends on #5", OPTS);
     expect(new Set(blockers)).toEqual(new Set([5, 9]));
   });
 
@@ -121,6 +119,6 @@ describe("fetchBlockers", () => {
       ok: true,
       json: async () => ({ data: { repository: { issue: { blockedBy: { nodes: [] } } } } }),
     } as any);
-    expect(await fetchBlockers(42, "No dependencies here")).toEqual([]);
+    expect(await fetchBlockers(42, "No dependencies here", OPTS)).toEqual([]);
   });
 });
