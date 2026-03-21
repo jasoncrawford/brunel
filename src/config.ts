@@ -49,6 +49,15 @@ const BrunelConfigSchema = z.object({
   foremanUrl:     z.string().default("ws://localhost:3000"),
   /** Claude permission mode for worker sessions. */
   permissionMode: z.enum(VALID_PERMISSION_MODES).default("default"),
+
+  // ── Cloud deployment ───────────────────────────────────────────────────────
+
+  /** Supabase project URL. Optional; required for cloud deployment. */
+  supabaseUrl:            z.string().optional(),
+  /** Supabase service role key. Optional; required for cloud deployment. Prefer env var over config file. */
+  supabaseServiceRoleKey: z.string().optional(),
+  /** Shared secret used to authenticate workers connecting to the foreman. Optional. Prefer env var over config file. */
+  workerSecret:           z.string().optional(),
 });
 
 export type BrunelConfig = z.infer<typeof BrunelConfigSchema> & {
@@ -70,7 +79,7 @@ const explorer = cosmiconfig("brunel", {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /** Config keys whose values should never be committed to source control. */
-const SECRET_KEYS = ["githubToken", "webhookSecret"] as const;
+const SECRET_KEYS = ["githubToken", "webhookSecret", "supabaseServiceRoleKey", "workerSecret"] as const;
 
 function warnIfSecretsInFile(
   config: Record<string, unknown>,

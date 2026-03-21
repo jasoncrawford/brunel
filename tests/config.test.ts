@@ -18,6 +18,7 @@ const ENV_KEYS = [
   "BRUNEL_TASK_LABEL", "BRUNEL_DONE_LABEL",
   "BRUNEL_VERBOSE", "BRUNEL_PORT", "BRUNEL_WEBHOOK_SECRET",
   "BRUNEL_FOREMAN_URL", "BRUNEL_PERMISSION_MODE",
+  "BRUNEL_SUPABASE_URL", "BRUNEL_SUPABASE_SERVICE_ROLE_KEY", "BRUNEL_WORKER_SECRET",
 ];
 
 beforeEach(() => {
@@ -346,5 +347,110 @@ describe("permission mode", () => {
     process.env.BRUNEL_PERMISSION_MODE = "badvalue";
     await loadConfig(["node", "repl.js"]);
     expect(exitSpy).toHaveBeenCalledWith(1);
+  });
+});
+
+// ── New optional fields: supabaseUrl, supabaseServiceRoleKey, workerSecret ────
+
+describe("supabaseUrl", () => {
+  it("is undefined by default", async () => {
+    baseEnv();
+    const cfg = await loadConfig(["node", "repl.js"]);
+    expect(cfg.supabaseUrl).toBeUndefined();
+  });
+
+  it("BRUNEL_SUPABASE_URL sets supabaseUrl", async () => {
+    baseEnv();
+    process.env.BRUNEL_SUPABASE_URL = "https://abc.supabase.co";
+    const cfg = await loadConfig(["node", "repl.js"]);
+    expect(cfg.supabaseUrl).toBe("https://abc.supabase.co");
+  });
+
+  it("--supabase-url CLI flag sets supabaseUrl", async () => {
+    baseEnv();
+    const cfg = await loadConfig(["node", "repl.js", "--supabase-url", "https://cli.supabase.co"]);
+    expect(cfg.supabaseUrl).toBe("https://cli.supabase.co");
+  });
+
+  it("CLI flag beats BRUNEL_SUPABASE_URL", async () => {
+    baseEnv();
+    process.env.BRUNEL_SUPABASE_URL = "https://env.supabase.co";
+    const cfg = await loadConfig(["node", "repl.js", "--supabase-url", "https://cli.supabase.co"]);
+    expect(cfg.supabaseUrl).toBe("https://cli.supabase.co");
+  });
+
+  it("BRUNEL_SUPABASE_URL beats file config", async () => {
+    baseEnv();
+    process.env.BRUNEL_SUPABASE_URL = "https://env.supabase.co";
+    const cfg = await loadConfig(["node", "repl.js"], { supabaseUrl: "https://file.supabase.co" });
+    expect(cfg.supabaseUrl).toBe("https://env.supabase.co");
+  });
+});
+
+describe("supabaseServiceRoleKey", () => {
+  it("is undefined by default", async () => {
+    baseEnv();
+    const cfg = await loadConfig(["node", "repl.js"]);
+    expect(cfg.supabaseServiceRoleKey).toBeUndefined();
+  });
+
+  it("BRUNEL_SUPABASE_SERVICE_ROLE_KEY sets supabaseServiceRoleKey", async () => {
+    baseEnv();
+    process.env.BRUNEL_SUPABASE_SERVICE_ROLE_KEY = "service-role-key";
+    const cfg = await loadConfig(["node", "repl.js"]);
+    expect(cfg.supabaseServiceRoleKey).toBe("service-role-key");
+  });
+
+  it("--supabase-service-role-key CLI flag sets supabaseServiceRoleKey", async () => {
+    baseEnv();
+    const cfg = await loadConfig(["node", "repl.js", "--supabase-service-role-key", "cli-key"]);
+    expect(cfg.supabaseServiceRoleKey).toBe("cli-key");
+  });
+
+  it("warns when supabaseServiceRoleKey in file config", async () => {
+    baseEnv();
+    await loadConfig(["node", "repl.js"], { supabaseServiceRoleKey: "file-key" });
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("supabaseServiceRoleKey"));
+  });
+
+  it("does NOT warn when supabaseServiceRoleKey from env var", async () => {
+    baseEnv();
+    process.env.BRUNEL_SUPABASE_SERVICE_ROLE_KEY = "env-key";
+    await loadConfig(["node", "repl.js"]);
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("workerSecret", () => {
+  it("is undefined by default", async () => {
+    baseEnv();
+    const cfg = await loadConfig(["node", "repl.js"]);
+    expect(cfg.workerSecret).toBeUndefined();
+  });
+
+  it("BRUNEL_WORKER_SECRET sets workerSecret", async () => {
+    baseEnv();
+    process.env.BRUNEL_WORKER_SECRET = "my-worker-secret";
+    const cfg = await loadConfig(["node", "repl.js"]);
+    expect(cfg.workerSecret).toBe("my-worker-secret");
+  });
+
+  it("--worker-secret CLI flag sets workerSecret", async () => {
+    baseEnv();
+    const cfg = await loadConfig(["node", "repl.js", "--worker-secret", "cli-secret"]);
+    expect(cfg.workerSecret).toBe("cli-secret");
+  });
+
+  it("warns when workerSecret in file config", async () => {
+    baseEnv();
+    await loadConfig(["node", "repl.js"], { workerSecret: "file-secret" });
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("workerSecret"));
+  });
+
+  it("does NOT warn when workerSecret from env var", async () => {
+    baseEnv();
+    process.env.BRUNEL_WORKER_SECRET = "env-secret";
+    await loadConfig(["node", "repl.js"]);
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 });
