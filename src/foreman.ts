@@ -798,6 +798,16 @@ export function createForemanWss(
         });
       }
     }
+
+    // Step 2: sync depsLoaded from labeledIssues to existing tasks
+    for (const [num, { depsLoaded }] of labeledIssues) {
+      if (depsLoaded) {
+        const t = taskQueue.getTaskForIssue(num);
+        if (t && !t.depsLoaded) {
+          taskQueue.markDepsLoaded([num]);
+        }
+      }
+    }
   }
 
   return { wss, routeEventToWorker: routeEvent, reconcile };

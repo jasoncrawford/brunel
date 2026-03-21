@@ -53,4 +53,18 @@ describe("reconcile()", () => {
     // Title must not be overwritten by reconcile
     expect(queue.get("42")?.title).toBe("Existing");
   });
+
+  it("syncs depsLoaded from labeledIssues to an existing task that has depsLoaded: false", () => {
+    queue.addTask({ taskId: "5", issueNumber: 5, title: "T", body: "b", labels: [], repoUrl: "", depsLoaded: false });
+    labeledIssues.set(5, { issue: makeIssue(5), depsLoaded: true });
+    reconcile();
+    expect(queue.get("5")?.depsLoaded).toBe(true);
+  });
+
+  it("does not change depsLoaded on an existing task when labeledIssues also says false", () => {
+    queue.addTask({ taskId: "5", issueNumber: 5, title: "T", body: "b", labels: [], repoUrl: "", depsLoaded: false });
+    labeledIssues.set(5, { issue: makeIssue(5), depsLoaded: false });
+    reconcile();
+    expect(queue.get("5")?.depsLoaded).toBe(false);
+  });
 });
