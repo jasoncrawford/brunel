@@ -97,7 +97,12 @@ export function coalesceEvents(events: GitHubEvent[]): GitHubEvent[] {
     const primary = reviews[0] ?? reviewComments[0];
     const comments = reviewComments.map(e => {
       const comment = e.payload.comment as Record<string, unknown> | undefined;
-      return { path: comment?.path, body: comment?.body };
+      return {
+        path: comment?.path,
+        body: comment?.body,
+        line: comment?.line,
+        startLine: comment?.start_line,
+      };
     });
     result.push({
       id: primary.id,

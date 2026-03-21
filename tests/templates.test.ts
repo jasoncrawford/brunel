@@ -356,7 +356,9 @@ describe("coalesceEvents", () => {
     expect(result[0].name).toBe("_code_review");
     expect(result[0].payload.pull_request).toEqual({ number: 5 });
     expect(result[0].payload.review).toEqual({ state: "changes_requested", body: "Please fix" });
-    expect(result[0].payload.comments).toEqual([{ path: "src/foo.ts", body: "This is wrong" }]);
+    expect(result[0].payload.comments).toEqual([
+      { path: "src/foo.ts", body: "This is wrong", line: undefined, startLine: undefined },
+    ]);
   });
 
   it("review alone → _code_review with empty comments array", () => {
@@ -367,6 +369,40 @@ describe("coalesceEvents", () => {
     expect(result).toHaveLength(1);
     expect(result[0].name).toBe("_code_review");
     expect(result[0].payload.comments).toEqual([]);
+  });
+
+  it("review comment with line number → included in coalesced comments", () => {
+    const events: GitHubEvent[] = [
+      {
+        id: "e1",
+        name: "pull_request_review_comment",
+        payload: {
+          pull_request: { number: 5 },
+          comment: { path: "src/foo.ts", body: "Rename this", line: 42, start_line: null },
+        },
+      },
+    ];
+    const result = coalesceEvents(events);
+    expect(result[0].payload.comments).toEqual([
+      { path: "src/foo.ts", body: "Rename this", line: 42, startLine: null },
+    ]);
+  });
+
+  it("review comment with line range → both line and startLine included", () => {
+    const events: GitHubEvent[] = [
+      {
+        id: "e1",
+        name: "pull_request_review_comment",
+        payload: {
+          pull_request: { number: 5 },
+          comment: { path: "src/bar.ts", body: "Extract this", line: 15, start_line: 10 },
+        },
+      },
+    ];
+    const result = coalesceEvents(events);
+    expect(result[0].payload.comments).toEqual([
+      { path: "src/bar.ts", body: "Extract this", line: 15, startLine: 10 },
+    ]);
   });
 
   it("mixed types (check suites + issue_comment) → both preserved", () => {
