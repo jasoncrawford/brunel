@@ -3,7 +3,7 @@ import http from "http";
 import "dotenv/config";
 import { WebSocketServer } from "ws";
 import type { WebSocket as WsSocket } from "ws";
-import type { WorkerMessage, ForemanMessage, GitHubEvent } from "./types.js";
+import type { WorkerMessage, ForemanMessage, GitHubEvent, LabeledIssueState } from "./types.js";
 import { labelIssueDone } from "./github.js";
 import { fmtTimestamp, setVerbose } from "./display.js";
 import { loadConfig } from "./config.js";
@@ -389,12 +389,14 @@ export function createForemanWss(
     dbLogger?: DbLogger;
     adminWss?: AdminWss;
     workerSecret?: string;
+    labeledIssues?: Map<number, LabeledIssueState>;
   },
-): { wss: WebSocketServer; routeEventToWorker: (id: string, name: string, payload: unknown) => void } {
+): { wss: WebSocketServer; routeEventToWorker: (id: string, name: string, payload: unknown) => void; reconcile: () => void } {
   const taskLabel = options.taskLabel;
   const labelDone = options.labelDone ?? (() => Promise.resolve());
   const graph = options.graph ?? new Map<number, Set<number>>();
   const openIssues = options.openIssues ?? new Set<number>();
+  const labeledIssues = options.labeledIssues ?? new Map<number, LabeledIssueState>();
   // repo and token default to "" for unit tests, which don't exercise GitHub-calling paths
   const repo = options.repo ?? "";
   const token = options.token ?? "";
@@ -781,7 +783,11 @@ export function createForemanWss(
     }
   });
 
-  return { wss, routeEventToWorker: routeEvent };
+  function reconcile() {
+    // TODO: implement
+  }
+
+  return { wss, routeEventToWorker: routeEvent, reconcile };
 }
 
 // Only start listening when run directly (not when imported by tests)
