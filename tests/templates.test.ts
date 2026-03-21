@@ -526,6 +526,48 @@ describe("EVENT_FMT — new entries", () => {
     expect(result).toContain("approved");
     expect(result).toContain("LGTM");
   });
+
+  it("_code_review inline comment with line number → includes 'line N' in output", () => {
+    const evt: GitHubEvent = {
+      id: "e1",
+      name: "_code_review",
+      payload: {
+        pull_request: { number: 5 },
+        review: { state: "changes_requested", body: "" },
+        comments: [{ path: "src/foo.ts", body: "Rename this", line: 42, startLine: null }],
+      },
+    };
+    const result = EVENT_FMT._code_review(evt.payload, evt);
+    expect(result).toContain("`src/foo.ts` line 42");
+  });
+
+  it("_code_review inline comment with line range → includes 'lines N-M' in output", () => {
+    const evt: GitHubEvent = {
+      id: "e1",
+      name: "_code_review",
+      payload: {
+        pull_request: { number: 5 },
+        review: { state: "changes_requested", body: "" },
+        comments: [{ path: "src/bar.ts", body: "Extract this", line: 15, startLine: 10 }],
+      },
+    };
+    const result = EVENT_FMT._code_review(evt.payload, evt);
+    expect(result).toContain("`src/bar.ts` lines 10-15");
+  });
+
+  it("_code_review inline comment with no line → just shows path (file-level)", () => {
+    const evt: GitHubEvent = {
+      id: "e1",
+      name: "_code_review",
+      payload: {
+        pull_request: { number: 5 },
+        review: { state: "changes_requested", body: "" },
+        comments: [{ path: "src/baz.ts", body: "General comment", line: null, startLine: null }],
+      },
+    };
+    const result = EVENT_FMT._code_review(evt.payload, evt);
+    expect(result).toContain("`src/baz.ts`: General comment");
+  });
 });
 
 describe("formatCommentLocation", () => {

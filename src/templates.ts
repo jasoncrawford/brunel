@@ -170,7 +170,7 @@ export const EVENT_FMT: EventTemplateFmtTable = {
   _code_review: (p) => {
     const pr = p.pull_request as Record<string, unknown> | undefined;
     const review = p.review as Record<string, unknown> | undefined;
-    const comments = p.comments as Array<{ path: unknown; body: unknown }> | undefined;
+    const comments = p.comments as Array<{ path: unknown; body: unknown; line?: unknown; startLine?: unknown }> | undefined;
     const lines: string[] = [
       `A review was submitted on PR #${pr?.number}: state=${review?.state}.`,
     ];
@@ -180,7 +180,7 @@ export const EVENT_FMT: EventTemplateFmtTable = {
     if (comments && comments.length > 0) {
       lines.push("\nInline comments:");
       for (const c of comments) {
-        lines.push(`\n- \`${c.path}\`: ${c.body}`);
+        lines.push(`\n- ${formatCommentLocation(c.path, c.line, c.startLine)}: ${c.body}`);
       }
     }
     lines.push("\n\nPlease respond in whatever way you think is most appropriate, replying and/or making code changes.");
