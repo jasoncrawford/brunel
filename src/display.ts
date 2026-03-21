@@ -7,8 +7,8 @@ export const hr = (ch = "─") => ch.repeat(W);
 
 // ── Verbose flag ──────────────────────────────────────────────────────────────
 
-export let VERBOSE = process.argv.includes("--verbose");
-export function setVerbose(v: boolean) { VERBOSE = v; }
+export let verbose = false;
+export function setVerbose(v: boolean) { verbose = v; }
 
 // ── Colors ────────────────────────────────────────────────────────────────────
 
@@ -491,7 +491,7 @@ export function resolve(table: FmtTable, key: string, data: unknown): string | n
   const entry = table[key] ?? table._default;
   if (!entry) return null;
   if (typeof entry === "function") return entry(data);
-  const fmt = VERBOSE ? entry.verbose : entry.quiet;
+  const fmt = verbose ? entry.verbose : entry.quiet;
   return fmt ? fmt(data) : null;
 }
 

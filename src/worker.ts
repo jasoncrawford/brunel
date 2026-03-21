@@ -291,8 +291,11 @@ export class WorkerSession {
 
 // ── workerMain ────────────────────────────────────────────────────────────────
 
-export async function workerMain(runQueryFn: RunQuery): Promise<void> {
-  const FOREMAN_URL = process.env.FOREMAN_URL ?? "ws://localhost:3000";
+export async function workerMain(
+  runQueryFn: RunQuery,
+  config: { foremanUrl: string },
+): Promise<void> {
+  const FOREMAN_URL = config.foremanUrl;
   const workerId = crypto.randomUUID();
 
   const wsFactory: WsFactory = (wid, taskId) => {

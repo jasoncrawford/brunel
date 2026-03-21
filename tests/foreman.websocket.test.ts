@@ -4,6 +4,7 @@ import http from "http";
 import { WebSocket, WebSocketServer } from "ws";
 import type { AddressInfo } from "net";
 import { TaskQueue, WorkerRegistry, createForemanWss } from "../src/foreman.js";
+import { DEFAULT_TASK_LABEL } from "../src/config.js";
 import type { ForemanMessage } from "../src/types.js";
 import { setBlockers } from "../src/dependencies.js";
 import type { DependencyGraph } from "../src/dependencies.js";
@@ -72,7 +73,7 @@ beforeEach(() => {
   graph = new Map();
   openIssues = new Set();
   httpServer = http.createServer();
-  ({ wss, routeEventToWorker: routeEvent } = createForemanWss(queue, registry, httpServer, { labelDone, graph, openIssues }));
+  ({ wss, routeEventToWorker: routeEvent } = createForemanWss(queue, registry, httpServer, { taskLabel: DEFAULT_TASK_LABEL, labelDone, graph, openIssues }));
 
   return new Promise<void>((resolve) => {
     httpServer.listen(0, () => {
@@ -428,7 +429,7 @@ function makeConnectToForeman(port: number) {
 describe("worker WebSocket connection", () => {
   it("worker client connects to foreman and completes handshake", async () => {
     const server = http.createServer();
-    const { wss } = createForemanWss(new TaskQueue(), new WorkerRegistry(), server);
+    const { wss } = createForemanWss(new TaskQueue(), new WorkerRegistry(), server, { taskLabel: DEFAULT_TASK_LABEL });
     const testPort = await new Promise<number>((resolve) => {
       server.listen(0, () => resolve((server.address() as AddressInfo).port));
     });
@@ -448,7 +449,7 @@ describe("worker WebSocket connection", () => {
 
   it("foreman rejects connections not at /worker path (regression guard)", async () => {
     const server = http.createServer();
-    const { wss } = createForemanWss(new TaskQueue(), new WorkerRegistry(), server);
+    const { wss } = createForemanWss(new TaskQueue(), new WorkerRegistry(), server, { taskLabel: DEFAULT_TASK_LABEL });
     const testPort = await new Promise<number>((resolve) => {
       server.listen(0, () => resolve((server.address() as AddressInfo).port));
     });
