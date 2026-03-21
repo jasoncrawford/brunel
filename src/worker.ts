@@ -34,6 +34,25 @@ export function classifyEvent(event: GitHubEvent): "actionable" | "log_only" {
   }
 }
 
+// ── Debounce duration ──────────────────────────────────────────────────────────
+
+export function debounceMs(events: GitHubEvent[]): number {
+  if (events.some(e => e.name === "pull_request" && e.payload["action"] === "closed")) {
+    return 0;
+  }
+  if (events.some(e => {
+    if (e.name !== "check_suite") return false;
+    const conclusion = (e.payload.check_suite as Record<string, unknown> | undefined)?.conclusion as string | undefined;
+    return conclusion === "failure" || conclusion === "action_required";
+  })) {
+    return 3000;
+  }
+  if (events.length > 0 && events.every(e => e.name === "check_suite")) {
+    return 30000;
+  }
+  return 3000;
+}
+
 // ── WorkerSession ─────────────────────────────────────────────────────────────
 
 export type WsFactory = (workerId: string, taskId?: string) => WebSocket;
@@ -56,7 +75,7 @@ export class WorkerSession {
   private resolveWsInput: ((v: string) => void) | null = null;
   private isRunningQuery = false;
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
-  private readonly DEBOUNCE_MS = 3000;
+  private prIsClosed = false;
   private queryDoneResolvers: Array<() => void> = [];
 
   constructor(
@@ -156,20 +175,35 @@ export class WorkerSession {
       this.currentTaskId = msg.taskId;
       this.currentIssue = msg.issue;
       this.currentSessionId = undefined;
+      this.prIsClosed = false;
       this.resolveWsInput?.(WS_TASK_ASSIGNED);
       this.resolveWsInput = null;
       const initialPrompt = buildInitialPrompt(msg.issue);
       this.display.print(display.c.amber(initialPrompt));
       void this.runQueryLoop(initialPrompt);
     } else if (msg.type === "event_notification") {
-      const classification = classifyEvent(msg.event);
+      const { event } = msg;
+      const action = event.payload["action"] as string | undefined;
+
+      if (event.name === "pull_request" && action === "closed") {
+        this.prIsClosed = true;
+        // process normally (cleanup prompt still fires)
+      } else if (event.name === "pull_request" && action === "reopened") {
+        this.prIsClosed = false;
+        // process normally
+      } else if (this.prIsClosed) {
+        // Post-merge event: already logged via printForemanMessage; silently drop.
+        return;
+      }
+
+      const classification = classifyEvent(event);
       if (classification === "log_only") {
         // Already logged via printForemanMessage above; no further action.
         return;
       }
 
       // Actionable event: queue it and schedule dispatch.
-      this.pendingEvents.push(msg.event);
+      this.pendingEvents.push(event);
       this.resolveWsInput?.(WS_EVENT);
       this.resolveWsInput = null;
 
@@ -182,7 +216,7 @@ export class WorkerSession {
             const events = this.pendingEvents.splice(0);
             void this.runQueryLoop(this.buildAndLogEventPrompt(events));
           }
-        }, this.DEBOUNCE_MS);
+        }, debounceMs(this.pendingEvents));
       }
       // If a query IS running, events drain at the end of runQueryLoop.
     }
