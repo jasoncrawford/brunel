@@ -191,8 +191,8 @@ export class WorkerSession {
       } else if (event.name === "pull_request" && action === "reopened") {
         this.prIsClosed = false;
         // process normally
-      } else if (this.prIsClosed) {
-        // Post-merge event: already logged via printForemanMessage; silently drop.
+      } else if (this.prIsClosed && event.name === "check_suite") {
+        // Post-merge check suite: already logged via printForemanMessage; silently drop.
         return;
       }
 
