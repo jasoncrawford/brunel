@@ -229,31 +229,34 @@ export class WorkerSession {
       this.debounceTimer = null;
     }
 
-    const ac = new AbortController();
-    this.isRunningQuery = true;
+    // Always notify waitUntilIdle() callers when this loop exits, even on ^C interrupt.
     try {
-      this.currentSessionId = await this.runQuery(initialPrompt, this.currentSessionId, ac) ?? this.currentSessionId;
-    } finally {
-      this.isRunningQuery = false;
-    }
-
-    // If the user interrupted (^C), skip the event drain and foreman notification.
-    if (ac.signal.aborted) return;
-
-    while (this.pendingEvents.length > 0 && this.currentTaskId && this.currentIssue) {
-      const eventAc = new AbortController();
-      const events = this.pendingEvents.splice(0);
-      const prompt = this.buildAndLogEventPrompt(events);
+      const ac = new AbortController();
       this.isRunningQuery = true;
       try {
-        this.currentSessionId = await this.runQuery(prompt, this.currentSessionId, eventAc) ?? this.currentSessionId;
+        this.currentSessionId = await this.runQuery(initialPrompt, this.currentSessionId, ac) ?? this.currentSessionId;
       } finally {
         this.isRunningQuery = false;
       }
-      if (eventAc.signal.aborted) return;
-    }
 
-    this.notifyQueryDone();
+      // If the user interrupted (^C), skip the event drain and foreman notification.
+      if (ac.signal.aborted) return;
+
+      while (this.pendingEvents.length > 0 && this.currentTaskId && this.currentIssue) {
+        const eventAc = new AbortController();
+        const events = this.pendingEvents.splice(0);
+        const prompt = this.buildAndLogEventPrompt(events);
+        this.isRunningQuery = true;
+        try {
+          this.currentSessionId = await this.runQuery(prompt, this.currentSessionId, eventAc) ?? this.currentSessionId;
+        } finally {
+          this.isRunningQuery = false;
+        }
+        if (eventAc.signal.aborted) return;
+      }
+    } finally {
+      this.notifyQueryDone();
+    }
   }
 
   private buildAndLogEventPrompt(events: GitHubEvent[]): string {

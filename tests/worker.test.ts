@@ -342,6 +342,33 @@ describe("waitUntilIdle", () => {
     await expect(p1).resolves.toBeUndefined();
     await expect(p2).resolves.toBeUndefined();
   });
+
+  it("resolves after runQuery is aborted (^C interrupt)", async () => {
+    let resolveQuery!: (v: string | undefined) => void;
+    let capturedAc!: AbortController;
+    runQuery.mockImplementationOnce(
+      (_prompt: string, _sessionId: string | undefined, ac: AbortController) => {
+        capturedAc = ac;
+        return new Promise<string | undefined>((r) => { resolveQuery = r; });
+      }
+    );
+
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "1", issue: makeIssue() });
+    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+
+    const idlePromise = session.waitUntilIdle();
+
+    // Simulate ^C: abort the controller and let the mock resolve
+    capturedAc.abort();
+    resolveQuery(undefined);
+
+    // waitUntilIdle should resolve even though the query was aborted
+    const result = await Promise.race([
+      idlePromise.then(() => "idle"),
+      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 100)),
+    ]);
+    expect(result).toBe("idle");
+  });
 });
 
 // ── classifyEvent ─────────────────────────────────────────────────────────────
