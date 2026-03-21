@@ -157,6 +157,11 @@ export function resolveEventTemplate(table: EventTemplateFmtTable, key: string, 
   return fmt(event.payload, event);
 }
 
+const BRANCH_REVIEW_PROMPT =
+  "Check whether all tests have passed. If not, take no action now; wait for the remaining ones. " +
+  "If all tests passed, check if the branch is up to date, and if not, rebase it. " +
+  "Then check if the PR can be merged. If anything is blocking merge, resolve it, but do not merge yourself.";
+
 export const EVENT_FMT: EventTemplateFmtTable = {
   _check_suites: (p) => {
     const failed = p.failed as string[];
@@ -164,7 +169,7 @@ export const EVENT_FMT: EventTemplateFmtTable = {
       return `Checks have failed: ${failed.join(", ")}. Please review the failing checks on your PR and fix any issues.`;
     }
     const succeeded = p.succeeded as string[];
-    return `Checks succeeded: ${succeeded.join(", ")}. Check whether all tests have passed. If not, take no action now; wait for the remaining ones. If all tests passed, check if the branch is up to date, and if not, rebase it. Then check if the PR can be merged. If anything is blocking merge, resolve it, but do not merge yourself.`;
+    return `Checks succeeded: ${succeeded.join(", ")}. ${BRANCH_REVIEW_PROMPT}`;
   },
 
   _code_review: (p) => {
@@ -190,7 +195,7 @@ export const EVENT_FMT: EventTemplateFmtTable = {
   check_suite: (p) =>
     (p.check_suite?.conclusion === "failure" || p.check_suite?.conclusion === "action_required")
       ? `CI suite failed (${p.check_suite?.conclusion}). Please review the failing checks on your PR and fix any issues.`
-      : `CI suite completed with conclusion: ${p.check_suite?.conclusion}. Check whether all tests have passed. If not, take no action now; wait for the remaining ones. If all tests passed, check if the branch is up to date, and if not, rebase it. Then check if the PR can be merged. If anything is blocking merge, resolve it, but do not merge yourself.`,
+      : `CI suite completed with conclusion: ${p.check_suite?.conclusion}. ${BRANCH_REVIEW_PROMPT}`,
 
   pull_request: (p) => {
     const pr = p.pull_request as Record<string, unknown> | undefined;
@@ -204,6 +209,9 @@ export const EVENT_FMT: EventTemplateFmtTable = {
 * Clean up your worktree by calling ExitWorktree with action: "remove".
 
 Please do the above if necessary. Then summarize what you did, and anything else the user should know.`;
+    }
+    if (p.action === "auto_merge_enabled") {
+      return `Auto-merge was enabled on PR #${prNumber}. ${BRANCH_REVIEW_PROMPT}`;
     }
     return "";
   },
