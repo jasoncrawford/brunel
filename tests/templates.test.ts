@@ -167,6 +167,17 @@ describe("buildEventPrompt", () => {
 
 });
 
+describe("check_suite success prompt", () => {
+  it("includes instruction to wait for remaining tests before acting", () => {
+    const events: GitHubEvent[] = [
+      { id: "e1", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success", name: "CI" } } },
+    ];
+    const p = buildEventPrompt(events);
+    expect(p).toContain("all tests passed");
+    expect(p).toContain("wait");
+  });
+});
+
 describe("fmtEventList", () => {
   it("formats a single event with action as name/action", () => {
     const events: GitHubEvent[] = [{ id: "e1", name: "check_suite", payload: { action: "completed" } }];

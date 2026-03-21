@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "events";
-import { WorkerSession, classifyEvent } from "../src/worker.js";
+import { WorkerSession, classifyEvent, debounceMs } from "../src/worker.js";
 import type { ForemanMessage, GitHubEvent, TaskIssue } from "../src/types.js";
 import { stripAnsi } from "./helpers.js";
 
@@ -570,5 +570,234 @@ describe("interrupt", () => {
     ]);
     expect(result).toBe("idle");
     expect(abortedAc?.signal.aborted).toBe(true);
+  });
+});
+
+// ── debounceMs ────────────────────────────────────────────────────────────────
+
+describe("debounceMs", () => {
+  function csEvt(conclusion: string): GitHubEvent {
+    return { id: "e1", name: "check_suite", payload: { action: "completed", check_suite: { conclusion } } };
+  }
+  function prEvt(action: string): GitHubEvent {
+    return { id: "e2", name: "pull_request", payload: { action } };
+  }
+  function commentEvt(): GitHubEvent {
+    return { id: "e3", name: "issue_comment", payload: { action: "created" } };
+  }
+
+  it("returns 0 for pull_request/closed", () => {
+    expect(debounceMs([prEvt("closed")])).toBe(0);
+  });
+
+  it("returns 0 when any event is pull_request/closed", () => {
+    expect(debounceMs([csEvt("success"), prEvt("closed")])).toBe(0);
+  });
+
+  it("returns 3000 for check_suite failure", () => {
+    expect(debounceMs([csEvt("failure")])).toBe(3000);
+  });
+
+  it("returns 3000 for check_suite action_required", () => {
+    expect(debounceMs([csEvt("action_required")])).toBe(3000);
+  });
+
+  it("returns 30000 for check_suite success only", () => {
+    expect(debounceMs([csEvt("success")])).toBe(30000);
+  });
+
+  it("returns 30000 for check_suite neutral only", () => {
+    expect(debounceMs([csEvt("neutral")])).toBe(30000);
+  });
+
+  it("returns 30000 for multiple check_suite success events", () => {
+    expect(debounceMs([csEvt("success"), csEvt("success")])).toBe(30000);
+  });
+
+  it("returns 3000 for mixed check_suite success and failure", () => {
+    expect(debounceMs([csEvt("success"), csEvt("failure")])).toBe(3000);
+  });
+
+  it("returns 3000 for issue_comment (default)", () => {
+    expect(debounceMs([commentEvt()])).toBe(3000);
+  });
+
+  it("returns 3000 for mix of check_suite success and issue_comment", () => {
+    expect(debounceMs([csEvt("success"), commentEvt()])).toBe(3000);
+  });
+});
+
+// ── event-type-specific debounce timers ───────────────────────────────────────
+
+describe("event-type-specific debounce timers", () => {
+  it("check_suite success uses 30s debounce instead of 3s", async () => {
+    vi.useFakeTimers();
+    try {
+      const issue = makeIssue();
+      sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+      runQuery.mockClear();
+
+      const csEvt: GitHubEvent = { id: "e1", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success" } } };
+      sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: csEvt });
+
+      // Should NOT fire after 3s (old default)
+      await vi.advanceTimersByTimeAsync(3001);
+      expect(runQuery).not.toHaveBeenCalled();
+
+      // Should fire after 30s
+      await vi.advanceTimersByTimeAsync(27001);
+      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("check_suite failure still uses 3s debounce", async () => {
+    vi.useFakeTimers();
+    try {
+      const issue = makeIssue();
+      sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+      runQuery.mockClear();
+
+      const csEvt: GitHubEvent = { id: "e1", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "failure" } } };
+      sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: csEvt });
+
+      await vi.advanceTimersByTimeAsync(3001);
+      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("pull_request/closed triggers immediate dispatch (0ms debounce)", async () => {
+    vi.useFakeTimers();
+    try {
+      const issue = makeIssue();
+      sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+      runQuery.mockClear();
+
+      const prEvt: GitHubEvent = { id: "e1", name: "pull_request", payload: { action: "closed", pull_request: { number: 1 } } };
+      sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: prEvt });
+
+      // Advance by just 1ms — fires immediately (0ms debounce)
+      await vi.advanceTimersByTimeAsync(1);
+      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("failure check_suite arriving during 30s success window resets timer to 3s", async () => {
+    vi.useFakeTimers();
+    try {
+      const issue = makeIssue();
+      sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+      runQuery.mockClear();
+
+      // Success sets 30s timer
+      const successEvt: GitHubEvent = { id: "e1", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success" } } };
+      sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: successEvt });
+
+      // Advance 3s — still waiting (30s timer)
+      await vi.advanceTimersByTimeAsync(3001);
+      expect(runQuery).not.toHaveBeenCalled();
+
+      // Failure arrives — resets timer to 3s
+      const failEvt: GitHubEvent = { id: "e2", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "failure" } } };
+      sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: failEvt });
+
+      // Advance 3s more — should fire now
+      await vi.advanceTimersByTimeAsync(3001);
+      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+// ── prIsClosed guard ──────────────────────────────────────────────────────────
+
+describe("prIsClosed guard", () => {
+  it("drops non-PR events silently when PR is closed", async () => {
+    vi.useFakeTimers();
+    try {
+      const issue = makeIssue();
+      sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+
+      // Close the PR — should trigger cleanup query
+      const closedEvt: GitHubEvent = { id: "e1", name: "pull_request", payload: { action: "closed", pull_request: { number: 1 } } };
+      sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: closedEvt });
+      await vi.runAllTimersAsync();
+      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledTimes(2));
+      runQuery.mockClear();
+
+      // check_suite event should be silently dropped
+      const csEvt: GitHubEvent = { id: "e2", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success" } } };
+      sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: csEvt });
+      await vi.runAllTimersAsync();
+      expect(runQuery).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("resets prIsClosed flag on task_assigned", async () => {
+    vi.useFakeTimers();
+    try {
+      const issue = makeIssue();
+      sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+
+      // Close the PR
+      const closedEvt: GitHubEvent = { id: "e1", name: "pull_request", payload: { action: "closed", pull_request: { number: 1 } } };
+      sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: closedEvt });
+      await vi.runAllTimersAsync();
+      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledTimes(2));
+
+      // New task assigned — resets prIsClosed
+      sendMsg(fakeWs, { type: "task_assigned", taskId: "99", issue: makeIssue(2) });
+      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledTimes(3));
+      runQuery.mockClear();
+
+      // check_suite event should now work normally (not dropped)
+      const csEvt: GitHubEvent = { id: "e2", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success" } } };
+      sendMsg(fakeWs, { type: "event_notification", taskId: "99", event: csEvt });
+      await vi.runAllTimersAsync();
+      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("clears prIsClosed when pull_request/reopened is received", async () => {
+    vi.useFakeTimers();
+    try {
+      const issue = makeIssue();
+      sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+
+      // Close the PR
+      sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: { id: "e1", name: "pull_request", payload: { action: "closed", pull_request: { number: 1 } } } });
+      await vi.runAllTimersAsync();
+      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledTimes(2));
+
+      // Reopen the PR
+      sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: { id: "e2", name: "pull_request", payload: { action: "reopened", pull_request: { number: 1 } } } });
+      await vi.runAllTimersAsync();
+      runQuery.mockClear();
+
+      // check_suite event should now work normally (not dropped)
+      const csEvt: GitHubEvent = { id: "e3", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success" } } };
+      sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: csEvt });
+      await vi.runAllTimersAsync();
+      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
