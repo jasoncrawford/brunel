@@ -762,6 +762,13 @@ export function ask(
 
 // ── Interactive pickers (raw-mode arrow-key menus) ─────────────────────────
 
+/** Formats a single picker row: adds ▶/space marker and dims non-selected rows. */
+function pickerLine(text: string, isSelected: boolean): string {
+  const prefix = isSelected ? "▶ " : "  ";
+  const full = prefix + text;
+  return isSelected ? full : display.s.dim(full);
+}
+
 /**
  * Single-selection arrow-key picker. Returns the index of the chosen option.
  * Up/down arrows move the cursor; Enter confirms. Ctrl-C exits the process.
@@ -775,15 +782,13 @@ export async function pick(options: string[], promptStr?: string): Promise<numbe
 
     if (promptStr) process.stdout.write(promptStr + "\n");
     for (let i = 0; i < count; i++) {
-      const marker = i === idx ? "▶ " : "  ";
-      process.stdout.write(marker + options[i] + "\n");
+      process.stdout.write(pickerLine(options[i], i === idx) + "\n");
     }
 
     function redraw() {
       process.stdout.write(`\x1b[${count}A\r`);
       for (let i = 0; i < count; i++) {
-        const marker = i === idx ? "▶ " : "  ";
-        process.stdout.write(marker + options[i] + "\x1b[K\r\n");
+        process.stdout.write(pickerLine(options[i], i === idx) + "\x1b[K\r\n");
       }
     }
 
@@ -826,17 +831,15 @@ export async function pickMultiple(options: string[], promptStr?: string): Promi
 
     if (promptStr) process.stdout.write(promptStr + "\n");
     for (let i = 0; i < count; i++) {
-      const cursor = i === idx ? "▶" : " ";
       const check = selected.has(i) ? "◉" : "○";
-      process.stdout.write(`${cursor} ${check} ${options[i]}\n`);
+      process.stdout.write(pickerLine(`${check} ${options[i]}`, i === idx) + "\n");
     }
 
     function redraw() {
       process.stdout.write(`\x1b[${count}A\r`);
       for (let i = 0; i < count; i++) {
-        const cursor = i === idx ? "▶" : " ";
         const check = selected.has(i) ? "◉" : "○";
-        process.stdout.write(`${cursor} ${check} ${options[i]}\x1b[K\r\n`);
+        process.stdout.write(pickerLine(`${check} ${options[i]}`, i === idx) + "\x1b[K\r\n");
       }
     }
 
@@ -943,7 +946,6 @@ export async function pickQuestion(
       const num = i + 1;
       const numStr = num <= 9 ? `${num}` : " ";
       const opt = all[i];
-      const marker = i === idx ? "▶ " : "  ";
       if (i === idx) {
         // Selected: bold label, normal weight description — no dim
         let text: string;
@@ -954,11 +956,11 @@ export async function pickQuestion(
         } else {
           text = display.s.bold(opt.label);
         }
-        return `${marker}${numStr}. ${text}`;
+        return pickerLine(`${numStr}. ${text}`, true);
       } else {
         // Non-selected: entire line dim, no bold (bold resets dim via \x1b[22m)
         const text = opt.description ? `${opt.label}. ${opt.description}` : opt.label;
-        return display.s.dim(`${marker}${numStr}. ${text}`);
+        return pickerLine(`${numStr}. ${text}`, false);
       }
     }
 

@@ -413,8 +413,10 @@ describe("runQuery - tool permission handling (non-bypass mode)", () => {
       cap.restore();
     }
 
-    const result = await canUseTool("Bash", { command: "rm -rf /" }, FAKE_OPTIONS);
+    const input = { command: "rm -rf /" };
+    const result = await canUseTool("Bash", input, FAKE_OPTIONS);
     expect(result.behavior).toBe("allow");
+    expect((result as any).updatedInput).toEqual(input);
   });
 
   it("unknown tool: pick index 1 (Deny) → returns behavior:deny with message", async () => {

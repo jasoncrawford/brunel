@@ -1,7 +1,7 @@
 import fs from "fs";
 import { fileURLToPath } from "url";
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import type { CanUseTool, PermissionResult } from "@anthropic-ai/claude-agent-sdk";
+import type { CanUseTool, PermissionMode, PermissionResult } from "@anthropic-ai/claude-agent-sdk";
 import * as display from "./display.js";
 import { ask, listCommandNames, dispatchInput, pick, pickMultiple, pickQuestion } from "./input.js";
 import type { PickQuestionResult } from "./input.js";
@@ -25,8 +25,58 @@ export function logFull(label: string, data: unknown) {
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
-const BYPASS = process.argv.includes("--dangerously-skip-permissions");
-const PERMISSION_MODE = BYPASS ? "bypassPermissions" : "acceptEdits";
+export const VALID_PERMISSION_MODES: readonly PermissionMode[] = [
+  "default", "acceptEdits", "bypassPermissions", "plan", "dontAsk",
+];
+
+export type ParsedPermissionConfig = {
+  mode: PermissionMode;
+  allowDangerouslySkipPermissions: boolean;
+};
+
+export function parsePermissionMode(argv: string[]): ParsedPermissionConfig {
+  const hasDangerousFlag = argv.includes("--dangerously-skip-permissions");
+  const modeIdx = argv.indexOf("--permission-mode");
+
+  let explicitMode: string | null = null;
+  if (modeIdx !== -1) {
+    const next = argv[modeIdx + 1];
+    // Missing value: no next token, or next token looks like a flag
+    if (!next || next.startsWith("--")) {
+      process.stderr.write(
+        `Error: --permission-mode requires a value. Valid modes: ${VALID_PERMISSION_MODES.join(", ")}\n`
+      );
+      process.exit(1);
+    }
+    if (!(VALID_PERMISSION_MODES as readonly string[]).includes(next)) {
+      process.stderr.write(
+        `Error: Unknown permission mode "${next}". Valid modes: ${VALID_PERMISSION_MODES.join(", ")}\n`
+      );
+      process.exit(1);
+    }
+    explicitMode = next;
+  }
+
+  // Conflict: --dangerously-skip-permissions implies bypassPermissions;
+  // if --permission-mode is also given and says something different, that's an error.
+  if (hasDangerousFlag && explicitMode !== null && explicitMode !== "bypassPermissions") {
+    process.stderr.write(
+      `Error: --dangerously-skip-permissions conflicts with --permission-mode ${explicitMode}. ` +
+      `Use --permission-mode bypassPermissions or omit --permission-mode.\n`
+    );
+    process.exit(1);
+  }
+
+  if (hasDangerousFlag || explicitMode === "bypassPermissions") {
+    return { mode: "bypassPermissions", allowDangerouslySkipPermissions: true };
+  }
+
+  const mode: PermissionMode = (explicitMode as PermissionMode) ?? "default";
+  return { mode, allowDangerouslySkipPermissions: false };
+}
+
+const { mode: PERMISSION_MODE, allowDangerouslySkipPermissions: ALLOW_BYPASS } =
+  parsePermissionMode(process.argv);
 
 // ── REPL ──────────────────────────────────────────────────────────────────────
 
@@ -70,7 +120,7 @@ export async function handleToolPermission(
   display.print(display.c.amber(`\n⚠ ${toolName}(${display.fmtArgs(input)})`));
   const idx = await pick(["Allow", "Deny"]);
   display.startStatus(getStatusText);
-  if (idx === 0) return { behavior: "allow" };
+  if (idx === 0) return { behavior: "allow", updatedInput: input };
   return { behavior: "deny", message: "User denied tool request" };
 }
 
@@ -101,7 +151,7 @@ export async function runQuery(prompt: string, sessionId: string | undefined, ab
     if (toolName === "AskUserQuestion") {
       return handleAskUserQuestion(input, getStatusText);
     }
-    if (BYPASS) return { behavior: "allow" };
+    if (ALLOW_BYPASS) return { behavior: "allow", updatedInput: input };
     return handleToolPermission(toolName, input, getStatusText);
   };
 
@@ -118,7 +168,7 @@ export async function runQuery(prompt: string, sessionId: string | undefined, ab
       includePartialMessages: true,
       canUseTool,
       abortController: ac,
-      ...(BYPASS ? { allowDangerouslySkipPermissions: true } : {}),
+      ...(ALLOW_BYPASS ? { allowDangerouslySkipPermissions: true } : {}),
       ...(sessionId ? { resume: sessionId } : {}),
     },
   });
