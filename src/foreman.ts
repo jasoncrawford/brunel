@@ -602,27 +602,15 @@ export function createForemanWss(
       if (action === "edited") {
         const changes = p.changes as Record<string, unknown> | undefined;
         if (changes?.body) {
-          const body = String(issue.body ?? "");
-          fetchBlockers(issueNumber, body, { repo, token })
-            .then((blockers) => {
-              setBlockers(issueNumber, blockers, graph);
-              return fetchIssueStates(blockers, { repo, token });
-            })
-            .then((states) => {
-              for (const [num, state] of states) {
-                // Only update state for the newly-fetched blockers of this issue.
-                // openIssues may contain entries from other tasks; we only touch
-                // what fetchIssueStates returned, so other tasks' blockers are unaffected.
-                if (state === "open") openIssues.add(num);
-                else openIssues.delete(num);
-              }
-              for (const w of registry.getIdleWorkers()) {
-                tryAssignWork(w.workerId);
-              }
-            })
-            .catch((err) => flog(`ERROR updating deps for #${issueNumber}: ${err}`));
+          const newBody = String(issue.body ?? "");
+          const entry = labeledIssues.get(issueNumber);
+          if (entry) {
+            entry.depsLoaded = false;
+            entry.issue = { ...entry.issue, body: newBody };
+            startDepsLoad(issueNumber, newBody);
+          }
         }
-        // fall through: let existing forwardEvent logic run for assigned tasks
+        // fall through: let forwardEvent run for assigned tasks
       }
     }
 
