@@ -1,5 +1,16 @@
 import type { GitHubEvent, TaskIssue } from "./types.js";
 
+export function formatCommentLocation(
+  path: unknown,
+  line?: unknown,
+  startLine?: unknown
+): string {
+  const pathStr = `\`${path}\``;
+  if (!line) return pathStr;
+  if (startLine && startLine !== line) return `${pathStr} lines ${startLine}-${line}`;
+  return `${pathStr} line ${line}`;
+}
+
 export function buildInitialPrompt(issue: TaskIssue): string {
   return `Please work on GitHub issue #${issue.number}: "${issue.title}" in ${issue.repoUrl}.
 

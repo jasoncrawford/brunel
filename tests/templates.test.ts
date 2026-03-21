@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildInitialPrompt, buildEventPrompt, fmtEventList, resolveEventTemplate, coalesceEvents, EVENT_FMT, type EventTemplateFmtTable } from "../src/templates.js";
+import { buildInitialPrompt, buildEventPrompt, fmtEventList, resolveEventTemplate, coalesceEvents, EVENT_FMT, formatCommentLocation, type EventTemplateFmtTable } from "../src/templates.js";
 import type { GitHubEvent } from "../src/types.js";
 
 describe("buildInitialPrompt", () => {
@@ -489,5 +489,32 @@ describe("EVENT_FMT — new entries", () => {
     expect(result).toContain("PR #3");
     expect(result).toContain("approved");
     expect(result).toContain("LGTM");
+  });
+});
+
+describe("formatCommentLocation", () => {
+  it("file-level comment (no line) → just backtick-path", () => {
+    const result = formatCommentLocation("src/foo.ts");
+    expect(result).toBe("`src/foo.ts`");
+  });
+
+  it("single-line comment → path line N", () => {
+    const result = formatCommentLocation("src/foo.ts", 42);
+    expect(result).toBe("`src/foo.ts` line 42");
+  });
+
+  it("multi-line comment → path lines N-M", () => {
+    const result = formatCommentLocation("src/foo.ts", 15, 10);
+    expect(result).toBe("`src/foo.ts` lines 10-15");
+  });
+
+  it("start_line equals line → treated as single line", () => {
+    const result = formatCommentLocation("src/foo.ts", 42, 42);
+    expect(result).toBe("`src/foo.ts` line 42");
+  });
+
+  it("null line → just backtick-path", () => {
+    const result = formatCommentLocation("src/foo.ts", null);
+    expect(result).toBe("`src/foo.ts`");
   });
 });
