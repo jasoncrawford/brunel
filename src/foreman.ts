@@ -183,6 +183,12 @@ export class TaskQueue {
     return taskId ? this.tasks.get(taskId) : undefined;
   }
 
+  removeTask(taskId: string) {
+    const t = this.tasks.get(taskId);
+    if (!t || t.status !== "pending") return;
+    this.tasks.delete(taskId);
+  }
+
   markDepsLoaded(issueNumbers: number[]) {
     for (const n of issueNumbers) {
       const t = this.tasks.get(String(n));
@@ -584,6 +590,20 @@ export function createForemanWss(
 
     if (name === "issues" && issue) {
       const action = p.action as string | undefined;
+
+      if (
+        action === "unlabeled" &&
+        (p.label as Record<string, unknown> | undefined)?.name === taskLabel
+      ) {
+        const existingTask = taskQueue.getTaskForIssue(issueNumber);
+        if (existingTask?.status === "pending") {
+          taskQueue.removeTask(existingTask.taskId);
+          openIssues.delete(issueNumber);
+          broadcastSnapshot();
+          flog(`[task #${issueNumber}] dequeued (label removed)`);
+        }
+        return;
+      }
 
       if (action === "closed") {
         openIssues.delete(issueNumber);

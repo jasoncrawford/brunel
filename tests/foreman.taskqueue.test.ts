@@ -93,6 +93,30 @@ describe("TaskQueue", () => {
   });
 });
 
+describe("removeTask", () => {
+  let q: TaskQueue;
+  beforeEach(() => { q = new TaskQueue(); });
+
+  it("removes a pending task so it is no longer retrievable", () => {
+    q.addTask(baseTask);
+    q.removeTask("42");
+    expect(q.get("42")).toBeUndefined();
+    expect(q.getTaskForIssue(42)).toBeUndefined();
+    expect(q.nextPending()).toBeNull();
+  });
+
+  it("does not remove an assigned task", () => {
+    q.addTask(baseTask);
+    q.assignTask("42", "w1");
+    q.removeTask("42");
+    expect(q.get("42")).toBeDefined();
+  });
+
+  it("is a no-op for unknown taskId", () => {
+    expect(() => q.removeTask("nonexistent")).not.toThrow();
+  });
+});
+
 describe("nextPending with predicate", () => {
   let q: TaskQueue;
   beforeEach(() => { q = new TaskQueue(); });
