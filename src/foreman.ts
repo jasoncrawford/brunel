@@ -784,7 +784,20 @@ export function createForemanWss(
   });
 
   function reconcile() {
-    // TODO: implement
+    // Step 1: materialise tasks for new labeledIssues entries
+    for (const [num, { issue, depsLoaded }] of labeledIssues) {
+      if (!taskQueue.getTaskForIssue(num)) {
+        taskQueue.addTask({
+          taskId: String(num),
+          issueNumber: num,
+          title: issue.title,
+          body: issue.body,
+          labels: issue.labels,
+          repoUrl: issue.repoUrl,
+          depsLoaded,
+        });
+      }
+    }
   }
 
   return { wss, routeEventToWorker: routeEvent, reconcile };
