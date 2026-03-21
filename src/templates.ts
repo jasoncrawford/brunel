@@ -1,5 +1,16 @@
 import type { GitHubEvent, TaskIssue } from "./types.js";
 
+export function formatCommentLocation(
+  path: unknown,
+  line?: unknown,
+  startLine?: unknown
+): string {
+  const pathStr = `\`${path}\``;
+  if (line == null) return pathStr;
+  if (startLine != null && startLine !== line) return `${pathStr} lines ${startLine}-${line}`;
+  return `${pathStr} line ${line}`;
+}
+
 export function buildInitialPrompt(issue: TaskIssue): string {
   return `Please work on GitHub issue #${issue.number}: "${issue.title}" in ${issue.repoUrl}.
 
@@ -86,7 +97,12 @@ export function coalesceEvents(events: GitHubEvent[]): GitHubEvent[] {
     const primary = reviews[0] ?? reviewComments[0];
     const comments = reviewComments.map(e => {
       const comment = e.payload.comment as Record<string, unknown> | undefined;
-      return { path: comment?.path, body: comment?.body };
+      return {
+        path: comment?.path,
+        body: comment?.body,
+        line: comment?.line,
+        startLine: comment?.start_line,
+      };
     });
     result.push({
       id: primary.id,
@@ -154,7 +170,7 @@ export const EVENT_FMT: EventTemplateFmtTable = {
   _code_review: (p) => {
     const pr = p.pull_request as Record<string, unknown> | undefined;
     const review = p.review as Record<string, unknown> | undefined;
-    const comments = p.comments as Array<{ path: unknown; body: unknown }> | undefined;
+    const comments = p.comments as Array<{ path: unknown; body: unknown; line?: unknown; startLine?: unknown }> | undefined;
     const lines: string[] = [
       `A review was submitted on PR #${pr?.number}: state=${review?.state}.`,
     ];
@@ -164,7 +180,7 @@ export const EVENT_FMT: EventTemplateFmtTable = {
     if (comments && comments.length > 0) {
       lines.push("\nInline comments:");
       for (const c of comments) {
-        lines.push(`\n- \`${c.path}\`: ${c.body}`);
+        lines.push(`\n- ${formatCommentLocation(c.path, c.line, c.startLine)}: ${c.body}`);
       }
     }
     lines.push("\n\nPlease respond in whatever way you think is most appropriate, replying and/or making code changes.");
@@ -196,7 +212,7 @@ Please do the above if necessary. Then summarize what you did, and anything else
     `A review was submitted on PR #${p.pull_request?.number}: state=${p.review?.state}.\n\n${p.review?.body ?? ""}\n\nPlease respond in whatever way you think is most appropriate, replying and/or making code changes.`.trim(),
 
   pull_request_review_comment: (p) =>
-    `A review comment was added on PR #${p.pull_request?.number} at \`${p.comment?.path}\`:\n\n${p.comment?.body ?? ""}\n\nPlease respond in whatever way you think is most appropriate, replying and/or making code changes.`.trim(),
+    `A review comment was added on PR #${p.pull_request?.number} at ${formatCommentLocation(p.comment?.path, p.comment?.line, p.comment?.start_line)}:\n\n${p.comment?.body ?? ""}\n\nPlease respond in whatever way you think is most appropriate, replying and/or making code changes.`.trim(),
 
   issue_comment: (p) =>
     `A comment was added on issue #${p.issue?.number}:\n\n${p.comment?.body ?? ""}`.trim(),

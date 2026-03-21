@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildInitialPrompt, buildEventPrompt, fmtEventList, resolveEventTemplate, coalesceEvents, EVENT_FMT, type EventTemplateFmtTable } from "../src/templates.js";
+import { buildInitialPrompt, buildEventPrompt, fmtEventList, resolveEventTemplate, coalesceEvents, EVENT_FMT, formatCommentLocation, type EventTemplateFmtTable } from "../src/templates.js";
 import type { GitHubEvent } from "../src/types.js";
 
 describe("buildInitialPrompt", () => {
@@ -113,6 +113,22 @@ describe("buildEventPrompt", () => {
     expect(p).toContain("PR #7");
     expect(p).toContain("src/foo.ts");
     expect(p).toContain("This line is wrong");
+  });
+
+  it("pull_request_review_comment with line number → includes line in location", () => {
+    const events: GitHubEvent[] = [
+      {
+        id: "e1",
+        name: "pull_request_review_comment",
+        payload: {
+          action: "created",
+          pull_request: { number: 7 },
+          comment: { body: "Nit: rename this", path: "src/foo.ts", line: 55, start_line: null },
+        },
+      },
+    ];
+    const p = buildEventPrompt(events);
+    expect(p).toContain("`src/foo.ts` line 55");
   });
 
   it("issue_comment — contains issue number and comment body", () => {
@@ -356,7 +372,9 @@ describe("coalesceEvents", () => {
     expect(result[0].name).toBe("_code_review");
     expect(result[0].payload.pull_request).toEqual({ number: 5 });
     expect(result[0].payload.review).toEqual({ state: "changes_requested", body: "Please fix" });
-    expect(result[0].payload.comments).toEqual([{ path: "src/foo.ts", body: "This is wrong" }]);
+    expect(result[0].payload.comments).toEqual([
+      { path: "src/foo.ts", body: "This is wrong", line: undefined, startLine: undefined },
+    ]);
   });
 
   it("review alone → _code_review with empty comments array", () => {
@@ -367,6 +385,40 @@ describe("coalesceEvents", () => {
     expect(result).toHaveLength(1);
     expect(result[0].name).toBe("_code_review");
     expect(result[0].payload.comments).toEqual([]);
+  });
+
+  it("review comment with line number → included in coalesced comments", () => {
+    const events: GitHubEvent[] = [
+      {
+        id: "e1",
+        name: "pull_request_review_comment",
+        payload: {
+          pull_request: { number: 5 },
+          comment: { path: "src/foo.ts", body: "Rename this", line: 42, start_line: null },
+        },
+      },
+    ];
+    const result = coalesceEvents(events);
+    expect(result[0].payload.comments).toEqual([
+      { path: "src/foo.ts", body: "Rename this", line: 42, startLine: null },
+    ]);
+  });
+
+  it("review comment with line range → both line and startLine included", () => {
+    const events: GitHubEvent[] = [
+      {
+        id: "e1",
+        name: "pull_request_review_comment",
+        payload: {
+          pull_request: { number: 5 },
+          comment: { path: "src/bar.ts", body: "Extract this", line: 15, start_line: 10 },
+        },
+      },
+    ];
+    const result = coalesceEvents(events);
+    expect(result[0].payload.comments).toEqual([
+      { path: "src/bar.ts", body: "Extract this", line: 15, startLine: 10 },
+    ]);
   });
 
   it("mixed types (check suites + issue_comment) → both preserved", () => {
@@ -489,5 +541,74 @@ describe("EVENT_FMT — new entries", () => {
     expect(result).toContain("PR #3");
     expect(result).toContain("approved");
     expect(result).toContain("LGTM");
+  });
+
+  it("_code_review inline comment with line number → includes 'line N' in output", () => {
+    const evt: GitHubEvent = {
+      id: "e1",
+      name: "_code_review",
+      payload: {
+        pull_request: { number: 5 },
+        review: { state: "changes_requested", body: "" },
+        comments: [{ path: "src/foo.ts", body: "Rename this", line: 42, startLine: null }],
+      },
+    };
+    const result = EVENT_FMT._code_review(evt.payload, evt);
+    expect(result).toContain("`src/foo.ts` line 42");
+  });
+
+  it("_code_review inline comment with line range → includes 'lines N-M' in output", () => {
+    const evt: GitHubEvent = {
+      id: "e1",
+      name: "_code_review",
+      payload: {
+        pull_request: { number: 5 },
+        review: { state: "changes_requested", body: "" },
+        comments: [{ path: "src/bar.ts", body: "Extract this", line: 15, startLine: 10 }],
+      },
+    };
+    const result = EVENT_FMT._code_review(evt.payload, evt);
+    expect(result).toContain("`src/bar.ts` lines 10-15");
+  });
+
+  it("_code_review inline comment with no line → just shows path (file-level)", () => {
+    const evt: GitHubEvent = {
+      id: "e1",
+      name: "_code_review",
+      payload: {
+        pull_request: { number: 5 },
+        review: { state: "changes_requested", body: "" },
+        comments: [{ path: "src/baz.ts", body: "General comment", line: null, startLine: null }],
+      },
+    };
+    const result = EVENT_FMT._code_review(evt.payload, evt);
+    expect(result).toContain("`src/baz.ts`: General comment");
+  });
+});
+
+describe("formatCommentLocation", () => {
+  it("file-level comment (no line) → just backtick-path", () => {
+    const result = formatCommentLocation("src/foo.ts");
+    expect(result).toBe("`src/foo.ts`");
+  });
+
+  it("single-line comment → path line N", () => {
+    const result = formatCommentLocation("src/foo.ts", 42);
+    expect(result).toBe("`src/foo.ts` line 42");
+  });
+
+  it("multi-line comment → path lines N-M", () => {
+    const result = formatCommentLocation("src/foo.ts", 15, 10);
+    expect(result).toBe("`src/foo.ts` lines 10-15");
+  });
+
+  it("start_line equals line → treated as single line", () => {
+    const result = formatCommentLocation("src/foo.ts", 42, 42);
+    expect(result).toBe("`src/foo.ts` line 42");
+  });
+
+  it("null line → just backtick-path", () => {
+    const result = formatCommentLocation("src/foo.ts", null);
+    expect(result).toBe("`src/foo.ts`");
   });
 });
