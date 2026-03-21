@@ -83,7 +83,7 @@ async function run(): Promise<void> {
     function spawnWorker() {
       worker = spawn("tsx", ["src/repl.ts", "--worker-mode"], {
         ...spawnOpts,
-        env: { ...process.env, FOREMAN_URL: foremanUrl, GITHUB_REPO: "test/test", GITHUB_TOKEN: "dummy" },
+        env: { ...process.env, BRUNEL_FOREMAN_URL: foremanUrl, GITHUB_REPO: "test/test", GITHUB_TOKEN: "dummy" },
       });
       worker.stdout!.on("data", (buf: Buffer) => {
         process.stderr.write(`[worker stdout] ${buf}`);
