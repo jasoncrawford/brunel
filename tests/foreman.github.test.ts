@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { loadIssuesToQueue, labelIssueDone, fetchIssueStates, fetchNativeBlockers } from "../src/github.js";
-import { TaskQueue } from "../src/foreman.js";
+import type { LabeledIssueState } from "../src/types.js";
 import { fetchBlockers } from "../src/dependencies.js";
 import type { DependencyGraph } from "../src/dependencies.js";
 
@@ -27,26 +27,26 @@ afterEach(() => {
 });
 
 describe("loadIssuesToQueue", () => {
-  it("fetches open issues with the task label and adds them to queue", async () => {
+  it("fetches open issues with the task label and populates labeledIssues", async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       ok: true,
       json: async () => mockIssues,
     } as any);
 
-    const q = new TaskQueue();
-    await loadIssuesToQueue(q, new Map(), new Set(), QUEUE_OPTS);
+    const labeledIssues = new Map<number, LabeledIssueState>();
+    await loadIssuesToQueue(labeledIssues, new Map(), new Set(), QUEUE_OPTS);
 
     expect(fetch).toHaveBeenCalledWith(
       expect.stringContaining("owner/repo/issues"),
       expect.objectContaining({ headers: expect.objectContaining({ Authorization: "Bearer token123" }) }),
     );
-    expect(q.get("1")?.title).toBe("First issue");
-    expect(q.get("2")?.body).toBe(""); // null coerced to ""
+    expect(labeledIssues.get(1)?.issue.title).toBe("First issue");
+    expect(labeledIssues.get(2)?.issue.body).toBe(""); // null coerced to ""
   });
 
   it("throws on non-ok response", async () => {
     vi.mocked(fetch).mockResolvedValueOnce({ ok: false, status: 403 } as any);
-    await expect(loadIssuesToQueue(new TaskQueue(), new Map(), new Set(), QUEUE_OPTS)).rejects.toThrow("403");
+    await expect(loadIssuesToQueue(new Map<number, LabeledIssueState>(), new Map(), new Set(), QUEUE_OPTS)).rejects.toThrow("403");
   });
 });
 
@@ -153,8 +153,8 @@ describe("loadIssuesToQueue with dependency graph", () => {
 
     const graph: DependencyGraph = new Map();
     const openIssues = new Set<number>();
-    const q = new TaskQueue();
-    await loadIssuesToQueue(q, graph, openIssues, QUEUE_OPTS);
+    const labeledIssues = new Map<number, LabeledIssueState>();
+    await loadIssuesToQueue(labeledIssues, graph, openIssues, QUEUE_OPTS);
 
     expect(graph.get(1)).toEqual(new Set([99]));
     expect(openIssues.has(99)).toBe(true);
@@ -178,7 +178,7 @@ describe("loadIssuesToQueue with dependency graph", () => {
 
     const graph: DependencyGraph = new Map();
     const openIssues = new Set<number>();
-    await loadIssuesToQueue(new TaskQueue(), graph, openIssues, QUEUE_OPTS);
+    await loadIssuesToQueue(new Map<number, LabeledIssueState>(), graph, openIssues, QUEUE_OPTS);
 
     expect(openIssues.has(50)).toBe(false);
   });
