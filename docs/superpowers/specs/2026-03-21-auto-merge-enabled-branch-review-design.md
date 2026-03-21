@@ -38,7 +38,7 @@ const BRANCH_REVIEW_PROMPT =
   "Then check if the PR can be merged. If anything is blocking merge, resolve it, but do not merge yourself.";
 ```
 
-Update the `check_suite` template to use the constant (no behaviour change).
+Update both the `check_suite` template and the `_check_suites` coalesced handler (used when multiple check-suite events are batched) to use the constant — no behaviour change, but both occurrences must be updated for the refactor to be complete.
 
 Add `auto_merge_enabled` case to the `pull_request` template:
 
