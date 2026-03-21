@@ -580,13 +580,10 @@ export function createForemanWss(
         action === "unlabeled" &&
         (p.label as Record<string, unknown> | undefined)?.name === taskLabel
       ) {
-        const existingTask = taskQueue.getTaskForIssue(issueNumber);
-        if (existingTask?.status === "pending") {
-          taskQueue.removeTask(existingTask.taskId);
-          openIssues.delete(issueNumber);
-          broadcastSnapshot();
-          flog(`[task #${issueNumber}] dequeued (label removed)`);
-        }
+        labeledIssues.delete(issueNumber);
+        openIssues.delete(issueNumber);
+        flog(`[task #${issueNumber}] dequeued (label removed)`);
+        reconcile();
         return;
       }
 
