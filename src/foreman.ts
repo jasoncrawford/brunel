@@ -189,6 +189,10 @@ export class TaskQueue {
     this.tasks.delete(taskId);
   }
 
+  getPendingTasks(): Task[] {
+    return [...this.tasks.values()].filter((t) => t.status === "pending");
+  }
+
   markDepsLoaded(issueNumbers: number[]) {
     for (const n of issueNumbers) {
       const t = this.tasks.get(String(n));
@@ -806,6 +810,13 @@ export function createForemanWss(
         if (t && !t.depsLoaded) {
           taskQueue.markDepsLoaded([num]);
         }
+      }
+    }
+
+    // Step 3: remove pending tasks whose issue no longer has the label
+    for (const t of taskQueue.getPendingTasks()) {
+      if (!labeledIssues.has(t.issueNumber)) {
+        taskQueue.removeTask(t.taskId);
       }
     }
   }

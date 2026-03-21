@@ -67,4 +67,27 @@ describe("reconcile()", () => {
     reconcile();
     expect(queue.get("5")?.depsLoaded).toBe(false);
   });
+
+  it("removes a pending task whose issue is no longer in labeledIssues", () => {
+    queue.addTask({ taskId: "9", issueNumber: 9, title: "T", body: "b", labels: [], repoUrl: "" });
+    // labeledIssues is empty — issue 9 has no label
+    reconcile();
+    expect(queue.get("9")).toBeUndefined();
+  });
+
+  it("does NOT remove an assigned task even if its issue is not in labeledIssues", () => {
+    queue.addTask({ taskId: "9", issueNumber: 9, title: "T", body: "b", labels: [], repoUrl: "" });
+    queue.assignTask("9", "worker-1");
+    reconcile();
+    expect(queue.get("9")).toBeDefined();
+    expect(queue.get("9")?.status).toBe("assigned");
+  });
+
+  it("does NOT remove a complete task even if its issue is not in labeledIssues", () => {
+    queue.addTask({ taskId: "9", issueNumber: 9, title: "T", body: "b", labels: [], repoUrl: "" });
+    queue.completeTask("9");
+    reconcile();
+    expect(queue.get("9")).toBeDefined();
+    expect(queue.get("9")?.status).toBe("complete");
+  });
 });
