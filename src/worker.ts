@@ -22,7 +22,7 @@ export function classifyEvent(event: GitHubEvent): "actionable" | "log_only" {
     }
 
     case "pull_request":
-      return action === "closed" ? "actionable" : "log_only";
+      return (action === "closed" || action === "auto_merge_enabled") ? "actionable" : "log_only";
 
     case "pull_request_review":
     case "pull_request_review_comment":

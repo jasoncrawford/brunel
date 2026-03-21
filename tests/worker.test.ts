@@ -433,6 +433,9 @@ describe("classifyEvent", () => {
     it("pull_request/closed is actionable", () => {
       expect(classifyEvent(evt("pull_request", "closed"))).toBe("actionable");
     });
+    it("pull_request/auto_merge_enabled is actionable", () => {
+      expect(classifyEvent(evt("pull_request", "auto_merge_enabled"))).toBe("actionable");
+    });
   });
 });
 
