@@ -35,15 +35,15 @@ The `TaskQueue` and its `Task` entries are **derived state** — materialized an
 
 A new private function inside `createForemanWss`, called after every canonical state change. Steps (in order):
 
-1. **Materialize new tasks**: for each `(num, { issue, depsLoaded })` in `labeledIssues`, if `taskQueue` has no task for that issue number → `taskQueue.addTask({ taskId: String(num), issueNumber: num, ...issue, depsLoaded })`.
+1. **Materialize new tasks**: for each `(num, { issue, depsLoaded })` in `labeledIssues`, if `taskQueue` has no task for that issue number → `taskQueue.addTask({ taskId: String(num), issueNumber: num, ...issue, depsLoaded })`. This step is strictly "create if absent" — it never updates an existing task.
 
-2. **Sync `depsLoaded`**: for each existing task where `labeledIssues.get(num).depsLoaded` is `true` but `task.depsLoaded` is `false` → set `task.depsLoaded = true` (via a new `TaskQueue.setDepsLoaded(issueNumber)` method).
+2. **Sync `depsLoaded`**: for each existing task where `labeledIssues.get(num)?.depsLoaded` is `true` but `task.depsLoaded` is `false` → call `taskQueue.markDepsLoaded([num])`. This is required because `addTask` in step 1 only runs when the task is first created; subsequent updates to `depsLoaded` in `labeledIssues` (from `startDepsLoad`) must be propagated to the existing task here.
 
-3. **Remove stale pending tasks**: for each pending task whose `issueNumber` is not in `labeledIssues` → `taskQueue.removeTask(taskId)`.
+3. **Remove stale pending tasks**: for each pending task whose `issueNumber` is not in `labeledIssues` → `taskQueue.removeTask(taskId)`. Non-pending (assigned or complete) tasks are never removed, enforced by the existing `removeTask` guard.
 
-4. **Try assignment + broadcast**: call `tryAssignWork(w.workerId)` for each idle worker; call `broadcastSnapshot()`.
+4. **Try assignment + broadcast**: call `tryAssignWork(w.workerId)` for each idle worker; call `broadcastSnapshot()`. Workers that receive no task will get a `standby` message, which is idempotent on the worker side (the worker just re-displays "waiting for tasks"). Calling for all idle workers is safe because JS is single-threaded — each sequential `tryAssignWork` call either claims the next pending task or sends `standby`.
 
-`tryAssignWork()` is unchanged — it remains the function that sends `task_assigned` messages. `reconcile()` replaces the scattered `tryAssignWork()` call sites in event handlers.
+`tryAssignWork()` is unchanged — it remains the function that sends `task_assigned` messages. `reconcile()` replaces the scattered `tryAssignWork()` call sites in event handlers. No event handler calls `tryAssignWork()` directly anymore.
 
 ---
 
@@ -57,11 +57,14 @@ A new private async helper inside `createForemanWss`, called fire-and-forget (no
 2. fetchIssueStates(blockers, { repo, token })
    → for each [num, state]: openIssues.add/delete(num)
      (both add and delete, so stale closed-blocker state is cleaned up)
-3. labeledIssues.get(issueNumber).depsLoaded = true  (if entry still present)
+3. if (labeledIssues.has(issueNumber)):
+     labeledIssues.get(issueNumber).depsLoaded = true
 4. reconcile()
 ```
 
-This replaces the inline `.then()` chains currently embedded in the `labeled` and `edited` handlers. Note the `edited` path uses add-or-delete semantics (unlike `labeled` which only adds), matching the current behaviour in the `edited` handler.
+This replaces the inline `.then()` chains currently embedded in the `labeled` and `edited` handlers.
+
+**Concurrent calls**: if `startDepsLoad` is called twice for the same issue (e.g., rapid re-label or edit while a previous load is in flight), both async chains complete independently. The last one to finish sets `depsLoaded = true` and updates `openIssues` / `graph` with its fetched results. This is a benign last-writer-wins race: at worst, one load's blocker data is immediately overwritten by another, but `depsLoaded` ends up `true` and `reconcile()` fires correctly. No guard or abort mechanism is needed.
 
 ---
 
@@ -72,15 +75,15 @@ Each `issues` action becomes a minimal state update + `reconcile()` call:
 | Action | Canonical update |
 |--------|-----------------|
 | `labeled` (task label) | `labeledIssues.set(num, {issue, depsLoaded: false})` + `openIssues.add(num)` + `startDepsLoad(num, body)` + `reconcile()` |
-| `unlabeled` (task label) | `labeledIssues.delete(num)` + `reconcile()` |
+| `unlabeled` (task label) | `labeledIssues.delete(num)` + `openIssues.delete(num)` + `reconcile()` |
 | `opened` (issue already has task label) | same as `labeled` |
 | `closed` | `openIssues.delete(num)` + `reconcile()` |
 | `reopened` | `openIssues.add(num)` + `reconcile()` |
-| `edited` (body changed, issue is labeled) | update `labeledIssues` entry's `issue.body` + `startDepsLoad(num, newBody)` (calls `reconcile()` internally) |
+| `edited` (body changed, issue is labeled) | set `labeledIssues.get(num).depsLoaded = false` + update `labeledIssues` entry's `issue.body` + `startDepsLoad(num, newBody)` (calls `reconcile()` internally) |
+
+Resetting `depsLoaded = false` in the `edited` handler prevents the task from being assigned using stale blocker data while the fresh `startDepsLoad` is in flight.
 
 PR events, `check_run`/`check_suite`, and `forwardEvent` are **unchanged**.
-
-No handler calls `tryAssignWork()` directly anymore — that always happens through `reconcile()`.
 
 ---
 
@@ -100,9 +103,9 @@ return { wss, routeEventToWorker: routeEvent, reconcile };
 
 This allows the startup boot code to call `reconcile()` after `loadIssuesToQueue` returns.
 
-### `TaskQueue` additions
+### `TaskQueue` — no new methods needed
 
-- `setDepsLoaded(issueNumber: number)`: sets `depsLoaded = true` on the task for the given issue number (used by `reconcile()` to sync deps-loaded state without resetting other task fields).
+`markDepsLoaded(issueNumbers: number[])` already exists and is reused by `reconcile()` step 2 (called with a one-element array for the individual issue).
 
 ---
 
@@ -120,8 +123,8 @@ loadIssuesToQueue(labeledIssues: Map<number, LabeledIssueState>, graph, openIssu
 Behaviour:
 1. Fetch all open issues with the task label from GitHub.
 2. For each issue: `labeledIssues.set(num, { issue: {...}, depsLoaded: false })` + `openIssues.add(num)`.
-3. Load blockers into `graph`; fetch blocker open/closed states into `openIssues`.
-4. Mark all loaded entries: `entry.depsLoaded = true` for all entries added in this call.
+3. Load blockers into `graph`; fetch blocker open/closed states and add to `openIssues`. Only additions are needed here because `openIssues` starts empty at startup — no stale state to clean up.
+4. Mark all entries added in this call: `entry.depsLoaded = true`.
 5. Return (caller calls `reconcile()`).
 
 `github.ts` no longer imports `TaskQueue`.
@@ -136,7 +139,7 @@ const { wss, routeEventToWorker, reconcile } = createForemanWss(
 );
 // ... server.listen:
 await loadIssuesToQueue(labeledIssues, graph, openIssues, opts);
-reconcile();
+reconcile();  // creates tasks with depsLoaded: true, assigns to idle workers
 ```
 
 ---
@@ -151,12 +154,13 @@ All changes follow TDD. New unit tests cover:
 - `reconcile()` removes a pending task when its issue is removed from `labeledIssues`.
 - `reconcile()` does NOT remove an assigned or complete task even if removed from `labeledIssues`.
 - `reconcile()` calls `tryAssignWork` for each idle worker.
-- `labeled` event: task is created; `unlabeled` event: pending task is removed.
+- `labeled` event: task is created; `unlabeled` event: pending task is removed and `openIssues` entry is cleaned up.
 - `closed` event: `openIssues` is updated; previously-blocked task becomes assignable after reconcile.
-- `loadIssuesToQueue` populates `labeledIssues` (not `taskQueue` directly).
+- `edited` event: `depsLoaded` is reset to `false` before dep reload.
+- `loadIssuesToQueue` populates `labeledIssues` (not `taskQueue` directly), with `depsLoaded: true` after loading.
 - Startup sequence: `reconcile()` after `loadIssuesToQueue` creates tasks with `depsLoaded: true`.
 
-Existing tests for `WorkerRegistry` and `TaskQueue` are preserved. Integration/smoke tests (`npm run smoke`) are expected to pass without changes.
+Existing tests for `WorkerRegistry`, `TaskQueue`, and all existing `foreman.*.test.ts` files are preserved. Integration/smoke tests (`npm run smoke`) are expected to pass without changes.
 
 ---
 
@@ -165,7 +169,7 @@ Existing tests for `WorkerRegistry` and `TaskQueue` are preserved. Integration/s
 | File | Change |
 |------|--------|
 | `src/types.ts` | Add `LabeledIssueState` interface |
-| `src/foreman.ts` | Add `reconcile()`, `startDepsLoad()`; simplify `routeEvent`; update `createForemanWss` options/return; add `TaskQueue.setDepsLoaded()`; update boot code |
+| `src/foreman.ts` | Add `reconcile()`, `startDepsLoad()`; simplify `routeEvent`; update `createForemanWss` options/return; update boot code |
 | `src/github.ts` | Change `loadIssuesToQueue` signature to accept `labeledIssues` instead of `queue` |
 | `tests/foreman.reconcile.test.ts` | New test file for `reconcile()` behaviour |
 | `tests/foreman.registry.test.ts` | Unchanged |
