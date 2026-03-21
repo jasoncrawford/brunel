@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import http from "http";
 import { TaskQueue, WorkerRegistry, createForemanWss } from "../src/foreman.js";
 import type { LabeledIssueState } from "../src/types.js";
@@ -89,5 +89,18 @@ describe("reconcile()", () => {
     reconcile();
     expect(queue.get("9")).toBeDefined();
     expect(queue.get("9")?.status).toBe("complete");
+  });
+
+  it("calls tryAssignWork for each idle worker, assigning pending ready tasks", () => {
+    const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
+    registry.register("w1", fakeWs, "idle");
+
+    labeledIssues.set(42, { issue: makeIssue(42), depsLoaded: true });
+    reconcile();
+
+    // task_assigned message should have been sent to the idle worker
+    expect(fakeWs.send).toHaveBeenCalledWith(expect.stringContaining('"task_assigned"'));
+    expect(queue.get("42")?.status).toBe("assigned");
+    expect(registry.get("w1")?.status).toBe("busy");
   });
 });

@@ -819,6 +819,16 @@ export function createForemanWss(
         taskQueue.removeTask(t.taskId);
       }
     }
+
+    // Step 4: try assignment for all idle workers
+    // Note: tryAssignWork calls broadcastSnapshot() internally when a task is assigned.
+    // We call it once at the end to cover the case where no assignment happened
+    // (e.g. all workers got standby). This may result in a redundant snapshot on
+    // assignment, which is harmless — snapshots are idempotent.
+    for (const w of registry.getIdleWorkers()) {
+      tryAssignWork(w.workerId);
+    }
+    broadcastSnapshot();
   }
 
   return { wss, routeEventToWorker: routeEvent, reconcile };
