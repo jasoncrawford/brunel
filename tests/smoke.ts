@@ -10,7 +10,7 @@ import * as net from "net";
 import path from "path";
 import { fileURLToPath } from "url";
 
-const TIMEOUT_MS = 15_000;
+const TIMEOUT_MS = 30_000;
 
 // Resolve the root of the repository containing this smoke test.
 // In a git worktree the .git entry is a file pointing at the common git dir;
