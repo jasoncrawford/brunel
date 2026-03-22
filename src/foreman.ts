@@ -1,6 +1,8 @@
 import { Webhooks } from "@octokit/webhooks";
 import http from "http";
 import "dotenv/config";
+import { Hono } from "hono";
+import { getRequestListener } from "@hono/node-server";
 import { WebSocketServer } from "ws";
 import type { WebSocket as WsSocket } from "ws";
 import type { WorkerMessage, ForemanMessage, GitHubEvent, TaskIssue, LabeledIssueState } from "./types.js";
@@ -269,112 +271,116 @@ function printEvent(id: string, name: string, payload: unknown) {
 
 // ── HTTP server factory ───────────────────────────────────────────────────────
 
-function createHttpServer(
+export function createHttpServer(
   webhooks: InstanceType<typeof Webhooks> | null,
   routeEvent: (id: string, name: string, payload: unknown) => void,
   dbLogger?: DbLogger,
 ): http.Server {
-  return http.createServer(async (req, res) => {
-    if (req.method === "POST" && req.url === "/webhook") {
-      const chunks: Buffer[] = [];
-      for await (const chunk of req) {
-        chunks.push(chunk as Buffer);
-      }
-      const rawBody = Buffer.concat(chunks).toString();
+  const app = new Hono();
 
-      const id = (req.headers["x-github-delivery"] as string) ?? "unknown";
-      const name = req.headers["x-github-event"] as string;
-      const signature = req.headers["x-hub-signature-256"] as string;
+  // ── Webhook ────────────────────────────────────────────────────────────────
+  app.post("/webhook", async (c) => {
+    const rawBody = await c.req.text();
+    const id = c.req.header("x-github-delivery") ?? "unknown";
+    const name = c.req.header("x-github-event");
+    const signature = c.req.header("x-hub-signature-256");
 
-      if (!name) {
-        res.writeHead(400);
-        res.end("Missing x-github-event header");
-        return;
-      }
-
-      try {
-        if (webhooks) {
-          if (!signature) {
-            res.writeHead(401);
-            res.end("Missing signature");
-            return;
-          }
-          await webhooks.verifyAndReceive({
-            id,
-            name: name as Parameters<typeof webhooks.verifyAndReceive>[0]["name"],
-            signature,
-            payload: rawBody,
-          });
-        } else {
-          const parsed = JSON.parse(rawBody);
-          printEvent(id, name, parsed);
-          routeEvent(id, name, parsed);
-        }
-        res.writeHead(200);
-        res.end("OK");
-      } catch (err) {
-        flog(`ERROR Webhook processing error: ${err}`);
-        res.writeHead(400);
-        res.end("Bad Request");
-      }
-      return;
+    if (!name) {
+      return c.text("Missing x-github-event header", 400);
     }
 
-    if (req.url === "/") {
-      res.writeHead(200, { "Content-Type": "text/plain" });
-      res.end("GitHub webhook listener running. POST events to /webhook");
-      return;
-    }
-
-    // ── REST API ──────────────────────────────────────────────────────────────
-    if (req.method === "GET" && req.url?.startsWith("/api/")) {
-      res.setHeader("Content-Type", "application/json");
-      try {
-        if (req.url === "/api/log" || req.url?.startsWith("/api/log?")) {
-          const entries = dbLogger ? await dbLogger.queryLog({ limit: 100 }) : [];
-          res.writeHead(200); res.end(JSON.stringify(entries)); return;
+    try {
+      if (webhooks) {
+        if (!signature) {
+          return c.text("Missing signature", 401);
         }
-        const taskMatch = /^\/api\/tasks\/([^/]+)\/events$/.exec(req.url ?? "");
-        if (taskMatch) {
-          const entries = dbLogger ? await dbLogger.queryTaskEvents(taskMatch[1]) : [];
-          res.writeHead(200); res.end(JSON.stringify(entries)); return;
-        }
-        const workerMatch = /^\/api\/workers\/([^/]+)\/messages$/.exec(req.url ?? "");
-        if (workerMatch) {
-          const entries = dbLogger ? await dbLogger.queryWorkerMessages(workerMatch[1]) : [];
-          res.writeHead(200); res.end(JSON.stringify(entries)); return;
-        }
-      } catch (err) {
-        flog(`ERROR API query failed: ${err}`);
-        res.writeHead(500); res.end(JSON.stringify({ error: "internal error" })); return;
+        await webhooks.verifyAndReceive({
+          id,
+          name: name as Parameters<typeof webhooks.verifyAndReceive>[0]["name"],
+          signature,
+          payload: rawBody,
+        });
+      } else {
+        const parsed = JSON.parse(rawBody) as unknown;
+        printEvent(id, name, parsed);
+        routeEvent(id, name, parsed);
       }
+      return c.text("OK", 200);
+    } catch (err) {
+      flog(`ERROR Webhook processing error: ${err}`);
+      return c.text("Bad Request", 400);
     }
+  });
 
-    // ── Static files (React SPA) ──────────────────────────────────────────────
-    // Serve dist/ for all other routes. Falls back to index.html for SPA routing.
-    // Only active when dist/ exists (production build); in dev, Vite serves the frontend.
+  // ── Health check ───────────────────────────────────────────────────────────
+  app.get("/", (c) =>
+    c.text("GitHub webhook listener running. POST events to /webhook"),
+  );
+
+  // ── REST API ───────────────────────────────────────────────────────────────
+  app.get("/api/log", async (c) => {
+    try {
+      const entries = dbLogger ? await dbLogger.queryLog({ limit: 100 }) : [];
+      return c.json(entries);
+    } catch (err) {
+      flog(`ERROR API query failed: ${err}`);
+      return c.json({ error: "internal error" }, 500);
+    }
+  });
+
+  app.get("/api/tasks/:id/events", async (c) => {
+    try {
+      const entries = dbLogger ? await dbLogger.queryTaskEvents(c.req.param("id")) : [];
+      return c.json(entries);
+    } catch (err) {
+      flog(`ERROR API query failed: ${err}`);
+      return c.json({ error: "internal error" }, 500);
+    }
+  });
+
+  app.get("/api/workers/:id/messages", async (c) => {
+    try {
+      const entries = dbLogger ? await dbLogger.queryWorkerMessages(c.req.param("id")) : [];
+      return c.json(entries);
+    } catch (err) {
+      flog(`ERROR API query failed: ${err}`);
+      return c.json({ error: "internal error" }, 500);
+    }
+  });
+
+  // ── Static files (React SPA) ───────────────────────────────────────────────
+  // Serve dist/ for all other routes. Falls back to index.html for SPA routing.
+  // Only active when dist/ exists (production build); in dev, Vite serves the frontend.
+  app.use("*", async (c) => {
     const { createReadStream, existsSync } = await import("fs");
     const { join, extname } = await import("path");
     const { fileURLToPath } = await import("url");
     const root = join(fileURLToPath(import.meta.url), "../../dist");
 
-    if (existsSync(root)) {
-      const safePath = (req.url ?? "/").split("?")[0];
-      const filePath = join(root, safePath);
-      const target = existsSync(filePath) && !safePath.endsWith("/")
-        ? filePath : join(root, "index.html");
-      const mime: Record<string, string> = {
-        ".html": "text/html", ".js": "application/javascript",
-        ".css": "text/css", ".svg": "image/svg+xml", ".ico": "image/x-icon",
-      };
-      res.writeHead(200, { "Content-Type": mime[extname(target)] ?? "application/octet-stream" });
-      createReadStream(target).pipe(res);
-      return;
+    if (!existsSync(root)) {
+      return c.text("Not Found", 404);
     }
 
-    res.writeHead(404);
-    res.end("Not Found");
+    const safePath = c.req.path;
+    const filePath = join(root, safePath);
+    const target =
+      existsSync(filePath) && !safePath.endsWith("/")
+        ? filePath
+        : join(root, "index.html");
+    const mime: Record<string, string> = {
+      ".html": "text/html",
+      ".js": "application/javascript",
+      ".css": "text/css",
+      ".svg": "image/svg+xml",
+      ".ico": "image/x-icon",
+    };
+    const stream = createReadStream(target);
+    return new Response(stream as unknown as ReadableStream, {
+      headers: { "Content-Type": mime[extname(target)] ?? "application/octet-stream" },
+    });
   });
+
+  return http.createServer(getRequestListener(app.fetch));
 }
 
 // ── WebSocket server factory ──────────────────────────────────────────────────
