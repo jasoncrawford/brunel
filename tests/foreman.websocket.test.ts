@@ -5,7 +5,7 @@ import { WebSocket, WebSocketServer } from "ws";
 import type { AddressInfo } from "net";
 import { TaskQueue, WorkerRegistry, createForemanWss } from "../src/foreman.js";
 import { DEFAULT_TASK_LABEL } from "../src/config.js";
-import type { ForemanMessage } from "../src/types.js";
+import type { ForemanMessage, LabeledIssueState } from "../src/types.js";
 import { setBlockers } from "../src/dependencies.js";
 import type { DependencyGraph } from "../src/dependencies.js";
 
@@ -59,6 +59,7 @@ let labelDone: ReturnType<typeof vi.fn>;
 let port: number;
 let graph: DependencyGraph;
 let openIssues: Set<number>;
+let labeledIssues: Map<number, LabeledIssueState>;
 const openClients: WebSocket[] = [];
 
 function connect(): Promise<WebSocket> {
@@ -72,8 +73,9 @@ beforeEach(() => {
   registry = new WorkerRegistry();
   graph = new Map();
   openIssues = new Set();
+  labeledIssues = new Map();
   httpServer = http.createServer();
-  ({ wss, routeEventToWorker: routeEvent } = createForemanWss(queue, registry, httpServer, { taskLabel: DEFAULT_TASK_LABEL, labelDone, graph, openIssues }));
+  ({ wss, routeEventToWorker: routeEvent } = createForemanWss(queue, registry, httpServer, { taskLabel: DEFAULT_TASK_LABEL, labelDone, graph, openIssues, labeledIssues }));
 
   return new Promise<void>((resolve) => {
     httpServer.listen(0, () => {
@@ -360,7 +362,9 @@ describe("dependency-aware task assignment", () => {
   });
 
   it("issues/closed event unblocks a waiting task and sends task_assigned to idle worker", async () => {
-    queue.addTask(makeTask(42));
+    const task42 = makeTask(42);
+    labeledIssues.set(42, { issue: { number: 42, title: task42.title, body: task42.body, labels: task42.labels, repoUrl: task42.repoUrl }, depsLoaded: true });
+    queue.addTask(task42);
     openIssues.add(10);
     setBlockers(42, [10], graph);
 

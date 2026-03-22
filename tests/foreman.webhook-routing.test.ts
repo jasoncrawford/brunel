@@ -29,6 +29,20 @@ function nextMsg(ws: WebSocket): Promise<ForemanMessage> {
   });
 }
 
+/** Collects messages until predicate returns true; resolves with the matching message. */
+function nextMsgWhere(ws: WebSocket, predicate: (msg: ForemanMessage) => boolean): Promise<ForemanMessage> {
+  return new Promise((resolve) => {
+    const handler = (data: Buffer | string) => {
+      const msg: ForemanMessage = JSON.parse(data.toString());
+      if (predicate(msg)) {
+        ws.off("message", handler);
+        resolve(msg);
+      }
+    };
+    ws.on("message", handler);
+  });
+}
+
 function send(ws: WebSocket, msg: object) {
   ws.send(JSON.stringify(msg));
 }
@@ -226,8 +240,11 @@ describe("webhook-triggered task routing", () => {
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
     await nextMsg(ws); // standby
 
-    // Webhook fires: issue #42 gets labeled brunel:ready
-    const reply = nextMsg(ws);
+    // Webhook fires: issue #42 gets labeled brunel:ready.
+    // reconcile() runs synchronously (task depsLoaded:false → standby),
+    // then startDepsLoad completes async → reconcile() assigns the task.
+    // Use nextMsgWhere to skip intermediate standby(s) and wait for task_assigned.
+    const reply = nextMsgWhere(ws, (m) => m.type === "task_assigned");
     routeEvent("evt-1", "issues", labeledPayload(42, "brunel:ready"));
 
     const msg = await reply;
@@ -306,7 +323,11 @@ describe("webhook-triggered task routing", () => {
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
     await nextMsg(ws); // standby
 
-    const reply = nextMsg(ws);
+    // Webhook fires: issue #99 opened with task label.
+    // reconcile() runs synchronously (task depsLoaded:false → standby),
+    // then startDepsLoad completes async → reconcile() assigns the task.
+    // Use nextMsgWhere to skip intermediate standby(s) and wait for task_assigned.
+    const reply = nextMsgWhere(ws, (m) => m.type === "task_assigned");
     routeEvent("evt-1", "issues", openedPayload(99, ["brunel:ready", "bug"]));
 
     const msg = await reply;

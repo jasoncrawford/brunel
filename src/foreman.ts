@@ -3,7 +3,7 @@ import http from "http";
 import "dotenv/config";
 import { WebSocketServer } from "ws";
 import type { WebSocket as WsSocket } from "ws";
-import type { WorkerMessage, ForemanMessage, GitHubEvent } from "./types.js";
+import type { WorkerMessage, ForemanMessage, GitHubEvent, TaskIssue, LabeledIssueState } from "./types.js";
 import { labelIssueDone } from "./github.js";
 import { fmtTimestamp, setVerbose } from "./display.js";
 import { loadConfig } from "./config.js";
@@ -187,6 +187,10 @@ export class TaskQueue {
     const t = this.tasks.get(taskId);
     if (!t || t.status !== "pending") return;
     this.tasks.delete(taskId);
+  }
+
+  getPendingTasks(): Task[] {
+    return [...this.tasks.values()].filter((t) => t.status === "pending");
   }
 
   markDepsLoaded(issueNumbers: number[]) {
@@ -389,12 +393,14 @@ export function createForemanWss(
     dbLogger?: DbLogger;
     adminWss?: AdminWss;
     workerSecret?: string;
+    labeledIssues?: Map<number, LabeledIssueState>;
   },
-): { wss: WebSocketServer; routeEventToWorker: (id: string, name: string, payload: unknown) => void } {
+): { wss: WebSocketServer; routeEventToWorker: (id: string, name: string, payload: unknown) => void; reconcile: () => void } {
   const taskLabel = options.taskLabel;
   const labelDone = options.labelDone ?? (() => Promise.resolve());
   const graph = options.graph ?? new Map<number, Set<number>>();
   const openIssues = options.openIssues ?? new Set<number>();
+  const labeledIssues = options.labeledIssues ?? new Map<number, LabeledIssueState>();
   // repo and token default to "" for unit tests, which don't exercise GitHub-calling paths
   const repo = options.repo ?? "";
   const token = options.token ?? "";
@@ -549,40 +555,19 @@ export function createForemanWss(
           ((p.repository as Record<string, unknown> | undefined)?.html_url as string | undefined) ?? "";
         const labels =
           (issue.labels as Array<{ name: string }> | undefined)?.map((l) => l.name) ?? [];
-        taskQueue.addTask({
-          taskId: String(issueNumber),
-          issueNumber,
+        const issueData: TaskIssue = {
+          number: issueNumber,
           title: String(issue.title ?? ""),
           body: String(issue.body ?? ""),
           labels,
           repoUrl,
-          depsLoaded: false,
-        });
-        // Track open state for newly-enqueued brunel:ready issues
+        };
+        labeledIssues.set(issueNumber, { issue: issueData, depsLoaded: false });
         openIssues.add(issueNumber);
-        broadcastSnapshot();
+        startDepsLoad(issueNumber, issueData.body);
+        reconcile();
         flog(`[task #${issueNumber}] enqueued via ${name}/${action}`);
-        task = taskQueue.getTaskForIssue(issueNumber)!;
-
-        // Fetch deps before assigning (graph must be current)
-        fetchBlockers(issueNumber, String(issue.body ?? ""), { repo, token })
-          .then((blockers) => {
-            setBlockers(issueNumber, blockers, graph);
-            return blockers.length > 0 ? fetchIssueStates(blockers, { repo, token }) : Promise.resolve(new Map<number, "open" | "closed">());
-          })
-          .then((states) => {
-            for (const [num, state] of states) {
-              if (state === "open") openIssues.add(num);
-            }
-            // Mark deps as loaded so this task is now eligible for assignment.
-            const t = taskQueue.get(String(issueNumber));
-            if (t) t.depsLoaded = true;
-            // Only one task was just enqueued, so assigning one idle worker is sufficient.
-            const idle = registry.getIdleWorker();
-            if (idle) tryAssignWork(idle.workerId);
-          })
-          .catch((err) => flog(`ERROR fetching deps for #${issueNumber}: ${err}`));
-        return;
+        return; // task is always pending here; nothing further to forward
       }
     }
 
@@ -595,53 +580,37 @@ export function createForemanWss(
         action === "unlabeled" &&
         (p.label as Record<string, unknown> | undefined)?.name === taskLabel
       ) {
-        const existingTask = taskQueue.getTaskForIssue(issueNumber);
-        if (existingTask?.status === "pending") {
-          taskQueue.removeTask(existingTask.taskId);
-          openIssues.delete(issueNumber);
-          broadcastSnapshot();
-          flog(`[task #${issueNumber}] dequeued (label removed)`);
-        }
+        labeledIssues.delete(issueNumber);
+        openIssues.delete(issueNumber);
+        flog(`[task #${issueNumber}] dequeued (label removed)`);
+        reconcile();
         return;
       }
 
       if (action === "closed") {
         openIssues.delete(issueNumber);
-        for (const w of registry.getIdleWorkers()) {
-          tryAssignWork(w.workerId);
-        }
+        reconcile();
         return;
       }
 
       if (action === "reopened") {
         openIssues.add(issueNumber);
+        reconcile();
         return;
       }
 
       if (action === "edited") {
         const changes = p.changes as Record<string, unknown> | undefined;
         if (changes?.body) {
-          const body = String(issue.body ?? "");
-          fetchBlockers(issueNumber, body, { repo, token })
-            .then((blockers) => {
-              setBlockers(issueNumber, blockers, graph);
-              return fetchIssueStates(blockers, { repo, token });
-            })
-            .then((states) => {
-              for (const [num, state] of states) {
-                // Only update state for the newly-fetched blockers of this issue.
-                // openIssues may contain entries from other tasks; we only touch
-                // what fetchIssueStates returned, so other tasks' blockers are unaffected.
-                if (state === "open") openIssues.add(num);
-                else openIssues.delete(num);
-              }
-              for (const w of registry.getIdleWorkers()) {
-                tryAssignWork(w.workerId);
-              }
-            })
-            .catch((err) => flog(`ERROR updating deps for #${issueNumber}: ${err}`));
+          const newBody = String(issue.body ?? "");
+          const entry = labeledIssues.get(issueNumber);
+          if (entry) {
+            entry.depsLoaded = false;
+            entry.issue = { ...entry.issue, body: newBody };
+            startDepsLoad(issueNumber, newBody);
+          }
         }
-        // fall through: let existing forwardEvent logic run for assigned tasks
+        // fall through: let forwardEvent run for assigned tasks
       }
     }
 
@@ -781,7 +750,71 @@ export function createForemanWss(
     }
   });
 
-  return { wss, routeEventToWorker: routeEvent };
+  function startDepsLoad(issueNumber: number, body: string): void {
+    fetchBlockers(issueNumber, body, { repo, token })
+      .then((blockers) => {
+        setBlockers(issueNumber, blockers, graph);
+        return blockers.length > 0
+          ? fetchIssueStates(blockers, { repo, token })
+          : Promise.resolve(new Map<number, "open" | "closed">());
+      })
+      .then((states) => {
+        for (const [num, state] of states) {
+          if (state === "open") openIssues.add(num);
+          else openIssues.delete(num);
+        }
+        const entry = labeledIssues.get(issueNumber);
+        if (entry) entry.depsLoaded = true;
+        reconcile();
+      })
+      .catch((err) => flog(`ERROR fetching deps for #${issueNumber}: ${err}`));
+  }
+
+  function reconcile() {
+    // Step 1: materialise tasks for new labeledIssues entries
+    for (const [num, { issue, depsLoaded }] of labeledIssues) {
+      if (!taskQueue.getTaskForIssue(num)) {
+        taskQueue.addTask({
+          taskId: String(num),
+          issueNumber: num,
+          title: issue.title,
+          body: issue.body,
+          labels: issue.labels,
+          repoUrl: issue.repoUrl,
+          depsLoaded,
+        });
+      }
+    }
+
+    // Step 2: sync depsLoaded from labeledIssues to existing tasks
+    for (const [num, { depsLoaded }] of labeledIssues) {
+      if (depsLoaded) {
+        const t = taskQueue.getTaskForIssue(num);
+        if (t && !t.depsLoaded) {
+          taskQueue.markDepsLoaded([num]);
+        }
+      }
+    }
+
+    // Step 3: remove pending tasks whose issue no longer has the label
+    for (const t of taskQueue.getPendingTasks()) {
+      if (!labeledIssues.has(t.issueNumber)) {
+        taskQueue.removeTask(t.taskId);
+      }
+    }
+
+    // Step 4: try assignment for all idle workers
+    // Note: tryAssignWork calls broadcastSnapshot() internally when a task is assigned.
+    // We call it once at the end to cover the case where no assignment happened
+    // (e.g. all workers got standby). This may result in a redundant snapshot on
+    // assignment, which is harmless — snapshots are idempotent.
+    for (const w of registry.getIdleWorkers()) {
+      tryAssignWork(w.workerId);
+    }
+    broadcastSnapshot();
+  }
+
+  return { wss, routeEventToWorker: routeEvent, reconcile };
 }
 
 // Only start listening when run directly (not when imported by tests)
@@ -796,6 +829,7 @@ if (isMain) {
   const taskQueue = new TaskQueue();
   const graph: DependencyGraph = new Map();
   const openIssues = new Set<number>();
+  const labeledIssues = new Map<number, LabeledIssueState>();
   const webhooks = config.webhookSecret
     ? new Webhooks({ secret: config.webhookSecret })
     : null;
@@ -813,17 +847,19 @@ if (isMain) {
   }
 
   let routeEvent: (id: string, name: string, payload: unknown) => void = () => {};
+  let reconcile: () => void = () => {};
   const server = createHttpServer(webhooks, (id, name, payload) => routeEvent(id, name, payload), dbLogger);
 
   // Admin WebSocket broadcaster
   const { createAdminWss } = await import("./admin-ws.js");
   const adminWss = createAdminWss(server);
 
-  ({ routeEventToWorker: routeEvent } = createForemanWss(
+  ({ routeEventToWorker: routeEvent, reconcile } = createForemanWss(
     taskQueue, registry, server,
     {
       graph,
       openIssues,
+      labeledIssues,
       taskLabel: config.taskLabel,
       repo: config.githubRepo,
       token: config.githubToken,
@@ -852,11 +888,12 @@ if (isMain) {
     flog(`Admin WebSocket: ws://localhost:${config.port}/admin/ws`);
     flog("Waiting for events...");
     try {
-      await loadIssuesToQueue(taskQueue, graph, openIssues, {
+      await loadIssuesToQueue(labeledIssues, graph, openIssues, {
         repo: config.githubRepo,
         token: config.githubToken,
         taskLabel: config.taskLabel,
       });
+      reconcile();
     } catch (err) {
       flog(`WARNING Failed to load issues from GitHub: ${err}`);
     }
