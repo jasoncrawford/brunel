@@ -789,10 +789,7 @@ export function createForemanWss(
     // Step 2: sync depsLoaded from labeledIssues to existing tasks (both directions)
     for (const [num, { depsLoaded }] of labeledIssues) {
       const t = taskQueue.getTaskForIssue(num);
-      if (t && t.depsLoaded !== depsLoaded) {
-        if (depsLoaded) taskQueue.markDepsLoaded([num]);
-        else t.depsLoaded = false;
-      }
+      if (t) t.depsLoaded = depsLoaded;
     }
 
     // Step 3: remove pending tasks whose issue no longer has the label
