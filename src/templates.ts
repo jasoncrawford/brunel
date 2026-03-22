@@ -165,6 +165,8 @@ const BRANCH_REVIEW_PROMPT =
   "If all tests passed, check if the branch is up to date, and if not, rebase it. " +
   "Then check if the PR can be merged. If anything is blocking merge, resolve it, but do not merge yourself.";
 
+const CODE_REVIEW_PROMPT = "Please respond in whatever way you think is most appropriate, replying and/or making code changes.";
+
 export const EVENT_FMT: EventTemplateFmtTable = {
   _check_suites: (p) => {
     const failed = p.failed as string[];
@@ -191,7 +193,7 @@ export const EVENT_FMT: EventTemplateFmtTable = {
         lines.push(`\n- ${formatCommentLocation(c.path, c.line, c.startLine)}: ${c.body}`);
       }
     }
-    lines.push("\n\nPlease respond in whatever way you think is most appropriate, replying and/or making code changes.");
+    lines.push("\n\n" + CODE_REVIEW_PROMPT);
     return lines.join("").trim();
   },
 
@@ -220,10 +222,10 @@ Please do the above if necessary. Then summarize what you did, and anything else
   },
 
   pull_request_review: (p) =>
-    `A review was submitted on PR #${p.pull_request?.number}: state=${p.review?.state}.\n\n${p.review?.body ?? ""}\n\nPlease respond in whatever way you think is most appropriate, replying and/or making code changes.`.trim(),
+    `A review was submitted on PR #${p.pull_request?.number}: state=${p.review?.state}.\n\n${p.review?.body ?? ""}\n\n${CODE_REVIEW_PROMPT}`.trim(),
 
   pull_request_review_comment: (p) =>
-    `A review comment was added on PR #${p.pull_request?.number} at ${formatCommentLocation(p.comment?.path, p.comment?.line, p.comment?.start_line)}:\n\n${p.comment?.body ?? ""}\n\nPlease respond in whatever way you think is most appropriate, replying and/or making code changes.`.trim(),
+    `A review comment was added on PR #${p.pull_request?.number} at ${formatCommentLocation(p.comment?.path, p.comment?.line, p.comment?.start_line)}:\n\n${p.comment?.body ?? ""}\n\n${CODE_REVIEW_PROMPT}`.trim(),
 
   issue_comment: (p) =>
     `A comment was added on issue #${p.issue?.number}:\n\n${p.comment?.body ?? ""}`.trim(),
