@@ -15,7 +15,10 @@ export function buildInitialPrompt(issue: TaskIssue): string {
   return `Please work on GitHub issue #${issue.number}: "${issue.title}" in ${issue.repoUrl}.
 
 Issue description:
+
+---------------
 ${issue.body || "(no description)"}
+---------------
 
 Labels: ${issue.labels.join(", ") || "(none)"}
 
