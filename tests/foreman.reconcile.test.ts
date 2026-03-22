@@ -69,6 +69,31 @@ describe("reconcile()", () => {
     expect(queue.get("5")?.depsLoaded).toBe(false);
   });
 
+  it("syncs depsLoaded=false from labeledIssues to an existing task that has depsLoaded: true (stale-dep bug)", () => {
+    // Simulates: issue body was edited → labeledIssues.depsLoaded reset to false,
+    // but task.depsLoaded is still true. reconcile() must propagate false → task.
+    queue.addTask({ taskId: "5", issueNumber: 5, title: "T", body: "b", labels: [], repoUrl: "", depsLoaded: true });
+    labeledIssues.set(5, { issue: makeIssue(5), depsLoaded: false });
+    reconcile();
+    expect(queue.get("5")?.depsLoaded).toBe(false);
+  });
+
+  it("does not assign a pending task via tryAssignWork when its depsLoaded is false after reconcile", () => {
+    // The worker is idle, but the task should NOT be assigned because depsLoaded is false.
+    const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
+    registry.register("w1", fakeWs, "idle");
+
+    // Task exists with depsLoaded: true but labeledIssues says false (e.g. mid-reload).
+    queue.addTask({ taskId: "42", issueNumber: 42, title: "T", body: "b", labels: [], repoUrl: "", depsLoaded: true });
+    labeledIssues.set(42, { issue: makeIssue(42), depsLoaded: false });
+    reconcile();
+
+    // reconcile must have propagated depsLoaded=false, so the task must NOT be assigned.
+    expect(queue.get("42")?.depsLoaded).toBe(false);
+    expect(queue.get("42")?.status).toBe("pending");
+    expect(fakeWs.send).not.toHaveBeenCalledWith(expect.stringContaining('"task_assigned"'));
+  });
+
   it("removes a pending task whose issue is no longer in labeledIssues", () => {
     queue.addTask({ taskId: "9", issueNumber: 9, title: "T", body: "b", labels: [], repoUrl: "" });
     // labeledIssues is empty — issue 9 has no label
