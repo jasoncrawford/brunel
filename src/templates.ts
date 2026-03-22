@@ -15,16 +15,19 @@ export function buildInitialPrompt(issue: TaskIssue): string {
   return `Please work on GitHub issue #${issue.number}: "${issue.title}" in ${issue.repoUrl}.
 
 Issue description:
+
+---------------
 ${issue.body || "(no description)"}
+---------------
 
 Labels: ${issue.labels.join(", ") || "(none)"}
 
 You should ask for any clarifications you need about requirements or product spec, but you should decide on the technical implementation on your own. If the technical design is complex enough to need review, use a subagent instead of asking the user.
 
-Remember key practices:
+Use your branch-discipline skill, and remember key practices:
 
-1. Use proper branch discipline. Pull main to get the latest, then create a new branch.
-2. Use the EnterWorktree tool to create an isolated worktree for this task. Make no changes in the main workspace, only in the worktree.
+1. Pull main to get the latest before making any edits.
+2. Use the EnterWorktree tool to create a new branch and an isolated worktree for this task. Make no changes in the main workspace, only in the worktree.
 3. As much as possible, use test-driven development.
 4. Create a PR when done, and include the text "Closes #${issue.number}".
 
@@ -162,6 +165,8 @@ const BRANCH_REVIEW_PROMPT =
   "If all tests passed, check if the branch is up to date, and if not, rebase it. " +
   "Then check if the PR can be merged. If anything is blocking merge, resolve it, but do not merge yourself.";
 
+const CODE_REVIEW_PROMPT = "Please respond in whatever way you think is most appropriate, replying and/or making code changes.";
+
 export const EVENT_FMT: EventTemplateFmtTable = {
   _check_suites: (p) => {
     const failed = p.failed as string[];
@@ -188,7 +193,7 @@ export const EVENT_FMT: EventTemplateFmtTable = {
         lines.push(`\n- ${formatCommentLocation(c.path, c.line, c.startLine)}: ${c.body}`);
       }
     }
-    lines.push("\n\nPlease respond in whatever way you think is most appropriate, replying and/or making code changes.");
+    lines.push("\n\n" + CODE_REVIEW_PROMPT);
     return lines.join("").trim();
   },
 
@@ -200,27 +205,28 @@ export const EVENT_FMT: EventTemplateFmtTable = {
   pull_request: (p) => {
     const pr = p.pull_request as Record<string, unknown> | undefined;
     const prNumber = pr?.number;
+    if (p.action === "auto_merge_enabled") {
+      return `Auto-merge was enabled on PR #${prNumber}. ${BRANCH_REVIEW_PROMPT}`;
+    }
     if (p.action === "closed") {
-      return `PR #${prNumber} was ${pr?.merged ? 'merged' : 'closed without merging'}. Before we end this session:
+      return `PR #${prNumber} was ${pr?.merged ? 'merged' : 'closed without merging'}. Please clean up your worktree by calling ExitWorktree with action: "remove".
+
+Then, before we end this session, consider:
 
 * Are there any followup issues we should file?
 * Are there any updates to skills that we should make, or new skills to record?
 * Are there any updates to be made to project documentation?
-* Clean up your worktree by calling ExitWorktree with action: "remove".
 
-Please do the above if necessary. Then summarize what you did, and anything else the user should know.`;
-    }
-    if (p.action === "auto_merge_enabled") {
-      return `Auto-merge was enabled on PR #${prNumber}. ${BRANCH_REVIEW_PROMPT}`;
+Please do the above if necessary. Then summarize any such followups/updates, and anything else the user should know.`;
     }
     return "";
   },
 
   pull_request_review: (p) =>
-    `A review was submitted on PR #${p.pull_request?.number}: state=${p.review?.state}.\n\n${p.review?.body ?? ""}\n\nPlease respond in whatever way you think is most appropriate, replying and/or making code changes.`.trim(),
+    `A review was submitted on PR #${p.pull_request?.number}: state=${p.review?.state}.\n\n${p.review?.body ?? ""}\n\n${CODE_REVIEW_PROMPT}`.trim(),
 
   pull_request_review_comment: (p) =>
-    `A review comment was added on PR #${p.pull_request?.number} at ${formatCommentLocation(p.comment?.path, p.comment?.line, p.comment?.start_line)}:\n\n${p.comment?.body ?? ""}\n\nPlease respond in whatever way you think is most appropriate, replying and/or making code changes.`.trim(),
+    `A review comment was added on PR #${p.pull_request?.number} at ${formatCommentLocation(p.comment?.path, p.comment?.line, p.comment?.start_line)}:\n\n${p.comment?.body ?? ""}\n\n${CODE_REVIEW_PROMPT}`.trim(),
 
   issue_comment: (p) =>
     `A comment was added on issue #${p.issue?.number}:\n\n${p.comment?.body ?? ""}`.trim(),
