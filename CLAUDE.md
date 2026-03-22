@@ -45,11 +45,6 @@ Optional (all have defaults):
 - `BRUNEL_SUPABASE_SERVICE_ROLE_KEY` — Supabase service role key (for cloud deployment; treat as secret)
 - `BRUNEL_WORKER_SECRET` — shared secret to authenticate workers with the foreman (treat as secret)
 
-## Git workflow
-
-- Always create a feature branch and PR for changes — never commit directly to `main`.
-- Do NOT auto-merge PRs — leave merging to the user after UAT.
-
 ## Useful scripts
 
 - `npm test` — unit tests (vitest)
