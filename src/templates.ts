@@ -205,18 +205,19 @@ export const EVENT_FMT: EventTemplateFmtTable = {
   pull_request: (p) => {
     const pr = p.pull_request as Record<string, unknown> | undefined;
     const prNumber = pr?.number;
+    if (p.action === "auto_merge_enabled") {
+      return `Auto-merge was enabled on PR #${prNumber}. ${BRANCH_REVIEW_PROMPT}`;
+    }
     if (p.action === "closed") {
-      return `PR #${prNumber} was ${pr?.merged ? 'merged' : 'closed without merging'}. Before we end this session:
+      return `PR #${prNumber} was ${pr?.merged ? 'merged' : 'closed without merging'}. Please clean up your worktree by calling ExitWorktree with action: "remove".
+
+Then, before we end this session, consider:
 
 * Are there any followup issues we should file?
 * Are there any updates to skills that we should make, or new skills to record?
 * Are there any updates to be made to project documentation?
-* Clean up your worktree by calling ExitWorktree with action: "remove".
 
-Please do the above if necessary. Then summarize what you did, and anything else the user should know.`;
-    }
-    if (p.action === "auto_merge_enabled") {
-      return `Auto-merge was enabled on PR #${prNumber}. ${BRANCH_REVIEW_PROMPT}`;
+Please do the above if necessary. Then summarize any such followups/updates, and anything else the user should know.`;
     }
     return "";
   },
