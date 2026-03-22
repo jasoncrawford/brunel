@@ -24,10 +24,10 @@ Labels: ${issue.labels.join(", ") || "(none)"}
 
 You should ask for any clarifications you need about requirements or product spec, but you should decide on the technical implementation on your own. If the technical design is complex enough to need review, use a subagent instead of asking the user.
 
-Remember key practices:
+Use your branch-discipline skill, and remember key practices:
 
-1. Use proper branch discipline. Pull main to get the latest, then create a new branch.
-2. Use the EnterWorktree tool to create an isolated worktree for this task. Make no changes in the main workspace, only in the worktree.
+1. Pull main to get the latest before making any edits.
+2. Use the EnterWorktree tool to create a new branch and an isolated worktree for this task. Make no changes in the main workspace, only in the worktree.
 3. As much as possible, use test-driven development.
 4. Create a PR when done, and include the text "Closes #${issue.number}".
 
