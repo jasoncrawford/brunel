@@ -39,12 +39,16 @@ export interface AdminWss {
   broadcastLogEvent(entry: LogEntry): void;
 }
 
-export function createAdminWss(server: http.Server): AdminWss {
+export function createAdminWss(server: http.Server, getSnapshot?: () => AdminSnapshot): AdminWss {
   const clients = new Set<WsSocket>();
   const wss = new WebSocketServer({ noServer: true });
 
   wss.on("connection", (ws) => {
     clients.add(ws);
+    if (getSnapshot) {
+      const snapshot = getSnapshot();
+      ws.send(JSON.stringify({ type: "snapshot", ...snapshot } satisfies AdminMessage));
+    }
     ws.on("close", () => clients.delete(ws));
   });
 
