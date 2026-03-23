@@ -854,7 +854,10 @@ if (isMain) {
 
   // Admin WebSocket broadcaster
   const { createAdminWss } = await import("./admin-ws.js");
-  const adminWss = createAdminWss(server);
+  const adminWss = createAdminWss(server, () => ({
+    tasks: taskQueue.getTaskSnapshots(),
+    workers: registry.getWorkerSnapshots(),
+  }));
 
   ({ routeEventToWorker: routeEvent, reconcile } = createForemanWss(
     taskQueue, registry, server,

@@ -16,6 +16,16 @@ function startServer(): Promise<{ server: http.Server; port: number; adminWss: R
   });
 }
 
+function startServerWithSnapshot(getSnapshot: () => import("../src/admin-ws.js").AdminSnapshot): Promise<{ server: http.Server; port: number; adminWss: ReturnType<typeof createAdminWss> }> {
+  return new Promise((resolve) => {
+    const server = http.createServer();
+    const adminWss = createAdminWss(server, getSnapshot);
+    server.listen(0, () => {
+      resolve({ server, port: (server.address() as AddressInfo).port, adminWss });
+    });
+  });
+}
+
 function connectAdmin(port: number): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(`ws://localhost:${port}/admin/ws`);
@@ -77,6 +87,19 @@ describe("createAdminWss", () => {
     expect(m1.type).toBe("snapshot");
     expect(m2.type).toBe("snapshot");
     await closeAll(ws1, ws2);
+  });
+
+  it("sends current snapshot immediately to a newly connected client", async () => {
+    const snapshot = { tasks: [{ taskId: "t1", issueNumber: 1, title: "Test", status: "pending" as const }], workers: [] };
+    const { server, port } = await startServerWithSnapshot(() => snapshot);
+    servers.push(server);
+    // Register message listener before opening so the immediate snapshot isn't missed
+    const ws = new WebSocket(`ws://localhost:${port}/admin/ws`);
+    const msgP = nextMsg(ws);
+    await new Promise<void>((resolve, reject) => { ws.once("open", resolve); ws.once("error", reject); });
+    const msg = await msgP;
+    expect(msg).toEqual({ type: "snapshot", ...snapshot });
+    await closeAll(ws);
   });
 
   it("ignores requests to /worker path (does not hijack worker upgrade)", async () => {
