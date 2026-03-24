@@ -35,6 +35,8 @@ const BrunelConfigSchema = z.object({
   doneLabel:      z.string().default(DEFAULT_DONE_LABEL),
   /** Enable verbose output (shows full Claude message stream). */
   verbose:        z.preprocess(boolPreprocess, z.boolean()).default(false),
+  /** Show full agent thinking text. Defaults to the value of verbose. */
+  thinkOutLoud:   z.preprocess(boolPreprocess, z.boolean()).optional(),
 
   // ── Foreman-only ───────────────────────────────────────────────────────────
 
@@ -60,7 +62,8 @@ const BrunelConfigSchema = z.object({
   workerSecret:           z.string().optional(),
 });
 
-export type BrunelConfig = z.infer<typeof BrunelConfigSchema> & {
+export type BrunelConfig = Omit<z.infer<typeof BrunelConfigSchema>, "thinkOutLoud"> & {
+  thinkOutLoud: boolean;
   allowDangerouslySkipPermissions: boolean;
 };
 
@@ -251,6 +254,7 @@ export async function loadConfig(
 
   return {
     ...parsed,
+    thinkOutLoud: parsed.thinkOutLoud ?? parsed.verbose,
     allowDangerouslySkipPermissions: parsed.permissionMode === "bypassPermissions",
   };
 }

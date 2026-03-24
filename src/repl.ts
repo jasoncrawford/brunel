@@ -4,7 +4,7 @@ import { fileURLToPath } from "url";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { CanUseTool, PermissionMode, PermissionResult } from "@anthropic-ai/claude-agent-sdk";
 import * as display from "./display.js";
-import { setVerbose } from "./display.js";
+import { setVerbose, setThinkOutLoud } from "./display.js";
 import { ask, listCommandNames, dispatchInput, pick, pickMultiple, pickQuestion } from "./input.js";
 import type { PickQuestionResult } from "./input.js";
 import { workerMain } from "./worker.js";
@@ -253,6 +253,7 @@ async function main(
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const config = await loadConfig(process.argv);
   setVerbose(config.verbose);
+  setThinkOutLoud(config.thinkOutLoud);
   const permConfig = {
     permissionMode: config.permissionMode,
     allowDangerouslySkipPermissions: config.allowDangerouslySkipPermissions,
