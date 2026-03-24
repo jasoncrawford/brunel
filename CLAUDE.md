@@ -40,6 +40,7 @@ Optional (all have defaults):
 - `BRUNEL_WEBHOOK_SECRET` / `WEBHOOK_SECRET` — GitHub webhook secret for signature verification (optional)
 - `BRUNEL_FOREMAN_URL` — WebSocket URL workers connect to (default: `ws://localhost:3000`); **no legacy fallback for this one**
 - `BRUNEL_VERBOSE` — enable verbose Claude output (default: `false`)
+- `BRUNEL_THINK_OUT_LOUD` — show full agent thinking text; defaults to `BRUNEL_VERBOSE`; also settable in `brunel.config.ts` as `thinkOutLoud`
 - `BRUNEL_PERMISSION_MODE` — Claude permission mode: `default`, `acceptEdits`, `bypassPermissions`, `plan`, `dontAsk` (default: `default`)
 - `BRUNEL_SUPABASE_URL` — Supabase project URL (for cloud deployment)
 - `BRUNEL_SUPABASE_SERVICE_ROLE_KEY` — Supabase service role key (for cloud deployment; treat as secret)
