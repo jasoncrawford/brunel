@@ -10,6 +10,11 @@ export const hr = (ch = "─") => ch.repeat(W);
 export let verbose = false;
 export function setVerbose(v: boolean) { verbose = v; }
 
+// ── Think-out-loud flag ───────────────────────────────────────────────────────
+
+export let thinkOutLoud = false;
+export function setThinkOutLoud(v: boolean) { thinkOutLoud = v; }
+
 // ── Colors ────────────────────────────────────────────────────────────────────
 
 export const c = {
@@ -209,7 +214,7 @@ export function fmtEditResult(b: ToolResultBlock) {
 export function fmtBashOutput(text: string): string {
   const t = text.trim();
   if (!t || t === "(Bash completed with no output)") return "Success";
-  return trunc(t, 100);
+  return verbose ? t : trunc(t, 100);
 }
 
 export function fmtWriteOutput(b: ToolResultBlock & { _input?: Record<string, unknown> }): string {
@@ -360,7 +365,7 @@ export type FmtEntry = Fmt | { quiet?: Fmt; verbose?: Fmt };
 export type FmtTable = Record<string, FmtEntry>;
 
 export const ASSISTANT_BLOCK_FMT: FmtTable = {
-  thinking: (b) => c.gray(`\n${renderMarkdown(b.thinking ?? "")}`),
+  thinking: (b) => thinkOutLoud ? c.gray(`\n${renderMarkdown(b.thinking ?? "")}`) : c.gray("\nThinking..."),
   text:     (b) => c.yellow(`\n${renderMarkdown(b.text ?? "")}`),
   _default: (b) => c.darkGray(`[assistant/${b.type}]`),
 };
@@ -373,7 +378,7 @@ export const USER_BLOCK_FMT: FmtTable = {
 };
 
 export const TOOL_CALL_FMT: FmtTable = {
-  Bash:       (b) => fmtToolCall(b, `$ ${trunc(b.input?.command ?? "", 80)}`),
+  Bash:       (b) => fmtToolCall(b, `$ ${b.input?.command ?? ""}`),
   Read:       (b) => fmtToolCall(b, `• Read(${b.input?.file_path ?? "?"})`),
   Write:      (b) => fmtToolCall(b, `• Write(${b.input?.file_path ?? "?"})`),
   Edit:       (b) => fmtToolCall(b, `• Edit(${b.input?.file_path ?? "?"})`),
@@ -388,7 +393,7 @@ export const TOOL_CALL_FMT: FmtTable = {
 };
 
 export const TOOL_RESULT_FMT: FmtTable = {
-  _default:   (b) => c.darkGray(`→ ${trunc(toolResultText(b), 100)}`),
+  _default:   (b) => c.darkGray(`→ ${verbose ? toolResultText(b) : trunc(toolResultText(b), 100)}`),
   Read:       (b) => c.darkGray(`→ ${fmtCount(toolResultText(b).split("\n").length, "line")}`),
   Edit:       (b) => fmtEditResult(b),
   Skill:      (b) => c.darkGray(`→ Loaded skill`),
@@ -399,8 +404,8 @@ export const TOOL_RESULT_FMT: FmtTable = {
 };
 
 export const TOOL_ERROR_FMT: FmtTable = {
-  AskUserQuestion: (b) => c.darkGray(`→ ${trunc(toolResultText(b), 100)}`),
-  _default:        (b) => c.salmon(`! ${trunc(toolResultText(b), 100)}`),
+  AskUserQuestion: (b) => c.darkGray(`→ ${toolResultText(b)}`),
+  _default:        (b) => c.salmon(`! ${toolResultText(b)}`),
 };
 
 export const SYSTEM_FMT: FmtTable = {

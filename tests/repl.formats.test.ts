@@ -3,6 +3,7 @@ import { stripAnsi } from "./helpers.js";
 import {
   resolve,
   setVerbose,
+  setThinkOutLoud,
   ASSISTANT_BLOCK_FMT,
   USER_BLOCK_FMT,
   TOOL_CALL_FMT,
@@ -76,10 +77,18 @@ describe("resolve()", () => {
 });
 
 describe("ASSISTANT_BLOCK_FMT", () => {
-  it("thinking block wraps renderMarkdown in gray", () => {
+  it("thinking block: thinkOutLoud=true shows content wrapped in gray", () => {
+    setThinkOutLoud(true);
     const result = resolve(ASSISTANT_BLOCK_FMT, "thinking", { thinking: "hello" })!;
+    setThinkOutLoud(false);
     expect(stripAnsi(result)).toContain("hello");
     // gray color: \x1b[38;5;246m
+    expect(result).toContain("\x1b[38;5;246m");
+  });
+
+  it("thinking block: thinkOutLoud=false shows 'Thinking...' placeholder in gray", () => {
+    const result = resolve(ASSISTANT_BLOCK_FMT, "thinking", { thinking: "hello" })!;
+    expect(stripAnsi(result)).toBe("\nThinking...");
     expect(result).toContain("\x1b[38;5;246m");
   });
 

@@ -8,6 +8,7 @@ import {
   print,
   toolUseNames,
   setVerbose,
+  setThinkOutLoud,
   _statusActive,
   setInputPrintCallback,
 } from "../src/display.js";
@@ -142,11 +143,21 @@ describe("printBlock - tool_result blocks", () => {
 });
 
 describe("printBlock - assistant blocks (non-tool)", () => {
-  it("thinking type → ASSISTANT_BLOCK_FMT", () => {
+  it("thinking type → ASSISTANT_BLOCK_FMT: thinkOutLoud=true shows content", () => {
+    setThinkOutLoud(true);
     const output = captureOutput(() => {
       printBlock({ type: "thinking", thinking: "my thoughts" }, "assistant");
     });
+    setThinkOutLoud(false);
     expect(stripAnsi(output)).toContain("my thoughts");
+  });
+
+  it("thinking type → ASSISTANT_BLOCK_FMT: thinkOutLoud=false shows placeholder", () => {
+    const output = captureOutput(() => {
+      printBlock({ type: "thinking", thinking: "my thoughts" }, "assistant");
+    });
+    expect(stripAnsi(output)).toContain("Thinking...");
+    expect(stripAnsi(output)).not.toContain("my thoughts");
   });
 
   it("text type → ASSISTANT_BLOCK_FMT", () => {
@@ -272,16 +283,16 @@ describe("printMessage", () => {
         type: "assistant",
         message: {
           content: [
-            { type: "thinking", thinking: "thinking..." },
+            { type: "thinking", thinking: "my thoughts" },
             { type: "text", text: "response" },
           ],
         },
       });
     });
     const plain = stripAnsi(output);
-    expect(plain).toContain("thinking...");
+    expect(plain).toContain("Thinking...");
     expect(plain).toContain("response");
-    expect(plain.indexOf("thinking...")).toBeLessThan(plain.indexOf("response"));
+    expect(plain.indexOf("Thinking...")).toBeLessThan(plain.indexOf("response"));
   });
 
   it("result message → fmtStats output", () => {
