@@ -227,7 +227,7 @@ async function main(
 
     if (action.type === "clear") {
       sessionId = undefined;
-      display.print("Session cleared.");
+      display.print(display.clearBreak());
       continue;
     }
 
