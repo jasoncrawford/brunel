@@ -1,6 +1,14 @@
 import fs from "fs";
 import * as display from "./display.js";
 
+// ── Stash ─────────────────────────────────────────────────────────────────────
+
+/** Buffer stashed by ^S, restored as the initial value of the next ask() call. */
+let stash: string | null = null;
+
+/** Reset the stash (exposed for testing). */
+export function _resetStash(): void { stash = null; }
+
 // ── Frontmatter parsing ────────────────────────────────────────────────────────
 
 /**
@@ -366,7 +374,7 @@ export function ask(
   abort?: Promise<string>,
 ): Promise<string> {
   return new Promise((resolve) => {
-    let buffer = "";
+    let buffer = stash ?? "";
     let pasteBuffer = "";
     let inPaste = false;
     let done = false;
@@ -377,11 +385,14 @@ export function ask(
     let commands: CommandSuggestion[] = [];
     try { commands = getCommands(); } catch { /* graceful: use empty */ }
 
-    let cursor = 0; // current cursor position within buffer
+    let cursor = buffer.length; // start cursor at end of any pre-populated stash
     // Number of rows used by the last full redraw (suggestion row is always included)
     let totalDrawnRows = 0;
+    stash = null; // consume the stash
 
     process.stdout.write(promptStr);
+    // If buffer was pre-populated from stash, render it immediately.
+    if (buffer) fullRedraw(0, computeMatches());
 
     // ── Multiline-aware screen position ──────────────────────────────────────
     //
@@ -670,6 +681,26 @@ export function ask(
       // if row+1 doesn't exist, no-op
     }
 
+    function stashBuffer() {
+      if (!buffer) return;
+      stash = buffer;
+      // Navigate from current cursor row to the top of the prompt area (row 0),
+      // then erase to end of screen, print the stash notification, and redraw
+      // an empty prompt so the user can type their next input.
+      const { row: curRow } = screenPosOf(cursor);
+      if (curRow > 0) process.stdout.write(`\x1b[${curRow}A`);
+      process.stdout.write("\r\x1b[J");
+      process.stdout.write(display.c.darkGray("✦ Prompt stashed — will be restored on next submit\r\n"));
+      buffer = "";
+      cursor = 0;
+      totalDrawnRows = 0;
+      process.stdout.write(promptLine);
+      process.stdout.write("\x1b[K\r\n\x1b[K");
+      totalDrawnRows = 1;
+      process.stdout.write(`\x1b[1A\r`);
+      if (promptLine.length > 0) process.stdout.write(`\x1b[${promptLine.length}C`);
+    }
+
     function processTyped(data: string) {
       // Substitute known sequences with placeholder chars before stripping
       data = data.replace(/\x1b\[1;3D/g, "\x1c"); // iTerm2 option+left  → 0x1C
@@ -701,6 +732,7 @@ export function ask(
         else if (ch === "\x17")                       { deleteWord(); }          // ^W
         else if (ch === "\x10")                       { moveLineUp(); }          // ↑
         else if (ch === "\x11")                       { moveLineDown(); }        // ↓
+        else if (ch === "\x13")                       { stashBuffer(); }         // ^S
         else if (ch === "\x1c")                       { moveWordLeft(); }        // option+←
         else if (ch === "\x1d")                       { moveWordRight(); }       // option+→
         else if (ch === "\x1e")                       { moveTo(cursor - 1); }    // ←
