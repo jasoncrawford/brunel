@@ -109,9 +109,9 @@ describe("POST /webhook", () => {
   });
 });
 
-describe("GET /", () => {
+describe("GET /health", () => {
   it("returns 200 with a text/plain response", async () => {
-    const res = await request(port, "GET", "/");
+    const res = await request(port, "GET", "/health");
     expect(res.status).toBe(200);
     expect(res.contentType).toMatch(/text\/plain/);
   });

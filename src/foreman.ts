@@ -313,7 +313,7 @@ export function createHttpServer(
   });
 
   // ── Health check ───────────────────────────────────────────────────────────
-  app.get("/", (c) =>
+  app.get("/health", (c) =>
     c.text("GitHub webhook listener running. POST events to /webhook"),
   );
 
