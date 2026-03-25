@@ -18,7 +18,7 @@ const ENV_KEYS = [
   "BRUNEL_TASK_LABEL", "BRUNEL_DONE_LABEL",
   "BRUNEL_VERBOSE", "BRUNEL_PORT", "BRUNEL_WEBHOOK_SECRET",
   "BRUNEL_FOREMAN_URL", "BRUNEL_PERMISSION_MODE",
-  "BRUNEL_SUPABASE_URL", "BRUNEL_SUPABASE_SERVICE_ROLE_KEY", "BRUNEL_WORKER_SECRET",
+  "BRUNEL_SUPABASE_URL", "BRUNEL_SUPABASE_SECRET_KEY", "BRUNEL_WORKER_SECRET",
 ];
 
 beforeEach(() => {
@@ -350,7 +350,7 @@ describe("permission mode", () => {
   });
 });
 
-// ── New optional fields: supabaseUrl, supabaseServiceRoleKey, workerSecret ────
+// ── New optional fields: supabaseUrl, supabaseSecretKey, workerSecret ────
 
 describe("supabaseUrl", () => {
   it("is undefined by default", async () => {
@@ -387,35 +387,35 @@ describe("supabaseUrl", () => {
   });
 });
 
-describe("supabaseServiceRoleKey", () => {
+describe("supabaseSecretKey", () => {
   it("is undefined by default", async () => {
     baseEnv();
     const cfg = await loadConfig(["node", "repl.js"]);
-    expect(cfg.supabaseServiceRoleKey).toBeUndefined();
+    expect(cfg.supabaseSecretKey).toBeUndefined();
   });
 
-  it("BRUNEL_SUPABASE_SERVICE_ROLE_KEY sets supabaseServiceRoleKey", async () => {
+  it("BRUNEL_SUPABASE_SECRET_KEY sets supabaseSecretKey", async () => {
     baseEnv();
-    process.env.BRUNEL_SUPABASE_SERVICE_ROLE_KEY = "service-role-key";
+    process.env.BRUNEL_SUPABASE_SECRET_KEY = "service-role-key";
     const cfg = await loadConfig(["node", "repl.js"]);
-    expect(cfg.supabaseServiceRoleKey).toBe("service-role-key");
+    expect(cfg.supabaseSecretKey).toBe("service-role-key");
   });
 
-  it("--supabase-service-role-key CLI flag sets supabaseServiceRoleKey", async () => {
+  it("--supabase-secret-key CLI flag sets supabaseSecretKey", async () => {
     baseEnv();
-    const cfg = await loadConfig(["node", "repl.js", "--supabase-service-role-key", "cli-key"]);
-    expect(cfg.supabaseServiceRoleKey).toBe("cli-key");
+    const cfg = await loadConfig(["node", "repl.js", "--supabase-secret-key", "cli-key"]);
+    expect(cfg.supabaseSecretKey).toBe("cli-key");
   });
 
-  it("warns when supabaseServiceRoleKey in file config", async () => {
+  it("warns when supabaseSecretKey in file config", async () => {
     baseEnv();
-    await loadConfig(["node", "repl.js"], { supabaseServiceRoleKey: "file-key" });
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("supabaseServiceRoleKey"));
+    await loadConfig(["node", "repl.js"], { supabaseSecretKey: "file-key" });
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("supabaseSecretKey"));
   });
 
-  it("does NOT warn when supabaseServiceRoleKey from env var", async () => {
+  it("does NOT warn when supabaseSecretKey from env var", async () => {
     baseEnv();
-    process.env.BRUNEL_SUPABASE_SERVICE_ROLE_KEY = "env-key";
+    process.env.BRUNEL_SUPABASE_SECRET_KEY = "env-key";
     await loadConfig(["node", "repl.js"]);
     expect(warnSpy).not.toHaveBeenCalled();
   });

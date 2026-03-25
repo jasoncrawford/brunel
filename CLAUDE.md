@@ -43,7 +43,7 @@ Optional (all have defaults):
 - `BRUNEL_THINK_OUT_LOUD` — show full agent thinking text; defaults to `BRUNEL_VERBOSE`; also settable in `brunel.config.ts` as `thinkOutLoud`
 - `BRUNEL_PERMISSION_MODE` — Claude permission mode: `default`, `acceptEdits`, `bypassPermissions`, `plan`, `dontAsk` (default: `default`)
 - `BRUNEL_SUPABASE_URL` — Supabase project URL (for cloud deployment)
-- `BRUNEL_SUPABASE_SERVICE_ROLE_KEY` — Supabase service role key (for cloud deployment; treat as secret)
+- `BRUNEL_SUPABASE_SECRET_KEY` — Supabase secret key (for cloud deployment; treat as secret)
 - `BRUNEL_WORKER_SECRET` — shared secret to authenticate workers with the foreman (treat as secret)
 
 ## Useful scripts
