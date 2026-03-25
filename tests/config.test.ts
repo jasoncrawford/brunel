@@ -61,7 +61,7 @@ describe("VALID_PERMISSION_MODES", () => {
 describe("defaults", () => {
   it("returns correct defaults for all optional fields", async () => {
     baseEnv();
-    const cfg = await loadConfig(["node", "repl.js"]);
+    const cfg = await loadConfig(["node", "repl.js"], {});
     expect(cfg.taskLabel).toBe("brunel:ready");
     expect(cfg.doneLabel).toBe("brunel:done");
     expect(cfg.verbose).toBe(false);
