@@ -117,10 +117,9 @@ describe("USER_BLOCK_FMT", () => {
     expect(raw).not.toContain("\x1b[90m");
   });
 
-  it("text block, _isSynthetic=true → truncated darkGray text", () => {
-    const raw = resolve(USER_BLOCK_FMT, "text", { text: "synthetic msg", _isSynthetic: true })!;
-    expect(raw).toContain("\x1b[90m");
-    expect(stripAnsi(raw)).toContain("synthetic msg");
+  it("text block, _isSynthetic=true → null (hidden)", () => {
+    const raw = resolve(USER_BLOCK_FMT, "text", { text: "synthetic msg", _isSynthetic: true });
+    expect(raw).toBeNull();
   });
 
   it("_default: [user/someType]", () => {
@@ -509,7 +508,7 @@ describe("SYSTEM_FMT", () => {
 
   it("init, VERBOSE=true → session: <session_id>", () => {
     setVerbose(true);
-    expect(r(SYSTEM_FMT, "init", { session_id: "abc" })).toBe("session: abc");
+    expect(r(SYSTEM_FMT, "init", { session_id: "abc" })).toBe("init: session abc");
   });
 
   it("task_started → lavender ▶ agent started: <description>", () => {

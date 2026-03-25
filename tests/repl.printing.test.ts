@@ -176,11 +176,7 @@ describe("printBlock - assistant blocks (non-tool)", () => {
 });
 
 describe("printBlock - user blocks (non-tool_result)", () => {
-  it("text with msg.isSynthetic=true → _isSynthetic injected", () => {
-    const output = captureOutput(() => {
-      printBlock({ type: "text", text: "synthetic content" }, "user", { isSynthetic: true });
-    });
-    // synthetic is shown in darkGray
+  it("text with msg.isSynthetic=true → hidden (no output)", () => {
     const raw = (() => {
       let out = "";
       const logSpy = vi.spyOn(console, "log").mockImplementation((s: any) => { out += String(s) + "\n"; });
@@ -190,7 +186,7 @@ describe("printBlock - user blocks (non-tool_result)", () => {
       writeSpy.mockRestore();
       return out;
     })();
-    expect(raw).toContain("\x1b[90m");
+    expect(raw.trim()).toBe("");
   });
 
   it("text with msg.isSynthetic absent → _isSynthetic=false (not darkGray)", () => {

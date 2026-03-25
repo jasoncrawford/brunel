@@ -30,14 +30,19 @@ afterEach(() => {
 });
 
 describe("printForemanMessage", () => {
-  it("task_assigned prints issue number and title", () => {
+  it("task_assigned prints issue number and title (verbose only)", () => {
     const msg: ForemanMessage = {
       type: "task_assigned",
       taskId: "task-1",
       issue: { number: 42, title: "Fix the bug", body: "", labels: [], repoUrl: "https://github.com/owner/repo" },
     };
-    const output = captureOutput(() => printForemanMessage(msg));
-    const plain = stripAnsi(output);
+    // task_assigned is verbose-only — silent in default mode
+    const quietOutput = captureOutput(() => printForemanMessage(msg));
+    expect(stripAnsi(quietOutput).trim()).toBe("");
+
+    setVerbose(true);
+    const verboseOutput = captureOutput(() => printForemanMessage(msg));
+    const plain = stripAnsi(verboseOutput);
     expect(plain).toContain("#42");
     expect(plain).toContain("Fix the bug");
   });
