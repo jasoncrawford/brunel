@@ -286,18 +286,87 @@ export function mdInline(text: string): string {
   return text;
 }
 
-export function renderTable(tableLines: string[]): string {
+function wrapText(text: string, width: number): string[] {
+  if (width <= 0 || text.length <= width) return [text];
+  const words = text.split(" ");
+  const lines: string[] = [];
+  let current = "";
+  for (const word of words) {
+    if (current === "") {
+      if (word.length > width) {
+        let rest = word;
+        while (rest.length > width) { lines.push(rest.slice(0, width)); rest = rest.slice(width); }
+        current = rest;
+      } else {
+        current = word;
+      }
+    } else if (current.length + 1 + word.length <= width) {
+      current += " " + word;
+    } else {
+      lines.push(current);
+      if (word.length > width) {
+        let rest = word;
+        while (rest.length > width) { lines.push(rest.slice(0, width)); rest = rest.slice(width); }
+        current = rest;
+      } else {
+        current = word;
+      }
+    }
+  }
+  if (current) lines.push(current);
+  return lines.length > 0 ? lines : [""];
+}
+
+function distributeWidths(naturalWidths: number[], available: number): number[] {
+  const N = naturalWidths.length;
+  if (N === 0) return [];
+  const total = naturalWidths.reduce((a, b) => a + b, 0);
+  if (total <= available) return [...naturalWidths];
+  const allocated = new Array<number>(N).fill(0);
+  const order = [...naturalWidths.keys()].sort((a, b) => naturalWidths[a] - naturalWidths[b]);
+  let remaining = available;
+  for (let k = 0; k < N; k++) {
+    const i = order[k];
+    const fairShare = Math.floor(remaining / (N - k));
+    if (naturalWidths[i] <= fairShare) {
+      allocated[i] = naturalWidths[i];
+      remaining -= naturalWidths[i];
+    } else {
+      for (let j = k; j < N; j++) {
+        allocated[order[j]] = Math.floor(remaining / (N - k));
+      }
+      break;
+    }
+  }
+  return allocated;
+}
+
+export function renderTable(tableLines: string[], maxWidth?: number): string {
+  const termWidth = maxWidth ?? (process.stdout.columns || W);
   const rows = tableLines.map(line =>
     line.split("|").slice(1, -1).map(cell => cell.trim())
   );
   const isSep = (row: string[]) => row.every(cell => /^[-: ]+$/.test(cell));
   const dataRows = rows.filter(r => !isSep(r));
   const colCount = Math.max(...dataRows.map(r => r.length));
-  const widths = Array.from({ length: colCount }, (_, i) =>
+  const naturalWidths = Array.from({ length: colCount }, (_, i) =>
     Math.max(...dataRows.map(r => (r[i] ?? "").length))
   );
-  const renderRow = (row: string[]) =>
-    "│ " + widths.map((w, i) => mdInline((row[i] ?? "").padEnd(w))).join(" │ ") + " │";
+  // overhead: "│ " (2) + " │ " * (N-1) (3*(N-1)) + " │" (2) = 1 + 3*N
+  const overhead = 1 + 3 * colCount;
+  const available = Math.max(termWidth - overhead, colCount);
+  const widths = distributeWidths(naturalWidths, available);
+  const renderRow = (row: string[]): string => {
+    const wrapped = widths.map((w, i) => wrapText(row[i] ?? "", w));
+    const numLines = Math.max(...wrapped.map(ls => ls.length));
+    const termRows: string[] = [];
+    for (let ln = 0; ln < numLines; ln++) {
+      termRows.push(
+        "│ " + widths.map((w, i) => mdInline((wrapped[i][ln] ?? "").padEnd(w))).join(" │ ") + " │"
+      );
+    }
+    return termRows.join("\n");
+  };
   const divider = "├─" + widths.map(w => "─".repeat(w)).join("─┼─") + "─┤";
   const out: string[] = [];
   for (const row of rows) {
