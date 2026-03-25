@@ -838,10 +838,10 @@ if (isMain) {
 
   // DB logger
   let dbLogger: DbLogger;
-  if (config.supabaseUrl && config.supabaseServiceRoleKey) {
+  if (config.supabaseUrl && config.supabaseSecretKey) {
     const { createClient } = await import("@supabase/supabase-js");
     const { createDbLogger } = await import("./db.js");
-    dbLogger = createDbLogger(createClient(config.supabaseUrl, config.supabaseServiceRoleKey));
+    dbLogger = createDbLogger(createClient(config.supabaseUrl, config.supabaseSecretKey));
     flog("Supabase logging enabled");
   } else {
     const { createNullDbLogger } = await import("./db.js");
