@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PassThrough } from "stream";
-import { ask, pick, pickMultiple, promptLine, pickQuestion } from "../src/input.js";
+import { ask, pick, pickMultiple, promptLine, pickQuestion, _resetStash } from "../src/input.js";
 import type { PickQuestionResult } from "../src/input.js";
 import * as display from "../src/display.js";
 
@@ -731,6 +731,112 @@ describe("pickMultiple() - multi-selection picker", () => {
       stdin.push("\r");
       const result = await p;
       expect(result).toEqual([0, 1]);
+    });
+  });
+});
+
+describe("ask() - stash (^S)", () => {
+  beforeEach(() => { _resetStash(); });
+  afterEach(() => { _resetStash(); });
+
+  it("^S with non-empty buffer clears buffer so ask resolves to ''", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = ask("> ", () => []);
+      stdin.push("hello world");
+      stdin.push("\x13"); // ^S — stash
+      stdin.push("\r");   // submit now-empty buffer
+      const result = await p;
+      expect(result).toBe("");
+    });
+  });
+
+  it("next ask() after stash is pre-populated with stashed text", async () => {
+    await withFakeStdin(async (stdin) => {
+      // First ask: stash then submit empty
+      const p1 = ask("> ", () => []);
+      stdin.push("hello world");
+      stdin.push("\x13");
+      stdin.push("\r");
+      await p1;
+
+      // Second ask: pre-populated with stash; Enter immediately resolves to stash
+      const p2 = ask("> ", () => []);
+      stdin.push("\r");
+      const result = await p2;
+      expect(result).toBe("hello world");
+    });
+  });
+
+  it("stash is consumed after one ask() call — third ask starts empty", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p1 = ask("> ", () => []);
+      stdin.push("saved");
+      stdin.push("\x13");
+      stdin.push("\r");
+      await p1;
+
+      const p2 = ask("> ", () => []);
+      stdin.push("\r");
+      const r2 = await p2;
+      expect(r2).toBe("saved");
+
+      const p3 = ask("> ", () => []);
+      stdin.push("\r");
+      const r3 = await p3;
+      expect(r3).toBe(""); // stash was consumed
+    });
+  });
+
+  it("^S with empty buffer is a no-op — nothing stashed", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p1 = ask("> ", () => []);
+      stdin.push("\x13"); // ^S with empty buffer
+      stdin.push("hi");
+      stdin.push("\r");
+      const r1 = await p1;
+      expect(r1).toBe("hi");
+
+      // No stash was set
+      const p2 = ask("> ", () => []);
+      stdin.push("\r");
+      const r2 = await p2;
+      expect(r2).toBe(""); // starts empty
+    });
+  });
+
+  it("^S writes a 'stashed' notification to stdout", async () => {
+    const writes: string[] = [];
+    vi.spyOn(process.stdout, "write").mockImplementation((s: any) => {
+      writes.push(String(s));
+      return true;
+    });
+
+    await withFakeStdin(async (stdin) => {
+      const p = ask("> ", () => []);
+      stdin.push("test");
+      stdin.push("\x13");
+      stdin.push("\r");
+      await p;
+    });
+
+    const out = writes.join("");
+    expect(out).toContain("stashed");
+  });
+
+  it("pressing ^S twice: second stash overwrites first", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p1 = ask("> ", () => []);
+      stdin.push("first");
+      stdin.push("\x13"); // stash "first"
+      stdin.push("second");
+      stdin.push("\x13"); // stash "second" (overwrites "first")
+      stdin.push("\r");
+      await p1;
+
+      const p2 = ask("> ", () => []);
+      stdin.push("\r");
+      const r2 = await p2;
+      expect(r2).toBe("second");
     });
   });
 });
