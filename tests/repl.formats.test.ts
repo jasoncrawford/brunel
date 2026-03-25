@@ -530,6 +530,52 @@ describe("SYSTEM_FMT", () => {
     expect(stripAnsi(raw)).toContain("done: All good");
   });
 
+  it("compact_boundary (auto) → shows compaction notice with token count", () => {
+    const msg = {
+      subtype: "compact_boundary",
+      compact_metadata: { trigger: "auto", pre_tokens: 50000 },
+    };
+    const result = r(SYSTEM_FMT, "compact_boundary", msg)!;
+    expect(result).not.toBeNull();
+    expect(result).toContain("compacted");
+    expect(result).toContain("auto");
+    expect(result).toContain("50k");
+  });
+
+  it("compact_boundary (manual) → shows manual trigger", () => {
+    const msg = {
+      subtype: "compact_boundary",
+      compact_metadata: { trigger: "manual", pre_tokens: 10000 },
+    };
+    const result = r(SYSTEM_FMT, "compact_boundary", msg)!;
+    expect(result).not.toBeNull();
+    expect(result).toContain("manual");
+  });
+
+  it("compact_boundary → always shown (not verbose-only)", () => {
+    setVerbose(false);
+    const msg = {
+      subtype: "compact_boundary",
+      compact_metadata: { trigger: "auto", pre_tokens: 1000 },
+    };
+    expect(resolve(SYSTEM_FMT, "compact_boundary", msg)).not.toBeNull();
+  });
+
+  it("status/compacting → shows compacting notice (verbose and quiet)", () => {
+    for (const v of [false, true]) {
+      setVerbose(v);
+      const msg = { subtype: "status", status: "compacting" };
+      const result = r(SYSTEM_FMT, "status", msg);
+      expect(result).not.toBeNull();
+      expect(result!.toLowerCase()).toContain("compact");
+    }
+  });
+
+  it("status/null → null (compaction done, no message needed)", () => {
+    const msg = { subtype: "status", status: null };
+    expect(resolve(SYSTEM_FMT, "status", msg)).toBeNull();
+  });
+
   it("_default, VERBOSE=false → null", () => {
     setVerbose(false);
     expect(resolve(SYSTEM_FMT, "unknown_subtype", { subtype: "unknown_subtype" })).toBeNull();
