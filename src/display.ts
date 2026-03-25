@@ -39,6 +39,12 @@ export const s = {
   strikethrough: (s: string) => `\x1b[9m${s}\x1b[29m`,
 };
 
+export function clearBreak(): string {
+  const label = "=== Context cleared ";
+  const fill = "=".repeat(Math.max(0, W - label.length));
+  return c.sageGreen(s.bold(label + fill));
+}
+
 // ── Content block types ───────────────────────────────────────────────────────
 
 export interface ToolUseBlock {

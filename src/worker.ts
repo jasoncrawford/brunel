@@ -286,7 +286,7 @@ export class WorkerSession {
 
     if (command === "clear") {
       this.currentSessionId = undefined;
-      this.display.print("Session cleared.");
+      this.display.print(display.clearBreak());
       return;
     }
   }
