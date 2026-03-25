@@ -40,9 +40,10 @@ export const s = {
 };
 
 export function clearBreak(): string {
+  const width = process.stdout.columns ?? W;
   const label = "=== Context cleared ";
-  const fill = "=".repeat(Math.max(0, W - label.length));
-  return c.sageGreen(s.bold(label + fill));
+  const fill = "=".repeat(Math.max(0, width - label.length));
+  return "\n" + c.sageGreen(s.bold(label + fill));
 }
 
 // ── Content block types ───────────────────────────────────────────────────────
