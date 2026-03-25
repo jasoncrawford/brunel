@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { stripAnsi } from "./helpers.js";
-import { mdInline, renderMarkdown, s } from "../src/display.js";
+import { mdInline, renderMarkdown, renderTable, s } from "../src/display.js";
 
 describe("mdInline", () => {
   it("bold with **", () => {
@@ -215,6 +215,82 @@ describe("renderMarkdown - tables", () => {
     const result = stripAnsi(renderMarkdown("| Col |\n| --- |\n| val |"));
     expect(result).toContain("│");
     expect(result).toContain("val");
+  });
+});
+
+describe("renderTable - text wrapping", () => {
+  it("table that fits within maxWidth is not wrapped", () => {
+    const lines = [
+      "| A | B |",
+      "| --- | --- |",
+      "| short | text |",
+    ];
+    const result = stripAnsi(renderTable(lines, 80));
+    const outputLines = result.split("\n");
+    expect(outputLines).toHaveLength(3); // header, divider, data row
+  });
+
+  it("each output line fits within maxWidth when wrapping needed", () => {
+    const lines = [
+      "| Bug | Root cause | Fix |",
+      "| --- | --- | --- |",
+      "| Short | A very long root cause explanation that exceeds the column width significantly | Short fix |",
+    ];
+    const result = stripAnsi(renderTable(lines, 60));
+    for (const line of result.split("\n")) {
+      expect(line.length).toBeLessThanOrEqual(60);
+    }
+  });
+
+  it("all cell content is preserved after wrapping", () => {
+    const lines = [
+      "| Col A | Col B |",
+      "| --- | --- |",
+      "| short | this is a very long text that will need to be wrapped across multiple lines in the output |",
+    ];
+    const result = stripAnsi(renderTable(lines, 40));
+    // All words from the long cell should appear somewhere in the output
+    expect(result).toContain("short");
+    expect(result).toContain("this is a very long text");
+    expect(result).toContain("multiple lines");
+  });
+
+  it("divider line fits within maxWidth", () => {
+    const lines = [
+      "| Bug | Root cause | Fix |",
+      "| --- | --- | --- |",
+      "| Short | Very long root cause text that needs wrapping here | Short |",
+    ];
+    const result = stripAnsi(renderTable(lines, 50));
+    const dividerLine = result.split("\n").find(l => l.startsWith("├"));
+    expect(dividerLine).toBeDefined();
+    expect(dividerLine!.length).toBeLessThanOrEqual(50);
+  });
+
+  it("short columns keep natural width when only wide column wraps", () => {
+    const lines = [
+      "| Name | Description |",
+      "| ---- | ----------- |",
+      "| Alice | A very long description that should wrap to multiple lines in the output |",
+    ];
+    const result = stripAnsi(renderTable(lines, 40));
+    expect(result).toContain("Alice");
+    expect(result).toContain("A very long");
+  });
+
+  it("wrapped row has │ borders on every output line", () => {
+    const lines = [
+      "| A | B |",
+      "| - | - |",
+      "| x | this is a long cell that wraps |",
+    ];
+    const result = stripAnsi(renderTable(lines, 25));
+    const dataLines = result.split("\n").filter(l => l.startsWith("│"));
+    // There should be more than one data line because of wrapping
+    expect(dataLines.length).toBeGreaterThan(1);
+    for (const line of dataLines) {
+      expect(line).toMatch(/^│.*│$/);
+    }
   });
 });
 
