@@ -480,6 +480,14 @@ export const SYSTEM_FMT: FmtTable = {
   task_started:      (m) => c.lavender(`  ▶ agent started: ${m.description}`),
   task_progress:     (m) => c.lavender(`  • ${m.description}`),
   task_notification: (m) => c.lavender(`  ◀︎ ${m.status}: ${m.summary}`),
+  compact_boundary:  (m) => {
+    const meta = m.compact_metadata as { trigger?: string; pre_tokens?: number } | undefined;
+    const trigger = meta?.trigger ?? "auto";
+    const tokens = meta?.pre_tokens;
+    const detail = tokens != null ? ` (${trigger}, ${fmtNum(tokens)} tokens)` : ` (${trigger})`;
+    return c.amber(`↩ Context compacted${detail}`);
+  },
+  status:            { verbose: (m) => m.status === "compacting" ? c.darkGray("Compacting context...") : null },
   _default:          { verbose: (m) => c.darkGray(`system/${m.subtype}`) },
 };
 
