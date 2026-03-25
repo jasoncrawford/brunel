@@ -479,7 +479,7 @@ function fmtCompactionDetail(meta: unknown): string {
   const m = meta as { trigger?: string; pre_tokens?: number } | undefined;
   const trigger = m?.trigger ?? "auto";
   const tokens = m?.pre_tokens;
-  return tokens != null ? ` (${trigger}, ${fmtNum(tokens)} tokens)` : ` (${trigger})`;
+  return tokens != null ? `${trigger}, ${fmtNum(tokens)} tokens` : trigger;
 }
 
 export const SYSTEM_FMT: FmtTable = {
@@ -487,8 +487,8 @@ export const SYSTEM_FMT: FmtTable = {
   task_started:      (m) => c.lavender(`  ▶ agent started: ${m.description}`),
   task_progress:     (m) => c.lavender(`  • ${m.description}`),
   task_notification: (m) => c.lavender(`  ◀︎ ${m.status}: ${m.summary}`),
-  compact_boundary:  (m) => c.amber(`↩ Context compacted${fmtCompactionDetail(m.compact_metadata)}`),
-  status:            { verbose: (m) => m.status === "compacting" ? c.darkGray("Compacting context...") : null },
+  compact_boundary:  (m) => c.darkGray(`↩ Context compacted (${fmtCompactionDetail(m.compact_metadata)})`),
+  status:            (m) => m.status === "compacting" ? c.darkGray("Compacting context...") : null,
   _default:          { verbose: (m) => c.darkGray(`system/${m.subtype}`) },
 };
 

@@ -561,18 +561,14 @@ describe("SYSTEM_FMT", () => {
     expect(resolve(SYSTEM_FMT, "compact_boundary", msg)).not.toBeNull();
   });
 
-  it("status/compacting → shows compacting notice in verbose mode", () => {
-    setVerbose(true);
-    const msg = { subtype: "status", status: "compacting" };
-    const result = r(SYSTEM_FMT, "status", msg);
-    expect(result).not.toBeNull();
-    expect(result!.toLowerCase()).toContain("compact");
-  });
-
-  it("status/compacting → null in quiet mode", () => {
-    setVerbose(false);
-    const msg = { subtype: "status", status: "compacting" };
-    expect(resolve(SYSTEM_FMT, "status", msg)).toBeNull();
+  it("status/compacting → shows compacting notice (verbose and quiet)", () => {
+    for (const v of [false, true]) {
+      setVerbose(v);
+      const msg = { subtype: "status", status: "compacting" };
+      const result = r(SYSTEM_FMT, "status", msg);
+      expect(result).not.toBeNull();
+      expect(result!.toLowerCase()).toContain("compact");
+    }
   });
 
   it("status/null → null (compaction done, no message needed)", () => {
