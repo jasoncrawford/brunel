@@ -151,7 +151,7 @@ export class WorkerSession {
     this.ws = ws;
 
     ws.on("open", () => {
-      this.display.print(display.c.sageGreen("  Connected to foreman."));
+      this.display.print(display.c.sageGreen("Connected to foreman"));
     });
 
     ws.on("message", (data: Buffer | string) => {
@@ -161,7 +161,7 @@ export class WorkerSession {
     });
 
     ws.on("close", () => {
-      this.display.print(display.c.amber("  Disconnected from foreman. Reconnecting..."));
+      this.display.print(display.c.amber("Disconnected from foreman. Reconnecting..."));
       setTimeout(() => this.connect(), 3000);
     });
 
@@ -179,7 +179,7 @@ export class WorkerSession {
       this.resolveWsInput?.(WS_TASK_ASSIGNED);
       this.resolveWsInput = null;
       const initialPrompt = buildInitialPrompt(msg.issue);
-      this.display.print(display.c.amber(initialPrompt));
+      this.display.print(display.c.sageGreen(initialPrompt));
       void this.runQueryLoop(initialPrompt);
     } else if (msg.type === "event_notification") {
       const { event } = msg;
@@ -262,7 +262,7 @@ export class WorkerSession {
   private buildAndLogEventPrompt(events: GitHubEvent[]): string {
     this.display.print(display.c.darkGray(`Building prompt from events: ${fmtEventList(events)}`));
     const prompt = buildEventPrompt(events);
-    this.display.print(display.c.amber(prompt));
+    this.display.print(display.c.sageGreen(prompt));
     return prompt;
   }
 
@@ -279,7 +279,7 @@ export class WorkerSession {
         this.currentTaskId = undefined;
         this.currentIssue = undefined;
         this.currentSessionId = undefined;
-        this.display.print(display.c.sageGreen("  Task complete. Waiting for next task..."));
+        this.display.print(display.c.sageGreen("Task complete. Waiting for next task..."));
       }
       return;
     }

@@ -365,15 +365,13 @@ export type FmtEntry = Fmt | { quiet?: Fmt; verbose?: Fmt };
 export type FmtTable = Record<string, FmtEntry>;
 
 export const ASSISTANT_BLOCK_FMT: FmtTable = {
-  thinking: (b) => thinkOutLoud ? c.gray(`\n${renderMarkdown(b.thinking ?? "")}`) : c.gray("\nThinking..."),
+  thinking: (b) => c.gray("\n" + (thinkOutLoud ? renderMarkdown(b.thinking ?? "") : "Thinking...")),
   text:     (b) => c.yellow(`\n${renderMarkdown(b.text ?? "")}`),
   _default: (b) => c.darkGray(`[assistant/${b.type}]`),
 };
 
 export const USER_BLOCK_FMT: FmtTable = {
-  text:     (b) => b._isSynthetic
-    ? c.darkGray(`\n${trunc(b.text ?? "", 100)}`)
-    : `\n${b.text ?? ""}`,
+  text:     (b) => b._isSynthetic ? null : `\n${b.text ?? ""}`,
   _default: (b) => c.darkGray(`[user/${b.type}]`),
 };
 
@@ -409,7 +407,7 @@ export const TOOL_ERROR_FMT: FmtTable = {
 };
 
 export const SYSTEM_FMT: FmtTable = {
-  init:              { verbose: (m) => c.darkGray(`session: ${m.session_id}`) },
+  init:              { verbose: (m) => c.darkGray(`init: session ${m.session_id}`) },
   task_started:      (m) => c.lavender(`  ▶ agent started: ${m.description}`),
   task_progress:     (m) => c.lavender(`  • ${m.description}`),
   task_notification: (m) => c.lavender(`  ◀︎ ${m.status}: ${m.summary}`),
@@ -424,7 +422,7 @@ export const MESSAGE_FMT: FmtTable = {
 };
 
 export const FOREMAN_MESSAGE_FMT: FmtTable = {
-  task_assigned:      (m) => c.lavender(`Task assigned: #${m.issue.number}, ${m.issue.title}`),
+  task_assigned:      { verbose: (m) => c.darkGray(`Task assigned: #${m.issue.number}, ${m.issue.title}`) },
   event_notification: (m) => c.darkGray(`Event received [${fmtTime()}]: ${fmtEvent(m.event as GitHubEvent)}`),
   standby:            (m) => c.darkGray("Standby: waiting for tasks..."),
   _default:           (m) => c.darkGray(`Unknown foreman message: ${m.type}`),
