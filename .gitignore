@@ -8,3 +8,5 @@ dist/
 repl.log
 .worker-id
 coverage/
+frontend/tsconfig.tsbuildinfo
+supabase/.temp/
