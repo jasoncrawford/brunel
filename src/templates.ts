@@ -27,7 +27,7 @@ You should ask for any clarifications you need about requirements or product spe
 Use your branch-discipline skill, and remember key practices:
 
 1. Pull main to get the latest before making any edits.
-2. Create a new branch and an isolated worktree for this task. Make no changes in the main workspace, only in the worktree.
+2. Create a new branch for this task.
 3. As much as possible, use test-driven development.
 4. Create a PR when done, and include the text "Closes #${issue.number}".
 
@@ -209,7 +209,7 @@ export const EVENT_FMT: EventTemplateFmtTable = {
       return `Auto-merge was enabled on PR #${prNumber}. ${BRANCH_REVIEW_PROMPT}`;
     }
     if (p.action === "closed") {
-      return `PR #${prNumber} was ${pr?.merged ? 'merged' : 'closed without merging'}. Please remove your worktree and delete the branch.
+      return `PR #${prNumber} was ${pr?.merged ? 'merged' : 'closed without merging'}. Please delete the branch.
 
 Then, before we end this session, consider:
 
