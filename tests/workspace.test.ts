@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import os from "node:os";
 import fs from "node:fs";
 import path from "node:path";
-import { Workspace } from "../src/workspace.js";
+import { Workspace, confirmIfUnsafe } from "../src/workspace.js";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -129,5 +129,93 @@ describe("Workspace.reset", () => {
     const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec);
     exec.mockClear();
     await expect(ws.reset()).rejects.toThrow("always fails");
+  });
+});
+
+// ── checkSafety ────────────────────────────────────────────────────────────
+
+describe("Workspace.checkSafety", () => {
+  it("returns empty arrays when working tree is clean and branch is pushed", async () => {
+    const exec = makeExec({
+      "status --porcelain": "",
+      "log @{u}..HEAD --oneline": "",
+    });
+    const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec);
+    const result = await ws.checkSafety();
+    expect(result.uncommittedFiles).toEqual([]);
+    expect(result.unpushedCommits).toEqual([]);
+    expect(result.noUpstream).toBe(false);
+  });
+
+  it("returns uncommitted files when working tree is dirty", async () => {
+    const exec = makeExec({
+      "status --porcelain": " M src/foo.ts\n?? newfile.ts",
+      "log @{u}..HEAD --oneline": "",
+    });
+    const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec);
+    const result = await ws.checkSafety();
+    expect(result.uncommittedFiles).toEqual(["M src/foo.ts", "?? newfile.ts"]);
+  });
+
+  it("returns unpushed commits when ahead of upstream", async () => {
+    const exec = makeExec({
+      "status --porcelain": "",
+      "log @{u}..HEAD --oneline": "abc1234 feat: my commit",
+    });
+    const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec);
+    const result = await ws.checkSafety();
+    expect(result.unpushedCommits).toEqual(["abc1234 feat: my commit"]);
+    expect(result.noUpstream).toBe(false);
+  });
+
+  it("sets noUpstream when branch has no tracking remote", async () => {
+    const exec = vi.fn().mockImplementation(async (args: string[]) => {
+      if (args[0] === "status") return "";
+      if (args[0] === "log") throw new Error("fatal: no upstream configured for branch 'my-branch'");
+      return "";
+    });
+    const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec);
+    const result = await ws.checkSafety();
+    expect(result.noUpstream).toBe(true);
+  });
+});
+
+// ── confirmIfUnsafe ─────────────────────────────────────────────────────────
+
+describe("confirmIfUnsafe", () => {
+  it("returns true without calling confirm when workspace is clean", async () => {
+    const exec = makeExec({
+      "status --porcelain": "",
+      "log @{u}..HEAD --oneline": "",
+    });
+    const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec);
+    const confirm = vi.fn().mockResolvedValue(true);
+    const result = await confirmIfUnsafe(ws, confirm);
+    expect(result).toBe(true);
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it("calls confirm with warning when there are uncommitted files", async () => {
+    const exec = makeExec({
+      "status --porcelain": " M src/foo.ts",
+      "log @{u}..HEAD --oneline": "",
+    });
+    const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec);
+    const confirm = vi.fn().mockResolvedValue(true);
+    const result = await confirmIfUnsafe(ws, confirm);
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(confirm.mock.calls[0][0]).toContain("src/foo.ts");
+    expect(result).toBe(true);
+  });
+
+  it("returns false when user declines", async () => {
+    const exec = makeExec({
+      "status --porcelain": " M src/foo.ts",
+      "log @{u}..HEAD --oneline": "",
+    });
+    const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec);
+    const confirm = vi.fn().mockResolvedValue(false);
+    const result = await confirmIfUnsafe(ws, confirm);
+    expect(result).toBe(false);
   });
 });
