@@ -40,6 +40,18 @@ describe("parseSlashCommand", () => {
   it("returns task_complete for /task-complete", () => {
     expect(parseSlashCommand("/task-complete")).toEqual({ type: "task_complete" });
   });
+  it("recognizes /create-workspace", () => {
+    expect(parseSlashCommand("/create-workspace")).toEqual({ type: "create_workspace" });
+  });
+  it("recognizes /reset-workspace", () => {
+    expect(parseSlashCommand("/reset-workspace")).toEqual({ type: "reset_workspace" });
+  });
+  it("recognizes /remove-workspace", () => {
+    expect(parseSlashCommand("/remove-workspace")).toEqual({ type: "remove_workspace" });
+  });
+  it("recognizes /prune", () => {
+    expect(parseSlashCommand("/prune")).toEqual({ type: "prune" });
+  });
 });
 
 describe("resolveCommandFilePath", () => {

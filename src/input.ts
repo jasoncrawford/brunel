@@ -51,6 +51,10 @@ export type SlashCommandResult =
   | { type: "exit" }
   | { type: "clear" }
   | { type: "task_complete" }
+  | { type: "create_workspace" }
+  | { type: "reset_workspace" }
+  | { type: "remove_workspace" }
+  | { type: "prune" }
   | { type: "unknown_command"; command: string };
 
 type BuiltinCommand = {
@@ -61,9 +65,13 @@ type BuiltinCommand = {
 };
 
 const BUILTIN_COMMANDS: BuiltinCommand[] = [
-  { name: "clear",         description: "Clear the conversation",      result: { type: "clear" } },
-  { name: "exit",          description: "Exit the REPL",               result: { type: "exit" } },
-  { name: "task-complete", description: "Mark the current task as done", result: { type: "task_complete" }, workerOnly: true },
+  { name: "clear",            description: "Clear the conversation",                                  result: { type: "clear" } },
+  { name: "exit",             description: "Exit the REPL",                                           result: { type: "exit" } },
+  { name: "task-complete",    description: "Mark the current task as done",                           result: { type: "task_complete" }, workerOnly: true },
+  { name: "create-workspace", description: "Create an isolated git checkout for this session",        result: { type: "create_workspace" } },
+  { name: "reset-workspace",  description: "Reset workspace to clean main branch",                    result: { type: "reset_workspace" } },
+  { name: "remove-workspace", description: "Remove the workspace checkout for this session",          result: { type: "remove_workspace" } },
+  { name: "prune",            description: "Remove orphaned worker workspace directories",            result: { type: "prune" } },
 ];
 
 /**
@@ -155,6 +163,10 @@ export type DispatchResult =
   | { type: "exit" }
   | { type: "clear" }
   | { type: "task_complete" }
+  | { type: "create_workspace" }
+  | { type: "reset_workspace" }
+  | { type: "remove_workspace" }
+  | { type: "prune" }
   | { type: "query"; prompt: string }
   | { type: "unknown_command"; command: string };
 
@@ -172,6 +184,12 @@ export async function dispatchInput(
   if (slash) {
     if (slash.type === "exit" || slash.type === "clear") return slash;
     if (slash.type === "task_complete") return slash;
+    if (
+      slash.type === "create_workspace" ||
+      slash.type === "reset_workspace" ||
+      slash.type === "remove_workspace" ||
+      slash.type === "prune"
+    ) return slash;
     // unknown_command: look up command file or skill
     const { command } = slash;
     const content = resolveContent(command, readFile);
