@@ -48,19 +48,19 @@ export function applyArguments(content: string, args: string): string {
 // ── Slash commands ────────────────────────────────────────────────────────────
 
 const BUILTIN_COMMANDS = [
-  { name: "clear",            description: "Clear the conversation",                                  result: { type: "clear" as const } },
-  { name: "exit",             description: "Exit the REPL",                                           result: { type: "exit" as const } },
-  { name: "task-complete",    description: "Mark the current task as done",                           result: { type: "task_complete" as const }, workerOnly: true },
-  { name: "create-workspace", description: "Create an isolated git checkout for this session",        result: { type: "create_workspace" as const } },
-  { name: "reset-workspace",  description: "Reset workspace to clean main branch",                    result: { type: "reset_workspace" as const } },
-  { name: "remove-workspace", description: "Remove the workspace checkout for this session",          result: { type: "remove_workspace" as const } },
-  { name: "prune",            description: "Remove orphaned worker workspace directories",            result: { type: "prune" as const } },
+  { name: "clear"            as const, description: "Clear the conversation"                                },
+  { name: "exit"             as const, description: "Exit the REPL"                                         },
+  { name: "task-complete"    as const, description: "Mark the current task as done",      workerOnly: true  },
+  { name: "create-workspace" as const, description: "Create an isolated git checkout for this session"      },
+  { name: "reset-workspace"  as const, description: "Reset workspace to clean main branch"                  },
+  { name: "remove-workspace" as const, description: "Remove the workspace checkout for this session"        },
+  { name: "prune"            as const, description: "Remove orphaned worker workspace directories"          },
 ];
 
 type BuiltinCommand = typeof BUILTIN_COMMANDS[number];
 
 export type SlashCommandResult =
-  | BuiltinCommand["result"]
+  | { type: BuiltinCommand["name"] }
   | { type: "unknown_command"; command: string };
 
 /**
@@ -72,7 +72,7 @@ export function parseSlashCommand(input: string): SlashCommandResult | null {
   const command = input.slice(1).split(/\s+/)[0];
   if (!command) return null;
   const builtin = BUILTIN_COMMANDS.find(c => c.name === command);
-  if (builtin) return builtin.result;
+  if (builtin) return { type: builtin.name };
   return { type: "unknown_command", command };
 }
 

@@ -126,7 +126,7 @@ export class WorkerSession {
       this.display.print(display.c.boldRed(`Unknown command: /${action.command}`));
       return;
     }
-    if (action.type === "task_complete") {
+    if (action.type === "task-complete") {
       await this.handleSlashCommand("/task-complete");
       return;
     }
