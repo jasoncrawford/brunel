@@ -219,3 +219,47 @@ describe("confirmIfUnsafe", () => {
     expect(result).toBe(false);
   });
 });
+
+// ── prune ──────────────────────────────────────────────────────────────────
+
+describe("Workspace.prune", () => {
+  it("returns empty array when baseDir does not exist", async () => {
+    const result = await Workspace.prune(path.join(BASE_DIR, "nonexistent"));
+    expect(result).toEqual([]);
+  });
+
+  it("removes directories with no lockfile", async () => {
+    const orphanDir = path.join(BASE_DIR, "orphan-no-lock");
+    fs.mkdirSync(orphanDir);
+    const removed = await Workspace.prune(BASE_DIR);
+    expect(removed).toContain(orphanDir);
+    expect(fs.existsSync(orphanDir)).toBe(false);
+  });
+
+  it("removes directories whose lockfile has a dead PID", async () => {
+    const orphanDir = path.join(BASE_DIR, "orphan-dead-pid");
+    fs.mkdirSync(orphanDir);
+    // PID 2147483647 is the max int32 — almost certainly not running
+    fs.writeFileSync(path.join(orphanDir, ".brunel.lock"), "2147483647");
+    const removed = await Workspace.prune(BASE_DIR);
+    expect(removed).toContain(orphanDir);
+    expect(fs.existsSync(orphanDir)).toBe(false);
+  });
+
+  it("keeps directories whose lockfile has a live PID", async () => {
+    const activeDir = path.join(BASE_DIR, "active-worker");
+    fs.mkdirSync(activeDir);
+    // Current process PID is definitely alive
+    fs.writeFileSync(path.join(activeDir, ".brunel.lock"), String(process.pid));
+    const removed = await Workspace.prune(BASE_DIR);
+    expect(removed).not.toContain(activeDir);
+    expect(fs.existsSync(activeDir)).toBe(true);
+  });
+
+  it("ignores non-directory entries", async () => {
+    fs.writeFileSync(path.join(BASE_DIR, "somefile.txt"), "content");
+    const removed = await Workspace.prune(BASE_DIR);
+    expect(fs.existsSync(path.join(BASE_DIR, "somefile.txt"))).toBe(true);
+    expect(removed).toHaveLength(0);
+  });
+});
