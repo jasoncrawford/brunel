@@ -117,19 +117,38 @@ With:
 
 > *"Please delete the branch."*
 
-### `/prune` slash command
+### Workspace slash commands
 
-`Workspace.prune()` is exposed as a `/prune` slash command available in both worker and REPL modes. When invoked:
+Four workspace management commands are available in both worker and REPL modes. The session carries an optional `workspace: Workspace | undefined` reference that these commands read and update.
 
-1. Calls `Workspace.prune(workspaceDir)` — scans `workspaceDir`, removes orphaned checkouts, skips active ones
-2. Prints each removed directory and a summary count
-3. If `workspaceDir` doesn't exist, prints a "nothing to prune" message
+**`/create-workspace`**
+- Creates a workspace for the current session (useful in REPL mode; in worker mode the workspace is created automatically at startup)
+- Calls `Workspace.create(workspaceDir, sessionId, repoUrl)`, then `process.chdir(workspace.dir)`
+- If a workspace already exists for this session, prints a message and does nothing
+- Saves the original `process.cwd()` before the first `chdir` so `/remove-workspace` can restore it
 
-This is a manual operation intended for cleaning up after crashed or killed workers. It is safe to run at any time — active workers are protected by their PID lockfile.
+**`/reset-workspace`**
+- Calls `workspace.reset()` on the current session's workspace
+- Useful for manually cleaning up mid-task or recovering from a bad state
+- Errors if no workspace exists for this session
+
+**`/remove-workspace`**
+- Calls `workspace.destroy()`, removes the checkout directory
+- Restores `process.cwd()` to the directory saved at `/create-workspace` time (or the original startup cwd for workers)
+- Clears the session's `workspace` reference
+- Errors if no workspace exists for this session
+
+**`/prune`**
+- Calls `Workspace.prune(workspaceDir)` — scans `workspaceDir`, removes orphaned checkouts, skips active ones (PID lockfile check)
+- Prints each removed directory and a summary count
+- If `workspaceDir` doesn't exist, prints a "nothing to prune" message
+- Safe to run at any time
 
 ### REPL
 
-No changes. The REPL continues to use `process.cwd()`. A `--workspace` flag could be added in the future if needed.
+The REPL gains workspace support via `/create-workspace`. By default it continues to use `process.cwd()` unchanged; the user opts in by running `/create-workspace`. The REPL generates a random UUID at startup to use as its session ID for workspace naming (the same pattern workers already use for `workerId`).
+
+Making the REPL and worker share the same workspace lifecycle API is intentional — the longer-term direction is to reduce the sharp distinction between the two modes, potentially allowing mode changes at runtime.
 
 ## Full Worker Lifecycle Summary
 
@@ -141,6 +160,5 @@ No changes. The REPL continues to use `process.cwd()`. A `--workspace` flag coul
 
 ## Out of scope
 
-- REPL workspace support (deferred)
 - Prompting the user about uncommitted changes on shutdown (can be added later)
 - Workspace pool / pre-provisioning (not needed at current scale)
