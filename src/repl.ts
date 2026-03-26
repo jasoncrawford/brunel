@@ -1,4 +1,7 @@
 import "dotenv/config";
+import crypto from "node:crypto";
+import os from "node:os";
+import path from "node:path";
 import fs from "fs";
 import { fileURLToPath } from "url";
 import { query } from "@anthropic-ai/claude-agent-sdk";
@@ -10,6 +13,7 @@ import type { PickQuestionResult } from "./input.js";
 import { workerMain } from "./worker.js";
 import type { RunQuery } from "./worker.js";
 import { loadConfig } from "./config.js";
+import { Workspace, confirmIfUnsafe } from "./workspace.js";
 export { parseSlashCommand, resolveCommandFilePath, resolveContent, dispatchInput, matchCommands, listCommandNames, listWorkerCommandNames, ask } from "./input.js";
 export type { SlashCommandResult, DispatchResult, ListDir } from "./input.js";
 
@@ -193,10 +197,91 @@ export async function runQuery(
   return capturedSessionId;
 }
 
+// ── Workspace action handler ──────────────────────────────────────────────────
+
+export type WorkspaceActionType = "create-workspace" | "reset-workspace" | "remove-workspace" | "prune";
+
+export interface WorkspaceActionParams {
+  workspaceCfg: { workspaceDir: string; repoUrl: string } | undefined;
+  workspace: Workspace | undefined;
+  sessionId_: string;
+  originalCwd: string;
+  confirm: (msg: string) => Promise<boolean>;
+  print: (msg: string) => void;
+  chdir: (dir: string) => void;
+}
+
+/**
+ * Handle one workspace slash command in the REPL.
+ * Returns the (possibly updated) workspace reference.
+ * Extracted for testability.
+ */
+export async function handleWorkspaceAction(
+  type: WorkspaceActionType,
+  params: WorkspaceActionParams,
+): Promise<Workspace | undefined> {
+  const { workspaceCfg, workspace, sessionId_, originalCwd, confirm, print, chdir } = params;
+
+  if (type === "create-workspace") {
+    if (!workspaceCfg) {
+      print(display.c.boldRed("Cannot create workspace: no GitHub repo configured."));
+      return workspace;
+    }
+    if (workspace) {
+      print(display.c.amber(`Workspace already exists: ${workspace.dir}`));
+      return workspace;
+    }
+    const ws = await Workspace.create(workspaceCfg.workspaceDir, sessionId_, workspaceCfg.repoUrl);
+    chdir(ws.dir);
+    print(display.c.sageGreen(`Workspace created: ${ws.dir}`));
+    return ws;
+  }
+
+  if (type === "reset-workspace") {
+    if (!workspace) {
+      print(display.c.boldRed("No workspace. Use /create-workspace first."));
+      return workspace;
+    }
+    const ok = await confirmIfUnsafe(workspace, confirm);
+    if (!ok) return workspace;
+    await workspace.reset();
+    print(display.c.sageGreen("Workspace reset to main."));
+    return workspace;
+  }
+
+  if (type === "remove-workspace") {
+    if (!workspace) {
+      print(display.c.boldRed("No workspace in this session."));
+      return workspace;
+    }
+    const ok = await confirmIfUnsafe(workspace, confirm);
+    if (!ok) return workspace;
+    await workspace.destroy();
+    chdir(originalCwd);
+    print(display.c.sageGreen(`Workspace removed. Now in: ${originalCwd}`));
+    return undefined;
+  }
+
+  // type === "prune"
+  if (!workspaceCfg) {
+    print(display.c.boldRed("Cannot prune: no workspace directory configured."));
+    return workspace;
+  }
+  const removed = await Workspace.prune(workspaceCfg.workspaceDir);
+  if (removed.length === 0) {
+    print(display.c.sageGreen("Nothing to prune."));
+  } else {
+    for (const dir of removed) print(display.c.darkGray(`  Removed: ${dir}`));
+    print(display.c.sageGreen(`Pruned ${removed.length} orphaned workspace(s).`));
+  }
+  return workspace;
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 async function main(
   permConfig: { permissionMode: PermissionMode; allowDangerouslySkipPermissions: boolean },
+  workspaceCfg?: { workspaceDir: string; repoUrl: string },
 ): Promise<void> {
   process.stdout.write("\x1b[?2004h"); // enable bracketed paste mode
   process.stdin.setRawMode(true);
@@ -204,6 +289,16 @@ async function main(
   process.stdin.setEncoding("utf8");
 
   let sessionId: string | undefined;
+  const sessionId_ = crypto.randomUUID();
+  const originalCwd = process.cwd();
+  let workspace: Workspace | undefined = undefined;
+
+  const confirm = async (msg: string): Promise<boolean> => {
+    display.stopStatus();
+    display.print(display.c.amber(`\n⚠ Potential data loss:\n${msg}`));
+    const idx = await pick(["Yes, proceed", "No, cancel"]);
+    return idx === 0;
+  };
 
   display.print(display.c.sageGreen(display.hr("═")));
   display.print(display.c.skyBlue(display.s.bold("  Claude Agent SDK REPL")));
@@ -219,6 +314,10 @@ async function main(
     if (action.type === "skip") continue;
 
     if (action.type === "exit") {
+      if (workspace) {
+        const ok = await confirmIfUnsafe(workspace, confirm);
+        if (ok) await workspace.destroy();
+      }
       process.stdout.write("\x1b[?2004l\r\n");
       process.stdin.setRawMode(false);
       process.stdin.pause();
@@ -247,7 +346,11 @@ async function main(
       action.type === "remove-workspace" ||
       action.type === "prune"
     ) {
-      display.print(display.c.amber(`/${action.type}: workspace management not yet implemented in REPL mode.`));
+      workspace = await handleWorkspaceAction(action.type, {
+        workspaceCfg, workspace, sessionId_, originalCwd, confirm,
+        print: display.print,
+        chdir: (dir) => process.chdir(dir),
+      });
       continue;
     }
 
@@ -273,9 +376,16 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const boundRunQuery: RunQuery = (prompt, sessionId, ac) =>
     runQuery(permConfig, prompt, sessionId, ac);
 
+  const workspaceCfg = (config.githubRepo && config.githubToken)
+    ? {
+        workspaceDir: config.workspaceDir ?? path.join(os.homedir(), ".brunel", "workers"),
+        repoUrl: `https://${config.githubToken}@github.com/${config.githubRepo}.git`,
+      }
+    : undefined;
+
   if (process.argv.includes("--worker-mode")) {
     void workerMain(boundRunQuery, { foremanUrl: config.foremanUrl });
   } else {
-    void main(permConfig);
+    void main(permConfig, workspaceCfg);
   }
 }
