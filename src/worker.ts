@@ -5,6 +5,7 @@ import * as display from "./display.js";
 import { buildInitialPrompt, buildEventPrompt, fmtEventList } from "./templates.js";
 import { ask, listWorkerCommands, dispatchInput } from "./input.js";
 import type { ForemanMessage, GitHubEvent, TaskIssue } from "./types.js";
+import { Workspace, confirmIfUnsafe } from "./workspace.js";
 
 // ── Event classification ───────────────────────────────────────────────────────
 
@@ -62,8 +63,17 @@ export type WorkerDisplay = {
   printForemanMessage: (msg: ForemanMessage) => void;
 };
 
+export type WorkspaceCtx = {
+  workspace: Workspace;
+  originalCwd: string;
+  workspaceDir: string;
+  repoUrl: string;
+  confirm: (msg: string) => Promise<boolean>;
+};
+
 export type WorkerSessionOptions = {
   afterTask?: () => Promise<void>;
+  workspaceCtx?: WorkspaceCtx;
 };
 
 // Sentinels used to signal WebSocket events through ask()'s abort param
@@ -137,6 +147,22 @@ export class WorkerSession {
     }
     if (action.type === "clear") {
       await this.handleSlashCommand("/clear");
+      return;
+    }
+    if (action.type === "reset-workspace") {
+      await this.handleSlashCommand("/reset-workspace");
+      return;
+    }
+    if (action.type === "remove-workspace") {
+      await this.handleSlashCommand("/remove-workspace");
+      return;
+    }
+    if (action.type === "create-workspace") {
+      this.display.print(display.c.amber("Workspace is managed automatically in worker mode."));
+      return;
+    }
+    if (action.type === "prune") {
+      await this.handleSlashCommand("/prune");
       return;
     }
     if (action.type === "query") {
@@ -300,6 +326,42 @@ export class WorkerSession {
     if (command === "clear") {
       this.currentSessionId = undefined;
       this.display.print(display.clearBreak());
+      return;
+    }
+
+    if (command === "reset-workspace") {
+      const ctx = this.options.workspaceCtx;
+      if (!ctx) { this.display.print(display.c.boldRed("No workspace in this session.")); return; }
+      const ok = await confirmIfUnsafe(ctx.workspace, ctx.confirm);
+      if (!ok) return;
+      await ctx.workspace.reset();
+      this.display.print(display.c.sageGreen("Workspace reset to main."));
+      return;
+    }
+
+    if (command === "remove-workspace") {
+      const ctx = this.options.workspaceCtx;
+      if (!ctx) { this.display.print(display.c.boldRed("No workspace in this session.")); return; }
+      const ok = await confirmIfUnsafe(ctx.workspace, ctx.confirm);
+      if (!ok) return;
+      await ctx.workspace.destroy();
+      process.chdir(ctx.originalCwd);
+      this.options.workspaceCtx = undefined;
+      this.display.print(display.c.sageGreen(`Workspace removed. Now in: ${ctx.originalCwd}`));
+      return;
+    }
+
+    if (command === "prune") {
+      const ctx = this.options.workspaceCtx;
+      const workspaceDir = ctx?.workspaceDir;
+      if (!workspaceDir) { this.display.print(display.c.boldRed("No workspace directory configured.")); return; }
+      const removed = await Workspace.prune(workspaceDir);
+      if (removed.length === 0) {
+        this.display.print(display.c.sageGreen("Nothing to prune."));
+      } else {
+        for (const dir of removed) this.display.print(display.c.darkGray(`  Removed: ${dir}`));
+        this.display.print(display.c.sageGreen(`Pruned ${removed.length} orphaned workspace(s).`));
+      }
       return;
     }
   }
