@@ -12,6 +12,8 @@ const REPO_URL = "https://token@github.com/owner/repo.git";
 
 function makeExec(responses: Record<string, string> = {}) {
   return vi.fn().mockImplementation(async (args: string[]) => {
+    // Simulate git clone creating the target directory
+    if (args[0] === "clone") fs.mkdirSync(args[2], { recursive: true });
     const key = args.join(" ");
     return responses[key] ?? "";
   });
@@ -92,7 +94,7 @@ describe("Workspace.reset", () => {
     // Pre-create the dir so create() skips cloning
     fs.mkdirSync(path.join(BASE_DIR, WORKER_ID), { recursive: true });
     const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec);
-    exec.mockClear();
+    exec.mockReset();
     // First reset attempt fails, second succeeds
     exec
       .mockRejectedValueOnce(new Error("network error"))
@@ -107,7 +109,7 @@ describe("Workspace.reset", () => {
     fs.mkdirSync(dir, { recursive: true });
     let callCount = 0;
     const exec = vi.fn().mockImplementation(async (args: string[]) => {
-      if (args[0] === "clone") return ""; // clone always succeeds
+      if (args[0] === "clone") { fs.mkdirSync(args[2], { recursive: true }); return ""; }
       callCount++;
       if (callCount <= 2) throw new Error("reset fail");
       return ""; // third attempt (after re-clone) succeeds
@@ -123,7 +125,7 @@ describe("Workspace.reset", () => {
     const dir = path.join(BASE_DIR, WORKER_ID);
     fs.mkdirSync(dir, { recursive: true });
     const exec = vi.fn().mockImplementation(async (args: string[]) => {
-      if (args[0] === "clone") return "";
+      if (args[0] === "clone") { fs.mkdirSync(args[2], { recursive: true }); return ""; }
       throw new Error("always fails");
     });
     const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec);
@@ -170,6 +172,7 @@ describe("Workspace.checkSafety", () => {
 
   it("sets noUpstream when branch has no tracking remote", async () => {
     const exec = vi.fn().mockImplementation(async (args: string[]) => {
+      if (args[0] === "clone") { fs.mkdirSync(args[2], { recursive: true }); return ""; }
       if (args[0] === "status") return "";
       if (args[0] === "log") throw new Error("fatal: no upstream configured for branch 'my-branch'");
       return "";

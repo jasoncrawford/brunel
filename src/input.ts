@@ -47,32 +47,21 @@ export function applyArguments(content: string, args: string): string {
 
 // ── Slash commands ────────────────────────────────────────────────────────────
 
-export type SlashCommandResult =
-  | { type: "exit" }
-  | { type: "clear" }
-  | { type: "task_complete" }
-  | { type: "create_workspace" }
-  | { type: "reset_workspace" }
-  | { type: "remove_workspace" }
-  | { type: "prune" }
-  | { type: "unknown_command"; command: string };
-
-type BuiltinCommand = {
-  name: string;
-  description: string;
-  result: Exclude<SlashCommandResult, { type: "unknown_command" }>;
-  workerOnly?: boolean;
-};
-
-const BUILTIN_COMMANDS: BuiltinCommand[] = [
-  { name: "clear",            description: "Clear the conversation",                                  result: { type: "clear" } },
-  { name: "exit",             description: "Exit the REPL",                                           result: { type: "exit" } },
-  { name: "task-complete",    description: "Mark the current task as done",                           result: { type: "task_complete" }, workerOnly: true },
-  { name: "create-workspace", description: "Create an isolated git checkout for this session",        result: { type: "create_workspace" } },
-  { name: "reset-workspace",  description: "Reset workspace to clean main branch",                    result: { type: "reset_workspace" } },
-  { name: "remove-workspace", description: "Remove the workspace checkout for this session",          result: { type: "remove_workspace" } },
-  { name: "prune",            description: "Remove orphaned worker workspace directories",            result: { type: "prune" } },
+const BUILTIN_COMMANDS = [
+  { name: "clear",            description: "Clear the conversation",                                  result: { type: "clear" as const } },
+  { name: "exit",             description: "Exit the REPL",                                           result: { type: "exit" as const } },
+  { name: "task-complete",    description: "Mark the current task as done",                           result: { type: "task_complete" as const }, workerOnly: true },
+  { name: "create-workspace", description: "Create an isolated git checkout for this session",        result: { type: "create_workspace" as const } },
+  { name: "reset-workspace",  description: "Reset workspace to clean main branch",                    result: { type: "reset_workspace" as const } },
+  { name: "remove-workspace", description: "Remove the workspace checkout for this session",          result: { type: "remove_workspace" as const } },
+  { name: "prune",            description: "Remove orphaned worker workspace directories",            result: { type: "prune" as const } },
 ];
+
+type BuiltinCommand = typeof BUILTIN_COMMANDS[number];
+
+export type SlashCommandResult =
+  | BuiltinCommand["result"]
+  | { type: "unknown_command"; command: string };
 
 /**
  * Parse a slash command from raw user input.
@@ -159,16 +148,9 @@ function defaultReadFile(path: string): string | null {
 }
 
 export type DispatchResult =
+  | SlashCommandResult
   | { type: "skip" }
-  | { type: "exit" }
-  | { type: "clear" }
-  | { type: "task_complete" }
-  | { type: "create_workspace" }
-  | { type: "reset_workspace" }
-  | { type: "remove_workspace" }
-  | { type: "prune" }
-  | { type: "query"; prompt: string }
-  | { type: "unknown_command"; command: string };
+  | { type: "query"; prompt: string };
 
 /**
  * Dispatch user input to the appropriate REPL action.
@@ -182,14 +164,7 @@ export async function dispatchInput(
 
   const slash = parseSlashCommand(input);
   if (slash) {
-    if (slash.type === "exit" || slash.type === "clear") return slash;
-    if (slash.type === "task_complete") return slash;
-    if (
-      slash.type === "create_workspace" ||
-      slash.type === "reset_workspace" ||
-      slash.type === "remove_workspace" ||
-      slash.type === "prune"
-    ) return slash;
+    if (slash.type !== "unknown_command") return slash;
     // unknown_command: look up command file or skill
     const { command } = slash;
     const content = resolveContent(command, readFile);

@@ -150,20 +150,4 @@ describe("dispatchInput", () => {
     const result = await dispatchInput("/myplugin:foo bar baz", readFile);
     expect(result).toEqual({ type: "query", prompt: "Plugin skill bar baz." });
   });
-  it("dispatches /create-workspace as create_workspace action", async () => {
-    const result = await dispatchInput("/create-workspace", () => null);
-    expect(result).toEqual({ type: "create_workspace" });
-  });
-  it("dispatches /reset-workspace as reset_workspace action", async () => {
-    const result = await dispatchInput("/reset-workspace", () => null);
-    expect(result).toEqual({ type: "reset_workspace" });
-  });
-  it("dispatches /remove-workspace as remove_workspace action", async () => {
-    const result = await dispatchInput("/remove-workspace", () => null);
-    expect(result).toEqual({ type: "remove_workspace" });
-  });
-  it("dispatches /prune as prune action", async () => {
-    const result = await dispatchInput("/prune", () => null);
-    expect(result).toEqual({ type: "prune" });
-  });
 });

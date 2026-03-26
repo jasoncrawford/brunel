@@ -39,11 +39,10 @@ export class Workspace {
     exec: GitExec = defaultGitExec,
   ): Promise<Workspace> {
     const dir = path.join(baseDir, workerId);
+    fs.mkdirSync(baseDir, { recursive: true });
     if (!fs.existsSync(dir)) {
-      fs.mkdirSync(baseDir, { recursive: true });
+      console.log(`[workspace] Cloning ${repoUrl} → ${dir}`);
       await exec(["clone", repoUrl, dir], undefined);
-      // Ensure dir exists even if exec was mocked (for testing)
-      fs.mkdirSync(dir, { recursive: true });
     }
     fs.writeFileSync(path.join(dir, ".brunel.lock"), String(process.pid));
     return new Workspace(dir, repoUrl, exec);
@@ -55,22 +54,22 @@ export class Workspace {
    * then retries one final time.
    */
   async reset(): Promise<void> {
+    console.log(`[workspace] Resetting ${this.dir}`);
     try {
       await this._doReset();
       return;
-    } catch {
-      // first retry
+    } catch (err) {
+      console.error(`[workspace] Reset failed, retrying: ${err}`);
     }
     try {
       await this._doReset();
       return;
-    } catch {
-      // destroy + re-clone + final attempt
+    } catch (err) {
+      console.error(`[workspace] Reset failed again, re-cloning: ${err}`);
       fs.rmSync(this.dir, { recursive: true, force: true });
       fs.mkdirSync(path.dirname(this.dir), { recursive: true });
+      console.log(`[workspace] Re-cloning ${this.repoUrl} → ${this.dir}`);
       await this.exec(["clone", this.repoUrl, this.dir], undefined);
-      // Ensure dir exists even if exec was mocked (for testing)
-      fs.mkdirSync(this.dir, { recursive: true });
       fs.writeFileSync(path.join(this.dir, ".brunel.lock"), String(process.pid));
       await this._doReset(); // throws if still broken — propagates to caller
     }
@@ -121,6 +120,7 @@ export class Workspace {
    */
   static async prune(baseDir: string): Promise<string[]> {
     if (!fs.existsSync(baseDir)) return [];
+    console.log(`[workspace] Pruning orphaned workspaces in ${baseDir}`);
     const entries = fs.readdirSync(baseDir, { withFileTypes: true });
     const removed: string[] = [];
     for (const entry of entries) {
@@ -131,6 +131,7 @@ export class Workspace {
         const pid = parseInt(fs.readFileSync(lockPath, "utf8").trim(), 10);
         if (isProcessAlive(pid)) continue;
       }
+      console.log(`[workspace] Removing orphaned workspace ${dir}`);
       fs.rmSync(dir, { recursive: true, force: true });
       removed.push(dir);
     }
@@ -139,6 +140,7 @@ export class Workspace {
 
   /** Remove the entire checkout directory. */
   async destroy(): Promise<void> {
+    console.log(`[workspace] Destroying ${this.dir}`);
     fs.rmSync(this.dir, { recursive: true, force: true });
   }
 }

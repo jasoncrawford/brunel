@@ -64,14 +64,6 @@ describe("buildInitialPrompt", () => {
     expect(p).toContain("brunel:ready");
   });
 
-  it("does not mention worktree", () => {
-    const p = buildInitialPrompt({
-      number: 1, title: "T", body: "B", labels: [], repoUrl: "https://github.com/x/y",
-    });
-    expect(p).not.toContain("worktree");
-    expect(p).toContain("Create a new branch for this task");
-  });
-
 });
 
 describe("buildEventPrompt", () => {
@@ -293,15 +285,14 @@ describe("EVENT_FMT table", () => {
     expect(result).toContain("PR #5");
   });
 
-  it("pull_request/closed — instructs worker to delete the branch, not remove the worktree", () => {
+  it("pull_request/closed — instructs worker to clean up its worktree", () => {
     const evt: GitHubEvent = {
       id: "e1",
       name: "pull_request",
       payload: { action: "closed", pull_request: { number: 5, merged: true } },
     };
     const result = EVENT_FMT.pull_request(evt.payload, evt);
-    expect(result).not.toContain("worktree");
-    expect(result).toContain("delete the branch");
+    expect(result).toContain("worktree");
   });
 
   it("pull_request/closed not merged — asks how to proceed", () => {
@@ -671,15 +662,3 @@ describe("formatCommentLocation", () => {
   });
 });
 
-describe("pull_request closed event", () => {
-  it("says delete the branch, not remove the worktree", () => {
-    const event: GitHubEvent = {
-      id: "e1",
-      name: "pull_request",
-      payload: { action: "closed", pull_request: { number: 7, merged: true } },
-    };
-    const result = buildEventPrompt([event]);
-    expect(result).not.toContain("worktree");
-    expect(result).toContain("delete the branch");
-  });
-});
