@@ -1,4 +1,7 @@
 import "dotenv/config";
+import crypto from "node:crypto";
+import os from "node:os";
+import path from "node:path";
 import fs from "fs";
 import { fileURLToPath } from "url";
 import { query } from "@anthropic-ai/claude-agent-sdk";
@@ -10,6 +13,7 @@ import type { PickQuestionResult } from "./input.js";
 import { workerMain } from "./worker.js";
 import type { RunQuery } from "./worker.js";
 import { loadConfig } from "./config.js";
+import { Workspace, confirmIfUnsafe } from "./workspace.js";
 export { parseSlashCommand, resolveCommandFilePath, resolveContent, dispatchInput, matchCommands, listCommandNames, listWorkerCommandNames, ask } from "./input.js";
 export type { SlashCommandResult, DispatchResult, ListDir } from "./input.js";
 
@@ -197,6 +201,7 @@ export async function runQuery(
 
 async function main(
   permConfig: { permissionMode: PermissionMode; allowDangerouslySkipPermissions: boolean },
+  workspaceCfg?: { workspaceDir: string; repoUrl: string },
 ): Promise<void> {
   process.stdout.write("\x1b[?2004h"); // enable bracketed paste mode
   process.stdin.setRawMode(true);
@@ -204,6 +209,16 @@ async function main(
   process.stdin.setEncoding("utf8");
 
   let sessionId: string | undefined;
+  const sessionId_ = crypto.randomUUID();
+  const originalCwd = process.cwd();
+  let workspace: Workspace | undefined = undefined;
+
+  const confirm = async (msg: string): Promise<boolean> => {
+    display.stopStatus();
+    display.print(display.c.amber(`\n⚠ Potential data loss:\n${msg}`));
+    const idx = await pick(["Yes, proceed", "No, cancel"]);
+    return idx === 0;
+  };
 
   display.print(display.c.sageGreen(display.hr("═")));
   display.print(display.c.skyBlue(display.s.bold("  Claude Agent SDK REPL")));
@@ -219,6 +234,10 @@ async function main(
     if (action.type === "skip") continue;
 
     if (action.type === "exit") {
+      if (workspace) {
+        const ok = await confirmIfUnsafe(workspace, confirm);
+        if (ok) await workspace.destroy();
+      }
       process.stdout.write("\x1b[?2004l\r\n");
       process.stdin.setRawMode(false);
       process.stdin.pause();
@@ -241,13 +260,59 @@ async function main(
       continue;
     }
 
-    if (
-      action.type === "create-workspace" ||
-      action.type === "reset-workspace" ||
-      action.type === "remove-workspace" ||
-      action.type === "prune"
-    ) {
-      display.print(display.c.amber(`/${action.type}: workspace management not yet implemented in REPL mode.`));
+    if (action.type === "create-workspace") {
+      if (!workspaceCfg) {
+        display.print(display.c.boldRed("Cannot create workspace: no GitHub repo configured."));
+        continue;
+      }
+      if (workspace) {
+        display.print(display.c.amber(`Workspace already exists: ${workspace.dir}`));
+        continue;
+      }
+      workspace = await Workspace.create(workspaceCfg.workspaceDir, sessionId_, workspaceCfg.repoUrl);
+      process.chdir(workspace.dir);
+      display.print(display.c.sageGreen(`Workspace created: ${workspace.dir}`));
+      continue;
+    }
+
+    if (action.type === "reset-workspace") {
+      if (!workspace) {
+        display.print(display.c.boldRed("No workspace. Use /create-workspace first."));
+        continue;
+      }
+      const ok = await confirmIfUnsafe(workspace, confirm);
+      if (!ok) continue;
+      await workspace.reset();
+      display.print(display.c.sageGreen("Workspace reset to main."));
+      continue;
+    }
+
+    if (action.type === "remove-workspace") {
+      if (!workspace) {
+        display.print(display.c.boldRed("No workspace in this session."));
+        continue;
+      }
+      const ok = await confirmIfUnsafe(workspace, confirm);
+      if (!ok) continue;
+      await workspace.destroy();
+      process.chdir(originalCwd);
+      workspace = undefined;
+      display.print(display.c.sageGreen(`Workspace removed. Now in: ${originalCwd}`));
+      continue;
+    }
+
+    if (action.type === "prune") {
+      if (!workspaceCfg) {
+        display.print(display.c.boldRed("Cannot prune: no workspace directory configured."));
+        continue;
+      }
+      const removed = await Workspace.prune(workspaceCfg.workspaceDir);
+      if (removed.length === 0) {
+        display.print(display.c.sageGreen("Nothing to prune."));
+      } else {
+        for (const dir of removed) display.print(display.c.darkGray(`  Removed: ${dir}`));
+        display.print(display.c.sageGreen(`Pruned ${removed.length} orphaned workspace(s).`));
+      }
       continue;
     }
 
@@ -273,9 +338,16 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const boundRunQuery: RunQuery = (prompt, sessionId, ac) =>
     runQuery(permConfig, prompt, sessionId, ac);
 
+  const workspaceCfg = (config.githubRepo && config.githubToken)
+    ? {
+        workspaceDir: config.workspaceDir ?? path.join(os.homedir(), ".brunel", "workers"),
+        repoUrl: `https://${config.githubToken}@github.com/${config.githubRepo}.git`,
+      }
+    : undefined;
+
   if (process.argv.includes("--worker-mode")) {
     void workerMain(boundRunQuery, { foremanUrl: config.foremanUrl });
   } else {
-    void main(permConfig);
+    void main(permConfig, workspaceCfg);
   }
 }
