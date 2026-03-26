@@ -241,6 +241,16 @@ async function main(
       continue;
     }
 
+    if (
+      action.type === "create_workspace" ||
+      action.type === "reset_workspace" ||
+      action.type === "remove_workspace" ||
+      action.type === "prune"
+    ) {
+      display.print(display.c.amber(`/${action.type.replace(/_/g, "-")}: workspace management not yet implemented in REPL mode.`));
+      continue;
+    }
+
     try {
       sessionId = await runQuery(permConfig, action.prompt, sessionId);
     } catch (err) {
