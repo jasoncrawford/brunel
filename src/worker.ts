@@ -1,9 +1,11 @@
 import "dotenv/config";
 import crypto from "crypto";
+import os from "node:os";
+import path from "node:path";
 import { WebSocket } from "ws";
 import * as display from "./display.js";
 import { buildInitialPrompt, buildEventPrompt, fmtEventList } from "./templates.js";
-import { ask, listWorkerCommands, dispatchInput } from "./input.js";
+import { ask, listWorkerCommands, dispatchInput, pick } from "./input.js";
 import type { ForemanMessage, GitHubEvent, TaskIssue } from "./types.js";
 import { Workspace, confirmIfUnsafe } from "./workspace.js";
 
@@ -371,10 +373,45 @@ export class WorkerSession {
 
 export async function workerMain(
   runQueryFn: RunQuery,
-  config: { foremanUrl: string },
+  config: {
+    foremanUrl: string;
+    workspaceDir?: string;
+    githubToken: string;
+    githubRepo: string;
+    repoUrl?: string;
+  },
 ): Promise<void> {
   const FOREMAN_URL = config.foremanUrl;
   const workerId = crypto.randomUUID();
+
+  const originalCwd = process.cwd();
+  const workspaceDir = config.workspaceDir ?? path.join(os.homedir(), ".brunel", "workers");
+  const repoUrl = config.repoUrl ?? `https://${config.githubToken}@github.com/${config.githubRepo}.git`;
+
+  const workspace = await Workspace.create(workspaceDir, workerId, repoUrl);
+  process.chdir(workspace.dir);
+
+  const confirm = async (msg: string): Promise<boolean> => {
+    display.print(display.c.amber(`\n⚠ Potential data loss:\n${msg}`));
+    const idx = await pick(["Yes, proceed", "No, cancel"]);
+    return idx === 0;
+  };
+
+  const afterTask = async () => {
+    const ok = await confirmIfUnsafe(workspace, confirm);
+    if (!ok) throw new Error("User declined workspace reset.");
+    await workspace.reset();
+  };
+
+  const shutdown = async () => {
+    const ok = await confirmIfUnsafe(workspace, confirm);
+    if (ok) await workspace.destroy();
+    process.exit(0);
+  };
+  // SIGTERM is a system/orchestrator signal: force-destroy without prompting.
+  process.on("SIGTERM", () => { void workspace.destroy().then(() => process.exit(0)); });
+  // SIGINT received as a signal: prompt before destroying.
+  process.on("SIGINT", () => { void shutdown(); });
 
   const wsFactory: WsFactory = (wid, taskId) => {
     const ws = new WebSocket(`${FOREMAN_URL}/worker`);
@@ -394,7 +431,10 @@ export async function workerMain(
     printForemanMessage: display.printForemanMessage,
   };
 
-  const session = new WorkerSession(workerId, wsFactory, runQueryFn, workerDisplay);
+  const session = new WorkerSession(workerId, wsFactory, runQueryFn, workerDisplay, {
+    afterTask,
+    workspaceCtx: { workspace, originalCwd, workspaceDir, repoUrl, confirm },
+  });
 
   process.stdout.write("\x1b[?2004h"); // enable bracketed paste mode
   if (process.stdin.isTTY) process.stdin.setRawMode(true);
@@ -437,6 +477,10 @@ export async function workerMain(
       display.print(display.c.boldRed(`\nERROR: ${err}`));
     }
   }
+
+  // Clean shutdown: destroy workspace if user approves
+  const okShutdown = await confirmIfUnsafe(workspace, confirm);
+  if (okShutdown) await workspace.destroy();
 
   process.stdout.write("\x1b[?2004l\r\n");
   if (process.stdin.isTTY) process.stdin.setRawMode(false);

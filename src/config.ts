@@ -53,6 +53,8 @@ const BrunelConfigSchema = z.object({
   permissionMode: z.enum(VALID_PERMISSION_MODES).default("default"),
   /** Base directory for worker checkout directories. Defaults to ~/.brunel/workers at runtime. */
   workspaceDir:   z.string().optional(),
+  /** Override the git repo URL used for workspace clones. Defaults to https://{token}@github.com/{repo}.git. */
+  repoUrl:        z.string().optional(),
 
   // ── Cloud deployment ───────────────────────────────────────────────────────
 
