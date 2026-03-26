@@ -36,6 +36,10 @@ class Workspace {
   // Called on clean worker shutdown.
   async destroy(): Promise<void>
 
+  // Returns structured safety information about the current state of the checkout.
+  // Used by callers before calling reset() or destroy() when user confirmation is needed.
+  async checkSafety(): Promise<{ uncommittedFiles: string[]; unpushedCommits: string[]; noUpstream: boolean }>
+
   // Scans baseDir for subdirectories and removes orphaned checkouts.
   // A checkout is orphaned if it has no lockfile, or its lockfile contains
   // a PID that is no longer running (checked via process.kill(pid, 0)).
@@ -48,6 +52,8 @@ class Workspace {
 **PID lockfile:** Each checkout contains `.brunel.lock` with the worker's PID. Written by `create()`, removed implicitly when `destroy()` deletes the directory. Used by `prune()` to distinguish active from orphaned checkouts.
 
 **Clone URL:** Constructed from config as `https://{githubToken}@github.com/{githubRepo}.git`.
+
+**Safety check helper:** A shared `confirmIfUnsafe(workspace, confirm)` helper (in `worker.ts` or a small utility) calls `workspace.checkSafety()`, formats a warning message if there are uncommitted files or unpushed commits, and calls `confirm(message)` to get user approval. Returns `true` if it's safe to proceed, `false` if the user declined. Used by slash commands and the shutdown handler. The automatic post-task reset skips this helper — it calls `workspace.reset()` directly without checking.
 
 **Error handling in `reset()`:** If reset fails, retry once. If it still fails, call `destroy()` explicitly (rm -rf the directory), then call `create()` to re-clone from scratch, then retry `reset()`. The explicit `destroy()` before `create()` ensures the directory doesn't already exist, preventing `create()` from skipping the clone. If that also fails, propagate the error. The caller (worker) treats a failed reset as a reason not to report idle — see lifecycle below.
 
@@ -92,8 +98,12 @@ Called inside `handleSlashCommand("task-complete")` **before** sending `task_com
 `workerMain` passes `() => workspace.reset()` as `afterTask`.
 
 **Clean shutdown** (end of `workerMain` loop, `/exit`, `^D`):
+- Calls `confirmIfUnsafe()` — if the workspace has uncommitted or unpushed work, prompts the user before destroying
 - `await workspace.destroy()`
 - Process exits normally
+
+**Signal shutdown** (SIGTERM, SIGINT-as-signal):
+- Same as clean shutdown: runs `confirmIfUnsafe()` then `workspace.destroy()` if approved, then exits
 
 **Unclean shutdown** (SIGKILL, crash):
 - Checkout is left as an orphan under `workspaceDir/`
@@ -128,16 +138,13 @@ Four workspace management commands are available in both worker and REPL modes. 
 - Saves the original `process.cwd()` before the first `chdir` so `/remove-workspace` can restore it
 
 **`/reset-workspace`**
-- Before resetting, runs `git status --porcelain` in the workspace. If the output is non-empty, shows the dirty files and prompts "This will discard all uncommitted changes. Continue? [Yes/No]". Aborts if the user says no.
+- Calls `confirmIfUnsafe()` before proceeding; aborts if the user declines
 - Calls `workspace.reset()` on the current session's workspace
 - Useful for manually cleaning up mid-task or recovering from a bad state
 - Errors if no workspace exists for this session
 
 **`/remove-workspace`**
-- Before removing, performs two safety checks:
-  1. `git status --porcelain` — warns if there are uncommitted changes
-  2. `git log @{u}..HEAD --oneline` — warns if the current branch has unpushed commits; also warns if the branch has no upstream (never pushed)
-- If either check finds potential data loss, shows what would be lost and prompts "This will permanently delete the workspace. Continue? [Yes/No]". Aborts if the user says no.
+- Calls `confirmIfUnsafe()` before proceeding; aborts if the user declines
 - Calls `workspace.destroy()`, removes the checkout directory
 - Restores `process.cwd()` to the directory saved at `/create-workspace` time (or the original startup cwd for workers)
 - Clears the session's `workspace` reference
@@ -165,5 +172,4 @@ Making the REPL and worker share the same workspace lifecycle API is intentional
 
 ## Out of scope
 
-- Prompting the user about uncommitted changes on shutdown (can be added later)
 - Workspace pool / pre-provisioning (not needed at current scale)
