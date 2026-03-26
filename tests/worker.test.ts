@@ -855,3 +855,132 @@ describe("prIsClosed guard", () => {
     }
   });
 });
+
+import { Workspace } from "../src/workspace.js";
+
+// ── workspace slash commands in WorkerSession ─────────────────────────────────
+
+describe("workspace slash commands in WorkerSession", () => {
+  function makeWorkspace(): Workspace {
+    return {
+      dir: "/tmp/test-workspace",
+      reset: vi.fn().mockResolvedValue(undefined),
+      destroy: vi.fn().mockResolvedValue(undefined),
+      checkSafety: vi.fn().mockResolvedValue({
+        uncommittedFiles: [], unpushedCommits: [], noUpstream: false,
+      }),
+    } as unknown as Workspace;
+  }
+
+  it("/reset-workspace calls workspace.reset() when clean", async () => {
+    const workspace = makeWorkspace();
+    const confirm = vi.fn().mockResolvedValue(true);
+    const sessionWs = new WorkerSession(WORKER_ID, wsFactory, runQuery, display, {
+      workspaceCtx: {
+        workspace,
+        originalCwd: "/original",
+        workspaceDir: "/tmp/workers",
+        repoUrl: "https://token@github.com/owner/repo.git",
+        confirm,
+      },
+    });
+    sessionWs.start();
+    await sessionWs.handleUserInput("/reset-workspace");
+    expect(workspace.reset).toHaveBeenCalledOnce();
+  });
+
+  it("/reset-workspace does not reset if user declines", async () => {
+    const workspace = makeWorkspace();
+    (workspace.checkSafety as ReturnType<typeof vi.fn>).mockResolvedValue({
+      uncommittedFiles: ["M foo.ts"], unpushedCommits: [], noUpstream: false,
+    });
+    const confirm = vi.fn().mockResolvedValue(false);
+    const sessionWs = new WorkerSession(WORKER_ID, wsFactory, runQuery, display, {
+      workspaceCtx: {
+        workspace,
+        originalCwd: "/original",
+        workspaceDir: "/tmp/workers",
+        repoUrl: "https://token@github.com/owner/repo.git",
+        confirm,
+      },
+    });
+    sessionWs.start();
+    await sessionWs.handleUserInput("/reset-workspace");
+    expect(workspace.reset).not.toHaveBeenCalled();
+  });
+
+  it("/remove-workspace calls destroy() when approved", async () => {
+    const workspace = makeWorkspace();
+    const confirm = vi.fn().mockResolvedValue(true);
+    const originalCwd = process.cwd();
+    const sessionWs = new WorkerSession(WORKER_ID, wsFactory, runQuery, display, {
+      workspaceCtx: {
+        workspace,
+        originalCwd,
+        workspaceDir: "/tmp/workers",
+        repoUrl: "https://token@github.com/owner/repo.git",
+        confirm,
+      },
+    });
+    sessionWs.start();
+    await sessionWs.handleUserInput("/remove-workspace");
+    expect(workspace.destroy).toHaveBeenCalledOnce();
+  });
+
+  it("/create-workspace prints 'managed automatically' in worker mode", async () => {
+    const sessionWs = new WorkerSession(WORKER_ID, wsFactory, runQuery, display, {});
+    sessionWs.start();
+    await sessionWs.handleUserInput("/create-workspace");
+    const printed = display.print.mock.calls.map(([s]: [string]) => s).join("\n");
+    expect(printed).toContain("managed automatically");
+  });
+});
+
+// ── afterTask callback on /task-complete ──────────────────────────────────────
+
+describe("afterTask callback on /task-complete", () => {
+  it("calls afterTask before sending task_complete to foreman", async () => {
+    const afterTask = vi.fn().mockResolvedValue(undefined);
+    const sessionWithAfterTask = new WorkerSession(
+      WORKER_ID, wsFactory, runQuery, display, { afterTask }
+    );
+    sessionWithAfterTask.start();
+
+    const issue = makeIssue();
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "t1", issue });
+    await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
+
+    await sessionWithAfterTask.handleUserInput("/task-complete");
+    expect(afterTask).toHaveBeenCalledOnce();
+    const sentMsg = JSON.parse(fakeWs.send.mock.calls.at(-1)![0]);
+    expect(sentMsg.type).toBe("task_complete");
+  });
+
+  it("does not send task_complete if afterTask throws", async () => {
+    const afterTask = vi.fn().mockRejectedValue(new Error("reset failed"));
+    const sessionWithAfterTask = new WorkerSession(
+      WORKER_ID, wsFactory, runQuery, display, { afterTask }
+    );
+    sessionWithAfterTask.start();
+
+    const issue = makeIssue();
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "t1", issue });
+    await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
+
+    const sendCountBefore = fakeWs.send.mock.calls.length;
+    await sessionWithAfterTask.handleUserInput("/task-complete");
+    const taskCompleteSent = fakeWs.send.mock.calls
+      .slice(sendCountBefore)
+      .some(([data]: [string]) => JSON.parse(data).type === "task_complete");
+    expect(taskCompleteSent).toBe(false);
+  });
+
+  it("sends task_complete normally with no afterTask", async () => {
+    const issue = makeIssue();
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "t1", issue });
+    await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
+    await session.handleUserInput("/task-complete");
+    const lastMsg = JSON.parse(fakeWs.send.mock.calls.at(-1)![0]);
+    expect(lastMsg.type).toBe("task_complete");
+  });
+});

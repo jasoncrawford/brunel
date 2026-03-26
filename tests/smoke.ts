@@ -4,9 +4,10 @@
  *
  * Run with: npm run smoke
  */
-import { spawn, type ChildProcess } from "child_process";
-import { existsSync, symlinkSync, unlinkSync, readFileSync } from "fs";
+import { spawn, type ChildProcess, execSync } from "child_process";
+import { existsSync, symlinkSync, unlinkSync, readFileSync, mkdtempSync, rmSync } from "fs";
 import * as net from "net";
+import * as os from "os";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -38,8 +39,21 @@ if (!existsSync(nmPath)) {
   } catch { /* not a worktree — proceed, will fail with a clear error if tsx can't find modules */ }
 }
 
+// Create a temporary bare git repo for the worker to clone
+const tmpRepoDir = mkdtempSync(path.join(os.tmpdir(), "brunel-smoke-repo-"));
+execSync(`git init --bare "${tmpRepoDir}"`);
+const tmpWorkDir = mkdtempSync(path.join(os.tmpdir(), "brunel-smoke-work-"));
+execSync(`git clone "${tmpRepoDir}" "${tmpWorkDir}"`, { stdio: "ignore" });
+execSync(`git -C "${tmpWorkDir}" commit --allow-empty -m "init"`, {
+  env: { ...process.env, GIT_AUTHOR_NAME: "Test", GIT_AUTHOR_EMAIL: "test@example.com", GIT_COMMITTER_NAME: "Test", GIT_COMMITTER_EMAIL: "test@example.com" },
+});
+execSync(`git -C "${tmpWorkDir}" push origin HEAD:main`);
+const SMOKE_REPO_URL = `file://${tmpRepoDir}`;
+
 function cleanup() {
   if (symlinkCreated && existsSync(nmPath)) unlinkSync(nmPath);
+  rmSync(tmpRepoDir, { recursive: true, force: true });
+  rmSync(tmpWorkDir, { recursive: true, force: true });
 }
 process.on("exit", cleanup);
 process.on("SIGINT", () => process.exit(130));
@@ -83,7 +97,7 @@ async function run(): Promise<void> {
     function spawnWorker() {
       worker = spawn("tsx", ["src/repl.ts", "--worker-mode"], {
         ...spawnOpts,
-        env: { ...process.env, BRUNEL_FOREMAN_URL: foremanUrl, GITHUB_REPO: "test/test", GITHUB_TOKEN: "dummy" },
+        env: { ...process.env, BRUNEL_FOREMAN_URL: foremanUrl, GITHUB_REPO: "test/test", GITHUB_TOKEN: "dummy", BRUNEL_REPO_URL: SMOKE_REPO_URL },
       });
       worker.stdout!.on("data", (buf: Buffer) => {
         process.stderr.write(`[worker stdout] ${buf}`);

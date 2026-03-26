@@ -384,7 +384,13 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     : undefined;
 
   if (process.argv.includes("--worker-mode")) {
-    void workerMain(boundRunQuery, { foremanUrl: config.foremanUrl });
+    void workerMain(boundRunQuery, {
+      foremanUrl: config.foremanUrl,
+      workspaceDir: config.workspaceDir,
+      githubToken: config.githubToken,
+      githubRepo: config.githubRepo,
+      repoUrl: config.repoUrl,
+    });
   } else {
     void main(permConfig, workspaceCfg);
   }

@@ -1,10 +1,13 @@
 import "dotenv/config";
 import crypto from "crypto";
+import os from "node:os";
+import path from "node:path";
 import { WebSocket } from "ws";
 import * as display from "./display.js";
 import { buildInitialPrompt, buildEventPrompt, fmtEventList } from "./templates.js";
-import { ask, listWorkerCommands, dispatchInput } from "./input.js";
+import { ask, listWorkerCommands, dispatchInput, pick } from "./input.js";
 import type { ForemanMessage, GitHubEvent, TaskIssue } from "./types.js";
+import { Workspace, confirmIfUnsafe } from "./workspace.js";
 
 // ── Event classification ───────────────────────────────────────────────────────
 
@@ -62,6 +65,19 @@ export type WorkerDisplay = {
   printForemanMessage: (msg: ForemanMessage) => void;
 };
 
+export type WorkspaceCtx = {
+  workspace: Workspace;
+  originalCwd: string;
+  workspaceDir: string;
+  repoUrl: string;
+  confirm: (msg: string) => Promise<boolean>;
+};
+
+export type WorkerSessionOptions = {
+  afterTask?: () => Promise<void>;
+  workspaceCtx?: WorkspaceCtx;
+};
+
 // Sentinels used to signal WebSocket events through ask()'s abort param
 const WS_TASK_ASSIGNED = "__task_assigned__";
 const WS_EVENT = "__event__";
@@ -83,6 +99,7 @@ export class WorkerSession {
     private wsFactory: WsFactory,
     private runQuery: RunQuery,
     private display: WorkerDisplay,
+    private options: WorkerSessionOptions = {},
   ) {}
 
   start(): void {
@@ -126,14 +143,76 @@ export class WorkerSession {
       this.display.print(display.c.boldRed(`Unknown command: /${action.command}`));
       return;
     }
+
     if (action.type === "task-complete") {
-      await this.handleSlashCommand("/task-complete");
+      if (this.currentTaskId && this.ws && this.ws.readyState === WebSocket.OPEN) {
+        if (this.options.afterTask) {
+          try {
+            await this.options.afterTask();
+          } catch {
+            return;
+          }
+        }
+        this.ws.send(JSON.stringify({
+          type: "task_complete",
+          workerId: this.workerId,
+          taskId: this.currentTaskId,
+        }));
+        this.currentTaskId = undefined;
+        this.currentIssue = undefined;
+        this.currentSessionId = undefined;
+        this.display.print(display.c.sageGreen("Task complete. Waiting for next task..."));
+      }
       return;
     }
+
     if (action.type === "clear") {
-      await this.handleSlashCommand("/clear");
+      this.currentSessionId = undefined;
+      this.display.print(display.clearBreak());
       return;
     }
+
+    if (action.type === "reset-workspace") {
+      const ctx = this.options.workspaceCtx;
+      if (!ctx) { this.display.print(display.c.boldRed("No workspace in this session.")); return; }
+      const ok = await confirmIfUnsafe(ctx.workspace, ctx.confirm);
+      if (!ok) return;
+      await ctx.workspace.reset();
+      this.display.print(display.c.sageGreen("Workspace reset to main."));
+      return;
+    }
+
+    if (action.type === "remove-workspace") {
+      const ctx = this.options.workspaceCtx;
+      if (!ctx) { this.display.print(display.c.boldRed("No workspace in this session.")); return; }
+      const ok = await confirmIfUnsafe(ctx.workspace, ctx.confirm);
+      if (!ok) return;
+      await ctx.workspace.destroy();
+      process.chdir(ctx.originalCwd);
+      this.options.workspaceCtx = undefined;
+      this.display.print(display.c.sageGreen(`Workspace removed. Now in: ${ctx.originalCwd}`));
+      return;
+    }
+
+    if (action.type === "create-workspace") {
+      this.display.print(display.c.amber("Workspace is managed automatically in worker mode."));
+      return;
+    }
+
+    if (action.type === "prune") {
+      const ctx = this.options.workspaceCtx;
+      const workspaceDir = ctx?.workspaceDir;
+      if (!workspaceDir) { this.display.print(display.c.boldRed("No workspace directory configured.")); return; }
+      const removed = await Workspace.prune(workspaceDir);
+      if (removed.length === 0) {
+        this.display.print(display.c.sageGreen("Nothing to prune."));
+      } else {
+        for (const dir of removed) this.display.print(display.c.darkGray(`  Removed: ${dir}`));
+        this.display.print(display.c.sageGreen(`Pruned ${removed.length} orphaned workspace(s).`));
+      }
+      return;
+    }
+
     if (action.type === "query") {
       await this.runQueryLoop(action.prompt);
     }
@@ -266,40 +345,59 @@ export class WorkerSession {
     return prompt;
   }
 
-  private async handleSlashCommand(input: string): Promise<void> {
-    const command = input.slice(1).split(/\s+/)[0];
-
-    if (command === "task-complete") {
-      if (this.currentTaskId && this.ws && this.ws.readyState === WebSocket.OPEN) {
-        this.ws.send(JSON.stringify({
-          type: "task_complete",
-          workerId: this.workerId,
-          taskId: this.currentTaskId,
-        }));
-        this.currentTaskId = undefined;
-        this.currentIssue = undefined;
-        this.currentSessionId = undefined;
-        this.display.print(display.c.sageGreen("Task complete. Waiting for next task..."));
-      }
-      return;
-    }
-
-    if (command === "clear") {
-      this.currentSessionId = undefined;
-      this.display.print(display.clearBreak());
-      return;
-    }
-  }
 }
 
 // ── workerMain ────────────────────────────────────────────────────────────────
 
 export async function workerMain(
   runQueryFn: RunQuery,
-  config: { foremanUrl: string },
+  config: {
+    foremanUrl: string;
+    workspaceDir?: string;
+    githubToken: string;
+    githubRepo: string;
+    repoUrl?: string;
+  },
 ): Promise<void> {
   const FOREMAN_URL = config.foremanUrl;
   const workerId = crypto.randomUUID();
+
+  const originalCwd = process.cwd();
+  const workspaceDir = config.workspaceDir ?? path.join(os.homedir(), ".brunel", "workers");
+  const repoUrl = config.repoUrl ?? `https://${config.githubToken}@github.com/${config.githubRepo}.git`;
+
+  const workspace = await Workspace.create(workspaceDir, workerId, repoUrl);
+  process.chdir(workspace.dir);
+
+  const confirm = async (msg: string): Promise<boolean> => {
+    display.print(display.c.amber(`\n⚠ Potential data loss:\n${msg}`));
+    const idx = await pick(["Yes, proceed", "No, cancel"]);
+    return idx === 0;
+  };
+
+  const afterTask = async () => {
+    const ok = await confirmIfUnsafe(workspace, confirm);
+    if (!ok) {
+      display.print(display.c.amber("Workspace reset cancelled. Task not marked complete."));
+      throw new Error("cancelled");
+    }
+    try {
+      await workspace.reset();
+    } catch (err) {
+      display.print(display.c.boldRed(`Workspace reset failed: ${err}. Task not marked complete.`));
+      throw err;
+    }
+  };
+
+  const shutdown = async () => {
+    const ok = await confirmIfUnsafe(workspace, confirm);
+    if (ok) await workspace.destroy();
+    process.exit(0);
+  };
+  // SIGTERM is a system/orchestrator signal: force-destroy without prompting.
+  process.on("SIGTERM", () => { void workspace.destroy().then(() => process.exit(0)); });
+  // SIGINT received as a signal: prompt before destroying.
+  process.on("SIGINT", () => { void shutdown(); });
 
   const wsFactory: WsFactory = (wid, taskId) => {
     const ws = new WebSocket(`${FOREMAN_URL}/worker`);
@@ -319,7 +417,10 @@ export async function workerMain(
     printForemanMessage: display.printForemanMessage,
   };
 
-  const session = new WorkerSession(workerId, wsFactory, runQueryFn, workerDisplay);
+  const session = new WorkerSession(workerId, wsFactory, runQueryFn, workerDisplay, {
+    afterTask,
+    workspaceCtx: { workspace, originalCwd, workspaceDir, repoUrl, confirm },
+  });
 
   process.stdout.write("\x1b[?2004h"); // enable bracketed paste mode
   if (process.stdin.isTTY) process.stdin.setRawMode(true);
@@ -362,6 +463,10 @@ export async function workerMain(
       display.print(display.c.boldRed(`\nERROR: ${err}`));
     }
   }
+
+  // Clean shutdown: destroy workspace if user approves
+  const okShutdown = await confirmIfUnsafe(workspace, confirm);
+  if (okShutdown) await workspace.destroy();
 
   process.stdout.write("\x1b[?2004l\r\n");
   if (process.stdin.isTTY) process.stdin.setRawMode(false);
