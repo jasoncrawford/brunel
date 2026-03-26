@@ -128,11 +128,16 @@ Four workspace management commands are available in both worker and REPL modes. 
 - Saves the original `process.cwd()` before the first `chdir` so `/remove-workspace` can restore it
 
 **`/reset-workspace`**
+- Before resetting, runs `git status --porcelain` in the workspace. If the output is non-empty, shows the dirty files and prompts "This will discard all uncommitted changes. Continue? [Yes/No]". Aborts if the user says no.
 - Calls `workspace.reset()` on the current session's workspace
 - Useful for manually cleaning up mid-task or recovering from a bad state
 - Errors if no workspace exists for this session
 
 **`/remove-workspace`**
+- Before removing, performs two safety checks:
+  1. `git status --porcelain` — warns if there are uncommitted changes
+  2. `git log @{u}..HEAD --oneline` — warns if the current branch has unpushed commits; also warns if the branch has no upstream (never pushed)
+- If either check finds potential data loss, shows what would be lost and prompts "This will permanently delete the workspace. Continue? [Yes/No]". Aborts if the user says no.
 - Calls `workspace.destroy()`, removes the checkout directory
 - Restores `process.cwd()` to the directory saved at `/create-workspace` time (or the original startup cwd for workers)
 - Clears the session's `workspace` reference
