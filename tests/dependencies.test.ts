@@ -42,6 +42,18 @@ describe("parseBodyBlockers", () => {
   it("parses mixed single and comma-separated entries across lines", () => {
     expect(parseBodyBlockers("Depends on #1\nBlocked by #2, #3, #4")).toEqual([1, 2, 3, 4]);
   });
+
+  it("parses markdown bold format '**Depends on:** #N'", () => {
+    expect(parseBodyBlockers("**Depends on:** #257")).toEqual([257]);
+  });
+
+  it("parses colon separator 'Depends on: #N'", () => {
+    expect(parseBodyBlockers("Depends on: #42")).toEqual([42]);
+  });
+
+  it("parses '**Blocked by:** #N'", () => {
+    expect(parseBodyBlockers("**Blocked by:** #7")).toEqual([7]);
+  });
 });
 
 describe("setBlockers", () => {

@@ -13,7 +13,9 @@ export type DependencyGraph = Map<number, Set<number>>;
  */
 export function parseBodyBlockers(body: string): number[] {
   // Match a keyword clause followed by one or more comma-separated #N references.
-  const clausePattern = /(?:^|\s)(?:depends\s+on|blocked\s+by)\s+(#\d+(?:\s*,\s*#\d+)*)/gi;
+  // Allow optional markdown formatting (**, :) around the keyword phrase,
+  // e.g. "**Depends on:** #257", "Depends on: #42", or plain "Depends on #N".
+  const clausePattern = /(?:^|\s)\*{0,2}(?:depends\s+on|blocked\s+by)[\s:*]+(#\d+(?:\s*,\s*#\d+)*)/gi;
   const numbers = new Set<number>();
   let m: RegExpExecArray | null;
   while ((m = clausePattern.exec(body)) !== null) {
