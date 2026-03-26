@@ -43,7 +43,7 @@ export class Workspace {
     fs.mkdirSync(baseDir, { recursive: true });
     if (!fs.existsSync(path.join(dir, ".git"))) {
       if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
-      display.print(`[workspace] Cloning ${repoUrl} → ${dir}`);
+      display.print(display.c.sageGreen(`[workspace] Cloning ${repoUrl} → ${dir}`));
       await exec(["clone", repoUrl, dir], undefined);
     }
     fs.writeFileSync(path.join(dir, ".brunel.lock"), String(process.pid));
@@ -56,7 +56,7 @@ export class Workspace {
    * then retries one final time.
    */
   async reset(): Promise<void> {
-    display.print(`[workspace] Resetting ${this.dir}`);
+    display.print(display.c.sageGreen(`[workspace] Resetting ${this.dir}`));
     try {
       await this._doReset();
       return;
@@ -70,7 +70,7 @@ export class Workspace {
       display.print(display.c.amber(`[workspace] Reset failed again, re-cloning: ${err}`));
       fs.rmSync(this.dir, { recursive: true, force: true });
       fs.mkdirSync(path.dirname(this.dir), { recursive: true });
-      display.print(`[workspace] Re-cloning ${this.repoUrl} → ${this.dir}`);
+      display.print(display.c.sageGreen(`[workspace] Re-cloning ${this.repoUrl} → ${this.dir}`));
       await this.exec(["clone", this.repoUrl, this.dir], undefined);
       fs.writeFileSync(path.join(this.dir, ".brunel.lock"), String(process.pid));
       await this._doReset(); // throws if still broken — propagates to caller
@@ -122,7 +122,7 @@ export class Workspace {
    */
   static async prune(baseDir: string): Promise<string[]> {
     if (!fs.existsSync(baseDir)) return [];
-    display.print(`[workspace] Pruning orphaned workspaces in ${baseDir}`);
+    display.print(display.c.sageGreen(`[workspace] Pruning orphaned workspaces in ${baseDir}`));
     const entries = fs.readdirSync(baseDir, { withFileTypes: true });
     const removed: string[] = [];
     for (const entry of entries) {
@@ -132,11 +132,11 @@ export class Workspace {
       if (fs.existsSync(lockPath)) {
         const pid = parseInt(fs.readFileSync(lockPath, "utf8").trim(), 10);
         if (isProcessAlive(pid)) {
-          if (display.verbose) display.print(`[workspace] Skipping active workspace ${dir} (pid ${pid})`);
+          if (display.verbose) display.print(display.c.sageGreen(`[workspace] Skipping active workspace ${dir} (pid ${pid})`));
           continue;
         }
       }
-      display.print(`[workspace] Removing orphaned workspace ${dir}`);
+      display.print(display.c.sageGreen(`[workspace] Removing orphaned workspace ${dir}`));
       fs.rmSync(dir, { recursive: true, force: true });
       removed.push(dir);
     }
@@ -145,7 +145,7 @@ export class Workspace {
 
   /** Remove the entire checkout directory. */
   async destroy(): Promise<void> {
-    display.print(`[workspace] Destroying ${this.dir}`);
+    display.print(display.c.sageGreen(`[workspace] Destroying ${this.dir}`));
     fs.rmSync(this.dir, { recursive: true, force: true });
   }
 }
