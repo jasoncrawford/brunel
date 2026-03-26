@@ -51,6 +51,8 @@ const BrunelConfigSchema = z.object({
   foremanUrl:     z.string().default("ws://localhost:3000"),
   /** Claude permission mode for worker sessions. */
   permissionMode: z.enum(VALID_PERMISSION_MODES).default("default"),
+  /** Base directory for worker checkout directories. Defaults to ~/.brunel/workers at runtime. */
+  workspaceDir:   z.string().optional(),
 
   // ── Cloud deployment ───────────────────────────────────────────────────────
 

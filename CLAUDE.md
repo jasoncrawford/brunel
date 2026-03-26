@@ -42,6 +42,7 @@ Optional (all have defaults):
 - `BRUNEL_VERBOSE` — enable verbose Claude output (default: `false`)
 - `BRUNEL_THINK_OUT_LOUD` — show full agent thinking text; defaults to `BRUNEL_VERBOSE`; also settable in `brunel.config.ts` as `thinkOutLoud`
 - `BRUNEL_PERMISSION_MODE` — Claude permission mode: `default`, `acceptEdits`, `bypassPermissions`, `plan`, `dontAsk` (default: `default`)
+- `BRUNEL_WORKSPACE_DIR` — base directory for worker checkout directories (default: `~/.brunel/workers`)
 - `BRUNEL_SUPABASE_URL` — Supabase project URL (for cloud deployment)
 - `BRUNEL_SUPABASE_SECRET_KEY` — Supabase secret key (for cloud deployment; treat as secret)
 - `BRUNEL_WORKER_SECRET` — shared secret to authenticate workers with the foreman (treat as secret)
@@ -60,3 +61,4 @@ All four run in CI on every PR.
 - TypeScript with ESM (`"type": "module"`). New dependencies must be ESM-compatible.
 - No compilation step — `tsx` runs TypeScript directly.
 - Webhook secret is optional for local dev; set `BRUNEL_WEBHOOK_SECRET` in `.env` to enable signature verification.
+- Use `display.print()` (not `console.log`/`console.error`) for any output in production code — routes through the status-bar-aware renderer so messages don't corrupt the prompt or status line.

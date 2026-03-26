@@ -661,3 +661,4 @@ describe("formatCommentLocation", () => {
     expect(result).toBe("`src/foo.ts`");
   });
 });
+

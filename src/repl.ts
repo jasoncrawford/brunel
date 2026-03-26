@@ -236,10 +236,22 @@ async function main(
       continue;
     }
 
-    if (action.type === "task_complete") {
+    if (action.type === "task-complete") {
       display.print(display.c.boldRed("Not in worker mode."));
       continue;
     }
+
+    if (
+      action.type === "create-workspace" ||
+      action.type === "reset-workspace" ||
+      action.type === "remove-workspace" ||
+      action.type === "prune"
+    ) {
+      display.print(display.c.amber(`/${action.type}: workspace management not yet implemented in REPL mode.`));
+      continue;
+    }
+
+    if (action.type !== "query") continue;
 
     try {
       sessionId = await runQuery(permConfig, action.prompt, sessionId);

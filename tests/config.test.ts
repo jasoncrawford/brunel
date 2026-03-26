@@ -19,6 +19,7 @@ const ENV_KEYS = [
   "BRUNEL_VERBOSE", "BRUNEL_PORT", "BRUNEL_WEBHOOK_SECRET",
   "BRUNEL_FOREMAN_URL", "BRUNEL_PERMISSION_MODE",
   "BRUNEL_SUPABASE_URL", "BRUNEL_SUPABASE_SECRET_KEY", "BRUNEL_WORKER_SECRET",
+  "BRUNEL_WORKSPACE_DIR",
 ];
 
 beforeEach(() => {
@@ -452,5 +453,22 @@ describe("workerSecret", () => {
     process.env.BRUNEL_WORKER_SECRET = "env-secret";
     await loadConfig(["node", "repl.js"]);
     expect(warnSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("workspaceDir", () => {
+  it("reads workspaceDir from BRUNEL_WORKSPACE_DIR env var", async () => {
+    process.env.BRUNEL_GITHUB_REPO = "owner/repo";
+    process.env.BRUNEL_GITHUB_TOKEN = "tok";
+    process.env.BRUNEL_WORKSPACE_DIR = "/custom/workspace";
+    const config = await loadConfig([]);
+    expect(config.workspaceDir).toBe("/custom/workspace");
+  });
+
+  it("defaults workspaceDir to undefined when not set", async () => {
+    process.env.BRUNEL_GITHUB_REPO = "owner/repo";
+    process.env.BRUNEL_GITHUB_TOKEN = "tok";
+    const config = await loadConfig([]);
+    expect(config.workspaceDir).toBeUndefined();
   });
 });
