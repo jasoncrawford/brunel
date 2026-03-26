@@ -855,3 +855,52 @@ describe("prIsClosed guard", () => {
     }
   });
 });
+
+// ── afterTask callback on /task-complete ──────────────────────────────────────
+
+describe("afterTask callback on /task-complete", () => {
+  it("calls afterTask before sending task_complete to foreman", async () => {
+    const afterTask = vi.fn().mockResolvedValue(undefined);
+    const sessionWithAfterTask = new WorkerSession(
+      WORKER_ID, wsFactory, runQuery, display, { afterTask }
+    );
+    sessionWithAfterTask.start();
+
+    const issue = makeIssue();
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "t1", issue });
+    await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
+
+    await sessionWithAfterTask.handleUserInput("/task-complete");
+    expect(afterTask).toHaveBeenCalledOnce();
+    const sentMsg = JSON.parse(fakeWs.send.mock.calls.at(-1)![0]);
+    expect(sentMsg.type).toBe("task_complete");
+  });
+
+  it("does not send task_complete if afterTask throws", async () => {
+    const afterTask = vi.fn().mockRejectedValue(new Error("reset failed"));
+    const sessionWithAfterTask = new WorkerSession(
+      WORKER_ID, wsFactory, runQuery, display, { afterTask }
+    );
+    sessionWithAfterTask.start();
+
+    const issue = makeIssue();
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "t1", issue });
+    await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
+
+    const sendCountBefore = fakeWs.send.mock.calls.length;
+    await sessionWithAfterTask.handleUserInput("/task-complete");
+    const taskCompleteSent = fakeWs.send.mock.calls
+      .slice(sendCountBefore)
+      .some(([data]: [string]) => JSON.parse(data).type === "task_complete");
+    expect(taskCompleteSent).toBe(false);
+  });
+
+  it("sends task_complete normally with no afterTask", async () => {
+    const issue = makeIssue();
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "t1", issue });
+    await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
+    await session.handleUserInput("/task-complete");
+    const lastMsg = JSON.parse(fakeWs.send.mock.calls.at(-1)![0]);
+    expect(lastMsg.type).toBe("task_complete");
+  });
+});

@@ -62,6 +62,10 @@ export type WorkerDisplay = {
   printForemanMessage: (msg: ForemanMessage) => void;
 };
 
+export type WorkerSessionOptions = {
+  afterTask?: () => Promise<void>;
+};
+
 // Sentinels used to signal WebSocket events through ask()'s abort param
 const WS_TASK_ASSIGNED = "__task_assigned__";
 const WS_EVENT = "__event__";
@@ -83,6 +87,7 @@ export class WorkerSession {
     private wsFactory: WsFactory,
     private runQuery: RunQuery,
     private display: WorkerDisplay,
+    private options: WorkerSessionOptions = {},
   ) {}
 
   start(): void {
@@ -271,6 +276,14 @@ export class WorkerSession {
 
     if (command === "task-complete") {
       if (this.currentTaskId && this.ws && this.ws.readyState === WebSocket.OPEN) {
+        if (this.options.afterTask) {
+          try {
+            await this.options.afterTask();
+          } catch (err) {
+            this.display.print(display.c.boldRed(`Workspace reset failed: ${err}. Task not marked complete.`));
+            return;
+          }
+        }
         this.ws.send(JSON.stringify({
           type: "task_complete",
           workerId: this.workerId,
