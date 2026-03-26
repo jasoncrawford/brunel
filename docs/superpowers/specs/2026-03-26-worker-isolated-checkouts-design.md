@@ -53,7 +53,7 @@ class Workspace {
 
 **Clone URL:** Constructed from config as `https://{githubToken}@github.com/{githubRepo}.git`.
 
-**Safety check helper:** A shared `confirmIfUnsafe(workspace, confirm)` helper (in `worker.ts` or a small utility) calls `workspace.checkSafety()`, formats a warning message if there are uncommitted files or unpushed commits, and calls `confirm(message)` to get user approval. Returns `true` if it's safe to proceed, `false` if the user declined. Used by slash commands and the shutdown handler. The automatic post-task reset skips this helper — it calls `workspace.reset()` directly without checking.
+**Safety check helper:** A shared `confirmIfUnsafe(workspace, confirm)` helper (in `worker.ts` or a small utility) calls `workspace.checkSafety()`, formats a warning message if there are uncommitted files or unpushed commits, and calls `confirm(message)` to get user approval. Returns `true` if it's safe to proceed, `false` if the user declined. Used everywhere `reset()` or `destroy()` is called — slash commands, the `/task-complete` handler, and shutdown. Every reset path is user-initiated, so all of them should check.
 
 **Error handling in `reset()`:** If reset fails, retry once. If it still fails, call `destroy()` explicitly (rm -rf the directory), then call `create()` to re-clone from scratch, then retry `reset()`. The explicit `destroy()` before `create()` ensures the directory doesn't already exist, preventing `create()` from skipping the clone. If that also fails, propagate the error. The caller (worker) treats a failed reset as a reason not to report idle — see lifecycle below.
 
@@ -95,7 +95,7 @@ afterTask?: () => Promise<void>
 
 Called inside `handleSlashCommand("task-complete")` **before** sending `task_complete` to the foreman. If `afterTask()` throws, the worker logs the error and does not send `task_complete` — it stays busy. The foreman never sees it as idle, so no task is stranded.
 
-`workerMain` passes `() => workspace.reset()` as `afterTask`.
+`workerMain` passes `() => confirmIfUnsafe(workspace, confirm).then(ok => ok && workspace.reset())` as `afterTask`, so `/task-complete` also warns if there are uncommitted or unpushed changes.
 
 **Clean shutdown** (end of `workerMain` loop, `/exit`, `^D`):
 - Calls `confirmIfUnsafe()` — if the workspace has uncommitted or unpushed work, prompts the user before destroying
@@ -166,7 +166,7 @@ Making the REPL and worker share the same workspace lifecycle API is intentional
 
 1. **Startup:** clone + write lockfile (inside `create()`) → chdir → connect to foreman
 2. **Task assigned:** Claude works in the checkout (already on clean main from previous reset or initial clone)
-3. **Task complete:** `workspace.reset()` → if successful, send `task_complete` to foreman → idle; if failed, stay busy and log error
+3. **Task complete:** `confirmIfUnsafe()` (warns if dirty) → `workspace.reset()` → if successful, send `task_complete` to foreman → idle; if reset failed, stay busy and log error; if user declined, stay busy
 4. **Clean shutdown:** `workspace.destroy()` → exit
 5. **Unclean shutdown:** orphaned dir cleaned up by `Workspace.prune()`
 
