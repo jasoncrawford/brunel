@@ -69,6 +69,8 @@ export class Workspace {
       fs.rmSync(this.dir, { recursive: true, force: true });
       fs.mkdirSync(path.dirname(this.dir), { recursive: true });
       await this.exec(["clone", this.repoUrl, this.dir], undefined);
+      // Ensure dir exists even if exec was mocked (for testing)
+      fs.mkdirSync(this.dir, { recursive: true });
       fs.writeFileSync(path.join(this.dir, ".brunel.lock"), String(process.pid));
       await this._doReset(); // throws if still broken — propagates to caller
     }

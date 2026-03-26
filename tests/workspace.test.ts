@@ -70,3 +70,64 @@ describe("Workspace.destroy", () => {
     expect(fs.existsSync(ws.dir)).toBe(false);
   });
 });
+
+// ── reset ──────────────────────────────────────────────────────────────────
+
+describe("Workspace.reset", () => {
+  it("runs fetch, checkout main, reset --hard, clean -fdx", async () => {
+    const exec = makeExec();
+    const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec);
+    exec.mockClear();
+    await ws.reset();
+    expect(exec).toHaveBeenCalledWith(["fetch", "origin"], ws.dir);
+    expect(exec).toHaveBeenCalledWith(["checkout", "main"], ws.dir);
+    expect(exec).toHaveBeenCalledWith(["reset", "--hard", "origin/main"], ws.dir);
+    expect(exec).toHaveBeenCalledWith(["clean", "-fdx"], ws.dir);
+  });
+
+  it("retries once on failure before succeeding", async () => {
+    const exec = vi.fn()
+      .mockRejectedValueOnce(new Error("transient"))
+      .mockResolvedValue("");
+    // Pre-create the dir so create() skips cloning
+    fs.mkdirSync(path.join(BASE_DIR, WORKER_ID), { recursive: true });
+    const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec);
+    exec.mockClear();
+    // First reset attempt fails, second succeeds
+    exec
+      .mockRejectedValueOnce(new Error("network error"))
+      .mockResolvedValue("");
+    await ws.reset();
+    // reset was called at least twice (first fail, then success)
+    expect(exec.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("destroys and re-clones if both retries fail, then succeeds", async () => {
+    const dir = path.join(BASE_DIR, WORKER_ID);
+    fs.mkdirSync(dir, { recursive: true });
+    let callCount = 0;
+    const exec = vi.fn().mockImplementation(async (args: string[]) => {
+      if (args[0] === "clone") return ""; // clone always succeeds
+      callCount++;
+      if (callCount <= 2) throw new Error("reset fail");
+      return ""; // third attempt (after re-clone) succeeds
+    });
+    const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec);
+    exec.mockClear();
+    callCount = 0;
+    await ws.reset();
+    expect(exec).toHaveBeenCalledWith(expect.arrayContaining(["clone"]), undefined);
+  });
+
+  it("throws if reset still fails after destroy + re-clone", async () => {
+    const dir = path.join(BASE_DIR, WORKER_ID);
+    fs.mkdirSync(dir, { recursive: true });
+    const exec = vi.fn().mockImplementation(async (args: string[]) => {
+      if (args[0] === "clone") return "";
+      throw new Error("always fails");
+    });
+    const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec);
+    exec.mockClear();
+    await expect(ws.reset()).rejects.toThrow("always fails");
+  });
+});
