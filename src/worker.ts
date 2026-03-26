@@ -149,8 +149,7 @@ export class WorkerSession {
         if (this.options.afterTask) {
           try {
             await this.options.afterTask();
-          } catch (err) {
-            this.display.print(display.c.boldRed(`afterTask failed: ${err}. Task not marked complete.`));
+          } catch {
             return;
           }
         }
@@ -378,8 +377,16 @@ export async function workerMain(
 
   const afterTask = async () => {
     const ok = await confirmIfUnsafe(workspace, confirm);
-    if (!ok) throw new Error("User declined workspace reset.");
-    await workspace.reset();
+    if (!ok) {
+      display.print(display.c.amber("Workspace reset cancelled. Task not marked complete."));
+      throw new Error("cancelled");
+    }
+    try {
+      await workspace.reset();
+    } catch (err) {
+      display.print(display.c.boldRed(`Workspace reset failed: ${err}. Task not marked complete.`));
+      throw err;
+    }
   };
 
   const shutdown = async () => {
