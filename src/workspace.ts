@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
+import * as display from "./display.js";
 
 const execFileAsync = promisify(execFileCb);
 
@@ -40,8 +41,9 @@ export class Workspace {
   ): Promise<Workspace> {
     const dir = path.join(baseDir, workerId);
     fs.mkdirSync(baseDir, { recursive: true });
-    if (!fs.existsSync(dir)) {
-      console.log(`[workspace] Cloning ${repoUrl} → ${dir}`);
+    if (!fs.existsSync(path.join(dir, ".git"))) {
+      if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
+      display.print(`[workspace] Cloning ${repoUrl} → ${dir}`);
       await exec(["clone", repoUrl, dir], undefined);
     }
     fs.writeFileSync(path.join(dir, ".brunel.lock"), String(process.pid));
@@ -54,21 +56,21 @@ export class Workspace {
    * then retries one final time.
    */
   async reset(): Promise<void> {
-    console.log(`[workspace] Resetting ${this.dir}`);
+    display.print(`[workspace] Resetting ${this.dir}`);
     try {
       await this._doReset();
       return;
     } catch (err) {
-      console.error(`[workspace] Reset failed, retrying: ${err}`);
+      display.print(display.c.amber(`[workspace] Reset failed, retrying: ${err}`));
     }
     try {
       await this._doReset();
       return;
     } catch (err) {
-      console.error(`[workspace] Reset failed again, re-cloning: ${err}`);
+      display.print(display.c.amber(`[workspace] Reset failed again, re-cloning: ${err}`));
       fs.rmSync(this.dir, { recursive: true, force: true });
       fs.mkdirSync(path.dirname(this.dir), { recursive: true });
-      console.log(`[workspace] Re-cloning ${this.repoUrl} → ${this.dir}`);
+      display.print(`[workspace] Re-cloning ${this.repoUrl} → ${this.dir}`);
       await this.exec(["clone", this.repoUrl, this.dir], undefined);
       fs.writeFileSync(path.join(this.dir, ".brunel.lock"), String(process.pid));
       await this._doReset(); // throws if still broken — propagates to caller
@@ -120,7 +122,7 @@ export class Workspace {
    */
   static async prune(baseDir: string): Promise<string[]> {
     if (!fs.existsSync(baseDir)) return [];
-    console.log(`[workspace] Pruning orphaned workspaces in ${baseDir}`);
+    display.print(`[workspace] Pruning orphaned workspaces in ${baseDir}`);
     const entries = fs.readdirSync(baseDir, { withFileTypes: true });
     const removed: string[] = [];
     for (const entry of entries) {
@@ -129,9 +131,12 @@ export class Workspace {
       const lockPath = path.join(dir, ".brunel.lock");
       if (fs.existsSync(lockPath)) {
         const pid = parseInt(fs.readFileSync(lockPath, "utf8").trim(), 10);
-        if (isProcessAlive(pid)) continue;
+        if (isProcessAlive(pid)) {
+          if (display.verbose) display.print(`[workspace] Skipping active workspace ${dir} (pid ${pid})`);
+          continue;
+        }
       }
-      console.log(`[workspace] Removing orphaned workspace ${dir}`);
+      display.print(`[workspace] Removing orphaned workspace ${dir}`);
       fs.rmSync(dir, { recursive: true, force: true });
       removed.push(dir);
     }
@@ -140,7 +145,7 @@ export class Workspace {
 
   /** Remove the entire checkout directory. */
   async destroy(): Promise<void> {
-    console.log(`[workspace] Destroying ${this.dir}`);
+    display.print(`[workspace] Destroying ${this.dir}`);
     fs.rmSync(this.dir, { recursive: true, force: true });
   }
 }

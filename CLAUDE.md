@@ -61,3 +61,4 @@ All four run in CI on every PR.
 - TypeScript with ESM (`"type": "module"`). New dependencies must be ESM-compatible.
 - No compilation step — `tsx` runs TypeScript directly.
 - Webhook secret is optional for local dev; set `BRUNEL_WEBHOOK_SECRET` in `.env` to enable signature verification.
+- Use `display.print()` (not `console.log`/`console.error`) for any output in production code — routes through the status-bar-aware renderer so messages don't corrupt the prompt or status line.

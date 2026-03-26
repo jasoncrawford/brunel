@@ -12,8 +12,8 @@ const REPO_URL = "https://token@github.com/owner/repo.git";
 
 function makeExec(responses: Record<string, string> = {}) {
   return vi.fn().mockImplementation(async (args: string[]) => {
-    // Simulate git clone creating the target directory
-    if (args[0] === "clone") fs.mkdirSync(args[2], { recursive: true });
+    // Simulate git clone creating the target directory with a .git subdirectory
+    if (args[0] === "clone") fs.mkdirSync(path.join(args[2], ".git"), { recursive: true });
     const key = args.join(" ");
     return responses[key] ?? "";
   });
@@ -40,9 +40,9 @@ describe("Workspace.create", () => {
     expect(ws.dir).toBe(path.join(BASE_DIR, WORKER_ID));
   });
 
-  it("skips git clone if directory already exists", async () => {
+  it("skips git clone if .git already exists", async () => {
     const workerDir = path.join(BASE_DIR, WORKER_ID);
-    fs.mkdirSync(workerDir);
+    fs.mkdirSync(path.join(workerDir, ".git"), { recursive: true });
     const exec = makeExec();
     await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec);
     expect(exec).not.toHaveBeenCalledWith(
@@ -91,8 +91,8 @@ describe("Workspace.reset", () => {
     const exec = vi.fn()
       .mockRejectedValueOnce(new Error("transient"))
       .mockResolvedValue("");
-    // Pre-create the dir so create() skips cloning
-    fs.mkdirSync(path.join(BASE_DIR, WORKER_ID), { recursive: true });
+    // Pre-create the .git dir so create() skips cloning
+    fs.mkdirSync(path.join(BASE_DIR, WORKER_ID, ".git"), { recursive: true });
     const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec);
     exec.mockReset();
     // First reset attempt fails, second succeeds
@@ -106,10 +106,10 @@ describe("Workspace.reset", () => {
 
   it("destroys and re-clones if both retries fail, then succeeds", async () => {
     const dir = path.join(BASE_DIR, WORKER_ID);
-    fs.mkdirSync(dir, { recursive: true });
+    fs.mkdirSync(path.join(dir, ".git"), { recursive: true });
     let callCount = 0;
     const exec = vi.fn().mockImplementation(async (args: string[]) => {
-      if (args[0] === "clone") { fs.mkdirSync(args[2], { recursive: true }); return ""; }
+      if (args[0] === "clone") { fs.mkdirSync(path.join(args[2], ".git"), { recursive: true }); return ""; }
       callCount++;
       if (callCount <= 2) throw new Error("reset fail");
       return ""; // third attempt (after re-clone) succeeds
@@ -123,9 +123,9 @@ describe("Workspace.reset", () => {
 
   it("throws if reset still fails after destroy + re-clone", async () => {
     const dir = path.join(BASE_DIR, WORKER_ID);
-    fs.mkdirSync(dir, { recursive: true });
+    fs.mkdirSync(path.join(dir, ".git"), { recursive: true });
     const exec = vi.fn().mockImplementation(async (args: string[]) => {
-      if (args[0] === "clone") { fs.mkdirSync(args[2], { recursive: true }); return ""; }
+      if (args[0] === "clone") { fs.mkdirSync(path.join(args[2], ".git"), { recursive: true }); return ""; }
       throw new Error("always fails");
     });
     const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec);
@@ -172,7 +172,7 @@ describe("Workspace.checkSafety", () => {
 
   it("sets noUpstream when branch has no tracking remote", async () => {
     const exec = vi.fn().mockImplementation(async (args: string[]) => {
-      if (args[0] === "clone") { fs.mkdirSync(args[2], { recursive: true }); return ""; }
+      if (args[0] === "clone") { fs.mkdirSync(path.join(args[2], ".git"), { recursive: true }); return ""; }
       if (args[0] === "status") return "";
       if (args[0] === "log") throw new Error("fatal: no upstream configured for branch 'my-branch'");
       return "";
