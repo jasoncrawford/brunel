@@ -197,6 +197,86 @@ export async function runQuery(
   return capturedSessionId;
 }
 
+// ── Workspace action handler ──────────────────────────────────────────────────
+
+export type WorkspaceActionType = "create-workspace" | "reset-workspace" | "remove-workspace" | "prune";
+
+export interface WorkspaceActionParams {
+  workspaceCfg: { workspaceDir: string; repoUrl: string } | undefined;
+  workspace: Workspace | undefined;
+  sessionId_: string;
+  originalCwd: string;
+  confirm: (msg: string) => Promise<boolean>;
+  print: (msg: string) => void;
+  chdir: (dir: string) => void;
+}
+
+/**
+ * Handle one workspace slash command in the REPL.
+ * Returns the (possibly updated) workspace reference.
+ * Extracted for testability.
+ */
+export async function handleWorkspaceAction(
+  type: WorkspaceActionType,
+  params: WorkspaceActionParams,
+): Promise<Workspace | undefined> {
+  const { workspaceCfg, workspace, sessionId_, originalCwd, confirm, print, chdir } = params;
+
+  if (type === "create-workspace") {
+    if (!workspaceCfg) {
+      print(display.c.boldRed("Cannot create workspace: no GitHub repo configured."));
+      return workspace;
+    }
+    if (workspace) {
+      print(display.c.amber(`Workspace already exists: ${workspace.dir}`));
+      return workspace;
+    }
+    const ws = await Workspace.create(workspaceCfg.workspaceDir, sessionId_, workspaceCfg.repoUrl);
+    chdir(ws.dir);
+    print(display.c.sageGreen(`Workspace created: ${ws.dir}`));
+    return ws;
+  }
+
+  if (type === "reset-workspace") {
+    if (!workspace) {
+      print(display.c.boldRed("No workspace. Use /create-workspace first."));
+      return workspace;
+    }
+    const ok = await confirmIfUnsafe(workspace, confirm);
+    if (!ok) return workspace;
+    await workspace.reset();
+    print(display.c.sageGreen("Workspace reset to main."));
+    return workspace;
+  }
+
+  if (type === "remove-workspace") {
+    if (!workspace) {
+      print(display.c.boldRed("No workspace in this session."));
+      return workspace;
+    }
+    const ok = await confirmIfUnsafe(workspace, confirm);
+    if (!ok) return workspace;
+    await workspace.destroy();
+    chdir(originalCwd);
+    print(display.c.sageGreen(`Workspace removed. Now in: ${originalCwd}`));
+    return undefined;
+  }
+
+  // type === "prune"
+  if (!workspaceCfg) {
+    print(display.c.boldRed("Cannot prune: no workspace directory configured."));
+    return workspace;
+  }
+  const removed = await Workspace.prune(workspaceCfg.workspaceDir);
+  if (removed.length === 0) {
+    print(display.c.sageGreen("Nothing to prune."));
+  } else {
+    for (const dir of removed) print(display.c.darkGray(`  Removed: ${dir}`));
+    print(display.c.sageGreen(`Pruned ${removed.length} orphaned workspace(s).`));
+  }
+  return workspace;
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 async function main(
@@ -260,59 +340,17 @@ async function main(
       continue;
     }
 
-    if (action.type === "create-workspace") {
-      if (!workspaceCfg) {
-        display.print(display.c.boldRed("Cannot create workspace: no GitHub repo configured."));
-        continue;
-      }
-      if (workspace) {
-        display.print(display.c.amber(`Workspace already exists: ${workspace.dir}`));
-        continue;
-      }
-      workspace = await Workspace.create(workspaceCfg.workspaceDir, sessionId_, workspaceCfg.repoUrl);
-      process.chdir(workspace.dir);
-      display.print(display.c.sageGreen(`Workspace created: ${workspace.dir}`));
-      continue;
-    }
-
-    if (action.type === "reset-workspace") {
-      if (!workspace) {
-        display.print(display.c.boldRed("No workspace. Use /create-workspace first."));
-        continue;
-      }
-      const ok = await confirmIfUnsafe(workspace, confirm);
-      if (!ok) continue;
-      await workspace.reset();
-      display.print(display.c.sageGreen("Workspace reset to main."));
-      continue;
-    }
-
-    if (action.type === "remove-workspace") {
-      if (!workspace) {
-        display.print(display.c.boldRed("No workspace in this session."));
-        continue;
-      }
-      const ok = await confirmIfUnsafe(workspace, confirm);
-      if (!ok) continue;
-      await workspace.destroy();
-      process.chdir(originalCwd);
-      workspace = undefined;
-      display.print(display.c.sageGreen(`Workspace removed. Now in: ${originalCwd}`));
-      continue;
-    }
-
-    if (action.type === "prune") {
-      if (!workspaceCfg) {
-        display.print(display.c.boldRed("Cannot prune: no workspace directory configured."));
-        continue;
-      }
-      const removed = await Workspace.prune(workspaceCfg.workspaceDir);
-      if (removed.length === 0) {
-        display.print(display.c.sageGreen("Nothing to prune."));
-      } else {
-        for (const dir of removed) display.print(display.c.darkGray(`  Removed: ${dir}`));
-        display.print(display.c.sageGreen(`Pruned ${removed.length} orphaned workspace(s).`));
-      }
+    if (
+      action.type === "create-workspace" ||
+      action.type === "reset-workspace" ||
+      action.type === "remove-workspace" ||
+      action.type === "prune"
+    ) {
+      workspace = await handleWorkspaceAction(action.type, {
+        workspaceCfg, workspace, sessionId_, originalCwd, confirm,
+        print: display.print,
+        chdir: (dir) => process.chdir(dir),
+      });
       continue;
     }
 
