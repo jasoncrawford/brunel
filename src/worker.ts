@@ -143,30 +143,77 @@ export class WorkerSession {
       this.display.print(display.c.boldRed(`Unknown command: /${action.command}`));
       return;
     }
+
     if (action.type === "task-complete") {
-      await this.handleSlashCommand("/task-complete");
+      if (this.currentTaskId && this.ws && this.ws.readyState === WebSocket.OPEN) {
+        if (this.options.afterTask) {
+          try {
+            await this.options.afterTask();
+          } catch (err) {
+            this.display.print(display.c.boldRed(`afterTask failed: ${err}. Task not marked complete.`));
+            return;
+          }
+        }
+        this.ws.send(JSON.stringify({
+          type: "task_complete",
+          workerId: this.workerId,
+          taskId: this.currentTaskId,
+        }));
+        this.currentTaskId = undefined;
+        this.currentIssue = undefined;
+        this.currentSessionId = undefined;
+        this.display.print(display.c.sageGreen("Task complete. Waiting for next task..."));
+      }
       return;
     }
+
     if (action.type === "clear") {
-      await this.handleSlashCommand("/clear");
+      this.currentSessionId = undefined;
+      this.display.print(display.clearBreak());
       return;
     }
+
     if (action.type === "reset-workspace") {
-      await this.handleSlashCommand("/reset-workspace");
+      const ctx = this.options.workspaceCtx;
+      if (!ctx) { this.display.print(display.c.boldRed("No workspace in this session.")); return; }
+      const ok = await confirmIfUnsafe(ctx.workspace, ctx.confirm);
+      if (!ok) return;
+      await ctx.workspace.reset();
+      this.display.print(display.c.sageGreen("Workspace reset to main."));
       return;
     }
+
     if (action.type === "remove-workspace") {
-      await this.handleSlashCommand("/remove-workspace");
+      const ctx = this.options.workspaceCtx;
+      if (!ctx) { this.display.print(display.c.boldRed("No workspace in this session.")); return; }
+      const ok = await confirmIfUnsafe(ctx.workspace, ctx.confirm);
+      if (!ok) return;
+      await ctx.workspace.destroy();
+      process.chdir(ctx.originalCwd);
+      this.options.workspaceCtx = undefined;
+      this.display.print(display.c.sageGreen(`Workspace removed. Now in: ${ctx.originalCwd}`));
       return;
     }
+
     if (action.type === "create-workspace") {
       this.display.print(display.c.amber("Workspace is managed automatically in worker mode."));
       return;
     }
+
     if (action.type === "prune") {
-      await this.handleSlashCommand("/prune");
+      const ctx = this.options.workspaceCtx;
+      const workspaceDir = ctx?.workspaceDir;
+      if (!workspaceDir) { this.display.print(display.c.boldRed("No workspace directory configured.")); return; }
+      const removed = await Workspace.prune(workspaceDir);
+      if (removed.length === 0) {
+        this.display.print(display.c.sageGreen("Nothing to prune."));
+      } else {
+        for (const dir of removed) this.display.print(display.c.darkGray(`  Removed: ${dir}`));
+        this.display.print(display.c.sageGreen(`Pruned ${removed.length} orphaned workspace(s).`));
+      }
       return;
     }
+
     if (action.type === "query") {
       await this.runQueryLoop(action.prompt);
     }
@@ -299,74 +346,6 @@ export class WorkerSession {
     return prompt;
   }
 
-  private async handleSlashCommand(input: string): Promise<void> {
-    const command = input.slice(1).split(/\s+/)[0];
-
-    if (command === "task-complete") {
-      if (this.currentTaskId && this.ws && this.ws.readyState === WebSocket.OPEN) {
-        if (this.options.afterTask) {
-          try {
-            await this.options.afterTask();
-          } catch (err) {
-            this.display.print(display.c.boldRed(`Workspace reset failed: ${err}. Task not marked complete.`));
-            return;
-          }
-        }
-        this.ws.send(JSON.stringify({
-          type: "task_complete",
-          workerId: this.workerId,
-          taskId: this.currentTaskId,
-        }));
-        this.currentTaskId = undefined;
-        this.currentIssue = undefined;
-        this.currentSessionId = undefined;
-        this.display.print(display.c.sageGreen("Task complete. Waiting for next task..."));
-      }
-      return;
-    }
-
-    if (command === "clear") {
-      this.currentSessionId = undefined;
-      this.display.print(display.clearBreak());
-      return;
-    }
-
-    if (command === "reset-workspace") {
-      const ctx = this.options.workspaceCtx;
-      if (!ctx) { this.display.print(display.c.boldRed("No workspace in this session.")); return; }
-      const ok = await confirmIfUnsafe(ctx.workspace, ctx.confirm);
-      if (!ok) return;
-      await ctx.workspace.reset();
-      this.display.print(display.c.sageGreen("Workspace reset to main."));
-      return;
-    }
-
-    if (command === "remove-workspace") {
-      const ctx = this.options.workspaceCtx;
-      if (!ctx) { this.display.print(display.c.boldRed("No workspace in this session.")); return; }
-      const ok = await confirmIfUnsafe(ctx.workspace, ctx.confirm);
-      if (!ok) return;
-      await ctx.workspace.destroy();
-      process.chdir(ctx.originalCwd);
-      this.options.workspaceCtx = undefined;
-      this.display.print(display.c.sageGreen(`Workspace removed. Now in: ${ctx.originalCwd}`));
-      return;
-    }
-
-    if (command === "prune") {
-      const ctx = this.options.workspaceCtx;
-      const workspaceDir = ctx?.workspaceDir;
-      if (!workspaceDir) { this.display.print(display.c.boldRed("No workspace directory configured.")); return; }
-      const removed = await Workspace.prune(workspaceDir);
-      if (removed.length === 0) {
-        this.display.print(display.c.sageGreen("Nothing to prune."));
-      } else {
-        for (const dir of removed) this.display.print(display.c.darkGray(`  Removed: ${dir}`));
-        this.display.print(display.c.sageGreen(`Pruned ${removed.length} orphaned workspace(s).`));
-      }
-      return;
-    }
-  }
 }
 
 // ── workerMain ────────────────────────────────────────────────────────────────
