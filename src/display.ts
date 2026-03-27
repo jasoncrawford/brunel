@@ -565,8 +565,12 @@ export function print(line: string | null) {
   // printing so the message appears on a clean line (not appended to the
   // prompt). The prompt is then redrawn below via _inputPrintCallback.
   if (_inputPrintCallback) process.stdout.write("\r\x1b[K");
-  const prefix = verbose ? c.darkGray(fmtTime() + " ") : "";
-  console.log(prefix + line);
+  if (verbose) {
+    const ts = c.darkGray(fmtTime() + " ");
+    console.log(line.split("\n").map(l => ts + l).join("\n"));
+  } else {
+    console.log(line);
+  }
   _drawStatus();
   // Only redraw the input prompt when no query is running. During a query the
   // status bar is active; calling drawFresh() then would interleave the prompt

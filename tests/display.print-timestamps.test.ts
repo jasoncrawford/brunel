@@ -59,6 +59,17 @@ describe("print() timestamps", () => {
     expect(raw).toContain("\x1b[90m");
   });
 
+  it("verbose=true: each line of multi-line output gets a timestamp", () => {
+    setVerbose(true);
+    const output = captureOutput(() => print("line one\nline two\nline three"));
+    const plain = stripAnsi(output);
+    const matches = plain.match(/\d{2}:\d{2}:\d{2}/g);
+    expect(matches).toHaveLength(3);
+    expect(plain).toContain("line one");
+    expect(plain).toContain("line two");
+    expect(plain).toContain("line three");
+  });
+
   it("verbose=true: print(null) still no-ops", () => {
     setVerbose(true);
     const output = captureOutput(() => print(null));
