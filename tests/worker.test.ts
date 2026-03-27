@@ -269,6 +269,52 @@ describe("reconnect", () => {
   });
 });
 
+// ── Close diagnostics ─────────────────────────────────────────────────────────
+
+describe("close diagnostics", () => {
+  it("logs close code in disconnect message", () => {
+    vi.useFakeTimers();
+    fakeWs.emit("close", 1006, Buffer.from(""));
+    const calls = display.print.mock.calls.map(a => stripAnsi(String(a[0])));
+    expect(calls.some(s => s.includes("code 1006"))).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it("logs elapsed seconds in disconnect message when connection was open", () => {
+    vi.useFakeTimers();
+    fakeWs.emit("open");
+    vi.advanceTimersByTime(47000);
+    fakeWs.emit("close", 1006, Buffer.from(""));
+    const calls = display.print.mock.calls.map(a => stripAnsi(String(a[0])));
+    expect(calls.some(s => s.includes("47s"))).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it("omits elapsed seconds when connection never opened", () => {
+    vi.useFakeTimers();
+    fakeWs.emit("close", 1006, Buffer.from(""));
+    const calls = display.print.mock.calls.map(a => stripAnsi(String(a[0])));
+    const msg = calls.find(s => s.includes("Disconnected"));
+    expect(msg).toBeDefined();
+    expect(msg).not.toMatch(/\d+s/);
+    vi.useRealTimers();
+  });
+
+  it("includes non-empty reason in disconnect message", () => {
+    vi.useFakeTimers();
+    fakeWs.emit("close", 1001, Buffer.from("Going Away"));
+    const calls = display.print.mock.calls.map(a => stripAnsi(String(a[0])));
+    expect(calls.some(s => s.includes("Going Away"))).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it("logs error message on ws error event", () => {
+    fakeWs.emit("error", new Error("connection reset"));
+    const calls = display.print.mock.calls.map(a => stripAnsi(String(a[0])));
+    expect(calls.some(s => s.includes("connection reset"))).toBe(true);
+  });
+});
+
 // ── createWsInputPromise ──────────────────────────────────────────────────────
 
 describe("createWsInputPromise", () => {
