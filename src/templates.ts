@@ -12,8 +12,9 @@ export function formatCommentLocation(
 }
 
 export function buildInitialPrompt(issue: TaskIssue, isolatedCheckout: boolean): string {
+  const workspaceContext = isolatedCheckout ? "an isolated workspace with your own checkout of the repo" : "a potentially shared workspace";
   const branchInstruction = isolatedCheckout
-    ? "You are running in your own isolated git clone. Just create a branch for this task — you're already isolated."
+    ? "Create a new branch for this task (no need for a worktree). Make all changes on the branch."
     : "Create a new branch and an isolated worktree for this task. Make no changes in the main workspace, only in the worktree.";
 
   return `Please work on GitHub issue #${issue.number}: "${issue.title}" in ${issue.repoUrl}.
@@ -28,7 +29,7 @@ Labels: ${issue.labels.join(", ") || "(none)"}
 
 You should ask for any clarifications you need about requirements or product spec, but you should decide on the technical implementation on your own. If the technical design is complex enough to need review, use a subagent instead of asking the user.
 
-Use your branch-discipline skill, and remember key practices:
+You are working in ${workspaceContext}. Use your branch-discipline skill, and remember key practices:
 
 1. Pull main to get the latest before making any edits.
 2. ${branchInstruction}
