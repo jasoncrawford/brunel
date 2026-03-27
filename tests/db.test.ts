@@ -43,6 +43,7 @@ describe("createDbLogger", () => {
       prNumber: null,
       branch: null,
       taskId: "42",
+      workerId: null,
       payload: { foo: "bar" },
     });
 
@@ -77,7 +78,7 @@ describe("createDbLogger", () => {
     expect(() => logger.logWebhookEvent({
       deliveryId: null, eventName: "push", action: null, repo: null,
       sender: null, issueNumber: null, prNumber: null, branch: null,
-      taskId: null, payload: {},
+      taskId: null, workerId: null, payload: {},
     })).not.toThrow();
   });
 });
@@ -138,7 +139,7 @@ describe("createNullDbLogger", () => {
     expect(() => logger.logWebhookEvent({
       deliveryId: null, eventName: "push", action: null, repo: null,
       sender: null, issueNumber: null, prNumber: null, branch: null,
-      taskId: null, payload: {},
+      taskId: null, workerId: null, payload: {},
     })).not.toThrow();
   });
 

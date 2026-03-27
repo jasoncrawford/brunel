@@ -260,3 +260,61 @@ describe("webhook event logging associates events with tasks", () => {
     expect(dbLogger.calls[0].taskId).toBeNull();
   });
 });
+
+describe("webhook event logging associates events with workers", () => {
+  it("logs workerId when an issue_comment is forwarded to an assigned worker", () => {
+    queue.addTask({
+      taskId: "42",
+      issueNumber: 42,
+      title: "Fix the bug",
+      body: "Body",
+      labels: [],
+      repoUrl: "https://github.com/owner/repo",
+    });
+    // Simulate task assigned to a worker
+    queue.assignTask("42", "worker-xyz");
+
+    routeEvent("evt-1", "issue_comment", {
+      action: "created",
+      issue: { number: 42, title: "Fix the bug" },
+      comment: { body: "LGTM" },
+      repository: { html_url: "https://github.com/owner/repo" },
+    });
+
+    expect(dbLogger.calls).toHaveLength(1);
+    expect(dbLogger.calls[0].workerId).toBe("worker-xyz");
+  });
+
+  it("logs workerId: null for a pending task (no worker assigned yet)", () => {
+    queue.addTask({
+      taskId: "42",
+      issueNumber: 42,
+      title: "Fix the bug",
+      body: "Body",
+      labels: [],
+      repoUrl: "https://github.com/owner/repo",
+    });
+    // Task is pending, no worker assigned
+
+    routeEvent("evt-1", "issue_comment", {
+      action: "created",
+      issue: { number: 42, title: "Fix the bug" },
+      comment: { body: "Hello?" },
+      repository: { html_url: "https://github.com/owner/repo" },
+    });
+
+    expect(dbLogger.calls).toHaveLength(1);
+    expect(dbLogger.calls[0].workerId).toBeNull();
+  });
+
+  it("logs workerId: null for an event with no matching task", () => {
+    routeEvent("evt-1", "issues", {
+      action: "closed",
+      issue: { number: 999, title: "Unknown", body: "", labels: [] },
+      repository: { html_url: "https://github.com/owner/repo" },
+    });
+
+    expect(dbLogger.calls).toHaveLength(1);
+    expect(dbLogger.calls[0].workerId).toBeNull();
+  });
+});
