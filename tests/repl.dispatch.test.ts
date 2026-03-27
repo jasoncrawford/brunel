@@ -150,4 +150,24 @@ describe("dispatchInput", () => {
     const result = await dispatchInput("/myplugin:foo bar baz", readFile);
     expect(result).toEqual({ type: "query", prompt: "Plugin skill bar baz." });
   });
+
+  it("/create-workspace returns { type: 'create-workspace' }", async () => {
+    const result = await dispatchInput("/create-workspace", () => null);
+    expect(result).toEqual({ type: "create-workspace" });
+  });
+
+  it("/reset-workspace returns { type: 'reset-workspace' }", async () => {
+    const result = await dispatchInput("/reset-workspace", () => null);
+    expect(result).toEqual({ type: "reset-workspace" });
+  });
+
+  it("/remove-workspace returns { type: 'remove-workspace' }", async () => {
+    const result = await dispatchInput("/remove-workspace", () => null);
+    expect(result).toEqual({ type: "remove-workspace" });
+  });
+
+  it("/prune returns { type: 'prune' }", async () => {
+    const result = await dispatchInput("/prune", () => null);
+    expect(result).toEqual({ type: "prune" });
+  });
 });
