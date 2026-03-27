@@ -309,6 +309,18 @@ async function main(
   while (true) {
     const input = await ask("\n> ");
 
+    // ^D / ^C on empty buffer resolves ask() with "__eof__" — treat as /exit.
+    if (input === "__eof__") {
+      if (workspace) {
+        const ok = await confirmIfUnsafe(workspace, confirm);
+        if (ok) await workspace.destroy();
+      }
+      process.stdout.write("\x1b[?2004l\r\n");
+      process.stdin.setRawMode(false);
+      process.stdin.pause();
+      break;
+    }
+
     const action = await dispatchInput(input);
 
     if (action.type === "skip") continue;
