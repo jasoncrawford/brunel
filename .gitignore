@@ -7,6 +7,7 @@ dist/
 .env.local
 repl.log
 .worker-id
+.brunel.lock
 coverage/
 frontend/tsconfig.tsbuildinfo
 supabase/.temp/
