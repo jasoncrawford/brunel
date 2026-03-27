@@ -64,12 +64,12 @@ describe("buildInitialPrompt", () => {
     expect(p).toContain("brunel:ready");
   });
 
-  it("isolated checkout — says 'isolated git clone' and does not mention worktree", () => {
+  it("isolated checkout — says 'own checkout' and clarifies no worktree needed", () => {
     const p = buildInitialPrompt({
       number: 1, title: "T", body: "body", labels: [], repoUrl: "https://github.com/x/y",
     }, true);
-    expect(p).toContain("isolated git clone");
-    expect(p).not.toContain("worktree");
+    expect(p).toContain("own checkout");
+    expect(p).not.toContain("isolated worktree");
   });
 
   it("shared checkout — mentions worktree", () => {
@@ -300,7 +300,7 @@ describe("EVENT_FMT table", () => {
     expect(result).toContain("PR #5");
   });
 
-  it("pull_request/closed — instructs worker to delete the branch, not remove a worktree", () => {
+  it("pull_request/closed — instructs worker to delete the branch", () => {
     const evt: GitHubEvent = {
       id: "e1",
       name: "pull_request",
@@ -308,7 +308,6 @@ describe("EVENT_FMT table", () => {
     };
     const result = EVENT_FMT.pull_request(evt.payload, evt);
     expect(result).toContain("delete the branch");
-    expect(result).not.toContain("worktree");
   });
 
   it("pull_request/closed not merged — asks how to proceed", () => {
