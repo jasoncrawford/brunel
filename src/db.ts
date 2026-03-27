@@ -68,7 +68,7 @@ export function createDbLogger(supabase: SupabaseClient): DbLogger {
       id: row.id as number,
       timestamp: row.received_at as string,
       taskId: (row.task_id as string | null) ?? null,
-      workerId: null,
+      workerId: (row.worker_id as string | null) ?? null,
       summary: `${row.event_name}${action}${issue}`,
     };
   }
@@ -123,7 +123,7 @@ export function createDbLogger(supabase: SupabaseClient): DbLogger {
       const limit = opts.limit ?? 100;
       const [wRes, mRes] = await Promise.all([
         supabase.from("webhook_events")
-          .select("id, received_at, event_name, action, issue_number, task_id")
+          .select("id, received_at, event_name, action, issue_number, task_id, worker_id")
           .order("received_at", { ascending: false })
           .limit(limit),
         supabase.from("foreman_messages")
@@ -141,7 +141,7 @@ export function createDbLogger(supabase: SupabaseClient): DbLogger {
     async queryTaskEvents(taskId) {
       const [wRes, mRes] = await Promise.all([
         supabase.from("webhook_events")
-          .select("id, received_at, event_name, action, issue_number, task_id")
+          .select("id, received_at, event_name, action, issue_number, task_id, worker_id")
           .eq("task_id", taskId)
           .order("received_at", { ascending: true })
           .limit(500),
