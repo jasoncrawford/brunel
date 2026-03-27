@@ -400,7 +400,10 @@ export async function workerMain(
     }
   };
 
+  let shuttingDown = false;
   const shutdown = async () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     const ok = await confirmIfUnsafe(workspace, confirm);
     if (ok) await workspace.destroy();
     process.exit(0);
@@ -475,11 +478,14 @@ export async function workerMain(
     }
   }
 
-  // Clean shutdown: destroy workspace if user approves
+  // Clean shutdown: destroy workspace if user approves.
+  // Set shuttingDown so the SIGINT handler won't double-destroy.
+  shuttingDown = true;
   const okShutdown = await confirmIfUnsafe(workspace, confirm);
   if (okShutdown) await workspace.destroy();
 
   process.stdout.write("\x1b[?2004l\r\n");
   if (process.stdin.isTTY) process.stdin.setRawMode(false);
   process.stdin.pause();
+  process.exit(0);
 }
