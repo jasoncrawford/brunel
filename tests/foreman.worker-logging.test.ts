@@ -175,6 +175,27 @@ describe("foreman worker message logging", () => {
     expect(completeLog).not.toContain("\n");
   });
 
+  it("logs DROPPED when event arrives for assigned task with disconnected worker", () => {
+    queue.addTask({
+      taskId: "99",
+      issueNumber: 99,
+      title: "Disconnected task",
+      body: "Body",
+      labels: [],
+      repoUrl: "https://github.com/owner/repo",
+    });
+    queue.assignTask("99", "disconnected-worker-id-12345");
+
+    logLines.length = 0;
+    routeEvent("evt-1", "issue_comment", { issue: { number: 99 }, comment: { body: "hi" } });
+
+    const droppedLog = logLines.find(l => l.includes("DROPPED"));
+    expect(droppedLog).toBeDefined();
+    expect(droppedLog).toContain("issue_comment");
+    expect(droppedLog).toContain("disconne"); // first 8 chars of "disconnected-worker-id-12345"
+    expect(droppedLog).toContain("not in registry");
+  });
+
   it("logs event_notification sent to worker as a one-liner", async () => {
     queue.addTask({
       taskId: "1",

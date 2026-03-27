@@ -433,6 +433,10 @@ export function createForemanWss(
 
   function forwardEvent(task: Task, evt: GitHubEvent, ref: string) {
     if (task.status === "assigned" && task.assignedWorkerId) {
+      const worker = registry.get(task.assignedWorkerId);
+      if (!worker) {
+        flog(`[task ${ref}] ${evt.name} DROPPED — worker ${task.assignedWorkerId.slice(0, 8)} not in registry (disconnected?)`);
+      }
       registry.send(task.assignedWorkerId, { type: "event_notification", taskId: task.taskId, event: evt });
       log(task.assignedWorkerId, `→ event_notification ${ref} ${evt.name}`);
     } else if (task.status === "pending") {
