@@ -133,6 +133,67 @@ describe("messageToEntry summary for worker_disconnected", () => {
   });
 });
 
+describe("webhookToEntry worker_id mapping", () => {
+  function makeSupabaseReturningWebhooks(rows: Record<string, unknown>[]) {
+    const webhookBuilder = {
+      select: vi.fn().mockReturnThis(),
+      order: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      then: vi.fn().mockImplementation((cb: (v: { data: unknown[]; error: null }) => unknown) =>
+        Promise.resolve(cb({ data: rows, error: null }))
+      ),
+    };
+    const emptyBuilder = {
+      select: vi.fn().mockReturnThis(),
+      order: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      then: vi.fn().mockImplementation((cb: (v: { data: unknown[]; error: null }) => unknown) =>
+        Promise.resolve(cb({ data: [], error: null }))
+      ),
+    };
+    return {
+      from: vi.fn().mockImplementation((t: string) =>
+        t === "webhook_events" ? webhookBuilder : emptyBuilder
+      ),
+    };
+  }
+
+  it("reads worker_id from webhook row in queryTaskEvents", async () => {
+    const supabase = makeSupabaseReturningWebhooks([{
+      id: 1, received_at: "2026-03-27T00:00:00Z",
+      event_name: "issues", action: "labeled", issue_number: 42,
+      task_id: "42", worker_id: "worker-1",
+    }]);
+    const logger = createDbLogger(supabase as unknown as Parameters<typeof createDbLogger>[0]);
+    const entries = await logger.queryTaskEvents("42");
+    expect(entries[0].workerId).toBe("worker-1");
+  });
+
+  it("reads null worker_id from webhook row when not set", async () => {
+    const supabase = makeSupabaseReturningWebhooks([{
+      id: 1, received_at: "2026-03-27T00:00:00Z",
+      event_name: "issues", action: "labeled", issue_number: 42,
+      task_id: "42", worker_id: null,
+    }]);
+    const logger = createDbLogger(supabase as unknown as Parameters<typeof createDbLogger>[0]);
+    const entries = await logger.queryTaskEvents("42");
+    expect(entries[0].workerId).toBeNull();
+  });
+
+  it("reads worker_id from webhook row in queryLog", async () => {
+    const supabase = makeSupabaseReturningWebhooks([{
+      id: 1, received_at: "2026-03-27T00:00:00Z",
+      event_name: "push", action: null, issue_number: null,
+      task_id: null, worker_id: "worker-2",
+    }]);
+    const logger = createDbLogger(supabase as unknown as Parameters<typeof createDbLogger>[0]);
+    const entries = await logger.queryLog({});
+    expect(entries[0].workerId).toBe("worker-2");
+  });
+});
+
 describe("createNullDbLogger", () => {
   it("logWebhookEvent is a no-op", () => {
     const logger = createNullDbLogger();
