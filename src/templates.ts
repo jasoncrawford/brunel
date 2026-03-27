@@ -214,7 +214,7 @@ export const EVENT_FMT: EventTemplateFmtTable = {
       return `Auto-merge was enabled on PR #${prNumber}. ${BRANCH_REVIEW_PROMPT}`;
     }
     if (p.action === "closed") {
-      return `PR #${prNumber} was ${pr?.merged ? 'merged' : 'closed without merging'}. Please delete the branch.
+      return `PR #${prNumber} was ${pr?.merged ? 'merged' : 'closed without merging'}. Please delete the branch (and remove your worktree, if any).
 
 Then, before we end this session, consider:
 
