@@ -52,11 +52,28 @@ describe("print() timestamps", () => {
     expect(tsIdx).toBeLessThan(msgIdx);
   });
 
-  it("verbose=true: timestamp is styled in darkGray (ANSI escape)", () => {
+  it("verbose=true: timestamp uses darkGray opener and foreground-only reset", () => {
     setVerbose(true);
     const raw = captureOutput(() => print("styled"));
-    // darkGray is \x1b[90m
+    // darkGray opener
     expect(raw).toContain("\x1b[90m");
+    // ends with \x1b[39m (pop foreground only), not a full \x1b[0m reset
+    const tsEnd = raw.indexOf("\x1b[39m");
+    expect(tsEnd).toBeGreaterThan(-1);
+    // full reset must not appear inside the timestamp itself (before content)
+    const fullReset = raw.indexOf("\x1b[0m");
+    expect(fullReset === -1 || fullReset > tsEnd).toBe(true);
+  });
+
+  it("verbose=true: opening color is re-applied to continuation lines", () => {
+    setVerbose(true);
+    // Simulate a color-wrapped multi-line block like c.gray() produces
+    const coloredBlock = `\x1b[38;5;246m\nline one\nline two\x1b[0m`;
+    const raw = captureOutput(() => print(coloredBlock));
+    // The opening color code \x1b[38;5;246m should appear on every split line
+    const occurrences = (raw.match(/\x1b\[38;5;246m/g) ?? []).length;
+    // First part is the opener line itself; continuation lines get it re-applied
+    expect(occurrences).toBeGreaterThanOrEqual(3); // opener + 2 continuation lines
   });
 
   it("verbose=true: each line of multi-line output gets a timestamp", () => {

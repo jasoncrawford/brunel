@@ -566,8 +566,14 @@ export function print(line: string | null) {
   // prompt). The prompt is then redrawn below via _inputPrintCallback.
   if (_inputPrintCallback) process.stdout.write("\r\x1b[K");
   if (verbose) {
-    const ts = c.darkGray(fmtTime() + " ");
-    console.log(line.split("\n").map(l => ts + l).join("\n"));
+    // \x1b[39m resets only the foreground ("pop-color") rather than \x1b[0m
+    // which would reset everything including the content's own color codes.
+    const ts = `\x1b[90m${fmtTime()} \x1b[39m`;
+    const parts = line.split("\n");
+    // Re-apply any opening ANSI color codes to continuation lines so that
+    // inserting the timestamp prefix doesn't strip color mid-block.
+    const openColor = (line.match(/^(\x1b\[[0-9;]*m)+/) ?? [""])[0];
+    console.log(parts.map((p, i) => ts + (i > 0 ? openColor : "") + p).join("\n"));
   } else {
     console.log(line);
   }
