@@ -231,8 +231,10 @@ export class WorkerSession {
   private connect(): void {
     const ws = this.wsFactory(this.workerId, this.currentTaskId);
     this.ws = ws;
+    let connectedAt: number | undefined;
 
     ws.on("open", () => {
+      connectedAt = Date.now();
       this.display.print(display.c.sageGreen("Connected to foreman"));
     });
 
@@ -242,12 +244,18 @@ export class WorkerSession {
       this.handleMessage(msg);
     });
 
-    ws.on("close", () => {
-      this.display.print(display.c.amber("Disconnected from foreman. Reconnecting..."));
+    ws.on("close", (code: number, reason: Buffer) => {
+      const elapsed = connectedAt !== undefined ? Math.round((Date.now() - connectedAt) / 1000) : undefined;
+      const elapsedStr = elapsed !== undefined ? `, ${elapsed}s` : "";
+      const reasonStr = reason?.length > 0 ? `, ${reason.toString()}` : "";
+      this.display.print(display.c.amber(`Disconnected from foreman (code ${code}${reasonStr}${elapsedStr}). Reconnecting...`));
       setTimeout(() => this.connect(), 3000);
     });
 
-    ws.on("error", () => { /* close will fire */ });
+    ws.on("error", (err: Error) => {
+      this.display.print(display.c.amber(`WebSocket error: ${err.message}`));
+      /* close will fire */
+    });
   }
 
   private handleMessage(msg: ForemanMessage): void {
