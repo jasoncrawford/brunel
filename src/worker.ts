@@ -257,7 +257,7 @@ export class WorkerSession {
       this.prIsClosed = false;
       this.resolveWsInput?.(WS_TASK_ASSIGNED);
       this.resolveWsInput = null;
-      const initialPrompt = buildInitialPrompt(msg.issue);
+      const initialPrompt = buildInitialPrompt(msg.issue, !!this.options.workspaceCtx);
       this.display.print(display.c.sageGreen(initialPrompt));
       void this.runQueryLoop(initialPrompt);
     } else if (msg.type === "event_notification") {

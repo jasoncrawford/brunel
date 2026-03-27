@@ -58,10 +58,25 @@ describe("buildInitialPrompt", () => {
       body: "body",
       labels: ["bug", "help wanted", "brunel:ready"],
       repoUrl: "https://github.com/x/y",
-    });
+    }, true);
     expect(p).toContain("bug");
     expect(p).toContain("help wanted");
     expect(p).toContain("brunel:ready");
+  });
+
+  it("isolated checkout — says 'own checkout' and clarifies no worktree needed", () => {
+    const p = buildInitialPrompt({
+      number: 1, title: "T", body: "body", labels: [], repoUrl: "https://github.com/x/y",
+    }, true);
+    expect(p).toContain("own checkout");
+    expect(p).not.toContain("isolated worktree");
+  });
+
+  it("shared checkout — mentions worktree", () => {
+    const p = buildInitialPrompt({
+      number: 1, title: "T", body: "body", labels: [], repoUrl: "https://github.com/x/y",
+    }, false);
+    expect(p).toContain("worktree");
   });
 
 });
@@ -285,14 +300,14 @@ describe("EVENT_FMT table", () => {
     expect(result).toContain("PR #5");
   });
 
-  it("pull_request/closed — instructs worker to clean up its worktree", () => {
+  it("pull_request/closed — instructs worker to delete the branch", () => {
     const evt: GitHubEvent = {
       id: "e1",
       name: "pull_request",
       payload: { action: "closed", pull_request: { number: 5, merged: true } },
     };
     const result = EVENT_FMT.pull_request(evt.payload, evt);
-    expect(result).toContain("worktree");
+    expect(result).toContain("delete the branch");
   });
 
   it("pull_request/closed not merged — asks how to proceed", () => {
