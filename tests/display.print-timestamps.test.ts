@@ -1,0 +1,67 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { stripAnsi } from "./helpers.js";
+import { print, setVerbose, stopStatus } from "../src/display.js";
+
+function captureOutput(fn: () => void): string {
+  let output = "";
+  const logSpy = vi.spyOn(console, "log").mockImplementation((s: any) => { output += String(s) + "\n"; });
+  const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation((s: any) => { output += String(s); return true; });
+  fn();
+  logSpy.mockRestore();
+  writeSpy.mockRestore();
+  return output;
+}
+
+beforeEach(() => {
+  stopStatus();
+  setVerbose(false);
+});
+
+afterEach(() => {
+  stopStatus();
+  setVerbose(false);
+  vi.restoreAllMocks();
+});
+
+describe("print() timestamps", () => {
+  it("verbose=false: no timestamp prepended", () => {
+    setVerbose(false);
+    const output = captureOutput(() => print("hello"));
+    const plain = stripAnsi(output);
+    expect(plain).toContain("hello");
+    // HH:MM:SS pattern should NOT appear
+    expect(plain).not.toMatch(/\d{2}:\d{2}:\d{2}/);
+  });
+
+  it("verbose=true: prepends HH:MM:SS timestamp", () => {
+    setVerbose(true);
+    const output = captureOutput(() => print("hello"));
+    const plain = stripAnsi(output);
+    expect(plain).toContain("hello");
+    expect(plain).toMatch(/\d{2}:\d{2}:\d{2}/);
+  });
+
+  it("verbose=true: timestamp appears before message content", () => {
+    setVerbose(true);
+    const output = captureOutput(() => print("world"));
+    const plain = stripAnsi(output);
+    const tsMatch = plain.match(/\d{2}:\d{2}:\d{2}/);
+    expect(tsMatch).not.toBeNull();
+    const tsIdx = plain.indexOf(tsMatch![0]);
+    const msgIdx = plain.indexOf("world");
+    expect(tsIdx).toBeLessThan(msgIdx);
+  });
+
+  it("verbose=true: timestamp is styled in darkGray (ANSI escape)", () => {
+    setVerbose(true);
+    const raw = captureOutput(() => print("styled"));
+    // darkGray is \x1b[90m
+    expect(raw).toContain("\x1b[90m");
+  });
+
+  it("verbose=true: print(null) still no-ops", () => {
+    setVerbose(true);
+    const output = captureOutput(() => print(null));
+    expect(output).toBe("");
+  });
+});
