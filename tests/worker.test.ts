@@ -214,6 +214,11 @@ describe("handleUserInput", () => {
     const [prompt] = runQuery.mock.calls[0];
     expect(prompt).toContain(issue.title);
   });
+
+  it("__eof__ returns 'exit' so workerMain() loop breaks and cleanup runs", async () => {
+    const result = await session.handleUserInput("__eof__");
+    expect(result).toBe("exit");
+  });
 });
 
 // ── State isolation ───────────────────────────────────────────────────────────

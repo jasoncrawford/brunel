@@ -281,15 +281,14 @@ describe("ask() - exit conditions", () => {
     });
   });
 
-  it("^C with empty buffer → calls process.exit(0)", async () => {
+  it("^C with empty buffer → resolves with '__eof__' (does not call process.exit)", async () => {
     const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => {}) as any);
     await withFakeStdin(async (stdin) => {
       const p = ask("> ", () => []);
       stdin.push("\x03"); // ^C with empty buffer
-      await new Promise(r => setTimeout(r, 10));
-      expect(exitSpy).toHaveBeenCalledWith(0);
-      stdin.push("\r");
-      await p.catch(() => {});
+      const result = await p;
+      expect(result).toBe("__eof__");
+      expect(exitSpy).not.toHaveBeenCalled();
     });
     exitSpy.mockRestore();
   });
@@ -310,15 +309,14 @@ describe("ask() - exit conditions", () => {
     exitSpy.mockRestore();
   });
 
-  it("^D on empty buffer → calls process.exit(0)", async () => {
+  it("^D on empty buffer → resolves with '__eof__' (does not call process.exit)", async () => {
     const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => {}) as any);
     await withFakeStdin(async (stdin) => {
       const p = ask("> ", () => []);
       stdin.push("\x04"); // ^D on empty
-      await new Promise(r => setTimeout(r, 10));
-      expect(exitSpy).toHaveBeenCalledWith(0);
-      stdin.push("\r");
-      await p.catch(() => {});
+      const result = await p;
+      expect(result).toBe("__eof__");
+      expect(exitSpy).not.toHaveBeenCalled();
     });
     exitSpy.mockRestore();
   });

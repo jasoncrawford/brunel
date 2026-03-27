@@ -555,11 +555,10 @@ export function ask(
     }
 
     function exit() {
-      // Don't call cleanup() here — process.exit() terminates for real;
-      // in tests where exit() is mocked, the listener stays alive so tests
-      // can push "\r" to resolve the dangling promise.
-      process.stdout.write("\x1b[?2004l\r\n");
-      process.exit(0);
+      // Resolve with the EOF sentinel so callers can run workspace cleanup
+      // before process.exit().  submit() handles terminal cursor/clear output,
+      // removes the stdin listener, and resolves the promise.
+      submit("__eof__");
     }
 
     // ── Autocomplete ────────────────────────────────────────────────────────

@@ -135,6 +135,9 @@ export class WorkerSession {
   async handleUserInput(input: string): Promise<"exit" | undefined> {
     if (!input || input === "__abort__") return;
     if (input === WS_TASK_ASSIGNED || input === WS_EVENT) return;
+    // ^D / ^C on empty buffer resolves ask() with "__eof__" — treat as /exit
+    // so the workerMain() loop breaks and workspace cleanup runs.
+    if (input === "__eof__") return "exit";
 
     const action = await dispatchInput(input);
     if (action.type === "skip") return;
