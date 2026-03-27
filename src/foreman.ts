@@ -3,7 +3,7 @@ import http from "http";
 import "dotenv/config";
 import { Hono } from "hono";
 import { getRequestListener } from "@hono/node-server";
-import { WebSocketServer } from "ws";
+import { WebSocketServer, WebSocket } from "ws";
 import type { WebSocket as WsSocket } from "ws";
 import type { WorkerMessage, ForemanMessage, GitHubEvent, TaskIssue, LabeledIssueState } from "./types.js";
 import { labelIssueDone } from "./github.js";
@@ -412,6 +412,7 @@ export function createForemanWss(
     adminWss?: AdminWss;
     workerSecret?: string;
     labeledIssues?: Map<number, LabeledIssueState>;
+    pingIntervalMs?: number;
   },
 ): { wss: WebSocketServer; routeEventToWorker: (id: string, name: string, payload: unknown) => void; reconcile: () => void } {
   const taskLabel = options.taskLabel;
@@ -693,6 +694,14 @@ export function createForemanWss(
   }
 
   const wss = new WebSocketServer({ noServer: true });
+
+  const PING_INTERVAL_MS = options.pingIntervalMs ?? 25_000;
+  const pingTimer = setInterval(() => {
+    for (const client of wss.clients) {
+      if (client.readyState === WebSocket.OPEN) client.ping();
+    }
+  }, PING_INTERVAL_MS);
+  wss.on("close", () => clearInterval(pingTimer));
 
   wss.on("connection", (ws) => {
     let workerId = "";

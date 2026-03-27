@@ -246,7 +246,7 @@ describe("reconnect", () => {
     expect(wsFactory).toHaveBeenCalledOnce();
 
     fakeWs.emit("close");
-    vi.advanceTimersByTime(3001);
+    vi.advanceTimersByTime(5001);
 
     expect(wsFactory).toHaveBeenCalledTimes(2);
     vi.useRealTimers();
@@ -260,11 +260,37 @@ describe("reconnect", () => {
     await Promise.resolve();
 
     fakeWs.emit("close");
-    vi.advanceTimersByTime(3001);
+    vi.advanceTimersByTime(5001);
 
     const secondCall = wsFactory.mock.calls[1];
     expect(secondCall[0]).toBe(WORKER_ID);
     expect(secondCall[1]).toBe("42");
+    vi.useRealTimers();
+  });
+
+  it("reconnect delay is at least 2 seconds (jitter lower bound)", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0);
+
+    fakeWs.emit("close");
+    vi.advanceTimersByTime(1999);
+    expect(wsFactory).toHaveBeenCalledTimes(1); // not reconnected yet
+
+    vi.advanceTimersByTime(2);
+    expect(wsFactory).toHaveBeenCalledTimes(2); // reconnected at ~2000ms
+
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it("reconnect delay is at most 5 seconds (jitter upper bound)", async () => {
+    vi.useFakeTimers();
+
+    fakeWs.emit("close");
+    // Even with maximum jitter (random approaching 1.0), delay is always < 5000ms
+    vi.advanceTimersByTime(5000);
+    expect(wsFactory).toHaveBeenCalledTimes(2);
+
     vi.useRealTimers();
   });
 });
