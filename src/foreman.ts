@@ -742,9 +742,18 @@ export function createForemanWss(
       }
     });
 
-    ws.on("close", () => {
+    ws.on("close", (code, reason) => {
       if (workerId) {
-        log(workerId, "disconnected");
+        const reasonStr = reason?.length ? `: ${reason}` : "";
+        log(workerId, `disconnected (code ${code}${reasonStr})`);
+        const taskId = registry.get(workerId)?.currentTaskId ?? null;
+        dbLogger?.logForemanMessage({
+          direction: "received",
+          workerId,
+          taskId,
+          msgType: "worker_disconnected",
+          payload: { code, reason: reason?.toString() ?? null },
+        });
         registry.remove(workerId);
         broadcastSnapshot();
       }
