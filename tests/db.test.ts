@@ -82,6 +82,56 @@ describe("createDbLogger", () => {
   });
 });
 
+describe("messageToEntry summary for worker_disconnected", () => {
+  function makeSupabaseReturning(rows: Record<string, unknown>[]) {
+    const builder = {
+      insert: vi.fn().mockResolvedValue({ error: null }),
+      select: vi.fn().mockReturnThis(),
+      order: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      then: vi.fn().mockImplementation((cb: (v: { data: unknown[]; error: null }) => unknown) =>
+        Promise.resolve(cb({ data: rows, error: null }))
+      ),
+    };
+    return { from: vi.fn().mockReturnValue(builder) };
+  }
+
+  it("includes close code in summary for worker_disconnected with no reason", async () => {
+    const supabase = makeSupabaseReturning([{
+      id: 1, created_at: "2026-03-27T00:00:00Z",
+      direction: "received", worker_id: "w1", task_id: null,
+      msg_type: "worker_disconnected", payload: { code: 1006, reason: null },
+    }]);
+    const logger = createDbLogger(supabase as unknown as Parameters<typeof createDbLogger>[0]);
+    const entries = await logger.queryWorkerMessages("w1");
+    expect(entries[0].summary).toMatch(/1006/);
+  });
+
+  it("includes close code and reason in summary for worker_disconnected with a reason", async () => {
+    const supabase = makeSupabaseReturning([{
+      id: 1, created_at: "2026-03-27T00:00:00Z",
+      direction: "received", worker_id: "w1", task_id: null,
+      msg_type: "worker_disconnected", payload: { code: 1001, reason: "Going Away" },
+    }]);
+    const logger = createDbLogger(supabase as unknown as Parameters<typeof createDbLogger>[0]);
+    const entries = await logger.queryWorkerMessages("w1");
+    expect(entries[0].summary).toMatch(/1001/);
+    expect(entries[0].summary).toMatch(/Going Away/);
+  });
+
+  it("uses standard direction+msgType summary for non-disconnect messages", async () => {
+    const supabase = makeSupabaseReturning([{
+      id: 1, created_at: "2026-03-27T00:00:00Z",
+      direction: "sent", worker_id: "w1", task_id: "42",
+      msg_type: "task_assigned", payload: {},
+    }]);
+    const logger = createDbLogger(supabase as unknown as Parameters<typeof createDbLogger>[0]);
+    const entries = await logger.queryWorkerMessages("w1");
+    expect(entries[0].summary).toBe("sent task_assigned");
+  });
+});
+
 describe("createNullDbLogger", () => {
   it("logWebhookEvent is a no-op", () => {
     const logger = createNullDbLogger();

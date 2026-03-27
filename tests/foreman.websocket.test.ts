@@ -8,6 +8,7 @@ import { DEFAULT_TASK_LABEL } from "../src/config.js";
 import type { ForemanMessage, LabeledIssueState } from "../src/types.js";
 import { setBlockers } from "../src/dependencies.js";
 import type { DependencyGraph } from "../src/dependencies.js";
+import type { DbLogger } from "../src/db.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -512,5 +513,97 @@ describe("worker WebSocket connection", () => {
     ).rejects.toThrow();
 
     await new Promise<void>((resolve) => wss.close(() => server.close(resolve)));
+  });
+});
+
+// ── Disconnect DB logging ──────────────────────────────────────────────────────
+
+describe("worker disconnect DB logging", () => {
+  it("calls dbLogger.logForemanMessage with worker_disconnected when a registered worker disconnects", async () => {
+    const mockDbLogger: DbLogger = {
+      logWebhookEvent: vi.fn(),
+      logForemanMessage: vi.fn(),
+      queryLog: vi.fn().mockResolvedValue([]),
+      queryTaskEvents: vi.fn().mockResolvedValue([]),
+      queryWorkerMessages: vi.fn().mockResolvedValue([]),
+    };
+
+    const server = http.createServer();
+    const { wss: testWss } = createForemanWss(
+      new TaskQueue(), new WorkerRegistry(), server,
+      { taskLabel: DEFAULT_TASK_LABEL, dbLogger: mockDbLogger },
+    );
+    const testPort = await new Promise<number>((r) => server.listen(0, () => r((server.address() as AddressInfo).port)));
+
+    const ws = new WebSocket(`ws://localhost:${testPort}/worker`);
+    await new Promise<void>((resolve, reject) => { ws.once("open", resolve); ws.once("error", reject); });
+    ws.send(JSON.stringify({ type: "worker_hello", workerId: "w-disc-1", status: "idle" }));
+    // Wait for standby reply
+    await new Promise<void>((resolve) => ws.once("message", resolve));
+
+    await new Promise<void>((resolve) => {
+      ws.once("close", resolve);
+      ws.close();
+    });
+    await new Promise((r) => setTimeout(r, 20)); // let close handler fire
+
+    const calls = (mockDbLogger.logForemanMessage as ReturnType<typeof vi.fn>).mock.calls;
+    const disconnectCall = calls.find((c) => c[0].msgType === "worker_disconnected");
+    expect(disconnectCall).toBeDefined();
+    expect(disconnectCall![0]).toMatchObject({
+      direction: "received",
+      workerId: "w-disc-1",
+      taskId: null,
+      msgType: "worker_disconnected",
+    });
+    expect(typeof disconnectCall![0].payload.code).toBe("number");
+
+    await new Promise<void>((r) => testWss.close(() => server.close(r)));
+  });
+
+  it("includes the current taskId in the disconnect event when worker had an active task", async () => {
+    const mockDbLogger: DbLogger = {
+      logWebhookEvent: vi.fn(),
+      logForemanMessage: vi.fn(),
+      queryLog: vi.fn().mockResolvedValue([]),
+      queryTaskEvents: vi.fn().mockResolvedValue([]),
+      queryWorkerMessages: vi.fn().mockResolvedValue([]),
+    };
+
+    const taskQueue = new TaskQueue();
+    taskQueue.addTask({
+      taskId: "42",
+      issueNumber: 42,
+      title: "Some task",
+      body: "Body",
+      labels: [],
+      repoUrl: "https://github.com/owner/repo",
+    });
+
+    const server = http.createServer();
+    const { wss: testWss } = createForemanWss(
+      taskQueue, new WorkerRegistry(), server,
+      { taskLabel: DEFAULT_TASK_LABEL, dbLogger: mockDbLogger },
+    );
+    const testPort = await new Promise<number>((r) => server.listen(0, () => r((server.address() as AddressInfo).port)));
+
+    const ws = new WebSocket(`ws://localhost:${testPort}/worker`);
+    await new Promise<void>((resolve, reject) => { ws.once("open", resolve); ws.once("error", reject); });
+    ws.send(JSON.stringify({ type: "worker_hello", workerId: "w-disc-2", status: "idle" }));
+    // Wait for task_assigned reply
+    await new Promise<void>((resolve) => ws.once("message", resolve));
+
+    await new Promise<void>((resolve) => {
+      ws.once("close", resolve);
+      ws.close();
+    });
+    await new Promise((r) => setTimeout(r, 20)); // let close handler fire
+
+    const calls = (mockDbLogger.logForemanMessage as ReturnType<typeof vi.fn>).mock.calls;
+    const disconnectCall = calls.find((c) => c[0].msgType === "worker_disconnected");
+    expect(disconnectCall).toBeDefined();
+    expect(disconnectCall![0].taskId).toBe("42");
+
+    await new Promise<void>((r) => testWss.close(() => server.close(r)));
   });
 });

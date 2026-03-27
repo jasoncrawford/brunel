@@ -73,13 +73,21 @@ export function createDbLogger(supabase: SupabaseClient): DbLogger {
   }
 
   function messageToEntry(row: Record<string, unknown>): LogEntry {
+    let summary: string;
+    if (row.msg_type === "worker_disconnected") {
+      const payload = (row.payload ?? {}) as Record<string, unknown>;
+      const reason = payload.reason ? `: ${payload.reason}` : "";
+      summary = `disconnected (code ${payload.code}${reason})`;
+    } else {
+      summary = `${row.direction} ${row.msg_type}`;
+    }
     return {
       kind: "message",
       id: row.id as number,
       timestamp: row.created_at as string,
       taskId: (row.task_id as string | null) ?? null,
       workerId: (row.worker_id as string | null) ?? null,
-      summary: `${row.direction} ${row.msg_type}`,
+      summary,
     };
   }
 
@@ -117,7 +125,7 @@ export function createDbLogger(supabase: SupabaseClient): DbLogger {
           .order("received_at", { ascending: false })
           .limit(limit),
         supabase.from("foreman_messages")
-          .select("id, created_at, direction, worker_id, task_id, msg_type")
+          .select("id, created_at, direction, worker_id, task_id, msg_type, payload")
           .order("created_at", { ascending: false })
           .limit(limit),
       ]);
@@ -136,7 +144,7 @@ export function createDbLogger(supabase: SupabaseClient): DbLogger {
           .order("received_at", { ascending: true })
           .limit(500),
         supabase.from("foreman_messages")
-          .select("id, created_at, direction, worker_id, task_id, msg_type")
+          .select("id, created_at, direction, worker_id, task_id, msg_type, payload")
           .eq("task_id", taskId)
           .order("created_at", { ascending: true })
           .limit(500),

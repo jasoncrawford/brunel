@@ -219,4 +219,23 @@ describe("foreman worker message logging", () => {
     expect(eventLog).toBeDefined();
     expect(eventLog).not.toContain("\n");
   });
+
+  it("logs disconnect with close code as a one-liner", async () => {
+    const ws = await connect();
+    send(ws, { type: "worker_hello", workerId: "worker-abc123", status: "idle" });
+    await nextMsg(ws); // standby
+
+    logLines.length = 0;
+    await new Promise<void>((resolve) => {
+      ws.once("close", resolve);
+      ws.close();
+    });
+    // Give the server-side close handler time to run
+    await new Promise((r) => setTimeout(r, 20));
+
+    const disconnectLog = logLines.find(l => l.includes("disconnected"));
+    expect(disconnectLog).toBeDefined();
+    expect(disconnectLog).toMatch(/code \d+/);
+    expect(disconnectLog).not.toContain("\n");
+  });
 });
