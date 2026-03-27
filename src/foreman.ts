@@ -214,6 +214,18 @@ export class TaskQueue {
 }
 
 
+function strProp(obj: unknown, key: string): string | null {
+  if (typeof obj !== "object" || obj === null) return null;
+  const val = (obj as Record<string, unknown>)[key];
+  return typeof val === "string" ? val : null;
+}
+
+function numProp(obj: unknown, key: string): number | null {
+  if (typeof obj !== "object" || obj === null) return null;
+  const val = (obj as Record<string, unknown>)[key];
+  return typeof val === "number" ? val : null;
+}
+
 function truncTitle(title: unknown, max = 50): string {
   const s = String(title ?? "").replace(/\s+/g, " ").trim();
   return s.length > max ? s.slice(0, max - 1) + "…" : s;
@@ -445,46 +457,25 @@ export function createForemanWss(
     }
   }
 
-  function routeEvent(id: string, name: string, payload: unknown) {
-    const p = payload as Record<string, unknown>;
-    const evt: GitHubEvent = { id, name, payload: p };
+  interface RouteResult { taskId: string | null; workerId: string | null; }
 
-    // Log webhook event to DB and broadcast to admin GUI
-    const action = typeof p.action === "string" ? p.action : null;
-    const webhookIssueNumber = typeof (p.issue as Record<string, unknown> | undefined)?.number === "number"
-      ? (p.issue as Record<string, unknown>).number as number : null;
-    const webhookPrNumber = typeof (p.pull_request as Record<string, unknown> | undefined)?.number === "number"
-      ? (p.pull_request as Record<string, unknown>).number as number : null;
-    dbLogger?.logWebhookEvent({
-      deliveryId: id,
-      eventName: name,
-      action,
-      repo: (p.repository as Record<string, unknown> | undefined)?.full_name as string ?? null,
-      sender: (p.sender as Record<string, unknown> | undefined)?.login as string ?? null,
-      issueNumber: webhookIssueNumber,
-      prNumber: webhookPrNumber,
-      branch: null,
-      taskId: null,
-      payload: p,
-    });
-    adminWss?.broadcastLogEvent({
-      kind: "webhook",
-      id: 0,
-      timestamp: new Date().toISOString(),
-      taskId: null,
-      workerId: null,
-      summary: `${name}${action ? `/${action}` : ""}${webhookIssueNumber ? ` #${webhookIssueNumber}` : ""}`,
-    });
+  // Routes the event to the appropriate worker and returns the associated task
+  // and worker IDs. Separating this from logging ensures we always log exactly
+  // once with the correct taskId and workerId.
+  function doRouteEvent(name: string, p: Record<string, unknown>, evt: GitHubEvent): RouteResult {
+    function result(task: { taskId: string; assignedWorkerId?: string } | null | undefined): RouteResult {
+      return { taskId: task?.taskId ?? null, workerId: task?.assignedWorkerId ?? null };
+    }
 
     // ── PR events: route by PR number ────────────────────────────────────────
 
     if (name === "pull_request") {
       const pr = p.pull_request as Record<string, unknown> | undefined;
-      const prNumber = typeof pr?.number === "number" ? pr.number : null;
-      if (prNumber === null) return;
+      const prNumber = numProp(pr, "number");
+      if (prNumber === null) return result(null);
 
       // Drop synchronize events — the worker pushed these commits itself.
-      if (p.action === "synchronize") return;
+      if (p.action === "synchronize") return result(taskQueue.getTaskForPr(prNumber));
 
       // When a PR is opened, register it against a task if the body links an issue.
       // The worker opened the PR itself, so don't forward this event back to it.
@@ -494,26 +485,27 @@ export function createForemanWss(
           const linkedTask = taskQueue.getTaskForIssue(linkedIssue);
           if (linkedTask) {
             taskQueue.registerPr(prNumber, linkedTask.taskId);
-            const branch = String((pr.head as Record<string, unknown> | undefined)?.ref ?? "");
+            const branch = strProp(pr.head, "ref");
             if (branch) taskQueue.registerBranch(branch, linkedTask.taskId);
             flog(`[task #${linkedIssue}] PR #${prNumber} registered`);
+            return result(linkedTask);
           }
         }
-        return;
+        return result(null);
       }
 
       const task = taskQueue.getTaskForPr(prNumber);
       if (task) forwardEvent(task, evt, `PR #${prNumber}`);
-      return;
+      return result(task);
     }
 
     if (name === "pull_request_review" || name === "pull_request_review_comment") {
       const pr = p.pull_request as Record<string, unknown> | undefined;
-      const prNumber = typeof pr?.number === "number" ? pr.number : null;
-      if (prNumber === null) return;
+      const prNumber = numProp(pr, "number");
+      if (prNumber === null) return result(null);
       const task = taskQueue.getTaskForPr(prNumber);
       if (task) forwardEvent(task, evt, `PR #${prNumber}`);
-      return;
+      return result(task);
     }
 
     if (name === "check_run" || name === "check_suite") {
@@ -523,26 +515,26 @@ export function createForemanWss(
       // Try PR-number lookup first (sometimes populated), fall back to head_branch
       if (prs && prs.length > 0) {
         const task = taskQueue.getTaskForPr(prs[0].number);
-        if (task) { forwardEvent(task, evt, `PR #${prs[0].number}`); return; }
+        if (task) { forwardEvent(task, evt, `PR #${prs[0].number}`); return result(task); }
       }
 
       // GitHub often sends empty pull_requests for branch-push-triggered checks;
       // use head_branch as the reliable fallback.
       const headBranch = name === "check_run"
-        ? String((inner?.check_suite as Record<string, unknown> | undefined)?.head_branch ?? "")
-        : String(inner?.head_branch ?? "");
+        ? strProp(inner?.check_suite, "head_branch") ?? ""
+        : strProp(inner, "head_branch") ?? "";
       if (headBranch) {
         const task = taskQueue.getTaskForBranch(headBranch);
-        if (task) forwardEvent(task, evt, `branch ${headBranch}`);
+        if (task) { forwardEvent(task, evt, `branch ${headBranch}`); return result(task); }
       }
-      return;
+      return result(null);
     }
 
     // ── Issue events: route by issue number ──────────────────────────────────
 
     const issue = p.issue as Record<string, unknown> | undefined;
-    const issueNumber = typeof issue?.number === "number" ? issue.number : null;
-    if (issueNumber === null) return;
+    const issueNumber = numProp(issue, "number");
+    if (issueNumber === null) return result(null);
 
     let task = taskQueue.getTaskForIssue(issueNumber);
 
@@ -561,8 +553,7 @@ export function createForemanWss(
         (issue.labels as Array<{ name: string }> | undefined)?.some((l) => l.name === taskLabel);
 
       if (labeledNow || openedWithLabel) {
-        const repoUrl =
-          ((p.repository as Record<string, unknown> | undefined)?.html_url as string | undefined) ?? "";
+        const repoUrl = strProp(p.repository, "html_url") ?? "";
         const labels =
           (issue.labels as Array<{ name: string }> | undefined)?.map((l) => l.name) ?? [];
         const issueData: TaskIssue = {
@@ -577,7 +568,8 @@ export function createForemanWss(
         startDepsLoad(issueNumber, issueData.body);
         reconcile();
         flog(`[task #${issueNumber}] enqueued via ${name}/${action}`);
-        return; // task is always pending here; nothing further to forward
+        // task is pending here (no worker yet); taskId is String(issueNumber)
+        return { taskId: String(issueNumber), workerId: null };
       }
     }
 
@@ -594,19 +586,19 @@ export function createForemanWss(
         openIssues.delete(issueNumber);
         flog(`[task #${issueNumber}] dequeued (label removed)`);
         reconcile();
-        return;
+        return result(task);
       }
 
       if (action === "closed") {
         openIssues.delete(issueNumber);
         reconcile();
-        return;
+        return result(task);
       }
 
       if (action === "reopened") {
         openIssues.add(issueNumber);
         reconcile();
-        return;
+        return result(task);
       }
 
       if (action === "edited") {
@@ -624,8 +616,43 @@ export function createForemanWss(
       }
     }
 
-    if (!task) return;
+    if (!task) return result(null);
     forwardEvent(task, evt, `#${issueNumber}`);
+    return result(task);
+  }
+
+  function routeEvent(id: string, name: string, payload: unknown) {
+    const p = payload as Record<string, unknown>;
+    const evt: GitHubEvent = { id, name, payload: p };
+
+    const { taskId, workerId } = doRouteEvent(name, p, evt);
+
+    // Log webhook event to DB and broadcast to admin GUI with the resolved
+    // taskId and workerId so events appear in task/worker history.
+    const action = strProp(p, "action");
+    const webhookIssueNumber = numProp(p.issue, "number");
+    const webhookPrNumber = numProp(p.pull_request, "number");
+    dbLogger?.logWebhookEvent({
+      deliveryId: id,
+      eventName: name,
+      action,
+      repo: strProp(p.repository, "full_name"),
+      sender: strProp(p.sender, "login"),
+      issueNumber: webhookIssueNumber,
+      prNumber: webhookPrNumber,
+      branch: null,
+      taskId,
+      workerId,
+      payload: p,
+    });
+    adminWss?.broadcastLogEvent({
+      kind: "webhook",
+      id: 0,
+      timestamp: new Date().toISOString(),
+      taskId,
+      workerId,
+      summary: `${name}${action ? `/${action}` : ""}${webhookIssueNumber ? ` #${webhookIssueNumber}` : ""}`,
+    });
   }
 
   function tryAssignWork(workerId: string) {

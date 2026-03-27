@@ -12,6 +12,7 @@ export interface WebhookEventData {
   prNumber: number | null;
   branch: string | null;
   taskId: string | null;
+  workerId: string | null;
   payload: Record<string, unknown>;
 }
 
@@ -103,6 +104,7 @@ export function createDbLogger(supabase: SupabaseClient): DbLogger {
         pr_number: data.prNumber,
         branch: data.branch,
         task_id: data.taskId,
+        worker_id: data.workerId,
         payload: data.payload,
       }));
     },
