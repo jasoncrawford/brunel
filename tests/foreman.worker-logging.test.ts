@@ -7,7 +7,8 @@ import http from "http";
 import { WebSocket, WebSocketServer } from "ws";
 import type { AddressInfo } from "net";
 import { TaskQueue, WorkerRegistry, createForemanWss } from "../src/foreman.js";
-import { DEFAULT_TASK_LABEL } from "../src/config.js";
+import { loadDefaultConfig } from "../src/config.js";
+const defaultCfg = await loadDefaultConfig();
 import type { ForemanMessage } from "../src/types.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -67,7 +68,7 @@ beforeEach(() => {
   queue = new TaskQueue();
   registry = new WorkerRegistry();
   httpServer = http.createServer();
-  ({ wss, routeEventToWorker: routeEvent } = createForemanWss(queue, registry, httpServer, { taskLabel: DEFAULT_TASK_LABEL }));
+  ({ wss, routeEventToWorker: routeEvent } = createForemanWss(queue, registry, httpServer, { taskLabel: defaultCfg.taskLabel, reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs }));
 
   return new Promise<void>((resolve) => {
     httpServer.listen(0, () => {

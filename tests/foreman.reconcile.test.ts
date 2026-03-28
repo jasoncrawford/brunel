@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import http from "http";
 import { TaskQueue, WorkerRegistry, createForemanWss } from "../src/foreman.js";
+import { loadDefaultConfig } from "../src/config.js";
+const defaultCfg = await loadDefaultConfig();
 import type { LabeledIssueState } from "../src/types.js";
 
 const TASK_LABEL = "brunel:ready";
@@ -22,6 +24,7 @@ beforeEach(() => {
   const server = http.createServer();
   ({ reconcile, routeEventToWorker } = createForemanWss(queue, registry, server, {
     taskLabel: TASK_LABEL,
+    reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs,
     labeledIssues,
   }));
 });
