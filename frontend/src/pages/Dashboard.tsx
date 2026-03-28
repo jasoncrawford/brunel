@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useAdminWs } from "../hooks/useAdminWs.ts";
 import type { TaskSnapshot, WorkerSnapshot, LogEntry, AdminMessage } from "../types.ts";
@@ -7,6 +7,13 @@ export default function Dashboard() {
   const [tasks, setTasks] = useState<TaskSnapshot[]>([]);
   const [workers, setWorkers] = useState<WorkerSnapshot[]>([]);
   const [recentLog, setRecentLog] = useState<LogEntry[]>([]);
+
+  useEffect(() => {
+    fetch("/api/log")
+      .then((r) => r.json() as Promise<LogEntry[]>)
+      .then(setRecentLog)
+      .catch(console.error);
+  }, []);
 
   const handleMessage = useCallback((msg: AdminMessage) => {
     if (msg.type === "snapshot") {
