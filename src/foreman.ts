@@ -1039,6 +1039,7 @@ if (isMain) {
       repo: config.githubRepo,
       token: config.githubToken,
       taskLabel: config.taskLabel,
+      apiUrl: config.githubApiUrl,
     });
     reconcile();
   } catch (err) {

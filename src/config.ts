@@ -44,6 +44,8 @@ const BrunelConfigSchema = z.object({
   port:           z.coerce.number().int().positive().default(3000),
   /** GitHub webhook secret for signature verification. Optional; skip for local dev. */
   webhookSecret:  z.string().optional(),
+  /** GitHub API base URL. Override for testing with a local mock server. */
+  githubApiUrl:   z.string().default("https://api.github.com"),
 
   // ── Worker-only ────────────────────────────────────────────────────────────
 

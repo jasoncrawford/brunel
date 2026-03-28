@@ -18,11 +18,11 @@ export async function loadIssuesToQueue(
   labeledIssues: Map<number, LabeledIssueState>,
   graph: DependencyGraph,
   openIssues: Set<number>,
-  opts: { repo: string; token: string; taskLabel: string },
+  opts: { repo: string; token: string; taskLabel: string; apiUrl?: string },
 ): Promise<void> {
-  const { repo, token, taskLabel } = opts;
+  const { repo, token, taskLabel, apiUrl = "https://api.github.com" } = opts;
   const [owner, repoName] = repo.split("/");
-  const url = `https://api.github.com/repos/${owner}/${repoName}/issues?labels=${encodeURIComponent(taskLabel)}&state=open&per_page=100`;
+  const url = `${apiUrl}/repos/${owner}/${repoName}/issues?labels=${encodeURIComponent(taskLabel)}&state=open&per_page=100`;
   const res = await fetch(url, { headers: ghHeaders(token) });
   if (!res.ok) throw new Error(`GitHub API error: ${res.status}`);
   const issues = await res.json() as Array<{
