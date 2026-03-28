@@ -143,18 +143,18 @@ export function createDbLogger(supabase: SupabaseClient): DbLogger {
         supabase.from("webhook_events")
           .select("id, received_at, event_name, action, issue_number, task_id, worker_id")
           .eq("task_id", taskId)
-          .order("received_at", { ascending: true })
+          .order("received_at", { ascending: false })
           .limit(500),
         supabase.from("foreman_messages")
           .select("id, created_at, direction, worker_id, task_id, msg_type, payload")
           .eq("task_id", taskId)
-          .order("created_at", { ascending: true })
+          .order("created_at", { ascending: false })
           .limit(500),
       ]);
       const webhooks = ((wRes.data ?? []) as Record<string, unknown>[]).map(webhookToEntry);
       const messages = ((mRes.data ?? []) as Record<string, unknown>[]).map(messageToEntry);
       return [...webhooks, ...messages]
-        .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+        .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
     },
 
     async queryWorkerMessages(workerId) {

@@ -16,7 +16,7 @@ export default function TaskDetail() {
 
   const handleMessage = useCallback((msg: AdminMessage) => {
     if (msg.type === "log_event" && msg.entry.taskId === id) {
-      setEvents((prev) => [...prev, msg.entry]);
+      setEvents((prev) => [msg.entry, ...prev]);
     }
   }, [id]);
 

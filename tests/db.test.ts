@@ -194,6 +194,51 @@ describe("webhookToEntry worker_id mapping", () => {
   });
 });
 
+describe("queryTaskEvents ordering", () => {
+  function makeSupabaseReturningTaskRows(webhookRows: Record<string, unknown>[], messageRows: Record<string, unknown>[]) {
+    const webhookBuilder = {
+      select: vi.fn().mockReturnThis(),
+      order: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      then: vi.fn().mockImplementation((cb: (v: { data: unknown[]; error: null }) => unknown) =>
+        Promise.resolve(cb({ data: webhookRows, error: null }))
+      ),
+    };
+    const messageBuilder = {
+      select: vi.fn().mockReturnThis(),
+      order: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      then: vi.fn().mockImplementation((cb: (v: { data: unknown[]; error: null }) => unknown) =>
+        Promise.resolve(cb({ data: messageRows, error: null }))
+      ),
+    };
+    return {
+      from: vi.fn().mockImplementation((t: string) =>
+        t === "webhook_events" ? webhookBuilder : messageBuilder
+      ),
+    };
+  }
+
+  it("returns events in reverse-chronological order (newest first)", async () => {
+    const supabase = makeSupabaseReturningTaskRows(
+      [
+        { id: 1, received_at: "2026-03-27T01:00:00Z", event_name: "issues", action: "labeled", issue_number: 42, task_id: "42", worker_id: null },
+        { id: 2, received_at: "2026-03-27T03:00:00Z", event_name: "issues", action: "unlabeled", issue_number: 42, task_id: "42", worker_id: null },
+      ],
+      [
+        { id: 10, created_at: "2026-03-27T02:00:00Z", direction: "sent", worker_id: "w1", task_id: "42", msg_type: "task_assigned", payload: {} },
+      ]
+    );
+    const logger = createDbLogger(supabase as unknown as Parameters<typeof createDbLogger>[0]);
+    const entries = await logger.queryTaskEvents("42");
+    expect(entries[0].timestamp).toBe("2026-03-27T03:00:00Z");
+    expect(entries[1].timestamp).toBe("2026-03-27T02:00:00Z");
+    expect(entries[2].timestamp).toBe("2026-03-27T01:00:00Z");
+  });
+});
+
 describe("createNullDbLogger", () => {
   it("logWebhookEvent is a no-op", () => {
     const logger = createNullDbLogger();
