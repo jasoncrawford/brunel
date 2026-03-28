@@ -5,9 +5,14 @@
  * Covers issue #341: event_notification messages sent via forwardEvent were
  * missing from both DB foreman_messages and the admin real-time event log,
  * causing worker detail pages to show no webhook events at all.
+ *
+ * Also covers the reconnect path (worker_hello busy) where queued events are
+ * drained to a reconnecting worker — the same logging was missing there too.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import http from "http";
+import { WebSocket, WebSocketServer } from "ws";
+import type { AddressInfo } from "net";
 import type { WebSocket as WsSocket } from "ws";
 import { TaskQueue, WorkerRegistry, createForemanWss } from "../src/foreman.js";
 import { loadDefaultConfig } from "../src/config.js";
@@ -192,6 +197,109 @@ describe("forwardEvent — admin broadcast of event_notification messages", () =
     const evtEntry = adminWss.logEntries.find(
       (e) => e.kind === "message" && e.summary.includes("event_notification"),
     );
+    expect(evtEntry?.taskId).toBe("42");
+    expect(evtEntry?.workerId).toBe("worker-abc");
+  });
+});
+
+// ── Reconnect path tests (real WebSocket needed) ──────────────────────────────
+//
+// When a worker reconnects as "busy", the foreman drains queued events and
+// sends them via event_notification. These should also be logged.
+
+describe("worker reconnect — DB logging of queued event_notification messages", () => {
+  let wss: WebSocketServer;
+  let reconnectQueue: TaskQueue;
+  let reconnectRegistry: WorkerRegistry;
+  let reconnectDbLogger: ReturnType<typeof makeMockDbLogger>;
+  let reconnectAdminWss: ReturnType<typeof makeMockAdminWss>;
+  let port: number;
+  const openClients: WebSocket[] = [];
+
+  beforeEach(() => {
+    reconnectQueue = new TaskQueue();
+    reconnectRegistry = new WorkerRegistry();
+    reconnectDbLogger = makeMockDbLogger();
+    reconnectAdminWss = makeMockAdminWss();
+    const httpServer = http.createServer();
+    ({ wss } = createForemanWss(reconnectQueue, reconnectRegistry, httpServer, {
+      taskLabel: defaultCfg.taskLabel,
+      reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs,
+      dbLogger: reconnectDbLogger,
+      adminWss: reconnectAdminWss,
+    }));
+    return new Promise<void>((resolve) => {
+      httpServer.listen(0, () => {
+        port = (httpServer.address() as AddressInfo).port;
+        resolve();
+      });
+    });
+  });
+
+  afterEach(() => {
+    return new Promise<void>((resolve) => {
+      const clients = openClients.splice(0);
+      const alive = clients.filter((c) => c.readyState !== WebSocket.CLOSED);
+      if (alive.length === 0) { wss.close(resolve); return; }
+      let pending = alive.length;
+      for (const c of alive) {
+        c.once("close", () => { if (--pending === 0) wss.close(resolve); });
+        c.close();
+      }
+    });
+  });
+
+  function connect(): Promise<WebSocket> {
+    return new Promise((resolve, reject) => {
+      const ws = new WebSocket(`ws://localhost:${port}/worker`);
+      ws.once("open", () => { openClients.push(ws); resolve(ws); });
+      ws.once("error", reject);
+    });
+  }
+
+  function nextMsg(ws: WebSocket): Promise<unknown> {
+    return new Promise((resolve) => ws.once("message", (d) => resolve(JSON.parse(d.toString()))));
+  }
+
+  it("logs queued event_notification to DB when worker reconnects as busy", async () => {
+    // Set up task with a queued event (no worker connected yet)
+    reconnectQueue.addTask({
+      taskId: "42", issueNumber: 42, title: "Fix", body: "", labels: [],
+      repoUrl: "https://github.com/owner/repo",
+    });
+    reconnectQueue.assignTask("42", "worker-abc");
+    reconnectQueue.queueEvent("42", { id: "evt-1", name: "issue_comment", payload: { action: "created" } });
+
+    // Worker reconnects as busy claiming the task
+    const ws = await connect();
+    ws.send(JSON.stringify({ type: "worker_hello", workerId: "worker-abc", taskId: "42", status: "busy" }));
+    // Drain the event_notification message the foreman sends
+    await nextMsg(ws);
+
+    const evtMsg = reconnectDbLogger.messageCalls.find((c) => c.msgType === "event_notification");
+    expect(evtMsg).toBeDefined();
+    expect(evtMsg?.workerId).toBe("worker-abc");
+    expect(evtMsg?.taskId).toBe("42");
+    expect(evtMsg?.direction).toBe("sent");
+  });
+
+  it("broadcasts queued event_notification to admin when worker reconnects as busy", async () => {
+    reconnectQueue.addTask({
+      taskId: "42", issueNumber: 42, title: "Fix", body: "", labels: [],
+      repoUrl: "https://github.com/owner/repo",
+    });
+    reconnectQueue.assignTask("42", "worker-abc");
+    reconnectQueue.queueEvent("42", { id: "evt-1", name: "issue_comment", payload: { action: "created" } });
+
+    const ws = await connect();
+    reconnectAdminWss.logEntries.length = 0;
+    ws.send(JSON.stringify({ type: "worker_hello", workerId: "worker-abc", taskId: "42", status: "busy" }));
+    await nextMsg(ws);
+
+    const evtEntry = reconnectAdminWss.logEntries.find(
+      (e) => e.kind === "message" && e.summary.includes("event_notification"),
+    );
+    expect(evtEntry).toBeDefined();
     expect(evtEntry?.taskId).toBe("42");
     expect(evtEntry?.workerId).toBe("worker-abc");
   });
