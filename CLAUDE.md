@@ -43,6 +43,7 @@ Optional (all have defaults):
 - `BRUNEL_THINK_OUT_LOUD` — show full agent thinking text; defaults to `BRUNEL_VERBOSE`; also settable in `brunel.config.ts` as `thinkOutLoud`
 - `BRUNEL_PERMISSION_MODE` — Claude permission mode: `default`, `acceptEdits`, `bypassPermissions`, `plan`, `dontAsk` (default: `default`)
 - `BRUNEL_WORKSPACE_DIR` — base directory for worker checkout directories (default: `~/.brunel/workers`)
+- `BRUNEL_WORKER_RECLAIM_TIMEOUT_MS` — ms to wait before reclaiming a task from a disconnected worker (default: `300000` / 5 min)
 - `BRUNEL_SUPABASE_URL` — Supabase project URL (for cloud deployment)
 - `BRUNEL_SUPABASE_SECRET_KEY` — Supabase secret key (for cloud deployment; treat as secret)
 - `BRUNEL_WORKER_SECRET` — shared secret to authenticate workers with the foreman (treat as secret)
