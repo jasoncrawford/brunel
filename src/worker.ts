@@ -260,6 +260,7 @@ export class WorkerSession {
     });
 
     ws.on("close", (code: number, reason: Buffer) => {
+      if (ws !== this.ws) return; // stale close from a previous connection
       const elapsed = connectedAt !== undefined ? Math.round((Date.now() - connectedAt) / 1000) : undefined;
       const elapsedStr = elapsed !== undefined ? `, ${elapsed}s` : "";
       const reasonStr = reason?.length > 0 ? `, ${reason.toString()}` : "";
@@ -268,6 +269,7 @@ export class WorkerSession {
     });
 
     ws.on("error", (err: Error) => {
+      if (ws !== this.ws) return; // stale error from a previous connection
       this.display.print(display.c.amber(`WebSocket error: ${err.message}`));
       /* close will fire */
     });
