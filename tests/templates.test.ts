@@ -319,6 +319,40 @@ describe("EVENT_FMT table", () => {
     const result = EVENT_FMT.pull_request(evt.payload, evt);
     expect(result).toContain("closed without merging");
   });
+
+  it("pull_request/closed — instructs to use skills for general practices", () => {
+    const evt: GitHubEvent = {
+      id: "e1",
+      name: "pull_request",
+      payload: { action: "closed", pull_request: { number: 5, merged: true } },
+    };
+    const result = EVENT_FMT.pull_request(evt.payload, evt);
+    expect(result).toContain("skills");
+    expect(result).toContain("general practices");
+  });
+
+  it("pull_request/closed — instructs to use CLAUDE.md for project-specific conventions", () => {
+    const evt: GitHubEvent = {
+      id: "e1",
+      name: "pull_request",
+      payload: { action: "closed", pull_request: { number: 5, merged: true } },
+    };
+    const result = EVENT_FMT.pull_request(evt.payload, evt);
+    expect(result).toContain("CLAUDE.md");
+    expect(result).toContain("project-specific");
+  });
+
+  it("pull_request/closed — warns not to use project memories", () => {
+    const evt: GitHubEvent = {
+      id: "e1",
+      name: "pull_request",
+      payload: { action: "closed", pull_request: { number: 5, merged: true } },
+    };
+    const result = EVENT_FMT.pull_request(evt.payload, evt);
+    expect(result).toContain("memories");
+    expect(result).toMatch(/not|do not|don't/i);
+    expect(result).toContain("persist");
+  });
 });
 
 describe("pull_request/auto_merge_enabled", () => {
