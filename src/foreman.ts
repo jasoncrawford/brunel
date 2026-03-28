@@ -8,7 +8,7 @@ import type { WebSocket as WsSocket } from "ws";
 import type { WorkerMessage, ForemanMessage, GitHubEvent, TaskIssue, LabeledIssueState } from "./types.js";
 import { labelIssueDone } from "./github.js";
 import { fmtTimestamp, setVerbose } from "./display.js";
-import { loadConfig } from "./config.js";
+import { loadConfig, DEFAULT_WORKER_RECLAIM_TIMEOUT_MS } from "./config.js";
 import { isBlocked, setBlockers, fetchBlockers } from "./dependencies.js";
 import { fetchIssueStates } from "./github.js";
 import type { DependencyGraph } from "./dependencies.js";
@@ -471,7 +471,7 @@ export function createForemanWss(
     async deleteAssignment() {},
     async listAssignments() { return []; },
   };
-  const reclaimTimeoutMs = options.reclaimTimeoutMs ?? 300_000;
+  const reclaimTimeoutMs = options.reclaimTimeoutMs ?? DEFAULT_WORKER_RECLAIM_TIMEOUT_MS;
 
   function log(wid: string, line: string) {
     flog(`[worker ${wid.slice(0, 8)}] ${line}`);
@@ -710,6 +710,13 @@ export function createForemanWss(
     });
   }
 
+  function assignIdleWorkers() {
+    for (const w of registry.getIdleWorkers()) {
+      tryAssignWork(w.workerId).catch(err => flog(`ERROR tryAssignWork: ${err}`));
+    }
+    broadcastSnapshot();
+  }
+
   async function tryAssignWork(workerId: string): Promise<void> {
     const task = taskQueue.nextPending(
       (t) => t.depsLoaded && !isBlocked(t.issueNumber, graph, openIssues),
@@ -907,10 +914,7 @@ export function createForemanWss(
             log(workerId, `reclaim timer fired — reverting task #${taskId} to pending`);
             taskQueue.revertTask(taskId);
             registry.remove(workerId);
-            for (const idle of registry.getIdleWorkers()) {
-              tryAssignWork(idle.workerId);
-            }
-            broadcastSnapshot();
+            assignIdleWorkers();
           });
         } else {
           registry.remove(workerId);
@@ -979,14 +983,7 @@ export function createForemanWss(
     }
 
     // Step 4: try assignment for all idle workers
-    // Note: tryAssignWork calls broadcastSnapshot() internally when a task is assigned.
-    // We call it once at the end to cover the case where no assignment happened
-    // (e.g. all workers got standby). This may result in a redundant snapshot on
-    // assignment, which is harmless — snapshots are idempotent.
-    for (const w of registry.getIdleWorkers()) {
-      tryAssignWork(w.workerId).catch(err => flog(`ERROR tryAssignWork: ${err}`));
-    }
-    broadcastSnapshot();
+    assignIdleWorkers();
   }
 
   return { wss, routeEventToWorker: routeEvent, reconcile };
