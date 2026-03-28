@@ -527,7 +527,10 @@ export function createForemanWss(
         taskQueue.queueEvent(task.taskId, evt);
         flog(`[task ${ref}] ${evt.name} queued (worker ${task.assignedWorkerId.slice(0, 8)} disconnected)`);
       } else if (worker) {
-        registry.send(task.assignedWorkerId, { type: "event_notification", taskId: task.taskId, event: evt });
+        const evtMsg: ForemanMessage = { type: "event_notification", taskId: task.taskId, event: evt };
+        registry.send(task.assignedWorkerId, evtMsg);
+        dbLogger?.logForemanMessage({ direction: "sent", workerId: task.assignedWorkerId, taskId: task.taskId, msgType: evtMsg.type, payload: evtMsg as unknown as Record<string, unknown> });
+        broadcastMessageEvent({ direction: "sent", workerId: task.assignedWorkerId, taskId: task.taskId, msgType: evtMsg.type });
         log(task.assignedWorkerId, `→ event_notification ${ref} ${evt.name}`);
       } else {
         flog(`[task ${ref}] ${evt.name} DROPPED — worker ${task.assignedWorkerId.slice(0, 8)} not in registry (disconnected?)`);
