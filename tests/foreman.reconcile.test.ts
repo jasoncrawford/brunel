@@ -117,12 +117,15 @@ describe("reconcile()", () => {
     expect(queue.get("9")?.status).toBe("complete");
   });
 
-  it("calls tryAssignWork for each idle worker, assigning pending ready tasks", () => {
+  it("calls tryAssignWork for each idle worker, assigning pending ready tasks", async () => {
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
     registry.register("w1", fakeWs, "idle");
 
     labeledIssues.set(42, { issue: makeIssue(42), depsLoaded: true });
     reconcile();
+
+    // tryAssignWork is async (DB write then send), so flush the microtask queue.
+    await new Promise((r) => setImmediate(r));
 
     // task_assigned message should have been sent to the idle worker
     expect(fakeWs.send).toHaveBeenCalledWith(expect.stringContaining('"task_assigned"'));
