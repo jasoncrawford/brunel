@@ -1,7 +1,7 @@
 # Reconnection Hardening: Findings and Plan
 
 **Date:** 2026-03-27
-**Status:** Investigation complete; staged implementation plan approved
+**Status:** Stages 1 + 2 shipped (PR #295, PR #297). Stage 3 tracked in #298.
 
 ---
 
@@ -104,7 +104,9 @@ All workers reconnect after exactly 3 seconds. If many workers disconnect simult
 
 ## Staged Implementation Plan
 
-### Stage 1 — Diagnostics (implement first; learn before fixing)
+### Stage 1 — Diagnostics ✅ (PR #295)
+
+**Findings:** All observed disconnects are code 1006. Connection lifetimes varied (147s–789s), confirming H1 — Railway proxy kills idle connections, not at a fixed timeout but whenever the connection is idle long enough.
 
 Goal: Get enough signal to confirm hypotheses before investing in fixes.
 
@@ -125,7 +127,7 @@ Goal: Get enough signal to confirm hypotheses before investing in fixes.
 
 ---
 
-### Stage 2 — Reduce connection drops
+### Stage 2 — Reduce connection drops ✅ (PR #297)
 
 Goal: Stop the disconnections from happening in the first place.
 
@@ -145,7 +147,7 @@ Goal: Stop the disconnections from happening in the first place.
 
 ---
 
-### Stage 3 — Improve robustness when drops do occur
+### Stage 3 — Improve robustness when drops do occur (Issue #298)
 
 Goal: Reduce the impact of disconnections, foreman restarts, and worker interruptions.
 
@@ -163,8 +165,8 @@ Goal: Reduce the impact of disconnections, foreman restarts, and worker interrup
 
 ## Open Questions
 
-- What close codes are actually being seen? (Stage 1 will answer this)
-- How long do connections stay up before dropping? (Stage 1 will answer this)
+- ~~What close codes are actually being seen?~~ **Answered: all 1006**
+- ~~How long do connections stay up before dropping?~~ **Answered: 147s–789s (variable, not fixed)**
 - Does the foreman itself restart frequently, or is it stable and only workers are disconnecting? (Check Railway deployment logs)
 - Are there cases where the worker process itself is being killed (SIGTERM from Railway), or is it always a network-level drop?
 
