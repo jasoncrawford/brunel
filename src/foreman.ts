@@ -27,14 +27,15 @@ type R = Record<string, unknown>;
 interface WorkerState {
   workerId: string;
   ws: WsSocket;
-  status: "idle" | "busy";
+  status: "idle" | "busy" | "disconnected";
   currentTaskId?: string;
+  disconnectedAt?: Date;
 }
 
 export class WorkerRegistry {
   private workers = new Map<string, WorkerState>();
 
-  register(workerId: string, ws: WsSocket, status: "idle" | "busy", taskId?: string) {
+  register(workerId: string, ws: WsSocket, status: "idle" | "busy", taskId?: string): void {
     this.workers.set(workerId, { workerId, ws, status, currentTaskId: taskId });
   }
 
@@ -44,6 +45,13 @@ export class WorkerRegistry {
 
   remove(workerId: string) {
     this.workers.delete(workerId);
+  }
+
+  markDisconnected(workerId: string) {
+    const w = this.workers.get(workerId);
+    if (!w) return;
+    w.status = "disconnected";
+    w.disconnectedAt = new Date();
   }
 
   getIdleWorker(): WorkerState | null {
@@ -152,6 +160,13 @@ export class TaskQueue {
   completeTask(taskId: string) {
     const t = this.tasks.get(taskId);
     if (t) t.status = "complete";
+  }
+
+  revertTask(taskId: string) {
+    const t = this.tasks.get(taskId);
+    if (!t || t.status !== "assigned") return;
+    t.status = "pending";
+    t.assignedWorkerId = undefined;
   }
 
   queueEvent(taskId: string, event: GitHubEvent) {
@@ -447,11 +462,16 @@ export function createForemanWss(
   function forwardEvent(task: Task, evt: GitHubEvent, ref: string) {
     if (task.status === "assigned" && task.assignedWorkerId) {
       const worker = registry.get(task.assignedWorkerId);
-      if (!worker) {
-        flog(`[task ${ref}] ${evt.name} DROPPED — worker ${task.assignedWorkerId.slice(0, 8)} not in registry (disconnected?)`);
+      if (worker?.status === "disconnected") {
+        taskQueue.queueEvent(task.taskId, evt);
+        flog(`[task ${ref}] ${evt.name} queued (worker ${task.assignedWorkerId.slice(0, 8)} disconnected)`);
+      } else {
+        if (!worker) {
+          flog(`[task ${ref}] ${evt.name} DROPPED — worker ${task.assignedWorkerId.slice(0, 8)} not in registry (disconnected?)`);
+        }
+        registry.send(task.assignedWorkerId, { type: "event_notification", taskId: task.taskId, event: evt });
+        log(task.assignedWorkerId, `→ event_notification ${ref} ${evt.name}`);
       }
-      registry.send(task.assignedWorkerId, { type: "event_notification", taskId: task.taskId, event: evt });
-      log(task.assignedWorkerId, `→ event_notification ${ref} ${evt.name}`);
     } else if (task.status === "pending") {
       taskQueue.queueEvent(task.taskId, evt);
       flog(`[task ${ref}] ${evt.name} queued (no worker assigned)`);
@@ -756,7 +776,15 @@ export function createForemanWss(
             log(workerId, "→ standby");
           }
         } else {
-          log(workerId, "hello idle");
+          // If there's a disconnected entry for this worker with an assigned task,
+          // the worker process restarted and can't resume. Revert the task to pending.
+          const existing = registry.get(workerId);
+          if (existing?.status === "disconnected" && existing.currentTaskId) {
+            log(workerId, `hello idle (was disconnected on task #${existing.currentTaskId}) — reverting task to pending`);
+            taskQueue.revertTask(existing.currentTaskId);
+          } else {
+            log(workerId, "hello idle");
+          }
           registry.register(workerId, ws, "idle");
           broadcastSnapshot();
           tryAssignWork(workerId);
@@ -790,7 +818,12 @@ export function createForemanWss(
           msgType: "worker_disconnected",
           payload: { code, reason: reason?.toString() ?? null },
         });
-        registry.remove(workerId);
+        if (taskId) {
+          // Keep registry entry so queued events can be delivered on reconnect.
+          registry.markDisconnected(workerId);
+        } else {
+          registry.remove(workerId);
+        }
         broadcastSnapshot();
       }
     });

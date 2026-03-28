@@ -59,4 +59,45 @@ describe("WorkerRegistry", () => {
     reg.send("w1", { type: "standby" });
     expect(ws.send).toHaveBeenCalledWith(JSON.stringify({ type: "standby" }));
   });
+
+  describe("markDisconnected", () => {
+    it("sets status to disconnected and records disconnectedAt", () => {
+      reg.register("w1", fakeWs(), "busy");
+      reg.assignTask("w1", "42");
+      reg.markDisconnected("w1");
+      const w = reg.get("w1")!;
+      expect(w.status).toBe("disconnected");
+      expect(w.currentTaskId).toBe("42");
+      expect(w.disconnectedAt).toBeInstanceOf(Date);
+    });
+
+    it("is a no-op for unknown worker", () => {
+      expect(() => reg.markDisconnected("unknown")).not.toThrow();
+    });
+
+    it("getIdleWorker does not return a disconnected worker", () => {
+      reg.register("w1", fakeWs(), "idle");
+      reg.markDisconnected("w1");
+      expect(reg.getIdleWorker()).toBeNull();
+    });
+
+    it("send does not call ws.send on a disconnected worker", () => {
+      const ws = fakeWs();
+      ws.readyState = 3; // CLOSED
+      reg.register("w1", ws, "busy");
+      reg.markDisconnected("w1");
+      reg.send("w1", { type: "standby" });
+      expect(ws.send).not.toHaveBeenCalled();
+    });
+
+    it("getWorkerSnapshots includes disconnected workers", () => {
+      reg.register("w1", fakeWs(), "busy");
+      reg.assignTask("w1", "42");
+      reg.markDisconnected("w1");
+      const snapshots = reg.getWorkerSnapshots();
+      expect(snapshots).toHaveLength(1);
+      expect(snapshots[0].status).toBe("disconnected");
+      expect(snapshots[0].currentTaskId).toBe("42");
+    });
+  });
 });
