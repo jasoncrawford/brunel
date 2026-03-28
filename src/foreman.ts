@@ -805,7 +805,8 @@ export function createForemanWss(
       });
 
       if (msg.type === "worker_hello") handleWorkerHello(msg);
-      if (msg.type === "task_complete") handleTaskComplete(msg);
+      else if (msg.type === "task_complete") handleTaskComplete(msg);
+      else flog(`[worker ${workerId}] unknown message type: ${(msg as R).type}`);
     });
 
     ws.on("close", (code, reason) => {
