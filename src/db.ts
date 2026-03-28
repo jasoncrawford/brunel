@@ -179,3 +179,70 @@ export function createNullDbLogger(): DbLogger {
     async queryWorkerMessages() { return []; },
   };
 }
+
+// ── TaskAssignmentStore ────────────────────────────────────────────────────────
+
+export interface TaskAssignmentRow {
+  taskId: string;
+  workerId: string;
+  prNumber: number | null;
+  branch: string | null;
+}
+
+export interface TaskAssignmentStore {
+  /** Insert or replace the assignment row for this task. */
+  upsertAssignment(taskId: string, workerId: string): Promise<void>;
+  /** Update the assignment row with PR number and branch (called when PR opened). */
+  updatePr(taskId: string, prNumber: number, branch: string | null): Promise<void>;
+  /** Delete the assignment row (task complete, or reverted to pending). */
+  deleteAssignment(taskId: string): Promise<void>;
+  /** Load all persisted assignments at startup. */
+  listAssignments(): Promise<TaskAssignmentRow[]>;
+}
+
+export function createTaskAssignmentStore(supabase: SupabaseClient): TaskAssignmentStore {
+  return {
+    async upsertAssignment(taskId, workerId) {
+      const { error } = await supabase.from("task_assignments").upsert(
+        { task_id: taskId, worker_id: workerId, updated_at: new Date().toISOString() },
+        { onConflict: "task_id" },
+      );
+      if (error) throw error;
+    },
+
+    async updatePr(taskId, prNumber, branch) {
+      const { error } = await supabase.from("task_assignments")
+        .update({ pr_number: prNumber, branch, updated_at: new Date().toISOString() })
+        .eq("task_id", taskId);
+      if (error) throw error;
+    },
+
+    async deleteAssignment(taskId) {
+      const { error } = await supabase.from("task_assignments")
+        .delete()
+        .eq("task_id", taskId);
+      if (error) throw error;
+    },
+
+    async listAssignments() {
+      const { data, error } = await supabase.from("task_assignments")
+        .select("task_id, worker_id, pr_number, branch");
+      if (error) throw error;
+      return ((data ?? []) as Record<string, unknown>[]).map((row) => ({
+        taskId: row.task_id as string,
+        workerId: row.worker_id as string,
+        prNumber: (row.pr_number as number | null) ?? null,
+        branch: (row.branch as string | null) ?? null,
+      }));
+    },
+  };
+}
+
+export function createNullTaskAssignmentStore(): TaskAssignmentStore {
+  return {
+    async upsertAssignment() {},
+    async updatePr() {},
+    async deleteAssignment() {},
+    async listAssignments() { return []; },
+  };
+}

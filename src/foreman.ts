@@ -12,7 +12,7 @@ import { loadConfig } from "./config.js";
 import { isBlocked, setBlockers, fetchBlockers } from "./dependencies.js";
 import { fetchIssueStates } from "./github.js";
 import type { DependencyGraph } from "./dependencies.js";
-import type { DbLogger } from "./db.js";
+import { type DbLogger, type TaskAssignmentStore, createDbLogger, createTaskAssignmentStore, createNullDbLogger, createNullTaskAssignmentStore } from "./db.js";
 import type { AdminWss, TaskSnapshot, WorkerSnapshot } from "./admin-ws.js";
 
 function flog(msg: string) {
@@ -215,6 +215,13 @@ export class TaskQueue {
       const t = this.tasks.get(String(n));
       if (t) t.depsLoaded = true;
     }
+  }
+
+  getAssignedTaskForWorker(workerId: string): Task | undefined {
+    for (const t of this.tasks.values()) {
+      if (t.status === "assigned" && t.assignedWorkerId === workerId) return t;
+    }
+    return undefined;
   }
 
   getTaskSnapshots(): TaskSnapshot[] {
@@ -428,6 +435,7 @@ export function createForemanWss(
     workerSecret?: string;
     labeledIssues?: Map<number, LabeledIssueState>;
     pingIntervalMs?: number;
+    assignStore?: TaskAssignmentStore;
   },
 ): { wss: WebSocketServer; routeEventToWorker: (id: string, name: string, payload: unknown) => void; reconcile: () => void } {
   const taskLabel = options.taskLabel;
@@ -441,6 +449,12 @@ export function createForemanWss(
   const dbLogger = options.dbLogger;
   const adminWss = options.adminWss;
   const workerSecret = options.workerSecret;
+  const assignStore: TaskAssignmentStore = options.assignStore ?? {
+    async upsertAssignment() {},
+    async updatePr() {},
+    async deleteAssignment() {},
+    async listAssignments() { return []; },
+  };
 
   function log(wid: string, line: string) {
     flog(`[worker ${wid.slice(0, 8)}] ${line}`);
@@ -507,6 +521,10 @@ export function createForemanWss(
             taskQueue.registerPr(prNumber, linkedTask.taskId);
             const branch = strProp(pr.head, "ref");
             if (branch) taskQueue.registerBranch(branch, linkedTask.taskId);
+            // Persist PR number and branch so routing survives a foreman restart.
+            assignStore.updatePr(linkedTask.taskId, prNumber, branch ?? null).catch(err =>
+              flog(`ERROR Failed to update PR for task #${linkedTask.taskId}: ${err}`)
+            );
             flog(`[task #${linkedIssue}] PR #${prNumber} registered`);
             return result(linkedTask);
           }
@@ -675,14 +693,32 @@ export function createForemanWss(
     });
   }
 
-  function tryAssignWork(workerId: string) {
+  async function tryAssignWork(workerId: string): Promise<void> {
     const task = taskQueue.nextPending(
       (t) => t.depsLoaded && !isBlocked(t.issueNumber, graph, openIssues),
     );
     if (task) {
+      // Reserve in memory first to prevent concurrent double-assignment in the reconcile loop.
       taskQueue.assignTask(task.taskId, workerId);
       registry.assignTask(workerId, task.taskId);
       broadcastSnapshot();
+
+      // Persist to DB before sending task_assigned to the worker.
+      try {
+        await assignStore.upsertAssignment(task.taskId, workerId);
+      } catch (err) {
+        flog(`ERROR Failed to persist assignment for task #${task.taskId}: ${err}`);
+        // Revert in-memory state — worker gets standby instead.
+        taskQueue.revertTask(task.taskId);
+        registry.releaseWorker(workerId);
+        broadcastSnapshot();
+        const standbyMsg: ForemanMessage = { type: "standby" };
+        registry.send(workerId, standbyMsg);
+        dbLogger?.logForemanMessage({ direction: "sent", workerId, taskId: null, msgType: standbyMsg.type, payload: standbyMsg as unknown as Record<string, unknown> });
+        log(workerId, "→ standby (DB write failed)");
+        return;
+      }
+
       const queued = taskQueue.drainEvents(task.taskId);
       const assignMsg: ForemanMessage = {
         type: "task_assigned",
@@ -762,17 +798,21 @@ export function createForemanWss(
           log(workerId, "→ standby");
         }
       } else {
-        // If this worker had an assigned task, it can't resume — revert to pending.
-        const existing = registry.get(workerId);
-        if (existing?.currentTaskId) {
-          log(workerId, `hello idle (had task #${existing.currentTaskId}) — reverting task to pending`);
-          taskQueue.revertTask(existing.currentTaskId);
+        // If the queue has a task assigned to this worker (from a prior foreman
+        // session loaded from DB, or a disconnect during this session), revert it.
+        const priorTask = taskQueue.getAssignedTaskForWorker(workerId);
+        if (priorTask) {
+          taskQueue.revertTask(priorTask.taskId);
+          assignStore.deleteAssignment(priorTask.taskId).catch(err =>
+            flog(`ERROR Failed to delete assignment for #${priorTask.taskId}: ${err}`)
+          );
+          log(workerId, `hello idle (had task #${priorTask.taskId}) — reverting task to pending`);
         } else {
           log(workerId, "hello idle");
         }
         registry.register(workerId, ws, "idle");
         broadcastSnapshot();
-        tryAssignWork(workerId);
+        tryAssignWork(workerId).catch(err => flog(`ERROR tryAssignWork: ${err}`));
       }
     }
 
@@ -781,13 +821,16 @@ export function createForemanWss(
       const task = taskQueue.get(msg.taskId);
       if (task) {
         taskQueue.completeTask(msg.taskId);
+        assignStore.deleteAssignment(msg.taskId).catch(err =>
+          flog(`ERROR Failed to delete assignment for #${msg.taskId}: ${err}`)
+        );
         labelDone(task.issueNumber).catch(err =>
           flog(`ERROR Failed to label issue done: ${err}`)
         );
       }
       registry.releaseWorker(workerId);
       broadcastSnapshot();
-      tryAssignWork(workerId);
+      tryAssignWork(workerId).catch(err => flog(`ERROR tryAssignWork: ${err}`));
     }
 
     function handleWorkerGoodbye(msg: Extract<WorkerMessage, { type: "worker_goodbye" }>) {
@@ -799,7 +842,7 @@ export function createForemanWss(
       broadcastSnapshot();
       // Try to assign the reverted task to any already-idle workers.
       for (const w of registry.getIdleWorkers()) {
-        tryAssignWork(w.workerId);
+        tryAssignWork(w.workerId).catch(err => flog(`ERROR tryAssignWork: ${err}`));
       }
     }
 
@@ -909,7 +952,7 @@ export function createForemanWss(
     // (e.g. all workers got standby). This may result in a redundant snapshot on
     // assignment, which is harmless — snapshots are idempotent.
     for (const w of registry.getIdleWorkers()) {
-      tryAssignWork(w.workerId);
+      tryAssignWork(w.workerId).catch(err => flog(`ERROR tryAssignWork: ${err}`));
     }
     broadcastSnapshot();
   }
@@ -934,16 +977,18 @@ if (isMain) {
     ? new Webhooks({ secret: config.webhookSecret })
     : null;
 
-  // DB logger
+  // Setup DB logger and assignment store (share the same Supabase client if configured)
   let dbLogger: DbLogger;
+  let assignStore: TaskAssignmentStore;
   if (config.supabaseUrl && config.supabaseSecretKey) {
     const { createClient } = await import("@supabase/supabase-js");
-    const { createDbLogger } = await import("./db.js");
-    dbLogger = createDbLogger(createClient(config.supabaseUrl, config.supabaseSecretKey));
+    const supabase = createClient(config.supabaseUrl, config.supabaseSecretKey);
+    dbLogger = createDbLogger(supabase);
+    assignStore = createTaskAssignmentStore(supabase);
     flog("Supabase logging enabled");
   } else {
-    const { createNullDbLogger } = await import("./db.js");
     dbLogger = createNullDbLogger();
+    assignStore = createNullTaskAssignmentStore();
   }
 
   let routeEvent: (id: string, name: string, payload: unknown) => void = () => {};
@@ -969,6 +1014,7 @@ if (isMain) {
       dbLogger,
       adminWss,
       workerSecret: config.workerSecret,
+      assignStore,
       labelDone: (issueNumber) =>
         labelIssueDone(issueNumber, {
           repo: config.githubRepo,
@@ -985,20 +1031,55 @@ if (isMain) {
     });
   }
 
-  server.listen(config.port, async () => {
-    flog(`Listening on http://localhost:${config.port}/webhook`);
-    flog(`WebSocket workers: ws://localhost:${config.port}/worker`);
-    flog(`Admin WebSocket: ws://localhost:${config.port}/admin/ws`);
-    flog("Waiting for events...");
-    try {
-      await loadIssuesToQueue(labeledIssues, graph, openIssues, {
-        repo: config.githubRepo,
-        token: config.githubToken,
-        taskLabel: config.taskLabel,
-      });
-      reconcile();
-    } catch (err) {
-      flog(`WARNING Failed to load issues from GitHub: ${err}`);
+  // Load all state before accepting WebSocket connections.
+  // Step 1: fetch brunel:ready issues from GitHub → all tasks start pending
+  flog("[startup] step 1: fetching brunel:ready issues from GitHub...");
+  try {
+    await loadIssuesToQueue(labeledIssues, graph, openIssues, {
+      repo: config.githubRepo,
+      token: config.githubToken,
+      taskLabel: config.taskLabel,
+      apiUrl: config.githubApiUrl,
+    });
+    reconcile();
+  } catch (err) {
+    flog(`ERROR Failed to load issues from GitHub: ${err}`);
+    process.exit(1);
+  }
+
+  // Step 2: read task_assignments table and restore assigned state
+  flog("[startup] step 2: loading task assignments from DB...");
+  try {
+    const assignments = await assignStore.listAssignments();
+    for (const row of assignments) {
+      const task = taskQueue.get(row.taskId);
+      if (!task) {
+        // Orphaned row: issue was closed, label removed, or task already completed.
+        flog(`[startup] orphaned assignment for task #${row.taskId}, deleting`);
+        assignStore.deleteAssignment(row.taskId).catch(err =>
+          flog(`ERROR Failed to delete orphaned assignment: ${err}`)
+        );
+        continue;
+      }
+      // Restore assigned state from DB; when the worker reconnects it will reclaim
+      // (if busy) or trigger a revert (if idle) via getAssignedTaskForWorker.
+      taskQueue.assignTask(row.taskId, row.workerId);
+      if (row.prNumber !== null) taskQueue.registerPr(row.prNumber, row.taskId);
+      if (row.branch) taskQueue.registerBranch(row.branch, row.taskId);
+      flog(`[startup] loaded assignment: task #${row.taskId} → worker ${row.workerId.slice(0, 8)}`);
     }
+  } catch (err) {
+    flog(`ERROR Failed to load task assignments: ${err}`);
+    process.exit(1);
+  }
+
+  // Step 3: start listening — state is fully loaded
+  const httpBase = config.foremanUrl.replace(/^ws:\/\//, "http://").replace(/^wss:\/\//, "https://").replace(/\/$/, "");
+  const wsBase = config.foremanUrl.replace(/\/$/, "");
+  server.listen(config.port, () => {
+    flog(`Listening on ${httpBase}/webhook`);
+    flog(`WebSocket workers: ${wsBase}/worker`);
+    flog(`Admin WebSocket: ${wsBase}/admin/ws`);
+    flog("Waiting for events...");
   });
 }

@@ -6,6 +6,7 @@
  */
 import { spawn, type ChildProcess, execSync } from "child_process";
 import { existsSync, symlinkSync, unlinkSync, readFileSync, mkdtempSync, rmSync } from "fs";
+import * as http from "http";
 import * as net from "net";
 import * as os from "os";
 import path from "path";
@@ -72,13 +73,28 @@ function freePort(): Promise<number> {
 
 async function run(): Promise<void> {
   const port = await freePort();
+  const mockApiPort = await freePort();
   const foremanUrl = `ws://localhost:${port}`;
+
+  // Local mock GitHub API server — returns empty issues list so startup succeeds
+  // without real GitHub credentials.
+  const mockApi = http.createServer((_req, res) => {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end("[]");
+  });
+  await new Promise<void>((resolve) => mockApi.listen(mockApiPort, resolve));
 
   const spawnOpts = { cwd: REPO_ROOT, stdio: ["ignore", "pipe", "pipe"] as const };
 
   const foreman = spawn("tsx", ["src/foreman.ts"], {
     ...spawnOpts,
-    env: { ...process.env, PORT: String(port), GITHUB_REPO: "test/test", GITHUB_TOKEN: "dummy" },
+    env: {
+      ...process.env,
+      PORT: String(port),
+      GITHUB_REPO: "test/test",
+      GITHUB_TOKEN: "dummy",
+      BRUNEL_GITHUB_API_URL: `http://localhost:${mockApiPort}`,
+    },
   });
 
   let worker: ChildProcess | null = null;
@@ -126,6 +142,7 @@ async function run(): Promise<void> {
   console.log("✓ Worker connected to foreman and received standby");
   foreman.kill();
   worker!.kill();
+  mockApi.close();
 }
 
 run().catch((err) => {
