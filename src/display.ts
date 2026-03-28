@@ -489,6 +489,18 @@ function fmtCompactionDetail(meta: unknown): string {
   return tokens != null ? `${trigger}, ${fmtNum(tokens)} tokens` : trigger;
 }
 
+function fmtHookExitCode(exitCode: number | undefined): string {
+  return exitCode != null && exitCode !== 0 ? ` [exit ${exitCode}]` : "";
+}
+
+function fmtRateLimitInfo(info: { status?: string; utilization?: number; rateLimitType?: string } | undefined): string | null {
+  if (!info || info.status === "allowed") return null;
+  const parts: string[] = [`rate limit: ${info.status}`];
+  if (info.rateLimitType) parts.push(info.rateLimitType);
+  if (info.utilization != null) parts.push(`${Math.round(info.utilization * 100)}% used`);
+  return c.amber(parts.join(", "));
+}
+
 export const SYSTEM_FMT: FmtTable = {
   init:              { verbose: (m) => c.darkGray(`init: session ${m.session_id}`) },
   task_started:      (m) => c.lavender(`  ▶ agent started: ${m.description}`),
@@ -497,24 +509,14 @@ export const SYSTEM_FMT: FmtTable = {
   compact_boundary:  (m) => c.darkGray(`↩ Context compacted (${fmtCompactionDetail(m.compact_metadata)})`),
   status:            (m) => m.status === "compacting" ? c.darkGray("Compacting context...") : null,
   hook_started:      { verbose: (m) => c.darkGray(`hook: ${m.hook_name} (${m.hook_event})`) },
-  hook_response:     { verbose: (m) => {
-    const exit = m.exit_code != null && m.exit_code !== 0 ? ` [exit ${m.exit_code}]` : "";
-    return c.darkGray(`hook: ${m.hook_name} — ${m.outcome}${exit}`);
-  }},
+  hook_response:     { verbose: (m) => c.darkGray(`hook: ${m.hook_name} — ${m.outcome}${fmtHookExitCode(m.exit_code)}`) },
   _default:          { verbose: (m) => c.darkGray(`system/${m.subtype}`) },
 };
 
 export const MESSAGE_FMT: FmtTable = {
   _empty:           (m) => c.darkGray(`[${m.type} — empty]`),
   result:           (m) => c.darkGray(`\n${fmtStats(Math.round(m.duration_ms / 1000), m.num_turns, m.usage.output_tokens, m.usage.input_tokens)}`),
-  rate_limit_event: { verbose: (m) => {
-    const info = m.rate_limit_info as { status?: string; utilization?: number; rateLimitType?: string } | undefined;
-    if (!info || info.status === "allowed") return null;
-    const parts: string[] = [`rate limit: ${info.status}`];
-    if (info.rateLimitType) parts.push(info.rateLimitType);
-    if (info.utilization != null) parts.push(`${Math.round(info.utilization * 100)}% used`);
-    return c.amber(parts.join(", "));
-  }},
+  rate_limit_event: { verbose: (m) => fmtRateLimitInfo(m.rate_limit_info) },
   _default:         (m) => c.darkGray(`msg: ${m.type}`),
 };
 
