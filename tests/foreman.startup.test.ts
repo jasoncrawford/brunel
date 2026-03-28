@@ -149,27 +149,19 @@ describe("tryAssignWork — DB persistence", () => {
   });
 });
 
-// ── startupDisconnected map ───────────────────────────────────────────────────
+// ── Startup reconnect behaviour ───────────────────────────────────────────────
 
-describe("startupDisconnected map", () => {
-  it("is returned from createForemanWss", () => {
-    const result = createForemanWss(taskQueue, registry, httpServer, { taskLabel: "brunel:ready" });
-    ({ wss } = result);
-    expect(result.startupDisconnected).toBeInstanceOf(Map);
-  });
-
-  it("idle worker in startupDisconnected triggers deleteAssignment and map cleanup", async () => {
+describe("startup reconnect behaviour", () => {
+  it("idle worker whose task was loaded from DB triggers deleteAssignment and revert", async () => {
     // After revert, tryAssignWork will offer the task again (correct: worker starts fresh).
     const store = makeStore();
     taskQueue.addTask(baseTask);
-    taskQueue.assignTask("42", "w1"); // simulate startup loading
+    taskQueue.assignTask("42", "w1"); // simulate what main block does after loadAssignments
 
-    const result = createForemanWss(taskQueue, registry, httpServer, {
+    ({ wss } = createForemanWss(taskQueue, registry, httpServer, {
       taskLabel: "brunel:ready",
       assignStore: store,
-    });
-    ({ wss } = result);
-    result.startupDisconnected.set("w1", "42");
+    }));
 
     port = await startServer();
     const ws = await connect({ type: "worker_hello", workerId: "w1", status: "idle" });
@@ -177,10 +169,7 @@ describe("startupDisconnected map", () => {
 
     // deleteAssignment should be called (the old session's row is removed)
     expect(store.deleteAssignment).toHaveBeenCalledWith("42");
-    // startupDisconnected entry should be cleared
-    expect(result.startupDisconnected.has("w1")).toBe(false);
     // Worker gets the task re-assigned (fresh session) or standby — either is valid
-    // The important guarantee is that deleteAssignment was called and the map was cleared
     expect(["task_assigned", "standby"]).toContain((msg as { type: string }).type);
   });
 
@@ -189,12 +178,10 @@ describe("startupDisconnected map", () => {
     taskQueue.addTask(baseTask);
     taskQueue.assignTask("42", "original-worker"); // simulate startup loading
 
-    const result = createForemanWss(taskQueue, registry, httpServer, {
+    ({ wss } = createForemanWss(taskQueue, registry, httpServer, {
       taskLabel: "brunel:ready",
       assignStore: store,
-    });
-    ({ wss } = result);
-    result.startupDisconnected.set("original-worker", "42");
+    }));
 
     port = await startServer();
     const ws = await connect({ type: "worker_hello", workerId: "new-worker", status: "idle" });
@@ -206,17 +193,15 @@ describe("startupDisconnected map", () => {
     expect(taskQueue.get("42")?.assignedWorkerId).toBe("original-worker");
   });
 
-  it("busy worker reconnect removes from startupDisconnected", async () => {
+  it("busy worker reconnect correctly reclaims its task", async () => {
     const store = makeStore();
     taskQueue.addTask(baseTask);
     taskQueue.assignTask("42", "w1");
 
-    const result = createForemanWss(taskQueue, registry, httpServer, {
+    ({ wss } = createForemanWss(taskQueue, registry, httpServer, {
       taskLabel: "brunel:ready",
       assignStore: store,
-    });
-    ({ wss } = result);
-    result.startupDisconnected.set("w1", "42");
+    }));
 
     port = await startServer();
     await connect({ type: "worker_hello", workerId: "w1", status: "busy", taskId: "42" });
@@ -224,7 +209,8 @@ describe("startupDisconnected map", () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(taskQueue.get("42")?.status).toBe("assigned");
     expect(taskQueue.get("42")?.assignedWorkerId).toBe("w1");
-    expect(result.startupDisconnected.has("w1")).toBe(false);
+    // deleteAssignment must NOT be called — worker reclaimed its task
+    expect(store.deleteAssignment).not.toHaveBeenCalled();
   });
 });
 

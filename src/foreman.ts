@@ -12,7 +12,7 @@ import { loadConfig } from "./config.js";
 import { isBlocked, setBlockers, fetchBlockers } from "./dependencies.js";
 import { fetchIssueStates } from "./github.js";
 import type { DependencyGraph } from "./dependencies.js";
-import type { DbLogger, TaskAssignmentStore } from "./db.js";
+import { type DbLogger, type TaskAssignmentStore, createDbLogger, createTaskAssignmentStore, createNullDbLogger, createNullTaskAssignmentStore } from "./db.js";
 import type { AdminWss, TaskSnapshot, WorkerSnapshot } from "./admin-ws.js";
 
 function flog(msg: string) {
@@ -215,6 +215,13 @@ export class TaskQueue {
       const t = this.tasks.get(String(n));
       if (t) t.depsLoaded = true;
     }
+  }
+
+  getAssignedTaskForWorker(workerId: string): Task | undefined {
+    for (const t of this.tasks.values()) {
+      if (t.status === "assigned" && t.assignedWorkerId === workerId) return t;
+    }
+    return undefined;
   }
 
   getTaskSnapshots(): TaskSnapshot[] {
@@ -430,7 +437,7 @@ export function createForemanWss(
     pingIntervalMs?: number;
     assignStore?: TaskAssignmentStore;
   },
-): { wss: WebSocketServer; routeEventToWorker: (id: string, name: string, payload: unknown) => void; reconcile: () => void; startupDisconnected: Map<string, string> } {
+): { wss: WebSocketServer; routeEventToWorker: (id: string, name: string, payload: unknown) => void; reconcile: () => void } {
   const taskLabel = options.taskLabel;
   const labelDone = options.labelDone ?? (() => Promise.resolve());
   const graph = options.graph ?? new Map<number, Set<number>>();
@@ -448,9 +455,6 @@ export function createForemanWss(
     async deleteAssignment() {},
     async listAssignments() { return []; },
   };
-  // workerId → taskId for workers that had assignments before the last foreman restart.
-  // Populated by the caller (main block) from the task_assignments DB table at startup.
-  const startupDisconnected = new Map<string, string>();
 
   function log(wid: string, line: string) {
     flog(`[worker ${wid.slice(0, 8)}] ${line}`);
@@ -767,8 +771,6 @@ export function createForemanWss(
       workerId = msg.workerId;
 
       if (msg.status === "busy" && msg.taskId) {
-        // Clear from startup disconnected map — worker is reclaiming its task.
-        startupDisconnected.delete(workerId);
         const existing = taskQueue.get(msg.taskId);
         if (existing && existing.status !== "complete" && (existing.status !== "assigned" || existing.assignedWorkerId === workerId)) {
           // Task is pending/assigned to this worker — reclaim.
@@ -796,27 +798,17 @@ export function createForemanWss(
           log(workerId, "→ standby");
         }
       } else {
-        // Check if this worker had an assignment before the last foreman restart.
-        const startupTaskId = startupDisconnected.get(workerId);
-        if (startupTaskId) {
-          startupDisconnected.delete(workerId);
-          taskQueue.revertTask(startupTaskId);
-          assignStore.deleteAssignment(startupTaskId).catch(err =>
-            flog(`ERROR Failed to delete assignment for #${startupTaskId}: ${err}`)
+        // If the queue has a task assigned to this worker (from a prior foreman
+        // session loaded from DB, or a disconnect during this session), revert it.
+        const priorTask = taskQueue.getAssignedTaskForWorker(workerId);
+        if (priorTask) {
+          taskQueue.revertTask(priorTask.taskId);
+          assignStore.deleteAssignment(priorTask.taskId).catch(err =>
+            flog(`ERROR Failed to delete assignment for #${priorTask.taskId}: ${err}`)
           );
-          log(workerId, `hello idle (startup assignment for task #${startupTaskId}) — reverting to pending`);
+          log(workerId, `hello idle (had task #${priorTask.taskId}) — reverting task to pending`);
         } else {
-          // Mid-session reconnect: check registry for an in-session disconnected assignment.
-          const existing = registry.get(workerId);
-          if (existing?.currentTaskId) {
-            log(workerId, `hello idle (had task #${existing.currentTaskId}) — reverting task to pending`);
-            taskQueue.revertTask(existing.currentTaskId);
-            assignStore.deleteAssignment(existing.currentTaskId).catch(err =>
-              flog(`ERROR Failed to delete assignment for #${existing.currentTaskId}: ${err}`)
-            );
-          } else {
-            log(workerId, "hello idle");
-          }
+          log(workerId, "hello idle");
         }
         registry.register(workerId, ws, "idle");
         broadcastSnapshot();
@@ -965,7 +957,7 @@ export function createForemanWss(
     broadcastSnapshot();
   }
 
-  return { wss, routeEventToWorker: routeEvent, reconcile, startupDisconnected };
+  return { wss, routeEventToWorker: routeEvent, reconcile };
 }
 
 // Only start listening when run directly (not when imported by tests)
@@ -990,20 +982,17 @@ if (isMain) {
   let assignStore: TaskAssignmentStore;
   if (config.supabaseUrl && config.supabaseSecretKey) {
     const { createClient } = await import("@supabase/supabase-js");
-    const { createDbLogger, createTaskAssignmentStore } = await import("./db.js");
     const supabase = createClient(config.supabaseUrl, config.supabaseSecretKey);
     dbLogger = createDbLogger(supabase);
     assignStore = createTaskAssignmentStore(supabase);
     flog("Supabase logging enabled");
   } else {
-    const { createNullDbLogger, createNullTaskAssignmentStore } = await import("./db.js");
     dbLogger = createNullDbLogger();
     assignStore = createNullTaskAssignmentStore();
   }
 
   let routeEvent: (id: string, name: string, payload: unknown) => void = () => {};
   let reconcile: () => void = () => {};
-  let startupDisconnected = new Map<string, string>();
   const server = createHttpServer(webhooks, (id, name, payload) => routeEvent(id, name, payload), dbLogger);
 
   // Admin WebSocket broadcaster
@@ -1013,7 +1002,7 @@ if (isMain) {
     workers: registry.getWorkerSnapshots(),
   }));
 
-  ({ routeEventToWorker: routeEvent, reconcile, startupDisconnected } = createForemanWss(
+  ({ routeEventToWorker: routeEvent, reconcile } = createForemanWss(
     taskQueue, registry, server,
     {
       graph,
@@ -1044,6 +1033,7 @@ if (isMain) {
 
   // Load all state before accepting WebSocket connections.
   // Step 1: fetch brunel:ready issues from GitHub → all tasks start pending
+  flog("[startup] step 1: fetching brunel:ready issues from GitHub...");
   try {
     await loadIssuesToQueue(labeledIssues, graph, openIssues, {
       repo: config.githubRepo,
@@ -1052,10 +1042,12 @@ if (isMain) {
     });
     reconcile();
   } catch (err) {
-    flog(`WARNING Failed to load issues from GitHub: ${err}`);
+    flog(`ERROR Failed to load issues from GitHub: ${err}`);
+    process.exit(1);
   }
 
-  // Step 2: read task_assignments table and seed in-memory state
+  // Step 2: read task_assignments table and restore assigned state
+  flog("[startup] step 2: loading task assignments from DB...");
   try {
     const assignments = await assignStore.listAssignments();
     for (const row of assignments) {
@@ -1068,23 +1060,25 @@ if (isMain) {
         );
         continue;
       }
-      // Restore assigned state from DB
+      // Restore assigned state from DB; when the worker reconnects it will reclaim
+      // (if busy) or trigger a revert (if idle) via getAssignedTaskForWorker.
       taskQueue.assignTask(row.taskId, row.workerId);
       if (row.prNumber !== null) taskQueue.registerPr(row.prNumber, row.taskId);
       if (row.branch) taskQueue.registerBranch(row.branch, row.taskId);
-      // Track so idle-reconnecting workers can revert their prior task
-      startupDisconnected.set(row.workerId, row.taskId);
       flog(`[startup] loaded assignment: task #${row.taskId} → worker ${row.workerId.slice(0, 8)}`);
     }
   } catch (err) {
-    flog(`WARNING Failed to load task assignments: ${err}`);
+    flog(`ERROR Failed to load task assignments: ${err}`);
+    process.exit(1);
   }
 
   // Step 3: start listening — state is fully loaded
+  const httpBase = config.foremanUrl.replace(/^ws:\/\//, "http://").replace(/^wss:\/\//, "https://").replace(/\/$/, "");
+  const wsBase = config.foremanUrl.replace(/\/$/, "");
   server.listen(config.port, () => {
-    flog(`Listening on http://localhost:${config.port}/webhook`);
-    flog(`WebSocket workers: ws://localhost:${config.port}/worker`);
-    flog(`Admin WebSocket: ws://localhost:${config.port}/admin/ws`);
+    flog(`Listening on ${httpBase}/webhook`);
+    flog(`WebSocket workers: ${wsBase}/worker`);
+    flog(`Admin WebSocket: ${wsBase}/admin/ws`);
     flog("Waiting for events...");
   });
 }
