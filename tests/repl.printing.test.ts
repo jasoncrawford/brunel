@@ -313,12 +313,12 @@ describe("printMessage", () => {
     expect(output).toBe("");
   });
 
-  it("rate_limit_event, verbose mode → rate limit line", () => {
+  it("rate_limit_event, verbose mode, status=allowed → null (silenced)", () => {
     setVerbose(true);
     const output = captureOutput(() => {
       printMessage({ type: "rate_limit_event", rate_limit_info: { status: "allowed" } });
     });
-    expect(stripAnsi(output)).toContain("rate limit: status=allowed");
+    expect(output).toBe("");
   });
 });
 

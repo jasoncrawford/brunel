@@ -59,18 +59,29 @@ describe("printForemanMessage", () => {
     expect(trimmed).not.toContain("\n");
   });
 
-  it("event_notification prints event name", () => {
+  it("event_notification, VERBOSE=false → silent", () => {
     const msg: ForemanMessage = {
       type: "event_notification",
       taskId: "task-1",
       event: { id: "evt-1", name: "issue_comment", payload: {} },
     };
     const output = captureOutput(() => printForemanMessage(msg));
-    const plain = stripAnsi(output);
-    expect(plain).toContain("issue_comment");
+    expect(stripAnsi(output).trim()).toBe("");
   });
 
-  it("event_notification includes a timestamp in [HH:MM:SS] format", () => {
+  it("event_notification, VERBOSE=true → prints event name", () => {
+    setVerbose(true);
+    const msg: ForemanMessage = {
+      type: "event_notification",
+      taskId: "task-1",
+      event: { id: "evt-1", name: "issue_comment", payload: {} },
+    };
+    const output = captureOutput(() => printForemanMessage(msg));
+    expect(stripAnsi(output)).toContain("issue_comment");
+  });
+
+  it("event_notification, VERBOSE=true → includes a timestamp in [HH:MM:SS] format", () => {
+    setVerbose(true);
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-17T14:05:03.000Z"));
     const msg: ForemanMessage = {
@@ -83,7 +94,8 @@ describe("printForemanMessage", () => {
     expect(plain).toMatch(/\[\d{2}:\d{2}:\d{2}\]/);
   });
 
-  it("event_notification includes check_run details", () => {
+  it("event_notification, VERBOSE=true → includes check_run details", () => {
+    setVerbose(true);
     const msg: ForemanMessage = {
       type: "event_notification",
       taskId: "task-1",
@@ -99,7 +111,8 @@ describe("printForemanMessage", () => {
     expect(plain).toContain("failure");
   });
 
-  it("event_notification includes action in name/action format when payload has action", () => {
+  it("event_notification, VERBOSE=true → includes action in name/action format when payload has action", () => {
+    setVerbose(true);
     const msg: ForemanMessage = {
       type: "event_notification",
       taskId: "task-1",
@@ -110,7 +123,8 @@ describe("printForemanMessage", () => {
     expect(plain).toContain("check_suite/completed");
   });
 
-  it("event_notification output is a single line (no embedded newlines in content)", () => {
+  it("event_notification, VERBOSE=true → output is a single line (no embedded newlines in content)", () => {
+    setVerbose(true);
     const msg: ForemanMessage = {
       type: "event_notification",
       taskId: "task-1",

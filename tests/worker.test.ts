@@ -124,7 +124,7 @@ describe("event_notification", () => {
     expect(eventPrompt).toContain("A comment was added"); // issue_comment template content
   });
 
-  it("prints 'Building prompt from events:' diagnostic and prompt in amber when event runs a query", async () => {
+  it("prints event prompt when event runs a query (no 'Building prompt' diagnostic)", async () => {
     vi.useFakeTimers();
     try {
       const issue = makeIssue();
@@ -138,7 +138,7 @@ describe("event_notification", () => {
       await vi.waitFor(() => expect(runQuery).toHaveBeenCalledTimes(2));
 
       const printCalls = display.print.mock.calls.map(args => stripAnsi(String(args[0])));
-      expect(printCalls.some(s => s.startsWith("Building prompt from events:"))).toBe(true);
+      expect(printCalls.some(s => s.startsWith("Building prompt from events:"))).toBe(false);
       expect(printCalls.some(s => s.includes("A comment was added"))).toBe(true);
     } finally {
       vi.useRealTimers();
