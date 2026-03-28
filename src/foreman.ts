@@ -503,7 +503,8 @@ export function createForemanWss(
     });
   }
 
-  function sendMsg(workerId: string, taskId: string | null, msg: ForemanMessage): void {
+  function sendMsg(workerId: string, msg: ForemanMessage): void {
+    const taskId = "taskId" in msg ? msg.taskId : null;
     registry.send(workerId, msg);
     dbLogger?.logForemanMessage({ direction: "sent", workerId, taskId, msgType: msg.type, payload: msg as unknown as Record<string, unknown> });
     broadcastMessageEvent({ direction: "sent", workerId, taskId, msgType: msg.type });
@@ -534,7 +535,7 @@ export function createForemanWss(
         flog(`[task ${ref}] ${evt.name} queued (worker ${task.assignedWorkerId.slice(0, 8)} disconnected)`);
       } else if (worker) {
         const evtMsg: ForemanMessage = { type: "event_notification", taskId: task.taskId, event: evt };
-        sendMsg(task.assignedWorkerId, task.taskId, evtMsg);
+        sendMsg(task.assignedWorkerId, evtMsg);
         log(task.assignedWorkerId, `→ event_notification ${ref} ${evt.name}`);
       } else {
         flog(`[task ${ref}] ${evt.name} DROPPED — worker ${task.assignedWorkerId.slice(0, 8)} not in registry (disconnected?)`);
@@ -774,7 +775,7 @@ export function createForemanWss(
         registry.releaseWorker(workerId);
         broadcastSnapshot();
         const standbyMsg: ForemanMessage = { type: "standby" };
-        sendMsg(workerId, null, standbyMsg);
+        sendMsg(workerId, standbyMsg);
         log(workerId, "→ standby (DB write failed)");
         return;
       }
@@ -791,16 +792,16 @@ export function createForemanWss(
           repoUrl: task.repoUrl,
         },
       };
-      sendMsg(workerId, task.taskId, assignMsg);
+      sendMsg(workerId, assignMsg);
       log(workerId, `→ task_assigned #${task.issueNumber} "${task.title}"`);
       for (const evt of queued) {
         const evtMsg: ForemanMessage = { type: "event_notification", taskId: task.taskId, event: evt };
-        sendMsg(workerId, task.taskId, evtMsg);
+        sendMsg(workerId, evtMsg);
         log(workerId, `→ event_notification #${task.issueNumber} ${evt.name} (queued)`);
       }
     } else {
       const standbyMsg: ForemanMessage = { type: "standby" };
-      sendMsg(workerId, null, standbyMsg);
+      sendMsg(workerId, standbyMsg);
       log(workerId, "→ standby");
     }
   }
@@ -841,7 +842,7 @@ export function createForemanWss(
           const queued = taskQueue.drainEvents(msg.taskId);
           for (const evt of queued) {
             const evtMsg: ForemanMessage = { type: "event_notification", taskId: msg.taskId, event: evt };
-            sendMsg(workerId, msg.taskId, evtMsg);
+            sendMsg(workerId, evtMsg);
             log(workerId, `→ event_notification #${existing.issueNumber} ${evt.name} (queued)`);
           }
         } else if (!existing) {
@@ -852,7 +853,7 @@ export function createForemanWss(
           log(workerId, `hello busy task=#${msg.taskId} — task taken by another worker`);
           registry.register(workerId, ws, "idle");
           const standbyMsg: ForemanMessage = { type: "standby" };
-          sendMsg(workerId, null, standbyMsg);
+          sendMsg(workerId, standbyMsg);
           log(workerId, "→ standby");
         }
       } else {
