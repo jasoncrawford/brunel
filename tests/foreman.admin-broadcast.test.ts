@@ -77,7 +77,7 @@ beforeEach(() => {
   registry = new WorkerRegistry();
   adminWss = makeMockAdminWss();
   httpServer = http.createServer();
-  ({ wss, routeEventToWorker: routeEvent } = createForemanWss(queue, registry, httpServer, {
+  ({ wss, routeEvent } = createForemanWss(queue, registry, httpServer, {
     taskLabel: defaultCfg.taskLabel,
     reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs,
     adminWss,

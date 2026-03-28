@@ -228,7 +228,7 @@ describe("PR tracking persistence", () => {
     });
     ({ wss } = result);
 
-    result.routeEventToWorker("evt-1", "pull_request", {
+    result.routeEvent("evt-1", "pull_request", {
       action: "opened",
       pull_request: {
         number: 10,
@@ -251,7 +251,7 @@ describe("PR tracking persistence", () => {
     });
     ({ wss } = result);
 
-    result.routeEventToWorker("evt-1", "pull_request", {
+    result.routeEvent("evt-1", "pull_request", {
       action: "opened",
       pull_request: {
         number: 10,

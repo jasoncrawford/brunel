@@ -44,7 +44,7 @@ beforeEach(() => {
 
   const registry = new WorkerRegistry();
   const httpServer = http.createServer();
-  ({ routeEventToWorker: routeEvent } = createForemanWss(queue, registry, httpServer, {
+  ({ routeEvent } = createForemanWss(queue, registry, httpServer, {
     taskLabel: defaultCfg.taskLabel,
     reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs,
     dbLogger,
