@@ -925,10 +925,11 @@ export function createForemanWss(
       });
       broadcastMessageEvent({ direction: "received", workerId: rcvWorkerId, taskId: rcvTaskId, msgType: msg.type });
 
-      if (msg.type === "worker_hello") { handleWorkerHello(msg); assignIdleWorkers(); }
-      else if (msg.type === "task_complete") { handleTaskComplete(msg); assignIdleWorkers(); }
-      else if (msg.type === "worker_goodbye") { handleWorkerGoodbye(msg); assignIdleWorkers(); }
-      else flog(`[worker ${workerId}] unknown message type: ${(msg as R).type}`);
+      if (msg.type === "worker_hello") handleWorkerHello(msg);
+      else if (msg.type === "task_complete") handleTaskComplete(msg);
+      else if (msg.type === "worker_goodbye") handleWorkerGoodbye(msg);
+      else { flog(`[worker ${workerId}] unknown message type: ${(msg as R).type}`); return; }
+      assignIdleWorkers();
     });
 
     ws.on("close", (code, reason) => {
