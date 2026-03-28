@@ -762,11 +762,10 @@ export function createForemanWss(
           log(workerId, "→ standby");
         }
       } else {
-        // If there's a disconnected entry for this worker with an assigned task,
-        // the worker process restarted and can't resume. Revert the task to pending.
+        // If this worker had an assigned task, it can't resume — revert to pending.
         const existing = registry.get(workerId);
-        if (existing?.status === "disconnected" && existing.currentTaskId) {
-          log(workerId, `hello idle (was disconnected on task #${existing.currentTaskId}) — reverting task to pending`);
+        if (existing?.currentTaskId) {
+          log(workerId, `hello idle (had task #${existing.currentTaskId}) — reverting task to pending`);
           taskQueue.revertTask(existing.currentTaskId);
         } else {
           log(workerId, "hello idle");
