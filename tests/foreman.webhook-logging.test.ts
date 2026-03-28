@@ -7,7 +7,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import http from "http";
 import { TaskQueue, WorkerRegistry, createForemanWss } from "../src/foreman.js";
-import { DEFAULT_TASK_LABEL } from "../src/config.js";
+import { DEFAULT_TASK_LABEL, DEFAULT_WORKER_RECLAIM_TIMEOUT_MS } from "../src/config.js";
 import type { DbLogger, WebhookEventData } from "../src/db.js";
 
 // ── Minimal mock dbLogger ─────────────────────────────────────────────────────
@@ -45,6 +45,7 @@ beforeEach(() => {
   const httpServer = http.createServer();
   ({ routeEventToWorker: routeEvent } = createForemanWss(queue, registry, httpServer, {
     taskLabel: DEFAULT_TASK_LABEL,
+    reclaimTimeoutMs: DEFAULT_WORKER_RECLAIM_TIMEOUT_MS,
     dbLogger,
   }));
 

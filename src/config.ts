@@ -68,7 +68,7 @@ const BrunelConfigSchema = z.object({
   /** Shared secret used to authenticate workers connecting to the foreman. Optional. Prefer env var over config file. */
   workerSecret:           z.string().optional(),
   /** How long (ms) to wait before reclaiming a disconnected worker's task. Default: 5 minutes. */
-  workerReclaimTimeoutMs: z.coerce.number().int().positive().default(300_000),
+  workerReclaimTimeoutMs: z.coerce.number().int().positive().default(DEFAULT_WORKER_RECLAIM_TIMEOUT_MS),
 });
 
 export type BrunelConfig = Omit<z.infer<typeof BrunelConfigSchema>, "thinkOutLoud"> & {

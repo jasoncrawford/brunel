@@ -8,7 +8,7 @@ import type { WebSocket as WsSocket } from "ws";
 import type { WorkerMessage, ForemanMessage, GitHubEvent, TaskIssue, LabeledIssueState } from "./types.js";
 import { labelIssueDone } from "./github.js";
 import { fmtTimestamp, setVerbose } from "./display.js";
-import { loadConfig, DEFAULT_WORKER_RECLAIM_TIMEOUT_MS } from "./config.js";
+import { loadConfig } from "./config.js";
 import { isBlocked, setBlockers, fetchBlockers } from "./dependencies.js";
 import { fetchIssueStates } from "./github.js";
 import type { DependencyGraph } from "./dependencies.js";
@@ -451,7 +451,7 @@ export function createForemanWss(
     labeledIssues?: Map<number, LabeledIssueState>;
     pingIntervalMs?: number;
     assignStore?: TaskAssignmentStore;
-    reclaimTimeoutMs?: number;
+    reclaimTimeoutMs: number;
   },
 ): { wss: WebSocketServer; routeEventToWorker: (id: string, name: string, payload: unknown) => void; reconcile: () => void } {
   const taskLabel = options.taskLabel;
@@ -471,7 +471,7 @@ export function createForemanWss(
     async deleteAssignment() {},
     async listAssignments() { return []; },
   };
-  const reclaimTimeoutMs = options.reclaimTimeoutMs ?? DEFAULT_WORKER_RECLAIM_TIMEOUT_MS;
+  const reclaimTimeoutMs = options.reclaimTimeoutMs;
 
   function log(wid: string, line: string) {
     flog(`[worker ${wid.slice(0, 8)}] ${line}`);
