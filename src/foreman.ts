@@ -473,6 +473,29 @@ export function createForemanWss(
   };
   const reclaimTimeoutMs = options.reclaimTimeoutMs;
 
+  // Incrementing counter for unique broadcast IDs (React uses these as keys).
+  let nextBroadcastId = 1;
+
+  function broadcastMessageEvent(data: { direction: string; workerId: string | null; taskId: string | null; msgType: string; payload?: Record<string, unknown> }) {
+    if (!adminWss) return;
+    let summary: string;
+    if (data.msgType === "worker_disconnected") {
+      const payload = data.payload ?? {};
+      const reason = payload.reason ? `: ${payload.reason}` : "";
+      summary = `disconnected (code ${payload.code}${reason})`;
+    } else {
+      summary = `${data.direction} ${data.msgType}`;
+    }
+    adminWss.broadcastLogEvent({
+      kind: "message",
+      id: nextBroadcastId++,
+      timestamp: new Date().toISOString(),
+      taskId: data.taskId,
+      workerId: data.workerId,
+      summary,
+    });
+  }
+
   function log(wid: string, line: string) {
     flog(`[worker ${wid.slice(0, 8)}] ${line}`);
   }
@@ -702,7 +725,7 @@ export function createForemanWss(
     });
     adminWss?.broadcastLogEvent({
       kind: "webhook",
-      id: 0,
+      id: nextBroadcastId++,
       timestamp: new Date().toISOString(),
       taskId,
       workerId,
@@ -739,6 +762,7 @@ export function createForemanWss(
         const standbyMsg: ForemanMessage = { type: "standby" };
         registry.send(workerId, standbyMsg);
         dbLogger?.logForemanMessage({ direction: "sent", workerId, taskId: null, msgType: standbyMsg.type, payload: standbyMsg as unknown as Record<string, unknown> });
+        broadcastMessageEvent({ direction: "sent", workerId, taskId: null, msgType: standbyMsg.type });
         log(workerId, "→ standby (DB write failed)");
         return;
       }
@@ -757,17 +781,20 @@ export function createForemanWss(
       };
       registry.send(workerId, assignMsg);
       dbLogger?.logForemanMessage({ direction: "sent", workerId, taskId: task.taskId, msgType: assignMsg.type, payload: assignMsg as unknown as Record<string, unknown> });
+      broadcastMessageEvent({ direction: "sent", workerId, taskId: task.taskId, msgType: assignMsg.type });
       log(workerId, `→ task_assigned #${task.issueNumber} "${task.title}"`);
       for (const evt of queued) {
         const evtMsg: ForemanMessage = { type: "event_notification", taskId: task.taskId, event: evt };
         registry.send(workerId, evtMsg);
         dbLogger?.logForemanMessage({ direction: "sent", workerId, taskId: task.taskId, msgType: evtMsg.type, payload: evtMsg as unknown as Record<string, unknown> });
+        broadcastMessageEvent({ direction: "sent", workerId, taskId: task.taskId, msgType: evtMsg.type });
         log(workerId, `→ event_notification #${task.issueNumber} ${evt.name} (queued)`);
       }
     } else {
       const standbyMsg: ForemanMessage = { type: "standby" };
       registry.send(workerId, standbyMsg);
       dbLogger?.logForemanMessage({ direction: "sent", workerId, taskId: null, msgType: standbyMsg.type, payload: standbyMsg as unknown as Record<string, unknown> });
+      broadcastMessageEvent({ direction: "sent", workerId, taskId: null, msgType: standbyMsg.type });
       log(workerId, "→ standby");
     }
   }
@@ -822,6 +849,7 @@ export function createForemanWss(
           const standbyMsg: ForemanMessage = { type: "standby" };
           registry.send(workerId, standbyMsg);
           dbLogger?.logForemanMessage({ direction: "sent", workerId, taskId: null, msgType: standbyMsg.type, payload: standbyMsg as unknown as Record<string, unknown> });
+          broadcastMessageEvent({ direction: "sent", workerId, taskId: null, msgType: standbyMsg.type });
           log(workerId, "→ standby");
         }
       } else {
@@ -878,13 +906,16 @@ export function createForemanWss(
       try { msg = JSON.parse(data.toString()); } catch { return; }
 
       // Log all received messages
+      const rcvWorkerId = workerId || ((msg as { workerId?: string }).workerId ?? null);
+      const rcvTaskId = (msg as { taskId?: string }).taskId ?? null;
       dbLogger?.logForemanMessage({
         direction: "received",
-        workerId: workerId || ((msg as { workerId?: string }).workerId ?? null),
-        taskId: (msg as { taskId?: string }).taskId ?? null,
+        workerId: rcvWorkerId,
+        taskId: rcvTaskId,
         msgType: msg.type,
         payload: msg as unknown as Record<string, unknown>,
       });
+      broadcastMessageEvent({ direction: "received", workerId: rcvWorkerId, taskId: rcvTaskId, msgType: msg.type });
 
       if (msg.type === "worker_hello") handleWorkerHello(msg);
       else if (msg.type === "task_complete") handleTaskComplete(msg);
@@ -897,13 +928,15 @@ export function createForemanWss(
         const reasonStr = reason?.length ? `: ${reason}` : "";
         log(workerId, `disconnected (code ${code}${reasonStr})`);
         const taskId = registry.get(workerId)?.currentTaskId ?? null;
+        const disconnPayload = { code, reason: reason?.toString() ?? null };
         dbLogger?.logForemanMessage({
           direction: "received",
           workerId,
           taskId,
           msgType: "worker_disconnected",
-          payload: { code, reason: reason?.toString() ?? null },
+          payload: disconnPayload,
         });
+        broadcastMessageEvent({ direction: "received", workerId, taskId, msgType: "worker_disconnected", payload: disconnPayload });
         if (taskId) {
           // Keep registry entry so queued events can be delivered on reconnect.
           registry.markDisconnected(workerId);
