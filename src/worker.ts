@@ -8,6 +8,7 @@ import { buildInitialPrompt, buildEventPrompt } from "./templates.js";
 import { ask, listWorkerCommands, dispatchInput, pick } from "./input.js";
 import type { ForemanMessage, GitHubEvent, TaskIssue } from "./types.js";
 import { Workspace, confirmIfUnsafe } from "./workspace.js";
+import { fmtError } from "./utils.js";
 
 // ── Event classification ───────────────────────────────────────────────────────
 
@@ -411,7 +412,7 @@ export async function workerMain(
     try {
       await workspace.reset();
     } catch (err) {
-      display.print(display.c.boldRed(`Workspace reset failed: ${err}. Task not marked complete.`));
+      display.print(display.c.boldRed(`Workspace reset failed: ${fmtError(err)}. Task not marked complete.`));
       throw err;
     }
   };
@@ -494,7 +495,7 @@ export async function workerMain(
       const result = await session.handleUserInput(input);
       if (result === "exit") break;
     } catch (err) {
-      display.print(display.c.boldRed(`\nERROR: ${err}`));
+      display.print(display.c.boldRed(`\nERROR: ${fmtError(err)}`));
     }
   }
 

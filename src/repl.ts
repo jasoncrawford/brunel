@@ -14,6 +14,7 @@ import { workerMain } from "./worker.js";
 import type { RunQuery } from "./worker.js";
 import { loadConfig } from "./config.js";
 import { Workspace, confirmIfUnsafe } from "./workspace.js";
+import { fmtError } from "./utils.js";
 export { parseSlashCommand, resolveCommandFilePath, resolveContent, dispatchInput, matchCommands, listCommandNames, listWorkerCommandNames, ask } from "./input.js";
 export type { SlashCommandResult, DispatchResult, ListDir } from "./input.js";
 
@@ -371,7 +372,7 @@ async function main(
     try {
       sessionId = await runQuery(permConfig, action.prompt, sessionId);
     } catch (err) {
-      console.error(display.c.boldRed(`\nERROR: ${err}`));
+      console.error(display.c.boldRed(`\nERROR: ${fmtError(err)}`));
       logFull("ERROR", err instanceof Error ? { message: err.message, stack: err.stack } : err);
     }
   }

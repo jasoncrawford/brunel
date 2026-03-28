@@ -14,22 +14,10 @@ import { fetchIssueStates } from "./github.js";
 import type { DependencyGraph } from "./dependencies.js";
 import { type DbLogger, type TaskAssignmentStore, createDbLogger, createTaskAssignmentStore, createNullDbLogger, createNullTaskAssignmentStore } from "./db.js";
 import type { AdminWss, TaskSnapshot, WorkerSnapshot } from "./admin-ws.js";
+import { fmtError } from "./utils.js";
 
 function flog(msg: string) {
   console.log(`${fmtTimestamp()} ${msg}`);
-}
-
-/** Serialize an unknown thrown value to a human-readable string.
- * Handles native Error, Supabase PostgrestError (plain object with `message`), strings, and fallback JSON. */
-export function fmtError(err: unknown): string {
-  if (err instanceof Error) return err.message;
-  if (typeof err === "string") return err;
-  if (err === null) return "null";
-  if (err === undefined) return "undefined";
-  if (typeof err === "object" && "message" in err && typeof (err as { message: unknown }).message === "string") {
-    return (err as { message: string }).message;
-  }
-  return JSON.stringify(err);
 }
 
 type R = Record<string, unknown>;

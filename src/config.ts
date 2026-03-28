@@ -1,6 +1,7 @@
 import { cosmiconfig } from "cosmiconfig";
 import { z } from "zod";
 import type { PermissionMode } from "@anthropic-ai/claude-agent-sdk";
+import { fmtError } from "./utils.js";
 
 // ── Permission modes ──────────────────────────────────────────────────────────
 
@@ -254,7 +255,7 @@ export async function loadConfig(
         err.issues.map((e) => `  ${e.path.join(".") || "(root)"}: ${e.message}`).join("\n") + "\n"
       );
     } else {
-      process.stderr.write(`Error: ${err}\n`);
+      process.stderr.write(`Error: ${fmtError(err)}\n`);
     }
     process.exit(1);
     // Satisfy TypeScript — process.exit never returns but TS doesn't know that

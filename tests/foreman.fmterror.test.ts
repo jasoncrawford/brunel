@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { fmtError } from "../src/foreman.js";
+import { fmtError } from "../src/utils.js";
 
 describe("fmtError", () => {
   it("returns the message for a native Error", () => {
