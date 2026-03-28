@@ -447,6 +447,12 @@ export function createHttpServer(
 
 // ── WebSocket server factory ──────────────────────────────────────────────────
 
+export interface ForemanWss {
+  wss: WebSocketServer;
+  routeEvent(id: string, name: string, payload: unknown): void;
+  reconcile(): void;
+}
+
 export function createForemanWss(
   taskQueue: TaskQueue,
   registry: WorkerRegistry,
@@ -466,7 +472,7 @@ export function createForemanWss(
     assignStore?: TaskAssignmentStore;
     reclaimTimeoutMs: number;
   },
-): { wss: WebSocketServer; routeEventToWorker: (id: string, name: string, payload: unknown) => void; reconcile: () => void } {
+): ForemanWss {
   const taskLabel = options.taskLabel;
   const labelDone = options.labelDone ?? (() => Promise.resolve());
   const graph = options.graph ?? new Map<number, Set<number>>();
@@ -1032,7 +1038,7 @@ export function createForemanWss(
     assignIdleWorkers();
   }
 
-  return { wss, routeEventToWorker: routeEvent, reconcile };
+  return { wss, routeEvent, reconcile };
 }
 
 // Only start listening when run directly (not when imported by tests)
@@ -1066,9 +1072,8 @@ if (isMain) {
     assignStore = createNullTaskAssignmentStore();
   }
 
-  let routeEvent: (id: string, name: string, payload: unknown) => void = () => {};
-  let reconcile: () => void = () => {};
-  const server = createHttpServer(webhooks, (id, name, payload) => routeEvent(id, name, payload), dbLogger);
+  let foremanWss: ForemanWss;
+  const server = createHttpServer(webhooks, (id, name, payload) => foremanWss.routeEvent(id, name, payload), dbLogger);
 
   // Admin WebSocket broadcaster
   const { createAdminWss } = await import("./admin-ws.js");
@@ -1077,7 +1082,7 @@ if (isMain) {
     workers: registry.getWorkerSnapshots(),
   }));
 
-  ({ routeEventToWorker: routeEvent, reconcile } = createForemanWss(
+  foremanWss = createForemanWss(
     taskQueue, registry, server,
     {
       graph,
@@ -1098,12 +1103,12 @@ if (isMain) {
           doneLabel: config.doneLabel,
         }),
     },
-  ));
+  );
 
   if (webhooks) {
     webhooks.onAny(({ id, name, payload }) => {
       printEvent(id, name as string, payload);
-      routeEvent(id, name as string, payload);
+      foremanWss.routeEvent(id, name as string, payload);
     });
   }
 
@@ -1117,7 +1122,7 @@ if (isMain) {
       taskLabel: config.taskLabel,
       apiUrl: config.githubApiUrl,
     });
-    reconcile();
+    foremanWss.reconcile();
   } catch (err) {
     flog(`ERROR Failed to load issues from GitHub: ${fmtError(err)}`);
     process.exit(1);

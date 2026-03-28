@@ -15,14 +15,14 @@ let queue: TaskQueue;
 let registry: WorkerRegistry;
 let labeledIssues: Map<number, LabeledIssueState>;
 let reconcile: () => void;
-let routeEventToWorker: (id: string, name: string, payload: unknown) => void;
+let routeEvent: (id: string, name: string, payload: unknown) => void;
 
 beforeEach(() => {
   queue = new TaskQueue();
   registry = new WorkerRegistry();
   labeledIssues = new Map();
   const server = http.createServer();
-  ({ reconcile, routeEventToWorker } = createForemanWss(queue, registry, server, {
+  ({ reconcile, routeEvent } = createForemanWss(queue, registry, server, {
     taskLabel: TASK_LABEL,
     reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs,
     labeledIssues,
@@ -148,7 +148,7 @@ describe("startDepsLoad() error handling", () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network error")));
 
     // Trigger startDepsLoad by routing a labeled event
-    routeEventToWorker("evt-1", "issues", {
+    routeEvent("evt-1", "issues", {
       action: "labeled",
       label: { name: TASK_LABEL },
       issue: {

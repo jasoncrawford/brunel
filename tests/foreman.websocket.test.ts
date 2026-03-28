@@ -77,7 +77,7 @@ beforeEach(() => {
   openIssues = new Set();
   labeledIssues = new Map();
   httpServer = http.createServer();
-  ({ wss, routeEventToWorker: routeEvent } = createForemanWss(queue, registry, httpServer, { taskLabel: defaultCfg.taskLabel, reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs, labelDone, graph, openIssues, labeledIssues }));
+  ({ wss, routeEvent } = createForemanWss(queue, registry, httpServer, { taskLabel: defaultCfg.taskLabel, reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs, labelDone, graph, openIssues, labeledIssues }));
 
   return new Promise<void>((resolve) => {
     httpServer.listen(0, () => {
@@ -216,7 +216,7 @@ describe("foreman WebSocket protocol", () => {
     expect(queue.get("1")?.status).toBe("pending");
   });
 
-  it("routeEventToWorker sends event_notification to assigned worker", async () => {
+  it("routeEvent sends event_notification to assigned worker", async () => {
     queue.addTask(makeTask(1));
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
@@ -230,7 +230,7 @@ describe("foreman WebSocket protocol", () => {
     expect(msg.event.name).toBe("issue_comment");
   });
 
-  it("routeEventToWorker queues event when no worker is assigned", () => {
+  it("routeEvent queues event when no worker is assigned", () => {
     queue.addTask(makeTask(1));
     routeEvent("evt-1", "issue_comment", { issue: { number: 1 } });
     const events = queue.drainEvents("1");

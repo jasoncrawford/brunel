@@ -198,7 +198,7 @@ beforeEach(() => {
   queue = new TaskQueue();
   registry = new WorkerRegistry();
   httpServer = http.createServer();
-  ({ wss, routeEventToWorker: routeEvent } = createForemanWss(queue, registry, httpServer, { taskLabel: defaultCfg.taskLabel, reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs }));
+  ({ wss, routeEvent } = createForemanWss(queue, registry, httpServer, { taskLabel: defaultCfg.taskLabel, reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs }));
 
   return new Promise<void>((resolve) => {
     httpServer.listen(0, () => {
