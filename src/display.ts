@@ -493,12 +493,11 @@ function fmtHookExitCode(exitCode: number | undefined): string {
   return exitCode != null && exitCode !== 0 ? ` [exit ${exitCode}]` : "";
 }
 
-function fmtRateLimitInfo(info: { status?: string; utilization?: number; rateLimitType?: string } | undefined): string | null {
-  if (!info || info.status === "allowed") return null;
+function fmtRateLimitInfo(info: { status?: string; utilization?: number; rateLimitType?: string }): string {
   const parts: string[] = [`rate limit: ${info.status}`];
   if (info.rateLimitType) parts.push(info.rateLimitType);
   if (info.utilization != null) parts.push(`${Math.round(info.utilization * 100)}% used`);
-  return c.amber(parts.join(", "));
+  return parts.join(", ");
 }
 
 export const SYSTEM_FMT: FmtTable = {
@@ -516,7 +515,11 @@ export const SYSTEM_FMT: FmtTable = {
 export const MESSAGE_FMT: FmtTable = {
   _empty:           (m) => c.darkGray(`[${m.type} — empty]`),
   result:           (m) => c.darkGray(`\n${fmtStats(Math.round(m.duration_ms / 1000), m.num_turns, m.usage.output_tokens, m.usage.input_tokens)}`),
-  rate_limit_event: { verbose: (m) => fmtRateLimitInfo(m.rate_limit_info) },
+  rate_limit_event: { verbose: (m) => {
+    const info = m.rate_limit_info;
+    if (!info || info.status === "allowed") return null;
+    return c.amber(fmtRateLimitInfo(info));
+  }},
   _default:         (m) => c.darkGray(`msg: ${m.type}`),
 };
 
