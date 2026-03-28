@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { WebSocket } from "ws";
 import * as display from "./display.js";
-import { buildInitialPrompt, buildEventPrompt, fmtEventList } from "./templates.js";
+import { buildInitialPrompt, buildEventPrompt } from "./templates.js";
 import { ask, listWorkerCommands, dispatchInput, pick } from "./input.js";
 import type { ForemanMessage, GitHubEvent, TaskIssue } from "./types.js";
 import { Workspace, confirmIfUnsafe } from "./workspace.js";
@@ -367,7 +367,6 @@ export class WorkerSession {
   }
 
   private buildAndLogEventPrompt(events: GitHubEvent[]): string {
-    this.display.print(display.c.darkGray(`Building prompt from events: ${fmtEventList(events)}`));
     const prompt = buildEventPrompt(events);
     this.display.print(display.c.sageGreen(prompt));
     return prompt;

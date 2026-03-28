@@ -489,6 +489,17 @@ function fmtCompactionDetail(meta: unknown): string {
   return tokens != null ? `${trigger}, ${fmtNum(tokens)} tokens` : trigger;
 }
 
+function fmtHookExitCode(exitCode: number | undefined): string {
+  return exitCode != null && exitCode !== 0 ? ` [exit ${exitCode}]` : "";
+}
+
+function fmtRateLimitInfo(info: { status?: string; utilization?: number; rateLimitType?: string }): string {
+  const parts: string[] = [`rate limit: ${info.status}`];
+  if (info.rateLimitType) parts.push(info.rateLimitType);
+  if (info.utilization != null) parts.push(`${Math.round(info.utilization * 100)}% used`);
+  return parts.join(", ");
+}
+
 export const SYSTEM_FMT: FmtTable = {
   init:              { verbose: (m) => c.darkGray(`init: session ${m.session_id}`) },
   task_started:      (m) => c.lavender(`  ▶ agent started: ${m.description}`),
@@ -496,19 +507,25 @@ export const SYSTEM_FMT: FmtTable = {
   task_notification: (m) => c.lavender(`  ◀︎ ${m.status}: ${m.summary}`),
   compact_boundary:  (m) => c.darkGray(`↩ Context compacted (${fmtCompactionDetail(m.compact_metadata)})`),
   status:            (m) => m.status === "compacting" ? c.darkGray("Compacting context...") : null,
+  hook_started:      { verbose: (m) => c.darkGray(`hook: ${m.hook_name} (${m.hook_event})`) },
+  hook_response:     { verbose: (m) => c.darkGray(`hook: ${m.hook_name} — ${m.outcome}${fmtHookExitCode(m.exit_code)}`) },
   _default:          { verbose: (m) => c.darkGray(`system/${m.subtype}`) },
 };
 
 export const MESSAGE_FMT: FmtTable = {
   _empty:           (m) => c.darkGray(`[${m.type} — empty]`),
   result:           (m) => c.darkGray(`\n${fmtStats(Math.round(m.duration_ms / 1000), m.num_turns, m.usage.output_tokens, m.usage.input_tokens)}`),
-  rate_limit_event: { verbose: (m) => c.darkGray(`rate limit: status=${m.rate_limit_info?.status ?? "?"}`) },
+  rate_limit_event: { verbose: (m) => {
+    const info = m.rate_limit_info;
+    if (!info || info.status === "allowed") return null;
+    return c.amber(fmtRateLimitInfo(info));
+  }},
   _default:         (m) => c.darkGray(`msg: ${m.type}`),
 };
 
 export const FOREMAN_MESSAGE_FMT: FmtTable = {
   task_assigned:      { verbose: (m) => c.darkGray(`Task assigned: #${m.issue.number}, ${m.issue.title}`) },
-  event_notification: (m) => c.darkGray(`Event received [${fmtTime()}]: ${fmtEvent(m.event as GitHubEvent)}`),
+  event_notification: { verbose: (m) => c.darkGray(`Event received [${fmtTime()}]: ${fmtEvent(m.event as GitHubEvent)}`) },
   standby:            (m) => c.darkGray("Standby: waiting for tasks..."),
   _default:           (m) => c.darkGray(`Unknown foreman message: ${m.type}`),
 };

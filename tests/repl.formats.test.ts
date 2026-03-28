@@ -576,6 +576,40 @@ describe("SYSTEM_FMT", () => {
     expect(resolve(SYSTEM_FMT, "status", msg)).toBeNull();
   });
 
+  it("hook_started, VERBOSE=false → null", () => {
+    setVerbose(false);
+    expect(resolve(SYSTEM_FMT, "hook_started", { hook_name: "my-hook", hook_event: "PreToolUse" })).toBeNull();
+  });
+
+  it("hook_started, VERBOSE=true → hook: <hook_name> (<hook_event>)", () => {
+    setVerbose(true);
+    expect(r(SYSTEM_FMT, "hook_started", { hook_name: "my-hook", hook_event: "PreToolUse" }))
+      .toBe("hook: my-hook (PreToolUse)");
+  });
+
+  it("hook_response, VERBOSE=false → null", () => {
+    setVerbose(false);
+    expect(resolve(SYSTEM_FMT, "hook_response", { hook_name: "my-hook", hook_event: "PreToolUse", outcome: "success" })).toBeNull();
+  });
+
+  it("hook_response, VERBOSE=true, success → hook: <hook_name> — success", () => {
+    setVerbose(true);
+    expect(r(SYSTEM_FMT, "hook_response", { hook_name: "my-hook", hook_event: "PreToolUse", outcome: "success" }))
+      .toBe("hook: my-hook — success");
+  });
+
+  it("hook_response, VERBOSE=true, error with exit code → includes [exit N]", () => {
+    setVerbose(true);
+    expect(r(SYSTEM_FMT, "hook_response", { hook_name: "lint-hook", hook_event: "PostToolUse", outcome: "error", exit_code: 1 }))
+      .toBe("hook: lint-hook — error [exit 1]");
+  });
+
+  it("hook_response, VERBOSE=true, exit_code=0 → no exit suffix", () => {
+    setVerbose(true);
+    expect(r(SYSTEM_FMT, "hook_response", { hook_name: "my-hook", hook_event: "PreToolUse", outcome: "success", exit_code: 0 }))
+      .toBe("hook: my-hook — success");
+  });
+
   it("_default, VERBOSE=false → null", () => {
     setVerbose(false);
     expect(resolve(SYSTEM_FMT, "unknown_subtype", { subtype: "unknown_subtype" })).toBeNull();
@@ -616,10 +650,29 @@ describe("MESSAGE_FMT", () => {
     expect(resolve(MESSAGE_FMT, "rate_limit_event", { rate_limit_info: { status: "allowed" } })).toBeNull();
   });
 
-  it("rate_limit_event, VERBOSE=true → rate limit: status=<status>", () => {
+  it("rate_limit_event, VERBOSE=true, status=allowed → null (silenced)", () => {
     setVerbose(true);
-    expect(r(MESSAGE_FMT, "rate_limit_event", { rate_limit_info: { status: "allowed" } }))
-      .toBe("rate limit: status=allowed");
+    expect(resolve(MESSAGE_FMT, "rate_limit_event", { rate_limit_info: { status: "allowed" } })).toBeNull();
+  });
+
+  it("rate_limit_event, VERBOSE=true, status=allowed_warning → shows warning with details", () => {
+    setVerbose(true);
+    const result = r(MESSAGE_FMT, "rate_limit_event", {
+      rate_limit_info: { status: "allowed_warning", rateLimitType: "seven_day", utilization: 0.85 },
+    });
+    expect(result).not.toBeNull();
+    expect(result).toContain("rate limit: allowed_warning");
+    expect(result).toContain("seven_day");
+    expect(result).toContain("85% used");
+  });
+
+  it("rate_limit_event, VERBOSE=true, status=rejected → shows rejection", () => {
+    setVerbose(true);
+    const result = r(MESSAGE_FMT, "rate_limit_event", {
+      rate_limit_info: { status: "rejected" },
+    });
+    expect(result).not.toBeNull();
+    expect(result).toContain("rate limit: rejected");
   });
 
   it("_default → msg: <type>", () => {
