@@ -19,6 +19,19 @@ function flog(msg: string) {
   console.log(`${fmtTimestamp()} ${msg}`);
 }
 
+/** Serialize an unknown thrown value to a human-readable string.
+ * Handles native Error, Supabase PostgrestError (plain object with `message`), strings, and fallback JSON. */
+export function fmtError(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "string") return err;
+  if (err === null) return "null";
+  if (err === undefined) return "undefined";
+  if (typeof err === "object" && "message" in err && typeof (err as { message: unknown }).message === "string") {
+    return (err as { message: string }).message;
+  }
+  return JSON.stringify(err);
+}
+
 type R = Record<string, unknown>;
 
 
@@ -356,7 +369,7 @@ export function createHttpServer(
       }
       return c.text("OK", 200);
     } catch (err) {
-      flog(`ERROR Webhook processing error: ${err}`);
+      flog(`ERROR Webhook processing error: ${fmtError(err)}`);
       return c.text("Bad Request", 400);
     }
   });
@@ -372,7 +385,7 @@ export function createHttpServer(
       const entries = dbLogger ? await dbLogger.queryLog({ limit: 100 }) : [];
       return c.json(entries);
     } catch (err) {
-      flog(`ERROR API query failed: ${err}`);
+      flog(`ERROR API query failed: ${fmtError(err)}`);
       return c.json({ error: "internal error" }, 500);
     }
   });
@@ -382,7 +395,7 @@ export function createHttpServer(
       const entries = dbLogger ? await dbLogger.queryTaskEvents(c.req.param("id")) : [];
       return c.json(entries);
     } catch (err) {
-      flog(`ERROR API query failed: ${err}`);
+      flog(`ERROR API query failed: ${fmtError(err)}`);
       return c.json({ error: "internal error" }, 500);
     }
   });
@@ -392,7 +405,7 @@ export function createHttpServer(
       const entries = dbLogger ? await dbLogger.queryWorkerMessages(c.req.param("id")) : [];
       return c.json(entries);
     } catch (err) {
-      flog(`ERROR API query failed: ${err}`);
+      flog(`ERROR API query failed: ${fmtError(err)}`);
       return c.json({ error: "internal error" }, 500);
     }
   });
@@ -563,7 +576,7 @@ export function createForemanWss(
             if (branch) taskQueue.registerBranch(branch, linkedTask.taskId);
             // Persist PR number and branch so routing survives a foreman restart.
             assignStore.updatePr(linkedTask.taskId, prNumber, branch ?? null).catch(err =>
-              flog(`ERROR Failed to update PR for task #${linkedTask.taskId}: ${err}`)
+              flog(`ERROR Failed to update PR for task #${linkedTask.taskId}: ${fmtError(err)}`)
             );
             flog(`[task #${linkedIssue}] PR #${prNumber} registered`);
             return result(linkedTask);
@@ -735,7 +748,7 @@ export function createForemanWss(
 
   function assignIdleWorkers() {
     for (const w of registry.getIdleWorkers()) {
-      tryAssignWork(w.workerId).catch(err => flog(`ERROR tryAssignWork: ${err}`));
+      tryAssignWork(w.workerId).catch(err => flog(`ERROR tryAssignWork: ${fmtError(err)}`));
     }
     broadcastSnapshot();
   }
@@ -754,7 +767,7 @@ export function createForemanWss(
       try {
         await assignStore.upsertAssignment(task.taskId, workerId);
       } catch (err) {
-        flog(`ERROR Failed to persist assignment for task #${task.taskId}: ${err}`);
+        flog(`ERROR Failed to persist assignment for task #${task.taskId}: ${fmtError(err)}`);
         // Revert in-memory state — worker gets standby instead.
         taskQueue.revertTask(task.taskId);
         registry.releaseWorker(workerId);
@@ -859,7 +872,7 @@ export function createForemanWss(
         if (priorTask) {
           taskQueue.revertTask(priorTask.taskId);
           assignStore.deleteAssignment(priorTask.taskId).catch(err =>
-            flog(`ERROR Failed to delete assignment for #${priorTask.taskId}: ${err}`)
+            flog(`ERROR Failed to delete assignment for #${priorTask.taskId}: ${fmtError(err)}`)
           );
           log(workerId, `hello idle (had task #${priorTask.taskId}) — reverting task to pending`);
         } else {
@@ -867,7 +880,7 @@ export function createForemanWss(
         }
         registry.register(workerId, ws, "idle");
         broadcastSnapshot();
-        tryAssignWork(workerId).catch(err => flog(`ERROR tryAssignWork: ${err}`));
+        tryAssignWork(workerId).catch(err => flog(`ERROR tryAssignWork: ${fmtError(err)}`));
       }
     }
 
@@ -877,15 +890,15 @@ export function createForemanWss(
       if (task) {
         taskQueue.completeTask(msg.taskId);
         assignStore.deleteAssignment(msg.taskId).catch(err =>
-          flog(`ERROR Failed to delete assignment for #${msg.taskId}: ${err}`)
+          flog(`ERROR Failed to delete assignment for #${msg.taskId}: ${fmtError(err)}`)
         );
         labelDone(task.issueNumber).catch(err =>
-          flog(`ERROR Failed to label issue done: ${err}`)
+          flog(`ERROR Failed to label issue done: ${fmtError(err)}`)
         );
       }
       registry.releaseWorker(workerId);
       broadcastSnapshot();
-      tryAssignWork(workerId).catch(err => flog(`ERROR tryAssignWork: ${err}`));
+      tryAssignWork(workerId).catch(err => flog(`ERROR tryAssignWork: ${fmtError(err)}`));
     }
 
     function handleWorkerGoodbye(msg: Extract<WorkerMessage, { type: "worker_goodbye" }>) {
@@ -897,7 +910,7 @@ export function createForemanWss(
       broadcastSnapshot();
       // Try to assign the reverted task to any already-idle workers.
       for (const w of registry.getIdleWorkers()) {
-        tryAssignWork(w.workerId).catch(err => flog(`ERROR tryAssignWork: ${err}`));
+        tryAssignWork(w.workerId).catch(err => flog(`ERROR tryAssignWork: ${fmtError(err)}`));
       }
     }
 
@@ -983,7 +996,7 @@ export function createForemanWss(
         if (entry) entry.depsLoaded = true;
         reconcile();
       })
-      .catch((err) => flog(`ERROR fetching deps for #${issueNumber}: ${err}`));
+      .catch((err) => flog(`ERROR fetching deps for #${issueNumber}: ${fmtError(err)}`));
   }
 
   function reconcile() {
@@ -1106,7 +1119,7 @@ if (isMain) {
     });
     reconcile();
   } catch (err) {
-    flog(`ERROR Failed to load issues from GitHub: ${err}`);
+    flog(`ERROR Failed to load issues from GitHub: ${fmtError(err)}`);
     process.exit(1);
   }
 
@@ -1120,7 +1133,7 @@ if (isMain) {
         // Orphaned row: issue was closed, label removed, or task already completed.
         flog(`[startup] orphaned assignment for task #${row.taskId}, deleting`);
         assignStore.deleteAssignment(row.taskId).catch(err =>
-          flog(`ERROR Failed to delete orphaned assignment: ${err}`)
+          flog(`ERROR Failed to delete orphaned assignment: ${fmtError(err)}`)
         );
         continue;
       }
@@ -1132,7 +1145,7 @@ if (isMain) {
       flog(`[startup] loaded assignment: task #${row.taskId} → worker ${row.workerId.slice(0, 8)}`);
     }
   } catch (err) {
-    flog(`ERROR Failed to load task assignments: ${err}`);
+    flog(`ERROR Failed to load task assignments: ${fmtError(err)}`);
     process.exit(1);
   }
 
