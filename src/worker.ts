@@ -249,7 +249,7 @@ export class WorkerSession {
       const elapsedStr = elapsed !== undefined ? `, ${elapsed}s` : "";
       const reasonStr = reason?.length > 0 ? `, ${reason.toString()}` : "";
       this.display.print(display.c.amber(`Disconnected from foreman (code ${code}${reasonStr}${elapsedStr}). Reconnecting...`));
-      setTimeout(() => this.connect(), 3000);
+      setTimeout(() => this.connect(), 2000 + Math.random() * 3000);
     });
 
     ws.on("error", (err: Error) => {

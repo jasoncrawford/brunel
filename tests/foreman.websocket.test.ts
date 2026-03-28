@@ -607,3 +607,33 @@ describe("worker disconnect DB logging", () => {
     await new Promise<void>((r) => testWss.close(() => server.close(r)));
   });
 });
+
+// ── Keepalive ping ─────────────────────────────────────────────────────────────
+
+describe("keepalive ping", () => {
+  it("sends WebSocket ping to connected clients on interval", async () => {
+    const q = new TaskQueue();
+    const r = new WorkerRegistry();
+    const srv = http.createServer();
+    const { wss: testWss } = createForemanWss(q, r, srv, {
+      taskLabel: DEFAULT_TASK_LABEL,
+      labelDone: vi.fn().mockResolvedValue(undefined),
+      pingIntervalMs: 50,
+    });
+    await new Promise<void>((resolve) => srv.listen(0, resolve));
+    const testPort = (srv.address() as AddressInfo).port;
+
+    const ws = new WebSocket(`ws://localhost:${testPort}/worker`);
+    await new Promise<void>((resolve, reject) => {
+      ws.once("open", resolve);
+      ws.once("error", reject);
+    });
+    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+
+    await new Promise<void>((resolve) => ws.once("ping", () => resolve()));
+
+    ws.close();
+    await new Promise<void>((resolve) => ws.once("close", resolve));
+    await new Promise<void>((resolve) => testWss.close(() => srv.close(resolve)));
+  });
+});
