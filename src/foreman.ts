@@ -850,7 +850,7 @@ export function createForemanWss(
       broadcastSnapshot();
       // Try to assign the reverted task to any already-idle workers.
       for (const w of registry.getIdleWorkers()) {
-        tryAssignWork(w.workerId);
+        tryAssignWork(w.workerId).catch(err => flog(`ERROR tryAssignWork: ${err}`));
       }
     }
 
