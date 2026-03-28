@@ -4,7 +4,8 @@ import http from "http";
 import { WebSocket, WebSocketServer } from "ws";
 import type { AddressInfo } from "net";
 import { TaskQueue, WorkerRegistry, createForemanWss } from "../src/foreman.js";
-import { DEFAULT_TASK_LABEL, DEFAULT_WORKER_RECLAIM_TIMEOUT_MS } from "../src/config.js";
+import { loadConfig } from "../src/config.js";
+const defaultCfg = await loadConfig([], { githubRepo: "owner/repo", githubToken: "tok" });
 import type { ForemanMessage, LabeledIssueState } from "../src/types.js";
 import { setBlockers } from "../src/dependencies.js";
 import type { DependencyGraph } from "../src/dependencies.js";
@@ -76,7 +77,7 @@ beforeEach(() => {
   openIssues = new Set();
   labeledIssues = new Map();
   httpServer = http.createServer();
-  ({ wss, routeEventToWorker: routeEvent } = createForemanWss(queue, registry, httpServer, { taskLabel: DEFAULT_TASK_LABEL, reclaimTimeoutMs: DEFAULT_WORKER_RECLAIM_TIMEOUT_MS, labelDone, graph, openIssues, labeledIssues }));
+  ({ wss, routeEventToWorker: routeEvent } = createForemanWss(queue, registry, httpServer, { taskLabel: defaultCfg.taskLabel, reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs, labelDone, graph, openIssues, labeledIssues }));
 
   return new Promise<void>((resolve) => {
     httpServer.listen(0, () => {
@@ -421,7 +422,7 @@ describe("worker secret enforcement", () => {
     const server = http.createServer();
     const { wss: secretWss } = createForemanWss(
       new TaskQueue(), new WorkerRegistry(), server,
-      { taskLabel: DEFAULT_TASK_LABEL, reclaimTimeoutMs: DEFAULT_WORKER_RECLAIM_TIMEOUT_MS, workerSecret: secret },
+      { taskLabel: defaultCfg.taskLabel, reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs, workerSecret: secret },
     );
     const p = await new Promise<number>((r) => server.listen(0, () => r((server.address() as AddressInfo).port)));
     return { server, secretWss, port: p };
@@ -479,7 +480,7 @@ function makeConnectToForeman(port: number) {
 describe("worker WebSocket connection", () => {
   it("worker client connects to foreman and completes handshake", async () => {
     const server = http.createServer();
-    const { wss } = createForemanWss(new TaskQueue(), new WorkerRegistry(), server, { taskLabel: DEFAULT_TASK_LABEL, reclaimTimeoutMs: DEFAULT_WORKER_RECLAIM_TIMEOUT_MS });
+    const { wss } = createForemanWss(new TaskQueue(), new WorkerRegistry(), server, { taskLabel: defaultCfg.taskLabel, reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs });
     const testPort = await new Promise<number>((resolve) => {
       server.listen(0, () => resolve((server.address() as AddressInfo).port));
     });
@@ -499,7 +500,7 @@ describe("worker WebSocket connection", () => {
 
   it("foreman rejects connections not at /worker path (regression guard)", async () => {
     const server = http.createServer();
-    const { wss } = createForemanWss(new TaskQueue(), new WorkerRegistry(), server, { taskLabel: DEFAULT_TASK_LABEL, reclaimTimeoutMs: DEFAULT_WORKER_RECLAIM_TIMEOUT_MS });
+    const { wss } = createForemanWss(new TaskQueue(), new WorkerRegistry(), server, { taskLabel: defaultCfg.taskLabel, reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs });
     const testPort = await new Promise<number>((resolve) => {
       server.listen(0, () => resolve((server.address() as AddressInfo).port));
     });
@@ -531,7 +532,7 @@ describe("worker disconnect DB logging", () => {
     const server = http.createServer();
     const { wss: testWss } = createForemanWss(
       new TaskQueue(), new WorkerRegistry(), server,
-      { taskLabel: DEFAULT_TASK_LABEL, reclaimTimeoutMs: DEFAULT_WORKER_RECLAIM_TIMEOUT_MS, dbLogger: mockDbLogger },
+      { taskLabel: defaultCfg.taskLabel, reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs, dbLogger: mockDbLogger },
     );
     const testPort = await new Promise<number>((r) => server.listen(0, () => r((server.address() as AddressInfo).port)));
 
@@ -583,7 +584,7 @@ describe("worker disconnect DB logging", () => {
     const server = http.createServer();
     const { wss: testWss } = createForemanWss(
       taskQueue, new WorkerRegistry(), server,
-      { taskLabel: DEFAULT_TASK_LABEL, reclaimTimeoutMs: DEFAULT_WORKER_RECLAIM_TIMEOUT_MS, dbLogger: mockDbLogger },
+      { taskLabel: defaultCfg.taskLabel, reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs, dbLogger: mockDbLogger },
     );
     const testPort = await new Promise<number>((r) => server.listen(0, () => r((server.address() as AddressInfo).port)));
 
@@ -796,8 +797,8 @@ describe("keepalive ping", () => {
     const r = new WorkerRegistry();
     const srv = http.createServer();
     const { wss: testWss } = createForemanWss(q, r, srv, {
-      taskLabel: DEFAULT_TASK_LABEL,
-      reclaimTimeoutMs: DEFAULT_WORKER_RECLAIM_TIMEOUT_MS,
+      taskLabel: defaultCfg.taskLabel,
+      reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs,
       labelDone: vi.fn().mockResolvedValue(undefined),
       pingIntervalMs: 50,
     });
@@ -833,7 +834,7 @@ describe("reclaim timer (fake timers)", () => {
     const r = new WorkerRegistry();
     const srv = http.createServer();
     const { wss: testWss } = createForemanWss(q, r, srv, {
-      taskLabel: DEFAULT_TASK_LABEL,
+      taskLabel: defaultCfg.taskLabel,
       labelDone: vi.fn().mockResolvedValue(undefined),
       reclaimTimeoutMs,
     });
@@ -893,7 +894,7 @@ describe("reclaim timer (fake timers)", () => {
     const r = new WorkerRegistry();
     const srv = http.createServer();
     const { wss: testWss } = createForemanWss(q, r, srv, {
-      taskLabel: DEFAULT_TASK_LABEL,
+      taskLabel: defaultCfg.taskLabel,
       labelDone: vi.fn().mockResolvedValue(undefined),
       reclaimTimeoutMs,
     });
@@ -937,7 +938,7 @@ describe("reclaim timer (fake timers)", () => {
     const r = new WorkerRegistry();
     const srv = http.createServer();
     const { wss: testWss } = createForemanWss(q, r, srv, {
-      taskLabel: DEFAULT_TASK_LABEL,
+      taskLabel: defaultCfg.taskLabel,
       labelDone: vi.fn().mockResolvedValue(undefined),
       reclaimTimeoutMs,
     });

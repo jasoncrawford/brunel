@@ -7,7 +7,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import http from "http";
 import { TaskQueue, WorkerRegistry, createForemanWss } from "../src/foreman.js";
-import { DEFAULT_TASK_LABEL, DEFAULT_WORKER_RECLAIM_TIMEOUT_MS } from "../src/config.js";
+import { loadConfig } from "../src/config.js";
+const defaultCfg = await loadConfig([], { githubRepo: "owner/repo", githubToken: "tok" });
 import type { DbLogger, WebhookEventData } from "../src/db.js";
 
 // ── Minimal mock dbLogger ─────────────────────────────────────────────────────
@@ -44,8 +45,8 @@ beforeEach(() => {
   const registry = new WorkerRegistry();
   const httpServer = http.createServer();
   ({ routeEventToWorker: routeEvent } = createForemanWss(queue, registry, httpServer, {
-    taskLabel: DEFAULT_TASK_LABEL,
-    reclaimTimeoutMs: DEFAULT_WORKER_RECLAIM_TIMEOUT_MS,
+    taskLabel: defaultCfg.taskLabel,
+    reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs,
     dbLogger,
   }));
 
@@ -62,12 +63,12 @@ describe("webhook event logging associates events with tasks", () => {
   it("logs an issue/labeled event (new task) with the issue number as taskId", () => {
     routeEvent("evt-1", "issues", {
       action: "labeled",
-      label: { name: DEFAULT_TASK_LABEL },
+      label: { name: defaultCfg.taskLabel },
       issue: {
         number: 42,
         title: "Fix the bug",
         body: "Body",
-        labels: [{ name: DEFAULT_TASK_LABEL }],
+        labels: [{ name: defaultCfg.taskLabel }],
       },
       repository: { html_url: "https://github.com/owner/repo" },
     });

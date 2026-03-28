@@ -10,9 +10,9 @@ export const VALID_PERMISSION_MODES = [
 
 // ── Schema defaults (exported so other modules don't duplicate these values) ──
 
-export const DEFAULT_TASK_LABEL = "brunel:ready";
-export const DEFAULT_DONE_LABEL = "brunel:done";
-export const DEFAULT_WORKER_RECLAIM_TIMEOUT_MS = 300_000;
+const DEFAULT_TASK_LABEL = "brunel:ready";
+const DEFAULT_DONE_LABEL = "brunel:done";
+const DEFAULT_WORKER_RECLAIM_TIMEOUT_MS = 300_000;
 
 // ── Schema ────────────────────────────────────────────────────────────────────
 
