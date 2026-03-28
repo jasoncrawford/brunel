@@ -7,8 +7,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import http from "http";
 import { TaskQueue, WorkerRegistry, createForemanWss } from "../src/foreman.js";
-import { loadConfig } from "../src/config.js";
-const defaultCfg = await loadConfig([], { githubRepo: "owner/repo", githubToken: "tok" });
+import { loadDefaultConfig } from "../src/config.js";
+const defaultCfg = await loadDefaultConfig();
 import type { DbLogger, WebhookEventData } from "../src/db.js";
 
 // ── Minimal mock dbLogger ─────────────────────────────────────────────────────

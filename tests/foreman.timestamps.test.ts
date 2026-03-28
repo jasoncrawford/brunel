@@ -6,8 +6,8 @@ import http from "http";
 import { WebSocket, WebSocketServer } from "ws";
 import type { AddressInfo } from "net";
 import { TaskQueue, WorkerRegistry, createForemanWss } from "../src/foreman.js";
-import { loadConfig } from "../src/config.js";
-const defaultCfg = await loadConfig([], { githubRepo: "owner/repo", githubToken: "tok" });
+import { loadDefaultConfig } from "../src/config.js";
+const defaultCfg = await loadDefaultConfig();
 import type { ForemanMessage } from "../src/types.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

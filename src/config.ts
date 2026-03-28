@@ -267,3 +267,12 @@ export async function loadConfig(
     allowDangerouslySkipPermissions: parsed.permissionMode === "bypassPermissions",
   };
 }
+
+/**
+ * Returns a config object populated with schema defaults. Useful in tests
+ * that need default values (e.g. taskLabel, workerReclaimTimeoutMs) without
+ * a real GitHub repo or token.
+ */
+export function loadDefaultConfig(): Promise<BrunelConfig> {
+  return loadConfig([], { githubRepo: "owner/repo", githubToken: "tok" });
+}

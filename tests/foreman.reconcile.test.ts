@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import http from "http";
 import { TaskQueue, WorkerRegistry, createForemanWss } from "../src/foreman.js";
-import { loadConfig } from "../src/config.js";
-const defaultCfg = await loadConfig([], { githubRepo: "owner/repo", githubToken: "tok" });
+import { loadDefaultConfig } from "../src/config.js";
+const defaultCfg = await loadDefaultConfig();
 import type { LabeledIssueState } from "../src/types.js";
 
 const TASK_LABEL = "brunel:ready";
