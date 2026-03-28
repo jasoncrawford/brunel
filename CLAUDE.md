@@ -63,3 +63,5 @@ All four run in CI on every PR.
 - No compilation step — `tsx` runs TypeScript directly.
 - Webhook secret is optional for local dev; set `BRUNEL_WEBHOOK_SECRET` in `.env` to enable signature verification.
 - Use `display.print()` (not `console.log`/`console.error`) for any output in production code — routes through the status-bar-aware renderer so messages don't corrupt the prompt or status line.
+- In tests, use `loadDefaultConfig()` from `src/config.ts` to get a config object with schema defaults — don't export `DEFAULT_*` constants or repeat `loadConfig([], {...})` inline in each test file.
+- Options passed to `createForemanWss` that have a corresponding required config field should be required (not optional with `??` fallback) — the config schema is the single source of truth for defaults.
