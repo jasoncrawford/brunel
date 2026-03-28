@@ -735,6 +735,59 @@ describe("disconnected worker state", () => {
   });
 });
 
+// ── worker_goodbye ────────────────────────────────────────────────────────────
+
+describe("worker_goodbye", () => {
+  it("removes worker from registry and reverts task to pending", async () => {
+    queue.addTask(makeTask(1));
+    const ws = await connect();
+    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    await nextMsg(ws); // task_assigned
+
+    send(ws, { type: "worker_goodbye", workerId: "w1", taskId: "1" });
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(registry.get("w1")).toBeUndefined();
+    expect(queue.get("1")?.status).toBe("pending");
+  });
+
+  it("removes idle worker from registry when goodbye has no taskId", async () => {
+    const ws = await connect();
+    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    await nextMsg(ws); // standby
+
+    send(ws, { type: "worker_goodbye", workerId: "w1" });
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(registry.get("w1")).toBeUndefined();
+  });
+
+  it("reverted task is immediately assigned to a waiting idle worker", async () => {
+    queue.addTask(makeTask(1));
+
+    // Worker A gets task 1
+    const wsA = await connect();
+    send(wsA, { type: "worker_hello", workerId: "worker-a", status: "idle" });
+    await nextMsg(wsA); // task_assigned
+
+    // Worker B connects and waits on standby
+    const wsB = await connect();
+    send(wsB, { type: "worker_hello", workerId: "worker-b", status: "idle" });
+    await nextMsg(wsB); // standby
+
+    // Worker A says goodbye — task should revert and be assigned to B
+    const replyB = nextMsg(wsB);
+    send(wsA, { type: "worker_goodbye", workerId: "worker-a", taskId: "1" });
+    const msg = await replyB;
+    expect(msg.type).toBe("task_assigned");
+    if (msg.type === "task_assigned") expect(msg.taskId).toBe("1");
+
+    expect(registry.get("worker-a")).toBeUndefined();
+    expect(queue.get("1")?.status).toBe("assigned");
+    expect(queue.get("1")?.assignedWorkerId).toBe("worker-b");
+  });
+});
+
 // ── Keepalive ping ─────────────────────────────────────────────────────────────
 
 describe("keepalive ping", () => {

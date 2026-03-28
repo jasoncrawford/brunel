@@ -130,6 +130,21 @@ export class WorkerSession {
   }
 
   /**
+   * Send worker_goodbye to the foreman if the WebSocket is currently open.
+   * Called before clean exits (SIGTERM, /quit) so the foreman can immediately
+   * revert the task to pending without waiting for the reclaim timeout.
+   */
+  sendGoodbye(): void {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({
+        type: "worker_goodbye",
+        workerId: this.workerId,
+        taskId: this.currentTaskId,
+      }));
+    }
+  }
+
+  /**
    * Process a line of stdin input: slash commands and user queries.
    */
   async handleUserInput(input: string): Promise<"exit" | undefined> {
@@ -408,8 +423,6 @@ export async function workerMain(
     if (ok) await workspace.destroy();
     process.exit(0);
   };
-  // SIGTERM is a system/orchestrator signal: force-destroy without prompting.
-  process.on("SIGTERM", () => { void workspace.destroy().then(() => process.exit(0)); });
   // SIGINT received as a signal: prompt before destroying.
   process.on("SIGINT", () => { void shutdown(); });
 
@@ -434,6 +447,12 @@ export async function workerMain(
   const session = new WorkerSession(workerId, wsFactory, runQueryFn, workerDisplay, {
     afterTask,
     workspaceCtx: { workspace, originalCwd, workspaceDir, repoUrl, confirm },
+  });
+
+  // SIGTERM is a system/orchestrator signal: send goodbye then force-destroy without prompting.
+  process.on("SIGTERM", () => {
+    session.sendGoodbye();
+    void workspace.destroy().then(() => process.exit(0));
   });
 
   process.stdout.write("\x1b[?2004h"); // enable bracketed paste mode
@@ -477,6 +496,9 @@ export async function workerMain(
       display.print(display.c.boldRed(`\nERROR: ${err}`));
     }
   }
+
+  // Send goodbye so the foreman can immediately reassign any in-progress task.
+  session.sendGoodbye();
 
   // Clean shutdown: destroy workspace if user approves.
   // Set shuttingDown so the SIGINT handler won't double-destroy.
