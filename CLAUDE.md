@@ -26,26 +26,7 @@ npm start
 npm run worker
 ```
 
-Config (in `.env` or `brunel.config.ts`; CLI flags also accepted). Precedence: CLI flags > `BRUNEL_*` env vars > config file > legacy env vars > defaults.
-
-Required:
-- `BRUNEL_GITHUB_REPO` / `GITHUB_REPO` — e.g. `owner/repo`
-- `BRUNEL_GITHUB_TOKEN` / `GITHUB_TOKEN` / `GH_TOKEN` — personal access token with `repo` scope (`GH_TOKEN` is forwarded automatically in the devcontainer)
-- `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` — for Claude Agent SDK (the OAuth token is used automatically if you're running inside Claude Code)
-
-Optional (all have defaults):
-- `BRUNEL_TASK_LABEL` / `TASK_LABEL` — label that triggers work (default: `brunel:ready`)
-- `BRUNEL_DONE_LABEL` / `DONE_LABEL` — label applied on completion (default: `brunel:done`)
-- `BRUNEL_PORT` / `PORT` — foreman HTTP/WebSocket port (default: `3000`)
-- `BRUNEL_WEBHOOK_SECRET` / `WEBHOOK_SECRET` — GitHub webhook secret for signature verification (optional)
-- `BRUNEL_FOREMAN_URL` — WebSocket URL workers connect to (default: `ws://localhost:3000`); **no legacy fallback for this one**
-- `BRUNEL_VERBOSE` — enable verbose Claude output (default: `false`)
-- `BRUNEL_THINK_OUT_LOUD` — show full agent thinking text; defaults to `BRUNEL_VERBOSE`; also settable in `brunel.config.ts` as `thinkOutLoud`
-- `BRUNEL_PERMISSION_MODE` — Claude permission mode: `default`, `acceptEdits`, `bypassPermissions`, `plan`, `dontAsk` (default: `default`)
-- `BRUNEL_WORKSPACE_DIR` — base directory for worker checkout directories (default: `~/.brunel/workers`)
-- `BRUNEL_SUPABASE_URL` — Supabase project URL (for cloud deployment)
-- `BRUNEL_SUPABASE_SECRET_KEY` — Supabase secret key (for cloud deployment; treat as secret)
-- `BRUNEL_WORKER_SECRET` — shared secret to authenticate workers with the foreman (treat as secret)
+Config (in `.env` or `brunel.config.ts`; CLI flags also accepted). Precedence: CLI flags > `BRUNEL_*` env vars > config file > legacy env vars > defaults. See `src/config.ts` for the full list of options, env var names, legacy fallbacks, and defaults.
 
 ## Useful scripts
 
@@ -62,3 +43,5 @@ All four run in CI on every PR.
 - No compilation step — `tsx` runs TypeScript directly.
 - Webhook secret is optional for local dev; set `BRUNEL_WEBHOOK_SECRET` in `.env` to enable signature verification.
 - Use `display.print()` (not `console.log`/`console.error`) for any output in production code — routes through the status-bar-aware renderer so messages don't corrupt the prompt or status line.
+- In tests, use `loadDefaultConfig()` from `src/config.ts` to get a config object with schema defaults — don't export `DEFAULT_*` constants or repeat `loadConfig([], {...})` inline in each test file.
+- Options passed to `createForemanWss` that have a corresponding required config field should be required (not optional with `??` fallback) — the config schema is the single source of truth for defaults.
