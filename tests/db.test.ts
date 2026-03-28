@@ -85,17 +85,21 @@ describe("createDbLogger", () => {
 
 describe("messageToEntry summary for worker_disconnected", () => {
   function makeSupabaseReturning(rows: Record<string, unknown>[]) {
-    const builder = {
+    const makeBuilder = (data: Record<string, unknown>[]) => ({
       insert: vi.fn().mockResolvedValue({ error: null }),
       select: vi.fn().mockReturnThis(),
       order: vi.fn().mockReturnThis(),
       limit: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
       then: vi.fn().mockImplementation((cb: (v: { data: unknown[]; error: null }) => unknown) =>
-        Promise.resolve(cb({ data: rows, error: null }))
+        Promise.resolve(cb({ data, error: null }))
+      ),
+    });
+    return {
+      from: vi.fn().mockImplementation((t: string) =>
+        t === "foreman_messages" ? makeBuilder(rows) : makeBuilder([])
       ),
     };
-    return { from: vi.fn().mockReturnValue(builder) };
   }
 
   it("includes close code in summary for worker_disconnected with no reason", async () => {
@@ -236,6 +240,83 @@ describe("queryTaskEvents ordering", () => {
     expect(entries[0].timestamp).toBe("2026-03-27T03:00:00Z");
     expect(entries[1].timestamp).toBe("2026-03-27T02:00:00Z");
     expect(entries[2].timestamp).toBe("2026-03-27T01:00:00Z");
+  });
+});
+
+describe("queryWorkerMessages includes webhook events", () => {
+  function makeSupabaseTwoTables(
+    webhookRows: Record<string, unknown>[],
+    messageRows: Record<string, unknown>[],
+  ) {
+    const makeBuilder = (rows: Record<string, unknown>[]) => ({
+      select: vi.fn().mockReturnThis(),
+      order: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      then: vi.fn().mockImplementation((cb: (v: { data: unknown[]; error: null }) => unknown) =>
+        Promise.resolve(cb({ data: rows, error: null }))
+      ),
+    });
+    return {
+      from: vi.fn().mockImplementation((t: string) =>
+        t === "webhook_events" ? makeBuilder(webhookRows) : makeBuilder(messageRows)
+      ),
+    };
+  }
+
+  it("returns webhook events for a worker alongside foreman messages", async () => {
+    const supabase = makeSupabaseTwoTables(
+      [{
+        id: 10, received_at: "2026-03-27T01:00:00Z",
+        event_name: "issues", action: "labeled", issue_number: 42,
+        task_id: "42", worker_id: "w1",
+      }],
+      [{
+        id: 20, created_at: "2026-03-27T02:00:00Z",
+        direction: "sent", worker_id: "w1", task_id: "42",
+        msg_type: "task_assigned", payload: {},
+      }],
+    );
+    const logger = createDbLogger(supabase as unknown as Parameters<typeof createDbLogger>[0]);
+    const entries = await logger.queryWorkerMessages("w1");
+    const kinds = entries.map((e) => e.kind);
+    expect(kinds).toContain("webhook");
+    expect(kinds).toContain("message");
+  });
+
+  it("returns only entries matching the given worker_id", async () => {
+    const supabase = makeSupabaseTwoTables(
+      [{
+        id: 10, received_at: "2026-03-27T01:00:00Z",
+        event_name: "push", action: null, issue_number: null,
+        task_id: null, worker_id: "w1",
+      }],
+      [],
+    );
+    const logger = createDbLogger(supabase as unknown as Parameters<typeof createDbLogger>[0]);
+    const entries = await logger.queryWorkerMessages("w1");
+    expect(entries).toHaveLength(1);
+    expect(entries[0].kind).toBe("webhook");
+    expect(entries[0].workerId).toBe("w1");
+  });
+
+  it("returns entries sorted by timestamp descending", async () => {
+    const supabase = makeSupabaseTwoTables(
+      [{
+        id: 10, received_at: "2026-03-27T01:00:00Z",
+        event_name: "issues", action: "labeled", issue_number: 1,
+        task_id: null, worker_id: "w1",
+      }],
+      [{
+        id: 20, created_at: "2026-03-27T03:00:00Z",
+        direction: "sent", worker_id: "w1", task_id: null,
+        msg_type: "standby", payload: {},
+      }],
+    );
+    const logger = createDbLogger(supabase as unknown as Parameters<typeof createDbLogger>[0]);
+    const entries = await logger.queryWorkerMessages("w1");
+    expect(entries[0].timestamp).toBe("2026-03-27T03:00:00Z");
+    expect(entries[1].timestamp).toBe("2026-03-27T01:00:00Z");
   });
 });
 

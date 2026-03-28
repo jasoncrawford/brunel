@@ -158,12 +158,22 @@ export function createDbLogger(supabase: SupabaseClient): DbLogger {
     },
 
     async queryWorkerMessages(workerId) {
-      const { data } = await supabase.from("foreman_messages")
-        .select("id, created_at, direction, worker_id, task_id, msg_type")
-        .eq("worker_id", workerId)
-        .order("created_at", { ascending: false })
-        .limit(500);
-      return ((data ?? []) as Record<string, unknown>[]).map(messageToEntry);
+      const [wRes, mRes] = await Promise.all([
+        supabase.from("webhook_events")
+          .select("id, received_at, event_name, action, issue_number, task_id, worker_id")
+          .eq("worker_id", workerId)
+          .order("received_at", { ascending: false })
+          .limit(500),
+        supabase.from("foreman_messages")
+          .select("id, created_at, direction, worker_id, task_id, msg_type, payload")
+          .eq("worker_id", workerId)
+          .order("created_at", { ascending: false })
+          .limit(500),
+      ]);
+      const webhooks = ((wRes.data ?? []) as Record<string, unknown>[]).map(webhookToEntry);
+      const messages = ((mRes.data ?? []) as Record<string, unknown>[]).map(messageToEntry);
+      return [...webhooks, ...messages]
+        .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
     },
   };
 }

@@ -31,6 +31,7 @@ export default function WorkerDetail() {
           <thead>
             <tr>
               <th style={th}>Time</th>
+              <th style={th}>Kind</th>
               <th style={th}>Summary</th>
               <th style={th}>Task</th>
             </tr>
@@ -39,6 +40,7 @@ export default function WorkerDetail() {
             {messages.map((e) => (
               <tr key={`${e.kind}-${e.id}`}>
                 <td style={td}>{new Date(e.timestamp).toLocaleString()}</td>
+                <td style={td}>{e.kind}</td>
                 <td style={td}>{e.summary}</td>
                 <td style={td}>{e.taskId ? <Link to={`/tasks/${e.taskId}`}>#{e.taskId}</Link> : "—"}</td>
               </tr>
