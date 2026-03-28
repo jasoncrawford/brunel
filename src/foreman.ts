@@ -30,6 +30,7 @@ interface WorkerState {
   status: "idle" | "busy" | "disconnected";
   currentTaskId?: string;
   disconnectedAt?: Date;
+  disconnectTimer?: ReturnType<typeof setTimeout>;
 }
 
 export class WorkerRegistry {
@@ -84,6 +85,20 @@ export class WorkerRegistry {
     if (!w) return;
     w.status = "idle";
     w.currentTaskId = undefined;
+  }
+
+  startReclaimTimer(workerId: string, timeoutMs: number, onReclaim: () => void): void {
+    const w = this.workers.get(workerId);
+    if (!w) return;
+    if (w.disconnectTimer) clearTimeout(w.disconnectTimer);
+    w.disconnectTimer = setTimeout(onReclaim, timeoutMs);
+  }
+
+  cancelReclaimTimer(workerId: string): void {
+    const w = this.workers.get(workerId);
+    if (!w?.disconnectTimer) return;
+    clearTimeout(w.disconnectTimer);
+    w.disconnectTimer = undefined;
   }
 
   send(workerId: string, msg: ForemanMessage) {
@@ -436,6 +451,7 @@ export function createForemanWss(
     labeledIssues?: Map<number, LabeledIssueState>;
     pingIntervalMs?: number;
     assignStore?: TaskAssignmentStore;
+    reclaimTimeoutMs?: number;
   },
 ): { wss: WebSocketServer; routeEventToWorker: (id: string, name: string, payload: unknown) => void; reconcile: () => void } {
   const taskLabel = options.taskLabel;
@@ -455,6 +471,7 @@ export function createForemanWss(
     async deleteAssignment() {},
     async listAssignments() { return []; },
   };
+  const reclaimTimeoutMs = options.reclaimTimeoutMs ?? 300_000;
 
   function log(wid: string, line: string) {
     flog(`[worker ${wid.slice(0, 8)}] ${line}`);
@@ -770,6 +787,9 @@ export function createForemanWss(
 
       workerId = msg.workerId;
 
+      // Cancel any pending reclaim timer — worker has reconnected.
+      registry.cancelReclaimTimer(workerId);
+
       if (msg.status === "busy" && msg.taskId) {
         const existing = taskQueue.get(msg.taskId);
         if (existing && existing.status !== "complete" && (existing.status !== "assigned" || existing.assignedWorkerId === workerId)) {
@@ -880,6 +900,18 @@ export function createForemanWss(
         if (taskId) {
           // Keep registry entry so queued events can be delivered on reconnect.
           registry.markDisconnected(workerId);
+          // Start reclaim timer — if the worker doesn't reconnect in time, revert its task.
+          registry.startReclaimTimer(workerId, reclaimTimeoutMs, () => {
+            const w = registry.get(workerId);
+            if (!w || w.status !== "disconnected") return;
+            log(workerId, `reclaim timer fired — reverting task #${taskId} to pending`);
+            taskQueue.revertTask(taskId);
+            registry.remove(workerId);
+            for (const idle of registry.getIdleWorkers()) {
+              tryAssignWork(idle.workerId);
+            }
+            broadcastSnapshot();
+          });
         } else {
           registry.remove(workerId);
         }
@@ -1015,6 +1047,7 @@ if (isMain) {
       adminWss,
       workerSecret: config.workerSecret,
       assignStore,
+      reclaimTimeoutMs: config.workerReclaimTimeoutMs,
       labelDone: (issueNumber) =>
         labelIssueDone(issueNumber, {
           repo: config.githubRepo,

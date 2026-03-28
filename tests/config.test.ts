@@ -19,7 +19,7 @@ const ENV_KEYS = [
   "BRUNEL_VERBOSE", "BRUNEL_PORT", "BRUNEL_WEBHOOK_SECRET",
   "BRUNEL_FOREMAN_URL", "BRUNEL_PERMISSION_MODE",
   "BRUNEL_SUPABASE_URL", "BRUNEL_SUPABASE_SECRET_KEY", "BRUNEL_WORKER_SECRET",
-  "BRUNEL_WORKSPACE_DIR",
+  "BRUNEL_WORKSPACE_DIR", "BRUNEL_WORKER_RECLAIM_TIMEOUT_MS",
 ];
 
 beforeEach(() => {
@@ -71,6 +71,7 @@ describe("defaults", () => {
     expect(cfg.foremanUrl).toBe("ws://localhost:3000");
     expect(cfg.permissionMode).toBe("default");
     expect(cfg.allowDangerouslySkipPermissions).toBe(false);
+    expect(cfg.workerReclaimTimeoutMs).toBe(300_000);
   });
 });
 
@@ -470,5 +471,15 @@ describe("workspaceDir", () => {
     process.env.BRUNEL_GITHUB_TOKEN = "tok";
     const config = await loadConfig([]);
     expect(config.workspaceDir).toBeUndefined();
+  });
+});
+
+
+describe("workerReclaimTimeoutMs", () => {
+  it("reads workerReclaimTimeoutMs from BRUNEL_WORKER_RECLAIM_TIMEOUT_MS env var", async () => {
+    baseEnv();
+    process.env.BRUNEL_WORKER_RECLAIM_TIMEOUT_MS = "60000";
+    const cfg = await loadConfig(["node", "repl.js"]);
+    expect(cfg.workerReclaimTimeoutMs).toBe(60_000);
   });
 });
