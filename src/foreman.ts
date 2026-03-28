@@ -985,20 +985,25 @@ if (isMain) {
     ? new Webhooks({ secret: config.webhookSecret })
     : null;
 
-  // DB logger
+  // Setup DB logger and assignment store (share the same Supabase client if configured)
   let dbLogger: DbLogger;
+  let assignStore: TaskAssignmentStore;
   if (config.supabaseUrl && config.supabaseSecretKey) {
     const { createClient } = await import("@supabase/supabase-js");
-    const { createDbLogger } = await import("./db.js");
-    dbLogger = createDbLogger(createClient(config.supabaseUrl, config.supabaseSecretKey));
+    const { createDbLogger, createTaskAssignmentStore } = await import("./db.js");
+    const supabase = createClient(config.supabaseUrl, config.supabaseSecretKey);
+    dbLogger = createDbLogger(supabase);
+    assignStore = createTaskAssignmentStore(supabase);
     flog("Supabase logging enabled");
   } else {
-    const { createNullDbLogger } = await import("./db.js");
+    const { createNullDbLogger, createNullTaskAssignmentStore } = await import("./db.js");
     dbLogger = createNullDbLogger();
+    assignStore = createNullTaskAssignmentStore();
   }
 
   let routeEvent: (id: string, name: string, payload: unknown) => void = () => {};
   let reconcile: () => void = () => {};
+  let startupDisconnected = new Map<string, string>();
   const server = createHttpServer(webhooks, (id, name, payload) => routeEvent(id, name, payload), dbLogger);
 
   // Admin WebSocket broadcaster
@@ -1008,7 +1013,7 @@ if (isMain) {
     workers: registry.getWorkerSnapshots(),
   }));
 
-  ({ routeEventToWorker: routeEvent, reconcile } = createForemanWss(
+  ({ routeEventToWorker: routeEvent, reconcile, startupDisconnected } = createForemanWss(
     taskQueue, registry, server,
     {
       graph,
@@ -1020,6 +1025,7 @@ if (isMain) {
       dbLogger,
       adminWss,
       workerSecret: config.workerSecret,
+      assignStore,
       labelDone: (issueNumber) =>
         labelIssueDone(issueNumber, {
           repo: config.githubRepo,
@@ -1036,20 +1042,49 @@ if (isMain) {
     });
   }
 
-  server.listen(config.port, async () => {
+  // Load all state before accepting WebSocket connections.
+  // Step 1: fetch brunel:ready issues from GitHub → all tasks start pending
+  try {
+    await loadIssuesToQueue(labeledIssues, graph, openIssues, {
+      repo: config.githubRepo,
+      token: config.githubToken,
+      taskLabel: config.taskLabel,
+    });
+    reconcile();
+  } catch (err) {
+    flog(`WARNING Failed to load issues from GitHub: ${err}`);
+  }
+
+  // Step 2: read task_assignments table and seed in-memory state
+  try {
+    const assignments = await assignStore.listAssignments();
+    for (const row of assignments) {
+      const task = taskQueue.get(row.taskId);
+      if (!task) {
+        // Orphaned row: issue was closed, label removed, or task already completed.
+        flog(`[startup] orphaned assignment for task #${row.taskId}, deleting`);
+        assignStore.deleteAssignment(row.taskId).catch(err =>
+          flog(`ERROR Failed to delete orphaned assignment: ${err}`)
+        );
+        continue;
+      }
+      // Restore assigned state from DB
+      taskQueue.assignTask(row.taskId, row.workerId);
+      if (row.prNumber !== null) taskQueue.registerPr(row.prNumber, row.taskId);
+      if (row.branch) taskQueue.registerBranch(row.branch, row.taskId);
+      // Track so idle-reconnecting workers can revert their prior task
+      startupDisconnected.set(row.workerId, row.taskId);
+      flog(`[startup] loaded assignment: task #${row.taskId} → worker ${row.workerId.slice(0, 8)}`);
+    }
+  } catch (err) {
+    flog(`WARNING Failed to load task assignments: ${err}`);
+  }
+
+  // Step 3: start listening — state is fully loaded
+  server.listen(config.port, () => {
     flog(`Listening on http://localhost:${config.port}/webhook`);
     flog(`WebSocket workers: ws://localhost:${config.port}/worker`);
     flog(`Admin WebSocket: ws://localhost:${config.port}/admin/ws`);
     flog("Waiting for events...");
-    try {
-      await loadIssuesToQueue(labeledIssues, graph, openIssues, {
-        repo: config.githubRepo,
-        token: config.githubToken,
-        taskLabel: config.taskLabel,
-      });
-      reconcile();
-    } catch (err) {
-      flog(`WARNING Failed to load issues from GitHub: ${err}`);
-    }
   });
 }
