@@ -219,10 +219,10 @@ export const EVENT_FMT: EventTemplateFmtTable = {
 Then, before we end this session, consider:
 
 * Are there any followup issues we should file?
-* Are there any updates to skills that we should make, or new skills to record? Use skills for general practices that are reusable across projects.
-* Are there any updates to be made to CLAUDE.md for project-specific conventions?
+* Are there any updates to skills that we should make, or new skills to record?
+* Are there any updates to be made to project documentation?
 
-Do not use project memories — they may not persist across sessions. Capture general practices in skills and project-specific conventions in CLAUDE.md instead.
+Do not use project memories: they may not persist across sessions, and they aren't available to other users or projects. Capture general practices in skills, and project-specific information in CLAUDE.md or other project docs.
 
 Please do the above if necessary. Then summarize any such followups/updates, and anything else the user should know.`;
     }
