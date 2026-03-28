@@ -32,6 +32,7 @@ export interface AdminSnapshot {
 
 export type AdminMessage =
   | { type: "snapshot"; tasks: TaskSnapshot[]; workers: WorkerSnapshot[] }
+  | { type: "initial_log"; entries: LogEntry[] }
   | { type: "log_event"; entry: LogEntry };
 
 export interface AdminWss {
@@ -39,8 +40,11 @@ export interface AdminWss {
   broadcastLogEvent(entry: LogEntry): void;
 }
 
+const MAX_RECENT_LOG = 30;
+
 export function createAdminWss(server: http.Server, getSnapshot?: () => AdminSnapshot): AdminWss {
   const clients = new Set<WsSocket>();
+  const recentLog: LogEntry[] = []; // newest first, capped at MAX_RECENT_LOG
   const wss = new WebSocketServer({ noServer: true });
 
   wss.on("connection", (ws) => {
@@ -49,6 +53,7 @@ export function createAdminWss(server: http.Server, getSnapshot?: () => AdminSna
       const snapshot = getSnapshot();
       ws.send(JSON.stringify({ type: "snapshot", ...snapshot } satisfies AdminMessage));
     }
+    ws.send(JSON.stringify({ type: "initial_log", entries: recentLog.slice() } satisfies AdminMessage));
     ws.on("close", () => clients.delete(ws));
   });
 
@@ -71,6 +76,8 @@ export function createAdminWss(server: http.Server, getSnapshot?: () => AdminSna
       broadcast({ type: "snapshot", ...snapshot });
     },
     broadcastLogEvent(entry) {
+      recentLog.unshift(entry);
+      if (recentLog.length > MAX_RECENT_LOG) recentLog.pop();
       broadcast({ type: "log_event", entry });
     },
   };
