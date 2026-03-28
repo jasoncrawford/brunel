@@ -3,6 +3,7 @@ import path from "node:path";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
 import * as display from "./display.js";
+import { fmtError } from "./utils.js";
 
 const execFileAsync = promisify(execFileCb);
 
@@ -61,13 +62,13 @@ export class Workspace {
       await this._doReset();
       return;
     } catch (err) {
-      display.print(display.c.amber(`[workspace] Reset failed, retrying: ${err}`));
+      display.print(display.c.amber(`[workspace] Reset failed, retrying: ${fmtError(err)}`));
     }
     try {
       await this._doReset();
       return;
     } catch (err) {
-      display.print(display.c.amber(`[workspace] Reset failed again, re-cloning: ${err}`));
+      display.print(display.c.amber(`[workspace] Reset failed again, re-cloning: ${fmtError(err)}`));
       fs.rmSync(this.dir, { recursive: true, force: true });
       fs.mkdirSync(path.dirname(this.dir), { recursive: true });
       display.print(display.c.sageGreen(`[workspace] Re-cloning ${this.repoUrl} → ${this.dir}`));
