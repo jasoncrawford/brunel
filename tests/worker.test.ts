@@ -295,6 +295,56 @@ describe("reconnect", () => {
   });
 });
 
+// ── Stale WebSocket handlers ──────────────────────────────────────────────────
+
+describe("stale WebSocket handlers", () => {
+  it("ignores close event from the old WebSocket after reconnect", () => {
+    vi.useFakeTimers();
+
+    const oldWs = fakeWs;
+    // Trigger reconnect — new WS is returned by wsFactory on second call
+    const newWs = new FakeWs();
+    wsFactory.mockReturnValueOnce(newWs);
+    oldWs.emit("close", 1001, Buffer.from(""));
+    vi.advanceTimersByTime(5001);
+
+    // wsFactory called a second time (reconnect happened)
+    expect(wsFactory).toHaveBeenCalledTimes(2);
+    display.print.mockClear();
+
+    // Now the old WS fires close again (delayed TCP teardown)
+    oldWs.emit("close", 1006, Buffer.from(""));
+
+    // Should be silently ignored — no disconnect message, no third connection
+    const calls = display.print.mock.calls.map(a => stripAnsi(String(a[0])));
+    expect(calls.some(s => s.includes("Disconnected"))).toBe(false);
+    expect(wsFactory).toHaveBeenCalledTimes(2); // no third connection
+
+    vi.useRealTimers();
+  });
+
+  it("ignores error event from the old WebSocket after reconnect", () => {
+    vi.useFakeTimers();
+
+    const oldWs = fakeWs;
+    const newWs = new FakeWs();
+    wsFactory.mockReturnValueOnce(newWs);
+    oldWs.emit("close", 1001, Buffer.from(""));
+    vi.advanceTimersByTime(5001);
+
+    display.print.mockClear();
+
+    // Old WS fires error after new connection is established
+    oldWs.emit("error", new Error("stale error"));
+
+    // Should be silently ignored
+    const calls = display.print.mock.calls.map(a => stripAnsi(String(a[0])));
+    expect(calls.some(s => s.includes("stale error"))).toBe(false);
+
+    vi.useRealTimers();
+  });
+});
+
 // ── Close diagnostics ─────────────────────────────────────────────────────────
 
 describe("close diagnostics", () => {
