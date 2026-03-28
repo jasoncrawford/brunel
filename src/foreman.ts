@@ -790,6 +790,19 @@ export function createForemanWss(
       tryAssignWork(workerId);
     }
 
+    function handleWorkerGoodbye(msg: Extract<WorkerMessage, { type: "worker_goodbye" }>) {
+      log(workerId, `worker_goodbye (task=${msg.taskId ?? "none"})`);
+      if (msg.taskId) {
+        taskQueue.revertTask(msg.taskId);
+      }
+      registry.remove(workerId);
+      broadcastSnapshot();
+      // Try to assign the reverted task to any already-idle workers.
+      for (const w of registry.getIdleWorkers()) {
+        tryAssignWork(w.workerId);
+      }
+    }
+
     ws.on("message", (data) => {
       let msg: WorkerMessage;
       try { msg = JSON.parse(data.toString()); } catch { return; }
@@ -805,6 +818,7 @@ export function createForemanWss(
 
       if (msg.type === "worker_hello") handleWorkerHello(msg);
       else if (msg.type === "task_complete") handleTaskComplete(msg);
+      else if (msg.type === "worker_goodbye") handleWorkerGoodbye(msg);
       else flog(`[worker ${workerId}] unknown message type: ${(msg as R).type}`);
     });
 

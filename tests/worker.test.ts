@@ -1061,3 +1061,36 @@ describe("afterTask callback on /task-complete", () => {
     expect(lastMsg.type).toBe("task_complete");
   });
 });
+
+describe("sendGoodbye", () => {
+  it("sends worker_goodbye with workerId and taskId when ws is open and task is active", async () => {
+    const issue = makeIssue();
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+    await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
+
+    fakeWs.send.mockClear();
+    session.sendGoodbye();
+
+    expect(fakeWs.send).toHaveBeenCalledOnce();
+    const sent = JSON.parse(fakeWs.send.mock.calls[0][0]);
+    expect(sent).toEqual({ type: "worker_goodbye", workerId: WORKER_ID, taskId: "42" });
+  });
+
+  it("sends worker_goodbye with undefined taskId when no task is active", () => {
+    fakeWs.send.mockClear();
+    session.sendGoodbye();
+
+    expect(fakeWs.send).toHaveBeenCalledOnce();
+    const sent = JSON.parse(fakeWs.send.mock.calls[0][0]);
+    expect(sent.type).toBe("worker_goodbye");
+    expect(sent.workerId).toBe(WORKER_ID);
+    expect(sent.taskId).toBeUndefined();
+  });
+
+  it("does not send when ws is not open", () => {
+    fakeWs.readyState = 3; // CLOSED
+    fakeWs.send.mockClear();
+    session.sendGoodbye();
+    expect(fakeWs.send).not.toHaveBeenCalled();
+  });
+});

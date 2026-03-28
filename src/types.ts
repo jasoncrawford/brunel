@@ -22,7 +22,8 @@ export interface LabeledIssueState {
 // Worker → Foreman messages
 export type WorkerMessage =
   | { type: "worker_hello"; workerId: string; taskId?: string; status: "idle" | "busy"; workerSecret?: string }
-  | { type: "task_complete"; workerId: string; taskId: string };
+  | { type: "task_complete"; workerId: string; taskId: string }
+  | { type: "worker_goodbye"; workerId: string; taskId?: string };
 
 // Foreman → Worker messages
 export type ForemanMessage =
