@@ -21,7 +21,7 @@ export interface TaskSnapshot {
 
 export interface WorkerSnapshot {
   workerId: string;
-  status: "idle" | "busy";
+  status: "idle" | "busy" | "disconnected";
   currentTaskId?: string;
 }
 

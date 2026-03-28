@@ -27,14 +27,15 @@ type R = Record<string, unknown>;
 interface WorkerState {
   workerId: string;
   ws: WsSocket;
-  status: "idle" | "busy";
+  status: "idle" | "busy" | "disconnected";
   currentTaskId?: string;
+  disconnectedAt?: Date;
 }
 
 export class WorkerRegistry {
   private workers = new Map<string, WorkerState>();
 
-  register(workerId: string, ws: WsSocket, status: "idle" | "busy", taskId?: string) {
+  register(workerId: string, ws: WsSocket, status: "idle" | "busy", taskId?: string): void {
     this.workers.set(workerId, { workerId, ws, status, currentTaskId: taskId });
   }
 
@@ -44,6 +45,13 @@ export class WorkerRegistry {
 
   remove(workerId: string) {
     this.workers.delete(workerId);
+  }
+
+  markDisconnected(workerId: string) {
+    const w = this.workers.get(workerId);
+    if (!w) return;
+    w.status = "disconnected";
+    w.disconnectedAt = new Date();
   }
 
   getIdleWorker(): WorkerState | null {
@@ -152,6 +160,13 @@ export class TaskQueue {
   completeTask(taskId: string) {
     const t = this.tasks.get(taskId);
     if (t) t.status = "complete";
+  }
+
+  revertTask(taskId: string) {
+    const t = this.tasks.get(taskId);
+    if (!t || t.status !== "assigned") return;
+    t.status = "pending";
+    t.assignedWorkerId = undefined;
   }
 
   queueEvent(taskId: string, event: GitHubEvent) {
@@ -447,11 +462,15 @@ export function createForemanWss(
   function forwardEvent(task: Task, evt: GitHubEvent, ref: string) {
     if (task.status === "assigned" && task.assignedWorkerId) {
       const worker = registry.get(task.assignedWorkerId);
-      if (!worker) {
+      if (worker?.status === "disconnected") {
+        taskQueue.queueEvent(task.taskId, evt);
+        flog(`[task ${ref}] ${evt.name} queued (worker ${task.assignedWorkerId.slice(0, 8)} disconnected)`);
+      } else if (worker) {
+        registry.send(task.assignedWorkerId, { type: "event_notification", taskId: task.taskId, event: evt });
+        log(task.assignedWorkerId, `→ event_notification ${ref} ${evt.name}`);
+      } else {
         flog(`[task ${ref}] ${evt.name} DROPPED — worker ${task.assignedWorkerId.slice(0, 8)} not in registry (disconnected?)`);
       }
-      registry.send(task.assignedWorkerId, { type: "event_notification", taskId: task.taskId, event: evt });
-      log(task.assignedWorkerId, `→ event_notification ${ref} ${evt.name}`);
     } else if (task.status === "pending") {
       taskQueue.queueEvent(task.taskId, evt);
       flog(`[task ${ref}] ${evt.name} queued (no worker assigned)`);
@@ -706,6 +725,71 @@ export function createForemanWss(
   wss.on("connection", (ws) => {
     let workerId = "";
 
+    function handleWorkerHello(msg: Extract<WorkerMessage, { type: "worker_hello" }>) {
+      // Reject if workerSecret is configured and the message's secret doesn't match
+      if (workerSecret && msg.workerSecret !== workerSecret) {
+        ws.close(4001, "unauthorized");
+        return;
+      }
+
+      workerId = msg.workerId;
+
+      if (msg.status === "busy" && msg.taskId) {
+        const existing = taskQueue.get(msg.taskId);
+        if (existing && existing.status !== "complete" && (existing.status !== "assigned" || existing.assignedWorkerId === workerId)) {
+          // Task is pending/assigned to this worker — reclaim.
+          log(workerId, `hello busy task=#${msg.taskId} — reclaimed`);
+          registry.register(workerId, ws, "busy", msg.taskId);
+          taskQueue.assignTask(msg.taskId, workerId);
+          broadcastSnapshot();
+          const queued = taskQueue.drainEvents(msg.taskId);
+          for (const evt of queued) {
+            registry.send(workerId, { type: "event_notification", taskId: msg.taskId, event: evt });
+            log(workerId, `→ event_notification #${existing.issueNumber} ${evt.name} (queued)`);
+          }
+        } else if (!existing) {
+          log(workerId, `hello busy task=#${msg.taskId} — unknown task, respecting busy status`);
+          registry.register(workerId, ws, "busy", msg.taskId);
+          broadcastSnapshot();
+        } else {
+          // Task is assigned to a different worker — standby
+          log(workerId, `hello busy task=#${msg.taskId} — task taken by another worker`);
+          registry.register(workerId, ws, "idle");
+          broadcastSnapshot();
+          const standbyMsg: ForemanMessage = { type: "standby" };
+          registry.send(workerId, standbyMsg);
+          dbLogger?.logForemanMessage({ direction: "sent", workerId, taskId: null, msgType: standbyMsg.type, payload: standbyMsg as unknown as Record<string, unknown> });
+          log(workerId, "→ standby");
+        }
+      } else {
+        // If this worker had an assigned task, it can't resume — revert to pending.
+        const existing = registry.get(workerId);
+        if (existing?.currentTaskId) {
+          log(workerId, `hello idle (had task #${existing.currentTaskId}) — reverting task to pending`);
+          taskQueue.revertTask(existing.currentTaskId);
+        } else {
+          log(workerId, "hello idle");
+        }
+        registry.register(workerId, ws, "idle");
+        broadcastSnapshot();
+        tryAssignWork(workerId);
+      }
+    }
+
+    function handleTaskComplete(msg: Extract<WorkerMessage, { type: "task_complete" }>) {
+      log(workerId, `task_complete #${msg.taskId}`);
+      const task = taskQueue.get(msg.taskId);
+      if (task) {
+        taskQueue.completeTask(msg.taskId);
+        labelDone(task.issueNumber).catch(err =>
+          flog(`ERROR Failed to label issue done: ${err}`)
+        );
+      }
+      registry.releaseWorker(workerId);
+      broadcastSnapshot();
+      tryAssignWork(workerId);
+    }
+
     ws.on("message", (data) => {
       let msg: WorkerMessage;
       try { msg = JSON.parse(data.toString()); } catch { return; }
@@ -719,63 +803,9 @@ export function createForemanWss(
         payload: msg as unknown as Record<string, unknown>,
       });
 
-      if (msg.type === "worker_hello") {
-        // Reject if workerSecret is configured and the message's secret doesn't match
-        if (workerSecret && msg.workerSecret !== workerSecret) {
-          ws.close(4001, "unauthorized");
-          return;
-        }
-
-        workerId = msg.workerId;
-
-        if (msg.status === "busy" && msg.taskId) {
-          const existing = taskQueue.get(msg.taskId);
-          if (existing && existing.status !== "complete" && (existing.status !== "assigned" || existing.assignedWorkerId === workerId)) {
-            // Task is pending/assigned to this worker — reclaim.
-            log(workerId, `hello busy task=#${msg.taskId} — reclaimed`);
-            registry.register(workerId, ws, "busy", msg.taskId);
-            taskQueue.assignTask(msg.taskId, workerId);
-            broadcastSnapshot();
-            const queued = taskQueue.drainEvents(msg.taskId);
-            for (const evt of queued) {
-              registry.send(workerId, { type: "event_notification", taskId: msg.taskId, event: evt });
-              log(workerId, `→ event_notification #${existing.issueNumber} ${evt.name} (queued)`);
-            }
-          } else if (!existing) {
-            log(workerId, `hello busy task=#${msg.taskId} — unknown task, respecting busy status`);
-            registry.register(workerId, ws, "busy", msg.taskId);
-            broadcastSnapshot();
-          } else {
-            // Task is assigned to a different worker — standby
-            log(workerId, `hello busy task=#${msg.taskId} — task taken by another worker`);
-            registry.register(workerId, ws, "idle");
-            broadcastSnapshot();
-            const standbyMsg: ForemanMessage = { type: "standby" };
-            registry.send(workerId, standbyMsg);
-            dbLogger?.logForemanMessage({ direction: "sent", workerId, taskId: null, msgType: standbyMsg.type, payload: standbyMsg as unknown as Record<string, unknown> });
-            log(workerId, "→ standby");
-          }
-        } else {
-          log(workerId, "hello idle");
-          registry.register(workerId, ws, "idle");
-          broadcastSnapshot();
-          tryAssignWork(workerId);
-        }
-      }
-
-      if (msg.type === "task_complete") {
-        log(workerId, `task_complete #${msg.taskId}`);
-        const task = taskQueue.get(msg.taskId);
-        if (task) {
-          taskQueue.completeTask(msg.taskId);
-          labelDone(task.issueNumber).catch(err =>
-            flog(`ERROR Failed to label issue done: ${err}`)
-          );
-        }
-        registry.releaseWorker(workerId);
-        broadcastSnapshot();
-        tryAssignWork(workerId);
-      }
+      if (msg.type === "worker_hello") handleWorkerHello(msg);
+      else if (msg.type === "task_complete") handleTaskComplete(msg);
+      else flog(`[worker ${workerId}] unknown message type: ${(msg as R).type}`);
     });
 
     ws.on("close", (code, reason) => {
@@ -790,7 +820,12 @@ export function createForemanWss(
           msgType: "worker_disconnected",
           payload: { code, reason: reason?.toString() ?? null },
         });
-        registry.remove(workerId);
+        if (taskId) {
+          // Keep registry entry so queued events can be delivered on reconnect.
+          registry.markDisconnected(workerId);
+        } else {
+          registry.remove(workerId);
+        }
         broadcastSnapshot();
       }
     });

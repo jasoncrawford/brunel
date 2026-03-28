@@ -608,6 +608,133 @@ describe("worker disconnect DB logging", () => {
   });
 });
 
+// ── Disconnected worker state ──────────────────────────────────────────────────
+
+describe("disconnected worker state", () => {
+  it("worker with active task is marked disconnected (not removed) on close", async () => {
+    queue.addTask(makeTask(1));
+    const ws = await connect();
+    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    await nextMsg(ws); // task_assigned
+
+    await closeClient(ws);
+    await new Promise((r) => setTimeout(r, 20)); // let close handler fire
+
+    const entry = registry.get("w1");
+    expect(entry).toBeDefined();
+    expect(entry!.status).toBe("disconnected");
+    expect(entry!.currentTaskId).toBe("1");
+    expect(queue.get("1")?.status).toBe("assigned");
+  });
+
+  it("idle worker is removed from registry on close", async () => {
+    const ws = await connect();
+    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    await nextMsg(ws); // standby
+
+    await closeClient(ws);
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(registry.get("w1")).toBeUndefined();
+  });
+
+  it("events are queued (not dropped) when assigned worker is disconnected", async () => {
+    queue.addTask(makeTask(1));
+    const ws = await connect();
+    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    await nextMsg(ws); // task_assigned
+
+    await closeClient(ws);
+    await new Promise((r) => setTimeout(r, 20));
+
+    // Route an event while the worker is disconnected
+    routeEvent("evt-1", "issue_comment", { issue: { number: 1 }, comment: { body: "hi" } });
+
+    // Event should be in the task queue, not dropped
+    const queued = queue.drainEvents("1");
+    expect(queued).toHaveLength(1);
+    expect(queued[0].name).toBe("issue_comment");
+  });
+
+  it("reconnecting worker (busy) from disconnected state drains queued events", async () => {
+    queue.addTask(makeTask(1));
+    const ws1 = await connect();
+    send(ws1, { type: "worker_hello", workerId: "w1", status: "idle" });
+    await nextMsg(ws1); // task_assigned
+
+    await closeClient(ws1);
+    await new Promise((r) => setTimeout(r, 20));
+
+    // Queue an event while disconnected
+    routeEvent("evt-1", "issue_comment", { issue: { number: 1 }, comment: { body: "hi" } });
+
+    // Worker reconnects as busy
+    const ws2 = await connect();
+    const reply = nextMsg(ws2);
+    send(ws2, { type: "worker_hello", workerId: "w1", taskId: "1", status: "busy" });
+
+    const msg = await reply;
+    expect(msg.type).toBe("event_notification");
+    if (msg.type === "event_notification") {
+      expect(msg.taskId).toBe("1");
+      expect(msg.event.name).toBe("issue_comment");
+    }
+
+    expect(registry.get("w1")?.status).toBe("busy");
+    expect(queue.get("1")?.status).toBe("assigned");
+  });
+
+  it("reconnecting worker (idle) from disconnected state reverts task to pending", async () => {
+    queue.addTask(makeTask(1));
+    const ws1 = await connect();
+    send(ws1, { type: "worker_hello", workerId: "w1", status: "idle" });
+    await nextMsg(ws1); // task_assigned
+
+    await closeClient(ws1);
+    await new Promise((r) => setTimeout(r, 20));
+
+    // Worker reconnects as idle (process restarted, no session context)
+    const ws2 = await connect();
+    const reply = nextMsg(ws2);
+    send(ws2, { type: "worker_hello", workerId: "w1", status: "idle" });
+
+    // Worker should get the task reassigned (task was reverted to pending)
+    const msg = await reply;
+    expect(msg.type).toBe("task_assigned");
+    if (msg.type === "task_assigned") expect(msg.taskId).toBe("1");
+
+    expect(registry.get("w1")?.status).toBe("busy");
+    expect(queue.get("1")?.status).toBe("assigned");
+    expect(queue.get("1")?.assignedWorkerId).toBe("w1");
+  });
+
+  it("a different idle worker can pick up the reverted task when disconnected worker reconnects as idle", async () => {
+    queue.addTask(makeTask(1));
+
+    // Worker A gets the task
+    const wsA = await connect();
+    send(wsA, { type: "worker_hello", workerId: "worker-a", status: "idle" });
+    await nextMsg(wsA); // task_assigned
+
+    await closeClient(wsA);
+    await new Promise((r) => setTimeout(r, 20));
+
+    // Worker B is already connected and on standby
+    const wsB = await connect();
+    send(wsB, { type: "worker_hello", workerId: "worker-b", status: "idle" });
+    await nextMsg(wsB); // standby (task still assigned to disconnected A)
+
+    // Worker A reconnects as idle (crashed and restarted)
+    const wsA2 = await connect();
+    // No need to wait — just sending the hello. Worker A might or might not get the task.
+    // The important assertion: task reverts to pending, someone gets it.
+    send(wsA2, { type: "worker_hello", workerId: "worker-a", status: "idle" });
+    const msg = await nextMsg(wsA2);
+    expect(msg.type).toBe("task_assigned");
+    expect(queue.get("1")?.status).toBe("assigned");
+  });
+});
+
 // ── Keepalive ping ─────────────────────────────────────────────────────────────
 
 describe("keepalive ping", () => {
