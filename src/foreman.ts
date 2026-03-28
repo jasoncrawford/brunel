@@ -859,12 +859,10 @@ export function createForemanWss(
         } else if (!existing) {
           log(workerId, `hello busy task=#${msg.taskId} — unknown task, respecting busy status`);
           registry.register(workerId, ws, "busy", msg.taskId);
-          broadcastSnapshot();
         } else {
           // Task is assigned to a different worker — standby
           log(workerId, `hello busy task=#${msg.taskId} — task taken by another worker`);
           registry.register(workerId, ws, "idle");
-          broadcastSnapshot();
           const standbyMsg: ForemanMessage = { type: "standby" };
           registry.send(workerId, standbyMsg);
           dbLogger?.logForemanMessage({ direction: "sent", workerId, taskId: null, msgType: standbyMsg.type, payload: standbyMsg as unknown as Record<string, unknown> });
@@ -885,8 +883,6 @@ export function createForemanWss(
           log(workerId, "hello idle");
         }
         registry.register(workerId, ws, "idle");
-        broadcastSnapshot();
-        tryAssignWork(workerId).catch(err => flog(`ERROR tryAssignWork: ${fmtError(err)}`));
       }
     }
 
@@ -903,8 +899,6 @@ export function createForemanWss(
         );
       }
       registry.releaseWorker(workerId);
-      broadcastSnapshot();
-      tryAssignWork(workerId).catch(err => flog(`ERROR tryAssignWork: ${fmtError(err)}`));
     }
 
     function handleWorkerGoodbye(msg: Extract<WorkerMessage, { type: "worker_goodbye" }>) {
@@ -913,11 +907,6 @@ export function createForemanWss(
         taskQueue.revertTask(msg.taskId);
       }
       registry.remove(workerId);
-      broadcastSnapshot();
-      // Try to assign the reverted task to any already-idle workers.
-      for (const w of registry.getIdleWorkers()) {
-        tryAssignWork(w.workerId).catch(err => flog(`ERROR tryAssignWork: ${fmtError(err)}`));
-      }
     }
 
     ws.on("message", (data) => {
@@ -936,9 +925,9 @@ export function createForemanWss(
       });
       broadcastMessageEvent({ direction: "received", workerId: rcvWorkerId, taskId: rcvTaskId, msgType: msg.type });
 
-      if (msg.type === "worker_hello") handleWorkerHello(msg);
-      else if (msg.type === "task_complete") handleTaskComplete(msg);
-      else if (msg.type === "worker_goodbye") handleWorkerGoodbye(msg);
+      if (msg.type === "worker_hello") { handleWorkerHello(msg); assignIdleWorkers(); }
+      else if (msg.type === "task_complete") { handleTaskComplete(msg); assignIdleWorkers(); }
+      else if (msg.type === "worker_goodbye") { handleWorkerGoodbye(msg); assignIdleWorkers(); }
       else flog(`[worker ${workerId}] unknown message type: ${(msg as R).type}`);
     });
 
