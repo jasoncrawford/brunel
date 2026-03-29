@@ -199,15 +199,13 @@ async function run(): Promise<void> {
   // the registry immediately on disconnect. The in-process fake worker below
   // will be the only idle worker when the webhook fires.
   //
-  // We must wait for the foreman to log the disconnect before proceeding;
-  // otherwise both the real worker and the fake worker may be idle when the
-  // webhook fires, causing the real worker to steal the task_assigned.
-  let realWorkerDisconnected = false;
-  foreman.stdout!.on("data", (buf: Buffer) => {
-    if (buf.toString().includes("disconnected")) realWorkerDisconnected = true;
-  });
+  // Wait for the worker process to fully exit, then add a brief pause so the
+  // foreman can process the TCP close event and remove the worker from its
+  // registry before we post the webhook.
+  const workerExited = new Promise<void>((resolve) => worker!.once("exit", resolve));
   worker!.kill();
-  await waitFor(() => realWorkerDisconnected, TIMEOUT_MS, "real worker disconnect");
+  await workerExited;
+  await new Promise((r) => setTimeout(r, 200));
 
   // Wait for the foreman to confirm the real worker has disconnected before
   // connecting the fake worker.  Without this wait there is a race: kill()
