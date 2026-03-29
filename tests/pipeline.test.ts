@@ -194,7 +194,8 @@ function stubFetchNoBlockers() {
   vi.stubGlobal(
     "fetch",
     makeGithubFetchMock((url) => {
-      if (url.includes("api.github.com") || url.includes("/graphql")) {
+      const { hostname, pathname } = new URL(url);
+      if (hostname === "api.github.com" || pathname === "/graphql") {
         return makeGithubResponse({
           data: { repository: { issue: { blockedBy: { nodes: [] } } } },
         });
@@ -544,13 +545,14 @@ describe("pipeline: dependency blocking", () => {
     vi.stubGlobal(
       "fetch",
       makeGithubFetchMock((url) => {
-        if (url.includes("/graphql")) {
+        const { hostname, pathname } = new URL(url);
+        if (pathname === "/graphql") {
           // fetchNativeBlockers — no native blockers
           return makeGithubResponse({
             data: { repository: { issue: { blockedBy: { nodes: [] } } } },
           });
         }
-        if (url.includes("api.github.com")) {
+        if (hostname === "api.github.com") {
           // fetchIssueStates — issue #91 is open
           return makeGithubResponse({ number: 91, state: "open" });
         }
