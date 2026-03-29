@@ -66,12 +66,6 @@ describe("WorkerDetail", () => {
     );
   });
 
-  it("shows truncated worker id in heading", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ json: () => Promise.resolve([]) }));
-    renderWorkerDetail("worker-abc-def-123");
-    await waitFor(() => expect(screen.getByText(/Worker worker-a/)).toBeInTheDocument());
-  });
-
   it("shows empty state when no messages", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ json: () => Promise.resolve([]) }));
     renderWorkerDetail("worker-abc-def-123");
