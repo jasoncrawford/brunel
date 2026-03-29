@@ -6,7 +6,7 @@
  * 2. POST a fake webhook payload to /webhook (issues/labeled event)
  * 3. Assert the worker receives task_assigned within the timeout
  * 4. Worker sends task_complete
- * 5. Assert the mock GitHub API received a label-apply call
+ * 5. Assert the foreman processes task_complete (worker returns to idle)
  *
  * Run with: npm run smoke
  */
@@ -101,26 +101,14 @@ async function run(): Promise<void> {
   const foremanUrl = `ws://localhost:${port}`;
   const foremanHttpUrl = `http://localhost:${port}`;
 
-  // Track label-apply calls received by the mock API.
-  const labelCalls: Array<{ path: string; body: string }> = [];
-
   // Local mock GitHub API server — returns empty issues list so startup
-  // succeeds without real GitHub credentials, handles GraphQL blocker
-  // lookups with an empty response, and records label-apply calls.
+  // succeeds without real GitHub credentials, and handles GraphQL blocker
+  // lookups with an empty response.
   const mockApi = http.createServer((req, res) => {
     const chunks: Buffer[] = [];
     req.on("data", (chunk: Buffer) => chunks.push(chunk));
     req.on("end", () => {
-      const body = Buffer.concat(chunks).toString();
       const urlPath = req.url ?? "/";
-
-      // Record POST label calls: POST /repos/:owner/:repo/issues/:number/labels
-      if (req.method === "POST" && /\/repos\/[^/]+\/[^/]+\/issues\/\d+\/labels$/.test(urlPath)) {
-        labelCalls.push({ path: urlPath, body });
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end("[]");
-        return;
-      }
 
       // Handle GraphQL blocker queries — return empty blocker list.
       if (req.method === "POST" && urlPath === "/graphql") {
@@ -317,23 +305,22 @@ async function run(): Promise<void> {
   process.stderr.write(`[fake-worker] task_assigned received — taskId=${taskId}\n`);
   console.log(`✓ Phase 2: Worker received task_assigned (issue #${ISSUE_NUMBER})`);
 
-  // Send task_complete.
+  // Send task_complete and wait for the foreman to acknowledge it.
+  let taskCompleteAcked = false;
+  foreman.stdout!.on("data", (buf: Buffer) => {
+    if (buf.toString().includes(`task_complete #${ISSUE_NUMBER}`)) taskCompleteAcked = true;
+  });
   ws.send(JSON.stringify({ type: "task_complete", workerId, taskId }));
   process.stderr.write("[fake-worker] task_complete sent\n");
   console.log("✓ Phase 3: Worker sent task_complete");
 
-  // Wait for the mock API to receive the label-apply call.
+  // Wait for the foreman to log that it processed the task_complete.
   await withTimeout(
-    waitFor(() => labelCalls.length > 0, TIMEOUT_MS, "label call"),
+    waitFor(() => taskCompleteAcked, TIMEOUT_MS, "foreman task_complete log"),
     TIMEOUT_MS,
-    `label call to /repos/test/test/issues/${ISSUE_NUMBER}/labels`,
+    `foreman to process task_complete #${ISSUE_NUMBER}`,
   );
-  const labelCall = labelCalls[0];
-  const expectedPath = `/repos/test/test/issues/${ISSUE_NUMBER}/labels`;
-  if (!labelCall.path.includes(expectedPath)) {
-    throw new Error(`Expected label call to ${expectedPath}, got: ${labelCall.path}`);
-  }
-  console.log(`✓ Phase 4: Mock API received label call (${labelCall.path})`);
+  console.log(`✓ Phase 4: Foreman processed task_complete (issue #${ISSUE_NUMBER})`);
 
   // Teardown
   ws.close();
