@@ -107,13 +107,15 @@ test("live task assignment: dashboard updates without page reload", async ({
     });
 
     // Task row should appear and transition to "assigned" in real time.
-    // Use .first() since the same task ID link may appear in multiple places
-    // (task table + Recent Events log).
-    await expect(page.getByRole("link", { name: "#2001" }).first()).toBeVisible();
-    const taskRow = page
-      .getByRole("row")
-      .filter({ hasText: "#2001" })
-      .first();
+    // Scope to the Tasks section so we don't accidentally match a Recent Events
+    // row that also contains "#2001" (those rows appear earlier in real time, via
+    // log_event, before the snapshot updates the task table, and don't have
+    // "assigned" in their cells).
+    const tasksSection = page
+      .locator("section")
+      .filter({ has: page.locator("h3").filter({ hasText: /Tasks/ }) });
+    await expect(tasksSection.getByRole("link", { name: "#2001" })).toBeVisible();
+    const taskRow = tasksSection.getByRole("row").filter({ hasText: "#2001" });
     await expect(taskRow.getByText("assigned")).toBeVisible();
 
     // Workers section header shows "1 busy" (or at least the worker item

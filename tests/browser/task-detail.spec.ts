@@ -59,8 +59,18 @@ test("task detail page: live events appear as webhooks arrive for that task", as
     repository: { html_url: "https://github.com/test/repo" },
   });
 
+  // Set up admin WS listener BEFORE navigating — same pattern as worker-detail
+  // test 2, since TaskDetail only handles live log_events (not initial_log).
+  const adminWsReady = page.waitForEvent("websocket", (ws) =>
+    ws.url().includes("/admin/ws"),
+  );
+
   // Navigate to the task detail page and wait for the WS to connect
   await page.goto("/tasks/5001");
+
+  const adminWs = await adminWsReady;
+  // Wait for the initial snapshot/log frame to confirm the WS is open and ready
+  await adminWs.waitForEvent("framereceived", { timeout: 5000 });
 
   // Fire another webhook for this task (an issue comment event)
   // The foreman routes it to the task and broadcasts it as a log_event
