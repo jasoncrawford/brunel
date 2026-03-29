@@ -182,10 +182,59 @@ describe("fmtEventDetails - workflow_run", () => {
   });
 });
 
+describe("fmtEventDetails - delete", () => {
+  it("includes ref_type and ref for a branch deletion", () => {
+    const event: GitHubEvent = {
+      id: "evt-12",
+      name: "delete",
+      payload: { ref_type: "branch", ref: "feature/my-branch" },
+    };
+    const result = fmtEventDetails(event);
+    expect(result).toContain("branch");
+    expect(result).toContain("feature/my-branch");
+  });
+
+  it("includes ref_type and ref for a tag deletion", () => {
+    const event: GitHubEvent = {
+      id: "evt-13",
+      name: "delete",
+      payload: { ref_type: "tag", ref: "v1.2.3" },
+    };
+    const result = fmtEventDetails(event);
+    expect(result).toContain("tag");
+    expect(result).toContain("v1.2.3");
+  });
+});
+
+describe("fmtEventDetails - issues labeled", () => {
+  it("includes label name for issues/labeled", () => {
+    const event: GitHubEvent = {
+      id: "evt-14",
+      name: "issues",
+      payload: {
+        action: "labeled",
+        label: { name: "bug" },
+        issue: { number: 42, title: "Something broken" },
+      },
+    };
+    const result = fmtEventDetails(event);
+    expect(result).toContain("bug");
+  });
+
+  it("returns empty string for issues events without a label", () => {
+    const event: GitHubEvent = {
+      id: "evt-15",
+      name: "issues",
+      payload: { action: "closed", issue: { number: 42, title: "Something" } },
+    };
+    expect(fmtEventDetails(event)).toBe("");
+  });
+});
+
 describe("fmtEventDetails - unknown event", () => {
   it("returns empty string for unknown event types", () => {
     const event: GitHubEvent = {
-      id: "evt-12",
+      id: "evt-16",
       name: "some_unknown_event",
       payload: {},
     };

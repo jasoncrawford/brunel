@@ -156,6 +156,15 @@ export function fmtEventDetails(event: GitHubEvent): string {
       const status = str(run.conclusion || run.status);
       return `"${str(run.name)}" ${status}`.trim();
     }
+    case "delete": {
+      const refType = str(p.ref_type);
+      const ref = str(p.ref);
+      return `${refType} ${ref}`.trim();
+    }
+    case "issues": {
+      const label = asObj(p.label) as { name?: string } | null;
+      return label?.name ? `label: ${label.name}` : "";
+    }
     default:
       return "";
   }

@@ -320,6 +320,171 @@ describe("queryWorkerMessages includes webhook events", () => {
   });
 });
 
+describe("webhookToEntry richer summaries", () => {
+  function makeSupabaseWithWebhookRow(row: Record<string, unknown>) {
+    const makeBuilder = (data: Record<string, unknown>[]) => ({
+      insert: vi.fn().mockResolvedValue({ error: null }),
+      select: vi.fn().mockReturnThis(),
+      order: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      then: vi.fn().mockImplementation((cb: (v: { data: unknown[]; error: null }) => unknown) =>
+        Promise.resolve(cb({ data, error: null }))
+      ),
+    });
+    return {
+      from: vi.fn().mockImplementation((t: string) =>
+        t === "webhook_events" ? makeBuilder([row]) : makeBuilder([])
+      ),
+    };
+  }
+
+  it("includes check run name and conclusion for check_run/completed", async () => {
+    const supabase = makeSupabaseWithWebhookRow({
+      id: 1, received_at: "2026-03-27T00:00:00Z",
+      event_name: "check_run", action: "completed", issue_number: null,
+      task_id: "42", worker_id: null,
+      payload: { action: "completed", check_run: { name: "CI / build", conclusion: "success" } },
+    });
+    const logger = createDbLogger(supabase as unknown as Parameters<typeof createDbLogger>[0]);
+    const entries = await logger.queryLog({});
+    expect(entries[0].summary).toContain("CI / build");
+    expect(entries[0].summary).toContain("success");
+  });
+
+  it("includes branch ref for push events", async () => {
+    const supabase = makeSupabaseWithWebhookRow({
+      id: 1, received_at: "2026-03-27T00:00:00Z",
+      event_name: "push", action: null, issue_number: null,
+      task_id: null, worker_id: null,
+      payload: { ref: "refs/heads/main", commits: [{}, {}] },
+    });
+    const logger = createDbLogger(supabase as unknown as Parameters<typeof createDbLogger>[0]);
+    const entries = await logger.queryLog({});
+    expect(entries[0].summary).toContain("refs/heads/main");
+  });
+
+  it("includes PR number and title for pull_request events", async () => {
+    const supabase = makeSupabaseWithWebhookRow({
+      id: 1, received_at: "2026-03-27T00:00:00Z",
+      event_name: "pull_request", action: "closed", issue_number: null,
+      task_id: "42", worker_id: null,
+      payload: { action: "closed", pull_request: { number: 10, title: "Fix the bug" } },
+    });
+    const logger = createDbLogger(supabase as unknown as Parameters<typeof createDbLogger>[0]);
+    const entries = await logger.queryLog({});
+    expect(entries[0].summary).toContain("10");
+    expect(entries[0].summary).toContain("Fix the bug");
+  });
+
+  it("includes label name for issues/labeled events", async () => {
+    const supabase = makeSupabaseWithWebhookRow({
+      id: 1, received_at: "2026-03-27T00:00:00Z",
+      event_name: "issues", action: "labeled", issue_number: 42,
+      task_id: "42", worker_id: null,
+      payload: { action: "labeled", issue: { number: 42, title: "Fix" }, label: { name: "bug" } },
+    });
+    const logger = createDbLogger(supabase as unknown as Parameters<typeof createDbLogger>[0]);
+    const entries = await logger.queryLog({});
+    expect(entries[0].summary).toContain("bug");
+  });
+
+  it("includes ref_type and ref for delete events", async () => {
+    const supabase = makeSupabaseWithWebhookRow({
+      id: 1, received_at: "2026-03-27T00:00:00Z",
+      event_name: "delete", action: null, issue_number: null,
+      task_id: null, worker_id: null,
+      payload: { ref_type: "branch", ref: "feature/old" },
+    });
+    const logger = createDbLogger(supabase as unknown as Parameters<typeof createDbLogger>[0]);
+    const entries = await logger.queryLog({});
+    expect(entries[0].summary).toContain("branch");
+    expect(entries[0].summary).toContain("feature/old");
+  });
+
+  it("includes comment text for issue_comment events", async () => {
+    const supabase = makeSupabaseWithWebhookRow({
+      id: 1, received_at: "2026-03-27T00:00:00Z",
+      event_name: "issue_comment", action: "created", issue_number: 42,
+      task_id: "42", worker_id: null,
+      payload: { action: "created", comment: { body: "LGTM!" } },
+    });
+    const logger = createDbLogger(supabase as unknown as Parameters<typeof createDbLogger>[0]);
+    const entries = await logger.queryLog({});
+    expect(entries[0].summary).toContain("LGTM!");
+  });
+
+  it("falls back gracefully for rows without payload", async () => {
+    const supabase = makeSupabaseWithWebhookRow({
+      id: 1, received_at: "2026-03-27T00:00:00Z",
+      event_name: "issues", action: "labeled", issue_number: 42,
+      task_id: "42", worker_id: null,
+      payload: null,
+    });
+    const logger = createDbLogger(supabase as unknown as Parameters<typeof createDbLogger>[0]);
+    const entries = await logger.queryLog({});
+    expect(entries[0].summary).toContain("issues");
+    expect(entries[0].summary).toContain("labeled");
+  });
+});
+
+describe("messageToEntry richer summaries", () => {
+  function makeSupabaseWithMessageRow(row: Record<string, unknown>) {
+    const makeBuilder = (data: Record<string, unknown>[]) => ({
+      insert: vi.fn().mockResolvedValue({ error: null }),
+      select: vi.fn().mockReturnThis(),
+      order: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      then: vi.fn().mockImplementation((cb: (v: { data: unknown[]; error: null }) => unknown) =>
+        Promise.resolve(cb({ data, error: null }))
+      ),
+    });
+    return {
+      from: vi.fn().mockImplementation((t: string) =>
+        t === "foreman_messages" ? makeBuilder([row]) : makeBuilder([])
+      ),
+    };
+  }
+
+  it("includes 'idle' status for worker_hello when idle", async () => {
+    const supabase = makeSupabaseWithMessageRow({
+      id: 1, created_at: "2026-03-27T00:00:00Z",
+      direction: "received", worker_id: "w1", task_id: null,
+      msg_type: "worker_hello",
+      payload: { type: "worker_hello", workerId: "w1", status: "idle" },
+    });
+    const logger = createDbLogger(supabase as unknown as Parameters<typeof createDbLogger>[0]);
+    const entries = await logger.queryWorkerMessages("w1");
+    expect(entries[0].summary).toContain("idle");
+  });
+
+  it("includes 'busy' status and taskId for worker_hello when busy", async () => {
+    const supabase = makeSupabaseWithMessageRow({
+      id: 1, created_at: "2026-03-27T00:00:00Z",
+      direction: "received", worker_id: "w1", task_id: "42",
+      msg_type: "worker_hello",
+      payload: { type: "worker_hello", workerId: "w1", status: "busy", taskId: "42" },
+    });
+    const logger = createDbLogger(supabase as unknown as Parameters<typeof createDbLogger>[0]);
+    const entries = await logger.queryWorkerMessages("w1");
+    expect(entries[0].summary).toContain("busy");
+    expect(entries[0].summary).toContain("42");
+  });
+
+  it("includes the forwarded event name for event_notification", async () => {
+    const supabase = makeSupabaseWithMessageRow({
+      id: 1, created_at: "2026-03-27T00:00:00Z",
+      direction: "sent", worker_id: "w1", task_id: "42",
+      msg_type: "event_notification",
+      payload: { type: "event_notification", taskId: "42", event: { id: "e1", name: "check_run", payload: { action: "completed" } } },
+    });
+    const logger = createDbLogger(supabase as unknown as Parameters<typeof createDbLogger>[0]);
+    const entries = await logger.queryWorkerMessages("w1");
+    expect(entries[0].summary).toContain("check_run");
+  });
+});
+
 describe("createNullDbLogger", () => {
   it("logWebhookEvent is a no-op", () => {
     const logger = createNullDbLogger();
