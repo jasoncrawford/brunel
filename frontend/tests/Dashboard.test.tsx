@@ -113,11 +113,11 @@ describe("Dashboard", () => {
     act(() => {
       capturedHandler!({
         type: "snapshot",
-        tasks: [{ taskId: "42", issueNumber: 42, title: "Fix bug", status: "assigned", prUrl: "https://github.com/test/repo/pull/7" }],
+        tasks: [{ taskId: "42", issueNumber: 42, title: "Fix bug", status: "assigned", prNumber: 7, prUrl: "https://github.com/test/repo/pull/7" }],
         workers: [],
       });
     });
-    const link = screen.getByRole("link", { name: "PR" });
+    const link = screen.getByRole("link", { name: "#7" });
     expect(link).toHaveAttribute("href", "https://github.com/test/repo/pull/7");
   });
 

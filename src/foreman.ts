@@ -250,6 +250,7 @@ export class TaskQueue {
       title: t.title,
       status: t.status,
       assignedWorkerId: t.assignedWorkerId,
+      prNumber: t.prNumber,
       prUrl: t.prNumber !== undefined ? `${t.repoUrl}/pull/${t.prNumber}` : undefined,
     }));
   }

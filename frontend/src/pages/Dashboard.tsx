@@ -52,7 +52,7 @@ export default function Dashboard() {
                     ? <Link to={`/workers/${t.assignedWorkerId}`}>{t.assignedWorkerId.slice(0, 8)}</Link>
                     : "—"}</td>
                   <td style={td}>{t.prUrl
-                    ? <a href={t.prUrl} target="_blank" rel="noreferrer">PR</a>
+                    ? <a href={t.prUrl} target="_blank" rel="noreferrer">#{t.prNumber}</a>
                     : "—"}</td>
                 </tr>
               ))}
