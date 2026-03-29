@@ -504,6 +504,7 @@ export function createForemanWss(
     openIssues?: Set<number>;
     repo?: string;
     token?: string;
+    githubApiUrl?: string;
     dbLogger?: DbLogger;
     adminWss?: AdminWss;
     workerSecret?: string;
@@ -522,6 +523,7 @@ export function createForemanWss(
   // repo and token default to "" for unit tests, which don't exercise GitHub-calling paths
   const repo = options.repo ?? "";
   const token = options.token ?? "";
+  const githubApiUrl = options.githubApiUrl;
   const dbLogger = options.dbLogger;
   const adminWss = options.adminWss;
   const workerSecret = options.workerSecret;
@@ -1054,7 +1056,7 @@ export function createForemanWss(
   });
 
   function startDepsLoad(issueNumber: number, body: string): void {
-    fetchBlockers(issueNumber, body, { repo, token })
+    fetchBlockers(issueNumber, body, { repo, token, apiUrl: githubApiUrl })
       .then((blockers) => {
         setBlockers(issueNumber, blockers, graph);
         return blockers.length > 0
@@ -1177,6 +1179,7 @@ if (isMain) {
       taskLabel: config.taskLabel,
       repo: config.githubRepo,
       token: config.githubToken,
+      githubApiUrl: config.githubApiUrl,
       dbLogger,
       adminWss,
       workerSecret: config.workerSecret,
@@ -1188,6 +1191,7 @@ if (isMain) {
           repo: config.githubRepo,
           token: config.githubToken,
           doneLabel: config.doneLabel,
+          apiUrl: config.githubApiUrl,
         }),
     },
   );

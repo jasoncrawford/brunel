@@ -59,7 +59,7 @@ export function isBlocked(
 export async function fetchBlockers(
   issueNumber: number,
   body: string,
-  opts: { repo: string; token: string },
+  opts: { repo: string; token: string; apiUrl?: string },
 ): Promise<number[]> {
   const [bodyBlockers, nativeBlockers] = await Promise.all([
     Promise.resolve(parseBodyBlockers(body)),
