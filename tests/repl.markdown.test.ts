@@ -294,6 +294,77 @@ describe("renderTable - text wrapping", () => {
   });
 });
 
+describe("renderTable - inline formatting column widths", () => {
+  it("all rows have equal visible column widths when mixing bold and plain cells", () => {
+    // **Alice** is 9 raw chars but 5 visible; Bob is 3 visible
+    // Both columns should render with the same width (max visible = 5)
+    const lines = [
+      "| Name | Status |",
+      "| --- | --- |",
+      "| **Alice** | active |",
+      "| Bob | inactive |",
+    ];
+    const result = renderTable(lines, 80);
+    const rowLines = stripAnsi(result).split("\n").filter(l => l.startsWith("│"));
+    const lengths = rowLines.map(l => l.length);
+    expect(lengths.every(l => l === lengths[0])).toBe(true);
+  });
+
+  it("bold cell renders with ANSI bold codes in output", () => {
+    const lines = [
+      "| Name |",
+      "| --- |",
+      "| **Alice** |",
+    ];
+    const result = renderTable(lines, 80);
+    expect(result).toContain("\x1b[1m");
+    expect(stripAnsi(result)).toContain("Alice");
+  });
+
+  it("inline code in table cell renders with bold+underline", () => {
+    const lines = [
+      "| Command |",
+      "| --- |",
+      "| `git status` |",
+    ];
+    const result = renderTable(lines, 80);
+    expect(result).toContain("\x1b[1m");
+    expect(result).toContain("\x1b[4m");
+    expect(stripAnsi(result)).toContain("git status");
+  });
+
+  it("column width reflects visible length not raw markdown length", () => {
+    // A table with only one formatted cell; column width should equal
+    // the visible length of **bold** (4), not the raw length (9)
+    // Header "Col" is 3 chars, so column width = max(3, 4) = 4
+    const lines = [
+      "| Col |",
+      "| --- |",
+      "| **bold** |",
+    ];
+    const result = stripAnsi(renderTable(lines, 80));
+    expect(result).toContain("bold");
+    // Divider for width=4: "├─" + "────" + "─┤" = "├──────┤"
+    expect(result).toContain("├──────┤");
+    // Data row for "bold" padded to 4: "│ bold │" (no extra spaces)
+    expect(result).toContain("│ bold │");
+  });
+
+  it("plain text rows still align with formatted rows", () => {
+    const lines = [
+      "| Name | Status |",
+      "| --- | --- |",
+      "| **Alice** | active |",
+      "| Bob | inactive |",
+    ];
+    const result = stripAnsi(renderTable(lines, 80));
+    const rowLines = result.split("\n").filter(l => l.startsWith("│"));
+    // Each row must end with │ at the same position
+    const lastPipe = rowLines.map(l => l.lastIndexOf("│"));
+    expect(lastPipe.every(p => p === lastPipe[0])).toBe(true);
+  });
+});
+
 describe("renderMarkdown - mixed content", () => {
   it("heading + paragraph + list all rendered", () => {
     const input = "# Title\n\nSome text.\n\n- item1\n- item2";

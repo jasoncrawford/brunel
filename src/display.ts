@@ -333,6 +333,53 @@ function wrapText(text: string, width: number): string[] {
   return lines.length > 0 ? lines : [""];
 }
 
+// Strips ANSI escape sequences to measure the visible length of a string.
+function visLen(str: string): number {
+  return str.replace(/\x1b\[[0-9;]*m/g, "").length;
+}
+
+// Pads a (possibly ANSI-formatted) string to `width` visible characters.
+function ansiPadEnd(str: string, width: number): string {
+  return str + " ".repeat(Math.max(0, width - visLen(str)));
+}
+
+// Like wrapText but measures word lengths by visible characters, so ANSI
+// escape sequences in pre-formatted strings don't distort line breaks.
+function wrapTextAnsi(text: string, width: number): string[] {
+  if (width <= 0 || visLen(text) <= width) return [text];
+  const words = text.split(" ");
+  const lines: string[] = [];
+  let current = "";
+  let currentLen = 0;
+  for (const word of words) {
+    const wl = visLen(word);
+    if (currentLen === 0) {
+      if (wl > width) {
+        // Can't safely split ANSI strings mid-character; push as-is.
+        lines.push(word);
+      } else {
+        current = word;
+        currentLen = wl;
+      }
+    } else if (currentLen + 1 + wl <= width) {
+      current += " " + word;
+      currentLen += 1 + wl;
+    } else {
+      lines.push(current);
+      if (wl > width) {
+        lines.push(word);
+        current = "";
+        currentLen = 0;
+      } else {
+        current = word;
+        currentLen = wl;
+      }
+    }
+  }
+  if (current) lines.push(current);
+  return lines.length > 0 ? lines : [""];
+}
+
 function distributeWidths(naturalWidths: number[], available: number): number[] {
   const N = naturalWidths.length;
   if (N === 0) return [];
@@ -363,29 +410,35 @@ export function renderTable(tableLines: string[], maxWidth?: number): string {
     line.split("|").slice(1, -1).map(cell => cell.trim())
   );
   const isSep = (row: string[]) => row.every(cell => /^[-: ]+$/.test(cell));
-  const dataRows = rows.filter(r => !isSep(r));
+
+  // Pre-apply inline formatting so column widths are measured in visible
+  // characters, not raw markdown source (e.g. **bold** is 4 visible chars,
+  // not 8 raw chars).
+  const fmtRows = rows.map(row => isSep(row) ? row : row.map(mdInline));
+
+  const dataRows = fmtRows.filter(r => !isSep(r));
   const colCount = Math.max(...dataRows.map(r => r.length));
   const naturalWidths = Array.from({ length: colCount }, (_, i) =>
-    Math.max(...dataRows.map(r => (r[i] ?? "").length))
+    Math.max(...dataRows.map(r => visLen(r[i] ?? "")))
   );
   // overhead: "│ " (2) + " │ " * (N-1) (3*(N-1)) + " │" (2) = 1 + 3*N
   const overhead = 1 + 3 * colCount;
   const available = Math.max(termWidth - overhead, colCount);
   const widths = distributeWidths(naturalWidths, available);
   const renderRow = (row: string[]): string => {
-    const wrapped = widths.map((w, i) => wrapText(row[i] ?? "", w));
+    const wrapped = widths.map((w, i) => wrapTextAnsi(row[i] ?? "", w));
     const numLines = Math.max(...wrapped.map(ls => ls.length));
     const termRows: string[] = [];
     for (let ln = 0; ln < numLines; ln++) {
       termRows.push(
-        "│ " + widths.map((w, i) => mdInline((wrapped[i][ln] ?? "").padEnd(w))).join(" │ ") + " │"
+        "│ " + widths.map((w, i) => ansiPadEnd(wrapped[i][ln] ?? "", w)).join(" │ ") + " │"
       );
     }
     return termRows.join("\n");
   };
   const divider = "├─" + widths.map(w => "─".repeat(w)).join("─┼─") + "─┤";
   const out: string[] = [];
-  for (const row of rows) {
+  for (const row of fmtRows) {
     if (isSep(row)) { out.push(divider); continue; }
     out.push(renderRow(row));
   }
