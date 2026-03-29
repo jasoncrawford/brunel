@@ -48,37 +48,37 @@ describe("Dashboard", () => {
     vi.restoreAllMocks();
   });
 
-  it("fetches from /api/log on mount", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ json: () => Promise.resolve([]) }));
+  it("shows empty state when no events", () => {
     renderDashboard();
-    await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/log"));
+    expect(screen.getByText("No events yet.")).toBeInTheDocument();
   });
 
-  it("shows empty state when no events", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ json: () => Promise.resolve([]) }));
+  it("renders events from initial_log WebSocket message", async () => {
     renderDashboard();
-    await waitFor(() => expect(screen.getByText("No events yet.")).toBeInTheDocument());
-  });
-
-  it("renders historical events loaded from the API", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ json: () => Promise.resolve([webhookEntry, messageEntry]) }));
-    renderDashboard();
-    await waitFor(() => expect(screen.getByText("issues/labeled #42")).toBeInTheDocument());
+    act(() => {
+      capturedHandler!({ type: "initial_log", entries: [webhookEntry, messageEntry] });
+    });
+    expect(screen.getByText("issues/labeled #42")).toBeInTheDocument();
     expect(screen.getByText("sent task_assigned")).toBeInTheDocument();
   });
 
-  it("shows both webhook and message kinds from API", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ json: () => Promise.resolve([webhookEntry, messageEntry]) }));
+  it("shows both webhook and message kinds from initial_log", async () => {
     renderDashboard();
-    await waitFor(() => expect(screen.getByText("webhook")).toBeInTheDocument());
+    act(() => {
+      capturedHandler!({ type: "initial_log", entries: [webhookEntry, messageEntry] });
+    });
+    expect(screen.getByText("webhook")).toBeInTheDocument();
     expect(screen.getByText("message")).toBeInTheDocument();
   });
 
-  it("prepends new log_event messages from WebSocket to historical events", async () => {
+  it("prepends new log_event messages to events from initial_log", async () => {
     const newEntry: LogEntry = { kind: "message", id: 3, timestamp: "2026-01-01T10:02:00.000Z", taskId: null, workerId: "worker-abc-123", summary: "received worker_hello" };
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ json: () => Promise.resolve([webhookEntry]) }));
     renderDashboard();
-    await waitFor(() => expect(screen.getByText("issues/labeled #42")).toBeInTheDocument());
+
+    act(() => {
+      capturedHandler!({ type: "initial_log", entries: [webhookEntry] });
+    });
+    expect(screen.getByText("issues/labeled #42")).toBeInTheDocument();
 
     act(() => {
       capturedHandler!({ type: "log_event", entry: newEntry });
@@ -89,14 +89,33 @@ describe("Dashboard", () => {
   });
 
   it("does not add events to log on snapshot messages", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ json: () => Promise.resolve([]) }));
     renderDashboard();
-    await waitFor(() => expect(screen.getByText("No events yet.")).toBeInTheDocument());
-
     act(() => {
       capturedHandler!({ type: "snapshot", tasks: [], workers: [] });
     });
-
     expect(screen.getByText("No events yet.")).toBeInTheDocument();
+  });
+
+  it("replaces existing events when a new initial_log arrives (reconnect)", async () => {
+    const freshEntry: LogEntry = { kind: "webhook", id: 10, timestamp: "2026-01-02T00:00:00.000Z", taskId: null, workerId: null, summary: "new event after reconnect" };
+    renderDashboard();
+
+    act(() => {
+      capturedHandler!({ type: "initial_log", entries: [webhookEntry] });
+    });
+    expect(screen.getByText("issues/labeled #42")).toBeInTheDocument();
+
+    act(() => {
+      capturedHandler!({ type: "initial_log", entries: [freshEntry] });
+    });
+    expect(screen.getByText("new event after reconnect")).toBeInTheDocument();
+    expect(screen.queryByText("issues/labeled #42")).not.toBeInTheDocument();
+  });
+
+  it("does not fetch from /api/log on mount", () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    renderDashboard();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

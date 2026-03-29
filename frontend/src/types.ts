@@ -23,4 +23,5 @@ export interface LogEntry {
 
 export type AdminMessage =
   | { type: "snapshot"; tasks: TaskSnapshot[]; workers: WorkerSnapshot[] }
+  | { type: "initial_log"; entries: LogEntry[] }
   | { type: "log_event"; entry: LogEntry };
