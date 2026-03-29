@@ -32,12 +32,23 @@ Config (in `.env` or `brunel.config.ts`; CLI flags also accepted). Precedence: C
 
 - `npm test` — unit tests (vitest)
 - `npm run smoke` — end-to-end smoke test: spawns real foreman + worker and asserts they connect
+- `npm run test:browser` — Playwright browser tests for the admin dashboard (requires a built frontend: `npm run build` first)
 - `npm run lint` — ESLint (`no-floating-promises` as error, `no-explicit-any` as warn)
 - `npx tsc --noEmit` — type check
 
-All four run in CI on every PR.
+All five run in CI on every PR.
 
 ## Running tests locally
+
+Browser tests require a built frontend and Playwright browsers:
+
+```
+npm run build                        # build the admin dashboard SPA
+npx playwright install chromium      # first time only
+npm run test:browser
+```
+
+The browser tests start a real foreman on port 14567 via `playwright.config.ts` `webServer`. State is seeded through real `POST /webhook` calls; test-only helpers (`/test/connect-worker`, `/test/workers/:id`) live in `tests/browser/server.ts` and are added by intercepting `rawListeners("request")` so the production `createHttpServer` is never modified.
 
 DB tests require a running local Supabase instance:
 
@@ -83,3 +94,4 @@ A task moves through states: **pending → assigned → complete**.
 - Options passed to `createForemanWss` that have a corresponding required config field should be required (not optional with `??` fallback) — the config schema is the single source of truth for defaults.
 - In WebSocket tests, use the `makeQueue` helper (defined in each test file) instead of sequential `ws.once("message")` calls. Both `hello_ack` and `task_assigned` can arrive in the same TCP packet and fire synchronously — `makeQueue` installs a permanent listener with a FIFO buffer so no message is missed.
 - In DB tests, each test file's `beforeEach` must only truncate the tables that file uses — not all tables. Vitest runs test files in parallel workers; if file A's `beforeEach` truncates tables owned by file B, file B's concurrent tests will lose their data. Use `tests/helpers/db.ts`'s `createTestSupabase()` and truncate inline with targeted `.delete()` calls.
+- In browser tests, the server is shared across all tests. Use unique issue numbers per test (1001, 2001, …) to avoid cross-test state interference instead of resetting server state. When a test needs to fire an event and verify it appears live on a page, set up `page.waitForEvent("websocket", ws => ws.url().includes("/admin/ws"))` **before** `page.goto()`, then await the returned WebSocket and call `ws.waitForEvent("framereceived")` before firing the event — this prevents the race where the event is broadcast before the page's admin WebSocket has connected.
