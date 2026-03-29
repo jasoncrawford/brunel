@@ -1,6 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import type { TaskRow } from "../types.ts";
+import { useAdminWs } from "../hooks/useAdminWs.ts";
+import type { AdminMessage, TaskRow } from "../types.ts";
 
 export default function TaskList() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -16,6 +17,18 @@ export default function TaskList() {
       .then((data) => { setTasks(data); setLoading(false); })
       .catch((err) => { console.error(err); setLoading(false); });
   }, [statusFilter]);
+
+  const handleMessage = useCallback((msg: AdminMessage) => {
+    if (msg.type === "snapshot") {
+      const statusMap = new Map(msg.tasks.map((t) => [t.taskId, t.status]));
+      setTasks((prev) => prev.map((row) => {
+        const newStatus = statusMap.get(row.taskId);
+        return newStatus && newStatus !== row.status ? { ...row, status: newStatus } : row;
+      }));
+    }
+  }, []);
+
+  useAdminWs(handleMessage);
 
   function setFilter(s: "all" | "pending" | "assigned" | "complete") {
     if (s === "all") setSearchParams({});
