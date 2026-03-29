@@ -1,111 +1,103 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { createTaskAssignmentStore, createNullTaskAssignmentStore } from "../src/db.js";
+import { createTestSupabase } from "./helpers/db.js";
 
-// ── Fake Supabase builder ──────────────────────────────────────────────────────
+const supabase = createTestSupabase();
 
-function makeSupabase(seedRows: Record<string, unknown>[] = []) {
-  const rows = [...seedRows];
-
-  const upsertFn = vi.fn().mockResolvedValue({ error: null });
-  const updateFn = vi.fn().mockReturnThis();
-  const deleteFn = vi.fn().mockReturnThis();
-  const eqFn = vi.fn().mockResolvedValue({ error: null });
-  const selectFn = vi.fn().mockReturnThis();
-  const thenFn = vi.fn().mockImplementation(
-    (cb: (v: { data: unknown[]; error: null }) => unknown) =>
-      Promise.resolve(cb({ data: rows, error: null }))
-  );
-
-  const supabase = {
-    from: vi.fn().mockReturnValue({
-      upsert: upsertFn,
-      update: updateFn,
-      delete: deleteFn,
-      eq: eqFn,
-      select: selectFn,
-      then: thenFn,
-    }),
-    _upsertFn: upsertFn,
-    _updateFn: updateFn,
-    _deleteFn: deleteFn,
-    _eqFn: eqFn,
-    _selectFn: selectFn,
-  };
-  return supabase;
-}
+beforeEach(async () => {
+  await supabase.from("task_assignments").delete().neq("task_id", "");
+});
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
 describe("createTaskAssignmentStore", () => {
-  it("upsertAssignment calls supabase upsert on task_assignments", async () => {
-    const sb = makeSupabase();
-    const store = createTaskAssignmentStore(sb as never);
+  it("upsertAssignment stores a row in task_assignments", async () => {
+    const store = createTaskAssignmentStore(supabase);
     await store.upsertAssignment("42", "worker-1");
-    expect(sb.from).toHaveBeenCalledWith("task_assignments");
-    expect(sb._upsertFn).toHaveBeenCalledWith(
-      expect.objectContaining({ task_id: "42", worker_id: "worker-1" }),
-      expect.objectContaining({ onConflict: "task_id" }),
-    );
+
+    const assignments = await store.listAssignments();
+    expect(assignments).toHaveLength(1);
+    expect(assignments[0]).toMatchObject({
+      taskId: "42",
+      workerId: "worker-1",
+      prNumber: null,
+      branch: null,
+    });
   });
 
-  it("upsertAssignment throws if supabase returns an error", async () => {
-    const sb = makeSupabase();
-    sb._upsertFn.mockResolvedValue({ error: new Error("db down") });
-    const store = createTaskAssignmentStore(sb as never);
-    await expect(store.upsertAssignment("42", "w1")).rejects.toThrow("db down");
+  it("upsertAssignment replaces an existing row for the same task_id (on conflict)", async () => {
+    const store = createTaskAssignmentStore(supabase);
+    await store.upsertAssignment("42", "worker-1");
+    await store.upsertAssignment("42", "worker-2");
+
+    const assignments = await store.listAssignments();
+    expect(assignments).toHaveLength(1);
+    expect(assignments[0].workerId).toBe("worker-2");
   });
 
-  it("updatePr calls supabase update with pr_number and branch", async () => {
-    const sb = makeSupabase();
-    const store = createTaskAssignmentStore(sb as never);
+  it("updatePr stores pr_number and branch for the task", async () => {
+    const store = createTaskAssignmentStore(supabase);
+    await store.upsertAssignment("42", "worker-1");
     await store.updatePr("42", 10, "fix-issue-42");
-    expect(sb.from).toHaveBeenCalledWith("task_assignments");
-    expect(sb._updateFn).toHaveBeenCalledWith(
-      expect.objectContaining({ pr_number: 10, branch: "fix-issue-42" }),
-    );
+
+    const assignments = await store.listAssignments();
+    expect(assignments[0].prNumber).toBe(10);
+    expect(assignments[0].branch).toBe("fix-issue-42");
   });
 
-  it("updatePr passes null branch when branch is null", async () => {
-    const sb = makeSupabase();
-    const store = createTaskAssignmentStore(sb as never);
+  it("updatePr stores null branch when branch is null", async () => {
+    const store = createTaskAssignmentStore(supabase);
+    await store.upsertAssignment("42", "worker-1");
     await store.updatePr("42", 10, null);
-    expect(sb._updateFn).toHaveBeenCalledWith(
-      expect.objectContaining({ pr_number: 10, branch: null }),
-    );
+
+    const assignments = await store.listAssignments();
+    expect(assignments[0].prNumber).toBe(10);
+    expect(assignments[0].branch).toBeNull();
   });
 
-  it("deleteAssignment calls supabase delete filtered by task_id", async () => {
-    const sb = makeSupabase();
-    const store = createTaskAssignmentStore(sb as never);
+  it("deleteAssignment removes the row from task_assignments", async () => {
+    const store = createTaskAssignmentStore(supabase);
+    await store.upsertAssignment("42", "worker-1");
+    await store.upsertAssignment("99", "worker-2");
     await store.deleteAssignment("42");
-    expect(sb.from).toHaveBeenCalledWith("task_assignments");
-    expect(sb._deleteFn).toHaveBeenCalled();
-    expect(sb._eqFn).toHaveBeenCalledWith("task_id", "42");
+
+    const assignments = await store.listAssignments();
+    expect(assignments).toHaveLength(1);
+    expect(assignments[0].taskId).toBe("99");
   });
 
   it("listAssignments returns mapped rows", async () => {
-    const sb = makeSupabase([
-      { task_id: "42", worker_id: "w1", pr_number: 10, branch: "fix-42" },
-    ]);
-    const store = createTaskAssignmentStore(sb as never);
+    const store = createTaskAssignmentStore(supabase);
+    await store.upsertAssignment("42", "w1");
+    await store.updatePr("42", 10, "fix-42");
+
     const rows = await store.listAssignments();
     expect(rows).toHaveLength(1);
     expect(rows[0]).toEqual({ taskId: "42", workerId: "w1", prNumber: 10, branch: "fix-42" });
   });
 
   it("listAssignments handles null pr_number and branch", async () => {
-    const sb = makeSupabase([
-      { task_id: "42", worker_id: "w1", pr_number: null, branch: null },
-    ]);
-    const store = createTaskAssignmentStore(sb as never);
+    const store = createTaskAssignmentStore(supabase);
+    await store.upsertAssignment("42", "w1");
+
     const rows = await store.listAssignments();
     expect(rows[0]).toEqual({ taskId: "42", workerId: "w1", prNumber: null, branch: null });
   });
 
   it("listAssignments returns empty array when no rows", async () => {
-    const sb = makeSupabase([]);
-    const store = createTaskAssignmentStore(sb as never);
+    const store = createTaskAssignmentStore(supabase);
     expect(await store.listAssignments()).toEqual([]);
+  });
+
+  it("listAssignments returns multiple rows", async () => {
+    const store = createTaskAssignmentStore(supabase);
+    await store.upsertAssignment("1", "worker-a");
+    await store.upsertAssignment("2", "worker-b");
+
+    const rows = await store.listAssignments();
+    expect(rows).toHaveLength(2);
+    const taskIds = rows.map((r) => r.taskId).sort();
+    expect(taskIds).toEqual(["1", "2"]);
   });
 });
 

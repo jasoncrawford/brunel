@@ -16,6 +16,27 @@ jobs:
         with:
           node-version: 20
 
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Start local Supabase
+        run: supabase start
+
+      - name: Export Supabase credentials for tests
+        run: |
+          STATUS=$(supabase status 2>&1)
+          # Supabase CLI v2+: sb_secret_* key format (same "shared defaults" for all installs)
+          KEY=$(echo "$STATUS" | grep -o 'sb_secret_[A-Za-z0-9_-]*')
+          # Fallback: older CLI JWT service_role key
+          if [ -z "$KEY" ]; then
+            KEY=$(echo "$STATUS" | grep 'service_role' | awk '{print $NF}')
+          fi
+          {
+            echo "SUPABASE_URL=http://127.0.0.1:54321"
+            echo "SUPABASE_SERVICE_ROLE_KEY=${KEY}"
+          } >> "$GITHUB_ENV"
+
       - run: npm ci
 
       - run: npm test
