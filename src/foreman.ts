@@ -12,7 +12,7 @@ import { loadConfig } from "./config.js";
 import { isBlocked, setBlockers, fetchBlockers } from "./dependencies.js";
 import { fetchIssueStates } from "./github.js";
 import type { DependencyGraph } from "./dependencies.js";
-import { type DbLogger, type TaskAssignmentStore, createDbLogger, createTaskAssignmentStore, createNullDbLogger, createNullTaskAssignmentStore } from "./db.js";
+import { type DbLogger, type TaskAssignmentStore, type TaskStore, createDbLogger, createTaskAssignmentStore, createTaskStore, createNullDbLogger, createNullTaskAssignmentStore, createNullTaskStore } from "./db.js";
 import type { AdminWss, TaskSnapshot, WorkerSnapshot } from "./admin-ws.js";
 import { fmtError } from "./utils.js";
 
@@ -330,6 +330,7 @@ export function createHttpServer(
   webhooks: InstanceType<typeof Webhooks> | null,
   routeEvent: (id: string, name: string, payload: unknown) => void,
   dbLogger?: DbLogger,
+  taskStore?: TaskStore,
 ): http.Server {
   const app = new Hono();
 
@@ -403,6 +404,17 @@ export function createHttpServer(
     }
   });
 
+  app.get("/api/tasks", async (c) => {
+    try {
+      const status = c.req.query("status") as "pending" | "assigned" | "complete" | undefined;
+      const tasks = taskStore ? await taskStore.listTasks(status ? { status } : undefined) : [];
+      return c.json(tasks);
+    } catch (err) {
+      flog(`ERROR API query failed: ${fmtError(err)}`);
+      return c.json({ error: "internal error" }, 500);
+    }
+  });
+
   // ── Static files (React SPA) ───────────────────────────────────────────────
   // Serve dist/ for all other routes. Falls back to index.html for SPA routing.
   // Only active when dist/ exists (production build); in dev, Vite serves the frontend.
@@ -463,6 +475,7 @@ export function createForemanWss(
     labeledIssues?: Map<number, LabeledIssueState>;
     pingIntervalMs?: number;
     assignStore?: TaskAssignmentStore;
+    taskStore?: TaskStore;
     reclaimTimeoutMs: number;
   },
 ): ForemanWss {
@@ -483,6 +496,7 @@ export function createForemanWss(
     async deleteAssignment() {},
     async listAssignments() { return []; },
   };
+  const taskStore: TaskStore = options.taskStore ?? createNullTaskStore();
   const reclaimTimeoutMs = options.reclaimTimeoutMs;
 
   // Incrementing counter for unique broadcast IDs (React uses these as keys).
@@ -593,6 +607,9 @@ export function createForemanWss(
             // Persist PR number and branch so routing survives a foreman restart.
             assignStore.updatePr(linkedTask.taskId, prNumber, branch ?? null).catch(err =>
               flog(`ERROR Failed to update PR for task #${linkedTask.taskId}: ${fmtError(err)}`)
+            );
+            taskStore.updateTaskPr(linkedTask.taskId, prNumber, branch ?? null).catch(err =>
+              flog(`ERROR Failed to update task PR for #${linkedTask.taskId}: ${fmtError(err)}`)
             );
             flog(`[task #${linkedIssue}] PR #${prNumber} registered`);
             return result(linkedTask);
@@ -791,6 +808,9 @@ export function createForemanWss(
         log(workerId, "→ idle (DB write failed)");
         return;
       }
+      taskStore.markAssigned(task.taskId, workerId).catch(err =>
+        flog(`ERROR Failed to mark task #${task.taskId} assigned: ${fmtError(err)}`)
+      );
 
       const queued = taskQueue.drainEvents(task.taskId);
       const assignMsg: ForemanMessage = {
@@ -872,6 +892,9 @@ export function createForemanWss(
           assignStore.deleteAssignment(priorTask.taskId).catch(err =>
             flog(`ERROR Failed to delete assignment for #${priorTask.taskId}: ${fmtError(err)}`)
           );
+          taskStore.markPending(priorTask.taskId).catch(err =>
+            flog(`ERROR Failed to mark task #${priorTask.taskId} pending: ${fmtError(err)}`)
+          );
           log(workerId, `hello idle (had task #${priorTask.taskId}) — reverting task to pending`);
         } else {
           log(workerId, "hello idle");
@@ -887,6 +910,9 @@ export function createForemanWss(
         taskQueue.completeTask(msg.taskId);
         assignStore.deleteAssignment(msg.taskId).catch(err =>
           flog(`ERROR Failed to delete assignment for #${msg.taskId}: ${fmtError(err)}`)
+        );
+        taskStore.markComplete(msg.taskId).catch(err =>
+          flog(`ERROR Failed to mark task #${msg.taskId} complete: ${fmtError(err)}`)
         );
         labelDone(task.issueNumber).catch(err =>
           flog(`ERROR Failed to label issue done: ${fmtError(err)}`)
@@ -950,6 +976,9 @@ export function createForemanWss(
             if (!w || w.status !== "disconnected") return;
             log(workerId, `reclaim timer fired — reverting task #${taskId} to pending`);
             taskQueue.revertTask(taskId);
+            taskStore.markPending(taskId).catch(err =>
+              flog(`ERROR Failed to mark task #${taskId} pending: ${fmtError(err)}`)
+            );
             registry.remove(workerId);
             assignIdleWorkers();
           });
@@ -1003,6 +1032,10 @@ export function createForemanWss(
           repoUrl: issue.repoUrl,
           depsLoaded,
         });
+        // Persist task record; on conflict (restart) updates title only, preserves status.
+        taskStore.upsertTask(String(num), num, repo, issue.title).catch(err =>
+          flog(`ERROR Failed to persist task #${num}: ${fmtError(err)}`)
+        );
       }
     }
 
@@ -1043,22 +1076,25 @@ if (isMain) {
     ? new Webhooks({ secret: config.webhookSecret })
     : null;
 
-  // Setup DB logger and assignment store (share the same Supabase client if configured)
+  // Setup DB logger, assignment store, and task store (share the same Supabase client if configured)
   let dbLogger: DbLogger;
   let assignStore: TaskAssignmentStore;
+  let taskStore: TaskStore;
   if (config.supabaseUrl && config.supabaseSecretKey) {
     const { createClient } = await import("@supabase/supabase-js");
     const supabase = createClient(config.supabaseUrl, config.supabaseSecretKey);
     dbLogger = createDbLogger(supabase);
     assignStore = createTaskAssignmentStore(supabase);
+    taskStore = createTaskStore(supabase);
     flog("Supabase logging enabled");
   } else {
     dbLogger = createNullDbLogger();
     assignStore = createNullTaskAssignmentStore();
+    taskStore = createNullTaskStore();
   }
 
   let foremanWss: ForemanWss;
-  const server = createHttpServer(webhooks, (id, name, payload) => foremanWss.routeEvent(id, name, payload), dbLogger);
+  const server = createHttpServer(webhooks, (id, name, payload) => foremanWss.routeEvent(id, name, payload), dbLogger, taskStore);
 
   // Admin WebSocket broadcaster
   const { createAdminWss } = await import("./admin-ws.js");
@@ -1080,6 +1116,7 @@ if (isMain) {
       adminWss,
       workerSecret: config.workerSecret,
       assignStore,
+      taskStore,
       reclaimTimeoutMs: config.workerReclaimTimeoutMs,
       labelDone: (issueNumber) =>
         labelIssueDone(issueNumber, {

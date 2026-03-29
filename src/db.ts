@@ -267,3 +267,117 @@ export function createNullTaskAssignmentStore(): TaskAssignmentStore {
     async listAssignments() { return []; },
   };
 }
+
+// ── TaskStore ──────────────────────────────────────────────────────────────────
+
+export interface TaskRow {
+  taskId: string;
+  issueNumber: number;
+  repo: string;
+  title: string;
+  status: "pending" | "assigned" | "complete";
+  workerId: string | null;
+  prNumber: number | null;
+  branch: string | null;
+  createdAt: string;
+  assignedAt: string | null;
+  completedAt: string | null;
+}
+
+export interface ListTasksOpts {
+  status?: "pending" | "assigned" | "complete";
+  limit?: number;
+}
+
+export interface TaskStore {
+  /** Insert task with status=pending; on conflict update title only. */
+  upsertTask(taskId: string, issueNumber: number, repo: string, title: string): Promise<void>;
+  /** Mark task as assigned to a worker. */
+  markAssigned(taskId: string, workerId: string): Promise<void>;
+  /** Mark task as complete. */
+  markComplete(taskId: string): Promise<void>;
+  /** Revert task to pending, clearing worker_id. */
+  markPending(taskId: string): Promise<void>;
+  /** Update PR number and branch for a task. */
+  updateTaskPr(taskId: string, prNumber: number, branch: string | null): Promise<void>;
+  /** List tasks, optionally filtered by status. */
+  listTasks(opts?: ListTasksOpts): Promise<TaskRow[]>;
+}
+
+export function createTaskStore(supabase: SupabaseClient): TaskStore {
+  function rowToTaskRow(row: Record<string, unknown>): TaskRow {
+    return {
+      taskId: row.task_id as string,
+      issueNumber: row.issue_number as number,
+      repo: row.repo as string,
+      title: row.title as string,
+      status: row.status as "pending" | "assigned" | "complete",
+      workerId: (row.worker_id as string | null) ?? null,
+      prNumber: (row.pr_number as number | null) ?? null,
+      branch: (row.branch as string | null) ?? null,
+      createdAt: row.created_at as string,
+      assignedAt: (row.assigned_at as string | null) ?? null,
+      completedAt: (row.completed_at as string | null) ?? null,
+    };
+  }
+
+  return {
+    async upsertTask(taskId, issueNumber, repo, title) {
+      const { error } = await supabase.from("tasks").upsert(
+        { task_id: taskId, issue_number: issueNumber, repo, title, status: "pending" },
+        { onConflict: "task_id", ignoreDuplicates: false },
+      );
+      if (error) throw error;
+    },
+
+    async markAssigned(taskId, workerId) {
+      const { error } = await supabase.from("tasks")
+        .update({ status: "assigned", worker_id: workerId, assigned_at: new Date().toISOString() })
+        .eq("task_id", taskId);
+      if (error) throw error;
+    },
+
+    async markComplete(taskId) {
+      const { error } = await supabase.from("tasks")
+        .update({ status: "complete", completed_at: new Date().toISOString() })
+        .eq("task_id", taskId);
+      if (error) throw error;
+    },
+
+    async markPending(taskId) {
+      const { error } = await supabase.from("tasks")
+        .update({ status: "pending", worker_id: null })
+        .eq("task_id", taskId);
+      if (error) throw error;
+    },
+
+    async updateTaskPr(taskId, prNumber, branch) {
+      const { error } = await supabase.from("tasks")
+        .update({ pr_number: prNumber, branch })
+        .eq("task_id", taskId);
+      if (error) throw error;
+    },
+
+    async listTasks(opts) {
+      const limit = opts?.limit ?? 200;
+      let q = supabase.from("tasks").select(
+        "task_id, issue_number, repo, title, status, worker_id, pr_number, branch, created_at, assigned_at, completed_at"
+      );
+      if (opts?.status) q = q.eq("status", opts.status);
+      const { data, error } = await q.order("created_at", { ascending: false }).limit(limit);
+      if (error) throw error;
+      return ((data ?? []) as Record<string, unknown>[]).map(rowToTaskRow);
+    },
+  };
+}
+
+export function createNullTaskStore(): TaskStore {
+  return {
+    async upsertTask() {},
+    async markAssigned() {},
+    async markComplete() {},
+    async markPending() {},
+    async updateTaskPr() {},
+    async listTasks() { return []; },
+  };
+}
