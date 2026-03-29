@@ -56,7 +56,7 @@ describe("createTaskStore", () => {
         title: "Fix the bug",
         status: "pending",
       }),
-      expect.objectContaining({ onConflict: "task_id", ignoreDuplicates: false }),
+      expect.objectContaining({ onConflict: "task_id", ignoreDuplicates: true }),
     );
   });
 
