@@ -1,6 +1,6 @@
 /**
  * Smoke test: spawns a real foreman process and a real worker process and
- * asserts that the worker connects and receives standby.
+ * asserts that the worker connects to the foreman.
  *
  * Run with: npm run smoke
  */
