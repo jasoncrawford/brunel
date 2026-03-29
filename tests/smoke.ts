@@ -200,6 +200,25 @@ async function run(): Promise<void> {
   // will be the only idle worker when the webhook fires.
   worker!.kill();
 
+  // Wait for the foreman to confirm the real worker has disconnected before
+  // connecting the fake worker.  Without this wait there is a race: kill()
+  // sends SIGTERM but the worker process doesn't close its WebSocket instantly,
+  // so both workers can be idle at the moment the webhook fires.
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`Timeout waiting for real worker to disconnect`)),
+      TIMEOUT_MS,
+    );
+    function onData(buf: Buffer) {
+      if (buf.toString().includes("disconnected")) {
+        clearTimeout(timer);
+        foreman.stdout!.off("data", onData);
+        resolve();
+      }
+    }
+    foreman.stdout!.on("data", onData);
+  });
+
   // ── Phase 2–5: full webhook → task_assigned → task_complete → label pipeline
 
   const workerId = crypto.randomUUID();
