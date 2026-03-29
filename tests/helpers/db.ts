@@ -11,9 +11,9 @@ const LOCAL_SERVICE_ROLE_KEY =
   "EGIM96RAZx35lJzdJsyH-qQwv8Hj04zWl196z2-SBc0";
 
 export const TEST_SUPABASE_URL =
-  process.env.SUPABASE_URL ?? LOCAL_URL;
+  process.env.SUPABASE_URL || LOCAL_URL;
 export const TEST_SUPABASE_KEY =
-  process.env.SUPABASE_SERVICE_ROLE_KEY ?? LOCAL_SERVICE_ROLE_KEY;
+  process.env.SUPABASE_SERVICE_ROLE_KEY || LOCAL_SERVICE_ROLE_KEY;
 
 /**
  * Creates a Supabase client pointed at the local test instance.
