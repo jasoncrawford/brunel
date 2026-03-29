@@ -156,3 +156,48 @@ describe("reclaim timer", () => {
     expect(() => reg.cancelReclaimTimer("w1")).not.toThrow();
   });
 });
+
+describe("WorkerRegistry changed events", () => {
+  let reg: WorkerRegistry;
+  beforeEach(() => { reg = new WorkerRegistry(); });
+
+  it("register emits changed", () => {
+    const changed = vi.fn();
+    reg.on("changed", changed);
+    reg.register("w1", fakeWs(), "idle");
+    expect(changed).toHaveBeenCalledOnce();
+  });
+
+  it("remove emits changed", () => {
+    reg.register("w1", fakeWs(), "idle");
+    const changed = vi.fn();
+    reg.on("changed", changed);
+    reg.remove("w1");
+    expect(changed).toHaveBeenCalledOnce();
+  });
+
+  it("markDisconnected emits changed", () => {
+    reg.register("w1", fakeWs(), "busy");
+    const changed = vi.fn();
+    reg.on("changed", changed);
+    reg.markDisconnected("w1");
+    expect(changed).toHaveBeenCalledOnce();
+  });
+
+  it("assignTask emits changed", () => {
+    reg.register("w1", fakeWs(), "idle");
+    const changed = vi.fn();
+    reg.on("changed", changed);
+    reg.assignTask("w1", "42");
+    expect(changed).toHaveBeenCalledOnce();
+  });
+
+  it("releaseWorker emits changed", () => {
+    reg.register("w1", fakeWs(), "busy");
+    reg.assignTask("w1", "42");
+    const changed = vi.fn();
+    reg.on("changed", changed);
+    reg.releaseWorker("w1");
+    expect(changed).toHaveBeenCalledOnce();
+  });
+});

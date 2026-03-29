@@ -5,6 +5,7 @@ import { Hono } from "hono";
 import { getRequestListener } from "@hono/node-server";
 import { WebSocketServer, WebSocket } from "ws";
 import type { WebSocket as WsSocket } from "ws";
+import { EventEmitter } from "events";
 import type { WorkerMessage, ForemanMessage, GitHubEvent, TaskIssue, LabeledIssueState } from "./types.js";
 import { labelIssueDone } from "./github.js";
 import { fmtTimestamp, fmtEvent, setVerbose } from "./display.js";
@@ -34,11 +35,12 @@ interface WorkerState {
   disconnectTimer?: ReturnType<typeof setTimeout>;
 }
 
-export class WorkerRegistry {
+export class WorkerRegistry extends EventEmitter {
   private workers = new Map<string, WorkerState>();
 
   register(workerId: string, ws: WsSocket, status: "idle" | "busy", taskId?: string): void {
     this.workers.set(workerId, { workerId, ws, status, currentTaskId: taskId });
+    this.emit("changed");
   }
 
   get(workerId: string): WorkerState | undefined {
@@ -47,6 +49,7 @@ export class WorkerRegistry {
 
   remove(workerId: string) {
     this.workers.delete(workerId);
+    this.emit("changed");
   }
 
   markDisconnected(workerId: string) {
@@ -54,6 +57,7 @@ export class WorkerRegistry {
     if (!w) return;
     w.status = "disconnected";
     w.disconnectedAt = new Date();
+    this.emit("changed");
   }
 
   getIdleWorker(): WorkerState | null {
@@ -79,6 +83,7 @@ export class WorkerRegistry {
     if (!w) return;
     w.status = "busy";
     w.currentTaskId = taskId;
+    this.emit("changed");
   }
 
   releaseWorker(workerId: string) {
@@ -86,6 +91,7 @@ export class WorkerRegistry {
     if (!w) return;
     w.status = "idle";
     w.currentTaskId = undefined;
+    this.emit("changed");
   }
 
   startReclaimTimer(workerId: string, timeoutMs: number, onReclaim: () => void): void {
@@ -135,7 +141,7 @@ interface Task {
   depsLoaded: boolean;
 }
 
-export class TaskQueue {
+export class TaskQueue extends EventEmitter {
   private tasks = new Map<string, Task>();
   private prToTaskId = new Map<number, string>();
   private branchToTaskId = new Map<string, string>();
@@ -147,6 +153,7 @@ export class TaskQueue {
       eventQueue: t.eventQueue ?? [],
       depsLoaded: t.depsLoaded ?? true,
     });
+    this.emit("changed");
   }
 
   get(taskId: string): Task | undefined {
@@ -172,11 +179,15 @@ export class TaskQueue {
     if (!t) return;
     t.status = "assigned";
     t.assignedWorkerId = workerId;
+    this.emit("changed");
   }
 
   completeTask(taskId: string) {
     const t = this.tasks.get(taskId);
-    if (t) t.status = "complete";
+    if (t) {
+      t.status = "complete";
+      this.emit("changed");
+    }
   }
 
   revertTask(taskId: string) {
@@ -184,6 +195,7 @@ export class TaskQueue {
     if (!t || t.status !== "assigned") return;
     t.status = "pending";
     t.assignedWorkerId = undefined;
+    this.emit("changed");
   }
 
   queueEvent(taskId: string, event: GitHubEvent) {
@@ -203,6 +215,7 @@ export class TaskQueue {
     this.prToTaskId.set(prNumber, taskId);
     const t = this.tasks.get(taskId);
     if (t) t.prNumber = prNumber;
+    this.emit("changed");
   }
 
   getTaskForPr(prNumber: number): Task | undefined {
@@ -223,6 +236,7 @@ export class TaskQueue {
     const t = this.tasks.get(taskId);
     if (!t || t.status !== "pending") return;
     this.tasks.delete(taskId);
+    this.emit("changed");
   }
 
   getPendingTasks(): Task[] {
@@ -234,6 +248,7 @@ export class TaskQueue {
       const t = this.tasks.get(String(n));
       if (t) t.depsLoaded = true;
     }
+    this.emit("changed");
   }
 
   getAssignedTaskForWorker(workerId: string): Task | undefined {
@@ -266,6 +281,14 @@ export class TaskQueue {
   }
 }
 
+
+function debounce(fn: () => void, delayMs: number): () => void {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  return () => {
+    if (timer !== null) clearTimeout(timer);
+    timer = setTimeout(() => { timer = null; fn(); }, delayMs);
+  };
+}
 
 function strProp(obj: unknown, key: string): string | null {
   if (typeof obj !== "object" || obj === null) return null;
@@ -562,6 +585,10 @@ export function createForemanWss(
     });
   }
 
+  const debouncedBroadcast = debounce(broadcastSnapshot, 10);
+  taskQueue.on("changed", debouncedBroadcast);
+  registry.on("changed", debouncedBroadcast);
+
   function extractLinkedIssueNumber(body: string): number | null {
     const match = /(?:closes|fixes|resolves)\s+#(\d+)/i.exec(body);
     return match ? parseInt(match[1], 10) : null;
@@ -624,7 +651,6 @@ export function createForemanWss(
               flog(`ERROR Failed to update task PR for #${linkedTask.taskId}: ${fmtError(err)}`)
             );
             flog(`[task #${linkedIssue}] PR #${prNumber} registered`);
-            broadcastSnapshot();
             return result(linkedTask);
           }
         }
@@ -796,7 +822,6 @@ export function createForemanWss(
     for (const w of registry.getIdleWorkers()) {
       tryAssignWork(w.workerId).catch(err => flog(`ERROR tryAssignWork: ${fmtError(err)}`));
     }
-    broadcastSnapshot();
   }
 
   async function tryAssignWork(workerId: string): Promise<void> {
@@ -807,7 +832,6 @@ export function createForemanWss(
       // Reserve in memory first to prevent concurrent double-assignment in the reconcile loop.
       taskQueue.assignTask(task.taskId, workerId);
       registry.assignTask(workerId, task.taskId);
-      broadcastSnapshot();
 
       // Persist to DB before sending task_assigned to the worker.
       try {
@@ -817,7 +841,6 @@ export function createForemanWss(
         // Revert in-memory state — worker returns to idle.
         taskQueue.revertTask(task.taskId);
         registry.releaseWorker(workerId);
-        broadcastSnapshot();
         log(workerId, "→ idle (DB write failed)");
         return;
       }
@@ -880,7 +903,6 @@ export function createForemanWss(
           log(workerId, `hello busy task=#${msg.taskId} — reclaimed`);
           registry.register(workerId, ws, "busy", msg.taskId);
           taskQueue.assignTask(msg.taskId, workerId);
-          broadcastSnapshot();
           const queued = taskQueue.drainEvents(msg.taskId);
           for (const evt of queued) {
             const evtMsg: ForemanMessage = { type: "event_notification", taskId: msg.taskId, event: evt };
@@ -998,7 +1020,6 @@ export function createForemanWss(
         } else {
           registry.remove(workerId);
         }
-        broadcastSnapshot();
       }
     });
   });
