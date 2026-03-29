@@ -16,6 +16,19 @@ jobs:
         with:
           node-version: 20
 
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Start local Supabase
+        run: supabase start
+
+      - name: Export Supabase connection details
+        run: |
+          STATUS=$(supabase status)
+          echo "SUPABASE_URL=$(echo "$STATUS" | grep 'API URL' | awk '{print $NF}')" >> "$GITHUB_ENV"
+          echo "SUPABASE_SERVICE_ROLE_KEY=$(echo "$STATUS" | grep 'service_role key' | awk '{print $NF}')" >> "$GITHUB_ENV"
+
       - run: npm ci
 
       - run: npm test

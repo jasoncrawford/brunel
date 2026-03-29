@@ -1,230 +1,173 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { createTaskStore, createNullTaskStore } from "../src/db.js";
+import { createTestSupabase, truncateTables } from "./helpers/db.js";
 
-// ── Fake Supabase builder ──────────────────────────────────────────────────────
+const supabase = createTestSupabase();
 
-function makeSupabase(seedRows: Record<string, unknown>[] = []) {
-  const rows = [...seedRows];
-
-  const upsertFn = vi.fn().mockReturnThis();
-  const updateFn = vi.fn().mockReturnThis();
-  const selectFn = vi.fn().mockReturnThis();
-  const orderFn = vi.fn().mockReturnThis();
-  const limitFn = vi.fn().mockReturnThis();
-  const eqFn = vi.fn().mockReturnThis();
-  const thenFn = vi.fn().mockImplementation(
-    (cb: (v: { data: unknown[]; error: null }) => unknown) =>
-      Promise.resolve(cb({ data: rows, error: null }))
-  );
-
-  const builder = {
-    upsert: upsertFn,
-    update: updateFn,
-    select: selectFn,
-    order: orderFn,
-    limit: limitFn,
-    eq: eqFn,
-    then: thenFn,
-  };
-
-  const supabase = {
-    from: vi.fn().mockReturnValue(builder),
-    _upsertFn: upsertFn,
-    _updateFn: updateFn,
-    _selectFn: selectFn,
-    _orderFn: orderFn,
-    _limitFn: limitFn,
-    _eqFn: eqFn,
-    _thenFn: thenFn,
-  };
-  return supabase;
-}
+beforeEach(async () => {
+  await truncateTables(supabase);
+});
 
 // ── Tests: createTaskStore ─────────────────────────────────────────────────────
 
 describe("createTaskStore", () => {
-  it("upsertTask calls supabase upsert on tasks table", async () => {
-    const sb = makeSupabase();
-    const store = createTaskStore(sb as never);
+  it("upsertTask stores a row with status=pending", async () => {
+    const store = createTaskStore(supabase);
     await store.upsertTask("42", 42, "owner/repo", "Fix the bug");
-    expect(sb.from).toHaveBeenCalledWith("tasks");
-    expect(sb._upsertFn).toHaveBeenCalledWith(
-      expect.objectContaining({
-        task_id: "42",
-        issue_number: 42,
-        repo: "owner/repo",
-        title: "Fix the bug",
-        status: "pending",
-      }),
-      expect.objectContaining({ onConflict: "task_id", ignoreDuplicates: true }),
-    );
-  });
 
-  it("upsertTask throws if supabase returns an error", async () => {
-    const sb = makeSupabase();
-    sb._thenFn.mockImplementationOnce(
-      (cb: (v: { data: null; error: Error }) => unknown) =>
-        Promise.resolve(cb({ data: null, error: new Error("db down") }))
-    );
-    const store = createTaskStore(sb as never);
-    await expect(store.upsertTask("42", 42, "owner/repo", "title")).rejects.toThrow("db down");
-  });
-
-  it("markAssigned updates status, worker_id, and assigned_at", async () => {
-    const sb = makeSupabase();
-    const store = createTaskStore(sb as never);
-    await store.markAssigned("42", "worker-1");
-    expect(sb.from).toHaveBeenCalledWith("tasks");
-    expect(sb._updateFn).toHaveBeenCalledWith(
-      expect.objectContaining({
-        status: "assigned",
-        worker_id: "worker-1",
-        assigned_at: expect.any(String),
-      }),
-    );
-    expect(sb._eqFn).toHaveBeenCalledWith("task_id", "42");
-  });
-
-  it("markAssigned throws if supabase returns an error", async () => {
-    const sb = makeSupabase();
-    sb._thenFn.mockImplementationOnce(
-      (cb: (v: { data: null; error: Error }) => unknown) =>
-        Promise.resolve(cb({ data: null, error: new Error("db error") }))
-    );
-    const store = createTaskStore(sb as never);
-    await expect(store.markAssigned("42", "w1")).rejects.toThrow("db error");
-  });
-
-  it("markComplete updates status and completed_at", async () => {
-    const sb = makeSupabase();
-    const store = createTaskStore(sb as never);
-    await store.markComplete("42");
-    expect(sb._updateFn).toHaveBeenCalledWith(
-      expect.objectContaining({
-        status: "complete",
-        completed_at: expect.any(String),
-      }),
-    );
-    expect(sb._eqFn).toHaveBeenCalledWith("task_id", "42");
-  });
-
-  it("markComplete throws if supabase returns an error", async () => {
-    const sb = makeSupabase();
-    sb._thenFn.mockImplementationOnce(
-      (cb: (v: { data: null; error: Error }) => unknown) =>
-        Promise.resolve(cb({ data: null, error: new Error("conn error") }))
-    );
-    const store = createTaskStore(sb as never);
-    await expect(store.markComplete("42")).rejects.toThrow("conn error");
-  });
-
-  it("markPending updates status and clears worker_id", async () => {
-    const sb = makeSupabase();
-    const store = createTaskStore(sb as never);
-    await store.markPending("42");
-    expect(sb._updateFn).toHaveBeenCalledWith(
-      expect.objectContaining({
-        status: "pending",
-        worker_id: null,
-      }),
-    );
-    expect(sb._eqFn).toHaveBeenCalledWith("task_id", "42");
-  });
-
-  it("updateTaskPr updates pr_number and branch", async () => {
-    const sb = makeSupabase();
-    const store = createTaskStore(sb as never);
-    await store.updateTaskPr("42", 10, "fix-issue-42");
-    expect(sb._updateFn).toHaveBeenCalledWith(
-      expect.objectContaining({ pr_number: 10, branch: "fix-issue-42" }),
-    );
-    expect(sb._eqFn).toHaveBeenCalledWith("task_id", "42");
-  });
-
-  it("updateTaskPr passes null branch when branch is null", async () => {
-    const sb = makeSupabase();
-    const store = createTaskStore(sb as never);
-    await store.updateTaskPr("42", 10, null);
-    expect(sb._updateFn).toHaveBeenCalledWith(
-      expect.objectContaining({ pr_number: 10, branch: null }),
-    );
-  });
-
-  it("listTasks returns mapped rows", async () => {
-    const now = new Date().toISOString();
-    const sb = makeSupabase([
-      {
-        task_id: "42", issue_number: 42, repo: "owner/repo",
-        title: "Fix the bug", status: "complete",
-        worker_id: "w1", pr_number: 10, branch: "fix-42",
-        created_at: now, assigned_at: now, completed_at: now,
-      },
-    ]);
-    const store = createTaskStore(sb as never);
-    const rows = await store.listTasks();
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toEqual({
+    const tasks = await store.listTasks();
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]).toMatchObject({
       taskId: "42",
       issueNumber: 42,
       repo: "owner/repo",
       title: "Fix the bug",
-      status: "complete",
-      workerId: "w1",
-      prNumber: 10,
-      branch: "fix-42",
-      createdAt: now,
-      assignedAt: now,
-      completedAt: now,
+      status: "pending",
+      workerId: null,
+      prNumber: null,
+      branch: null,
     });
+    expect(tasks[0].createdAt).toBeTruthy();
+    expect(tasks[0].assignedAt).toBeNull();
+    expect(tasks[0].completedAt).toBeNull();
+  });
+
+  it("upsertTask is idempotent — duplicate task_id does not throw or duplicate", async () => {
+    const store = createTaskStore(supabase);
+    await store.upsertTask("42", 42, "owner/repo", "Fix the bug");
+    // Should not throw (ignoreDuplicates: true)
+    await expect(store.upsertTask("42", 42, "owner/repo", "Fix the bug")).resolves.toBeUndefined();
+
+    const tasks = await store.listTasks();
+    expect(tasks).toHaveLength(1);
+  });
+
+  it("upsertTask does not overwrite an existing row (ignoreDuplicates)", async () => {
+    const store = createTaskStore(supabase);
+    await store.upsertTask("42", 42, "owner/repo", "Original title");
+    await store.markAssigned("42", "worker-1");
+    // Second upsert with same task_id should be ignored
+    await store.upsertTask("42", 42, "owner/repo", "New title");
+
+    const tasks = await store.listTasks();
+    expect(tasks[0].title).toBe("Original title");
+    expect(tasks[0].status).toBe("assigned"); // status was not reset to pending
+  });
+
+  it("markAssigned updates status, worker_id, and sets assigned_at", async () => {
+    const store = createTaskStore(supabase);
+    await store.upsertTask("42", 42, "owner/repo", "Fix the bug");
+    await store.markAssigned("42", "worker-1");
+
+    const tasks = await store.listTasks();
+    expect(tasks[0].status).toBe("assigned");
+    expect(tasks[0].workerId).toBe("worker-1");
+    expect(tasks[0].assignedAt).toBeTruthy();
+  });
+
+  it("markComplete updates status and sets completed_at", async () => {
+    const store = createTaskStore(supabase);
+    await store.upsertTask("42", 42, "owner/repo", "Fix the bug");
+    await store.markAssigned("42", "worker-1");
+    await store.markComplete("42");
+
+    const tasks = await store.listTasks();
+    expect(tasks[0].status).toBe("complete");
+    expect(tasks[0].completedAt).toBeTruthy();
+  });
+
+  it("markPending reverts status to pending and clears worker_id", async () => {
+    const store = createTaskStore(supabase);
+    await store.upsertTask("42", 42, "owner/repo", "Fix the bug");
+    await store.markAssigned("42", "worker-1");
+    await store.markPending("42");
+
+    const tasks = await store.listTasks();
+    expect(tasks[0].status).toBe("pending");
+    expect(tasks[0].workerId).toBeNull();
+  });
+
+  it("updateTaskPr stores pr_number and branch", async () => {
+    const store = createTaskStore(supabase);
+    await store.upsertTask("42", 42, "owner/repo", "Fix the bug");
+    await store.updateTaskPr("42", 10, "fix-issue-42");
+
+    const tasks = await store.listTasks();
+    expect(tasks[0].prNumber).toBe(10);
+    expect(tasks[0].branch).toBe("fix-issue-42");
+  });
+
+  it("updateTaskPr stores null branch when branch is null", async () => {
+    const store = createTaskStore(supabase);
+    await store.upsertTask("42", 42, "owner/repo", "Fix the bug");
+    await store.updateTaskPr("42", 10, null);
+
+    const tasks = await store.listTasks();
+    expect(tasks[0].prNumber).toBe(10);
+    expect(tasks[0].branch).toBeNull();
+  });
+
+  it("listTasks returns rows in descending created_at order", async () => {
+    const store = createTaskStore(supabase);
+    // Insert with explicit timestamps so order is predictable
+    await supabase.from("tasks").insert({
+      task_id: "1", issue_number: 1, repo: "r/r", title: "First",
+      status: "pending", created_at: "2026-03-27T01:00:00Z",
+    });
+    await supabase.from("tasks").insert({
+      task_id: "2", issue_number: 2, repo: "r/r", title: "Second",
+      status: "pending", created_at: "2026-03-27T03:00:00Z",
+    });
+    await supabase.from("tasks").insert({
+      task_id: "3", issue_number: 3, repo: "r/r", title: "Third",
+      status: "pending", created_at: "2026-03-27T02:00:00Z",
+    });
+
+    const tasks = await store.listTasks();
+    expect(tasks.map((t) => t.taskId)).toEqual(["2", "3", "1"]);
   });
 
   it("listTasks returns empty array when no rows", async () => {
-    const sb = makeSupabase([]);
-    const store = createTaskStore(sb as never);
+    const store = createTaskStore(supabase);
     expect(await store.listTasks()).toEqual([]);
   });
 
-  it("listTasks handles null nullable fields", async () => {
-    const now = new Date().toISOString();
-    const sb = makeSupabase([
-      {
-        task_id: "1", issue_number: 1, repo: "r/r",
-        title: "T", status: "pending",
-        worker_id: null, pr_number: null, branch: null,
-        created_at: now, assigned_at: null, completed_at: null,
-      },
-    ]);
-    const store = createTaskStore(sb as never);
-    const rows = await store.listTasks();
-    expect(rows[0].workerId).toBeNull();
-    expect(rows[0].prNumber).toBeNull();
-    expect(rows[0].branch).toBeNull();
-    expect(rows[0].assignedAt).toBeNull();
-    expect(rows[0].completedAt).toBeNull();
-  });
-
-  it("listTasks queries tasks table with descending created_at order", async () => {
-    const sb = makeSupabase([]);
-    const store = createTaskStore(sb as never);
-    await store.listTasks();
-    expect(sb.from).toHaveBeenCalledWith("tasks");
-    expect(sb._selectFn).toHaveBeenCalled();
-    expect(sb._orderFn).toHaveBeenCalledWith("created_at", { ascending: false });
-    expect(sb._limitFn).toHaveBeenCalled();
-  });
-
   it("listTasks filters by status when provided", async () => {
-    const sb = makeSupabase([]);
-    const store = createTaskStore(sb as never);
-    await store.listTasks({ status: "complete" });
-    expect(sb._eqFn).toHaveBeenCalledWith("status", "complete");
+    const store = createTaskStore(supabase);
+    await store.upsertTask("1", 1, "r/r", "Pending task");
+    await store.upsertTask("2", 2, "r/r", "Complete task");
+    await store.markAssigned("2", "w1");
+    await store.markComplete("2");
+
+    const pending = await store.listTasks({ status: "pending" });
+    expect(pending).toHaveLength(1);
+    expect(pending[0].taskId).toBe("1");
+
+    const complete = await store.listTasks({ status: "complete" });
+    expect(complete).toHaveLength(1);
+    expect(complete[0].taskId).toBe("2");
   });
 
-  it("listTasks does not filter by status when not provided", async () => {
-    const sb = makeSupabase([]);
-    const store = createTaskStore(sb as never);
-    await store.listTasks();
-    expect(sb._eqFn).not.toHaveBeenCalledWith("status", expect.anything());
+  it("listTasks returns all statuses when status not provided", async () => {
+    const store = createTaskStore(supabase);
+    await store.upsertTask("1", 1, "r/r", "Pending");
+    await store.upsertTask("2", 2, "r/r", "Assigned");
+    await store.markAssigned("2", "w1");
+
+    const all = await store.listTasks();
+    expect(all).toHaveLength(2);
+  });
+
+  it("listTasks handles null nullable fields", async () => {
+    const store = createTaskStore(supabase);
+    await store.upsertTask("1", 1, "r/r", "T");
+
+    const tasks = await store.listTasks();
+    expect(tasks[0].workerId).toBeNull();
+    expect(tasks[0].prNumber).toBeNull();
+    expect(tasks[0].branch).toBeNull();
+    expect(tasks[0].assignedAt).toBeNull();
+    expect(tasks[0].completedAt).toBeNull();
   });
 });
 
