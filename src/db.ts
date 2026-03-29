@@ -290,7 +290,7 @@ export interface ListTasksOpts {
 }
 
 export interface TaskStore {
-  /** Insert task with status=pending; on conflict update title only. */
+  /** Insert task with status=pending; on conflict (duplicate task_id) do nothing. */
   upsertTask(taskId: string, issueNumber: number, repo: string, title: string): Promise<void>;
   /** Mark task as assigned to a worker. */
   markAssigned(taskId: string, workerId: string): Promise<void>;
@@ -325,7 +325,7 @@ export function createTaskStore(supabase: SupabaseClient): TaskStore {
     async upsertTask(taskId, issueNumber, repo, title) {
       const { error } = await supabase.from("tasks").upsert(
         { task_id: taskId, issue_number: issueNumber, repo, title, status: "pending" },
-        { onConflict: "task_id", ignoreDuplicates: false },
+        { onConflict: "task_id", ignoreDuplicates: true },
       );
       if (error) throw error;
     },
