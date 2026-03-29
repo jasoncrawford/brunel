@@ -137,6 +137,35 @@ describe("printForemanMessage", () => {
 
 });
 
+describe("printForemanMessage - hello_ack", () => {
+  it("hello_ack, VERBOSE=false → silent", () => {
+    const msg: ForemanMessage = { type: "hello_ack", workerId: "w-1", status: "idle" };
+    const output = captureOutput(() => printForemanMessage(msg));
+    expect(stripAnsi(output).trim()).toBe("");
+  });
+
+  it("hello_ack, VERBOSE=true → prints ack status", () => {
+    setVerbose(true);
+    const msg: ForemanMessage = { type: "hello_ack", workerId: "w-1", status: "idle" };
+    const output = captureOutput(() => printForemanMessage(msg));
+    expect(stripAnsi(output)).toContain("idle");
+  });
+
+  it("hello_ack, VERBOSE=true → includes status for busy", () => {
+    setVerbose(true);
+    const msg: ForemanMessage = { type: "hello_ack", workerId: "w-1", status: "busy" };
+    const output = captureOutput(() => printForemanMessage(msg));
+    expect(stripAnsi(output)).toContain("busy");
+  });
+
+  it("hello_ack, VERBOSE=true → includes status for cancelled", () => {
+    setVerbose(true);
+    const msg: ForemanMessage = { type: "hello_ack", workerId: "w-1", status: "cancelled" };
+    const output = captureOutput(() => printForemanMessage(msg));
+    expect(stripAnsi(output)).toContain("cancelled");
+  });
+});
+
 describe("printForemanMessage - _default", () => {
   it("unknown type prints <type>", () => {
     const output = captureOutput(() => printForemanMessage({ type: "unknown_future_type" } as any));
