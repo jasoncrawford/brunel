@@ -39,6 +39,7 @@ export default function Dashboard() {
                 <th style={th}>Title</th>
                 <th style={th}>Status</th>
                 <th style={th}>Worker</th>
+                <th style={th}>PR</th>
               </tr>
             </thead>
             <tbody>
@@ -49,6 +50,9 @@ export default function Dashboard() {
                   <td style={td}>{t.status}</td>
                   <td style={td}>{t.assignedWorkerId
                     ? <Link to={`/workers/${t.assignedWorkerId}`}>{t.assignedWorkerId.slice(0, 8)}</Link>
+                    : "—"}</td>
+                  <td style={td}>{t.prUrl
+                    ? <a href={t.prUrl} target="_blank" rel="noreferrer">PR</a>
                     : "—"}</td>
                 </tr>
               ))}

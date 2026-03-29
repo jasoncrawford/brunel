@@ -4,6 +4,7 @@ export interface TaskSnapshot {
   title: string;
   status: "pending" | "assigned" | "complete";
   assignedWorkerId?: string;
+  prUrl?: string;
 }
 
 export interface WorkerSnapshot {
