@@ -454,7 +454,7 @@ describe("hello_ack handshake", () => {
     expect(ack).toEqual({ type: "hello_ack", workerId: "w1", status: "busy" });
   });
 
-  it("sends hello_ack with status cancelled when worker's task is complete", async () => {
+  it("sends hello_ack with status busy when worker's task is complete (issue closed, worker finishing)", async () => {
     queue.addTask(makeTask(1));
     queue.assignTask("1", "w1");
     queue.completeTask("1");
@@ -463,7 +463,7 @@ describe("hello_ack handshake", () => {
     const ackPromise = nextMsg(ws);
     send(ws, { type: "worker_hello", workerId: "w1", taskId: "1", status: "busy" });
     const ack = await ackPromise;
-    expect(ack).toEqual({ type: "hello_ack", workerId: "w1", status: "cancelled" });
+    expect(ack).toEqual({ type: "hello_ack", workerId: "w1", status: "busy" });
   });
 
   it("queued events are sent after hello_ack on reclaim", async () => {
