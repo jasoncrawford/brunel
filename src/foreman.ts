@@ -456,6 +456,8 @@ export interface ForemanWss {
   wss: WebSocketServer;
   routeEvent(id: string, name: string, payload: unknown): void;
   reconcile(): void;
+  /** Close all connected worker clients with code 1001 and wait for their close events to fire. */
+  shutdown(): Promise<void>;
 }
 
 export function createForemanWss(
@@ -1056,7 +1058,18 @@ export function createForemanWss(
     assignIdleWorkers();
   }
 
-  return { wss, routeEvent, reconcile };
+  function shutdown(): Promise<void> {
+    return new Promise((resolve) => {
+      if (wss.clients.size === 0) { resolve(); return; }
+      let remaining = wss.clients.size;
+      for (const client of wss.clients) {
+        client.once("close", () => { if (--remaining === 0) resolve(); });
+        client.close(1001, "Server shutting down");
+      }
+    });
+  }
+
+  return { wss, routeEvent, reconcile, shutdown };
 }
 
 // Only start listening when run directly (not when imported by tests)
@@ -1184,5 +1197,18 @@ if (isMain) {
     flog(`WebSocket workers: ${wsBase}/worker`);
     flog(`Admin WebSocket: ${wsBase}/admin/ws`);
     flog("Waiting for events...");
+  });
+
+  // Graceful shutdown on SIGTERM: close all worker connections so their close
+  // handlers fire and persist disconnect events to DB, then wait briefly for
+  // the fire-and-forget Supabase writes to complete before exiting.
+  process.on("SIGTERM", () => {
+    flog("SIGTERM received, shutting down gracefully...");
+    void foremanWss.shutdown().then(() => {
+      setTimeout(() => {
+        flog("Shutdown complete.");
+        process.exit(0);
+      }, 2000);
+    });
   });
 }
