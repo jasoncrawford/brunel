@@ -909,6 +909,7 @@ export function createForemanWss(
           log(workerId, `hello busy task=#${msg.taskId} — reclaimed`);
           registry.register(workerId, ws, "busy", msg.taskId);
           taskQueue.assignTask(msg.taskId, workerId);
+          sendMsg(workerId, { type: "hello_ack", workerId, status: "busy" });
           const queued = taskQueue.drainEvents(msg.taskId);
           for (const evt of queued) {
             const evtMsg: ForemanMessage = { type: "event_notification", taskId: msg.taskId, event: evt };
@@ -920,14 +921,16 @@ export function createForemanWss(
           // Let them stay busy so they can call task_complete to release themselves.
           log(workerId, `hello busy task=#${msg.taskId} — reclaimed (issue closed, worker finishing)`);
           registry.register(workerId, ws, "busy", msg.taskId);
+          sendMsg(workerId, { type: "hello_ack", workerId, status: "busy" });
         } else if (!existing) {
           log(workerId, `hello busy task=#${msg.taskId} — unknown task, respecting busy status`);
           registry.register(workerId, ws, "busy", msg.taskId);
+          sendMsg(workerId, { type: "hello_ack", workerId, status: "busy" });
         } else {
-          // Task is assigned to a different worker — register idle
+          // Task is complete or assigned to a different worker — register idle
           log(workerId, `hello busy task=#${msg.taskId} — task taken by another worker`);
           registry.register(workerId, ws, "idle");
-
+          sendMsg(workerId, { type: "hello_ack", workerId, status: "cancelled" });
         }
       } else {
         // If the queue has a task assigned to this worker (from a prior foreman
@@ -946,12 +949,18 @@ export function createForemanWss(
           log(workerId, "hello idle");
         }
         registry.register(workerId, ws, "idle");
+        sendMsg(workerId, { type: "hello_ack", workerId, status: "idle" });
       }
     }
 
     function handleTaskComplete(msg: Extract<WorkerMessage, { type: "task_complete" }>) {
       log(workerId, `task_complete #${msg.taskId}`);
       const task = taskQueue.get(msg.taskId);
+      // Belt-and-suspenders ownership check: ignore if this worker doesn't own the task.
+      if (task && task.assignedWorkerId !== workerId) {
+        log(workerId, `task_complete #${msg.taskId} ignored — owned by ${task.assignedWorkerId ?? "nobody"}`);
+        return;
+      }
       if (task) {
         taskQueue.completeTask(msg.taskId);
         assignStore.deleteAssignment(msg.taskId).catch(err =>

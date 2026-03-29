@@ -6,7 +6,7 @@ import { WebSocket } from "ws";
 import * as display from "./display.js";
 import { buildInitialPrompt, buildEventPrompt } from "./templates.js";
 import { ask, listWorkerCommands, dispatchInput, pick } from "./input.js";
-import type { ForemanMessage, GitHubEvent, TaskIssue } from "./types.js";
+import type { ForemanMessage, GitHubEvent, TaskIssue, WorkerMessage } from "./types.js";
 import { Workspace, confirmIfUnsafe } from "./workspace.js";
 import { fmtError } from "./utils.js";
 
@@ -88,6 +88,9 @@ export type WorkerSessionOptions = {
 const WS_TASK_ASSIGNED = "__task_assigned__";
 const WS_EVENT = "__event__";
 
+// Messages that must wait for hello_ack before being sent.
+type BufferableMessage = Extract<WorkerMessage, { type: "task_complete" }>;
+
 export class WorkerSession {
   private currentTaskId: string | undefined;
   private currentIssue: TaskIssue | undefined;
@@ -99,6 +102,12 @@ export class WorkerSession {
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private prIsClosed = false;
   private queryDoneResolvers: Array<() => void> = [];
+  // Handshake lifecycle: "registered" = hello_ack received (or initial state);
+  // "hello_sent" = worker_hello was sent but hello_ack not yet received.
+  // Initialized to "registered" so sessions that never emit "open" (e.g. tests)
+  // behave as if already registered.
+  private connectionState: "hello_sent" | "registered" = "registered";
+  private bufferedMessages: BufferableMessage[] = [];
 
   constructor(
     private workerId: string,
@@ -169,7 +178,7 @@ export class WorkerSession {
     }
 
     if (action.type === "task-complete") {
-      if (this.currentTaskId && this.ws && this.ws.readyState === WebSocket.OPEN) {
+      if (this.currentTaskId) {
         if (this.options.afterTask) {
           try {
             await this.options.afterTask();
@@ -177,11 +186,11 @@ export class WorkerSession {
             return;
           }
         }
-        this.ws.send(JSON.stringify({
+        this.sendTaskMessage({
           type: "task_complete",
           workerId: this.workerId,
           taskId: this.currentTaskId,
-        }));
+        });
         this.currentTaskId = undefined;
         this.currentIssue = undefined;
         this.currentSessionId = undefined;
@@ -245,6 +254,29 @@ export class WorkerSession {
 
   // ── Private ───────────────────────────────────────────────────────────────
 
+  /**
+   * Send a task-scoped message to the foreman. Always buffers first, then
+   * immediately flushes if the handshake is complete. This way the buffer
+   * is the single code path regardless of connection state.
+   */
+  private sendTaskMessage(msg: BufferableMessage): void {
+    this.bufferedMessages.push(msg);
+    this.flushBuffer();
+  }
+
+  /**
+   * Send all buffered messages if registered and the socket is open.
+   * No-ops if the handshake is still pending or the socket is not ready.
+   */
+  private flushBuffer(): void {
+    if (this.connectionState !== "registered") return;
+    if (this.ws?.readyState !== WebSocket.OPEN) return;
+    const pending = this.bufferedMessages.splice(0);
+    for (const m of pending) {
+      this.ws.send(JSON.stringify(m));
+    }
+  }
+
   private notifyQueryDone(): void {
     const resolvers = this.queryDoneResolvers.splice(0);
     for (const r of resolvers) r();
@@ -257,6 +289,7 @@ export class WorkerSession {
 
     ws.on("open", () => {
       connectedAt = Date.now();
+      this.connectionState = "hello_sent";
       this.display.print(display.c.sageGreen("Connected to foreman"));
     });
 
@@ -284,6 +317,22 @@ export class WorkerSession {
 
   private handleMessage(msg: ForemanMessage): void {
     this.display.printForemanMessage(msg);
+
+    if (msg.type === "hello_ack") {
+      if (msg.status === "cancelled") {
+        // Task was reassigned while worker was disconnected — stop and reset.
+        this.connectionState = "registered";
+        this.bufferedMessages = [];
+        this.currentTaskId = undefined;
+        this.currentIssue = undefined;
+        this.currentSessionId = undefined;
+      } else {
+        // "idle" or "busy": transition to registered and flush buffered messages.
+        this.connectionState = "registered";
+        this.flushBuffer();
+      }
+      return;
+    }
 
     if (msg.type === "task_assigned") {
       this.currentTaskId = msg.taskId;
