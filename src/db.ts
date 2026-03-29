@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { fmtEvent } from "./display.js";
 
 // ── Input types ────────────────────────────────────────────────────────────────
 
@@ -61,24 +62,34 @@ export function createDbLogger(supabase: SupabaseClient): DbLogger {
   }
 
   function webhookToEntry(row: Record<string, unknown>): LogEntry {
-    const action = row.action ? `/${row.action}` : "";
-    const issue = row.issue_number ? ` #${row.issue_number}` : "";
+    const storedPayload = (row.payload ?? {}) as Record<string, unknown>;
+    // Merge row-level action as fallback for old rows without stored payload
+    const payload: Record<string, unknown> = { action: row.action, ...storedPayload };
+    const summary = fmtEvent({ id: String(row.delivery_id ?? ""), name: String(row.event_name), payload });
     return {
       kind: "webhook",
       id: row.id as number,
       timestamp: row.received_at as string,
       taskId: (row.task_id as string | null) ?? null,
       workerId: (row.worker_id as string | null) ?? null,
-      summary: `${row.event_name}${action}${issue}`,
+      summary,
     };
   }
 
   function messageToEntry(row: Record<string, unknown>): LogEntry {
+    const payload = (row.payload ?? {}) as Record<string, unknown>;
     let summary: string;
     if (row.msg_type === "worker_disconnected") {
-      const payload = (row.payload ?? {}) as Record<string, unknown>;
       const reason = payload.reason ? `: ${payload.reason}` : "";
       summary = `disconnected (code ${payload.code}${reason})`;
+    } else if (row.msg_type === "worker_hello") {
+      const status = String(payload.status ?? "");
+      const taskId = payload.taskId ? ` task=#${payload.taskId}` : "";
+      summary = `${row.direction} worker_hello — ${status}${taskId}`;
+    } else if (row.msg_type === "event_notification") {
+      const event = (payload.event ?? {}) as Record<string, unknown>;
+      const eventName = event.name ? ` — ${event.name}` : "";
+      summary = `${row.direction} event_notification${eventName}`;
     } else {
       summary = `${row.direction} ${row.msg_type}`;
     }
@@ -123,7 +134,7 @@ export function createDbLogger(supabase: SupabaseClient): DbLogger {
       const limit = opts.limit ?? 100;
       const [wRes, mRes] = await Promise.all([
         supabase.from("webhook_events")
-          .select("id, received_at, event_name, action, issue_number, task_id, worker_id")
+          .select("id, received_at, delivery_id, event_name, action, issue_number, task_id, worker_id, payload")
           .order("received_at", { ascending: false })
           .limit(limit),
         supabase.from("foreman_messages")
@@ -141,7 +152,7 @@ export function createDbLogger(supabase: SupabaseClient): DbLogger {
     async queryTaskEvents(taskId) {
       const [wRes, mRes] = await Promise.all([
         supabase.from("webhook_events")
-          .select("id, received_at, event_name, action, issue_number, task_id, worker_id")
+          .select("id, received_at, delivery_id, event_name, action, issue_number, task_id, worker_id, payload")
           .eq("task_id", taskId)
           .order("received_at", { ascending: false })
           .limit(500),
@@ -160,7 +171,7 @@ export function createDbLogger(supabase: SupabaseClient): DbLogger {
     async queryWorkerMessages(workerId) {
       const [wRes, mRes] = await Promise.all([
         supabase.from("webhook_events")
-          .select("id, received_at, event_name, action, issue_number, task_id, worker_id")
+          .select("id, received_at, delivery_id, event_name, action, issue_number, task_id, worker_id, payload")
           .eq("worker_id", workerId)
           .order("received_at", { ascending: false })
           .limit(500),

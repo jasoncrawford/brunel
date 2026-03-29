@@ -152,6 +152,62 @@ describe("foreman admin broadcast — webhook events", () => {
     expect(adminWss.logEntries[0].taskId).toBe("42");
     expect(adminWss.logEntries[0].summary).toMatch(/issue_comment/);
   });
+
+  it("broadcasts check_run event with name and conclusion", () => {
+    routeEvent("evt-1", "check_run", {
+      action: "completed",
+      check_run: { name: "CI / build", conclusion: "success", pull_requests: [] },
+      repository: { html_url: "https://github.com/owner/repo" },
+    });
+
+    expect(adminWss.logEntries[0].summary).toContain("CI / build");
+    expect(adminWss.logEntries[0].summary).toContain("success");
+  });
+
+  it("broadcasts issue_comment event with truncated comment text", () => {
+    queue.addTask({ taskId: "42", issueNumber: 42, title: "Fix", body: "", labels: [], repoUrl: "https://github.com/owner/repo" });
+
+    routeEvent("evt-1", "issue_comment", {
+      action: "created",
+      issue: { number: 42 },
+      comment: { body: "Looks good to me!" },
+      repository: { html_url: "https://github.com/owner/repo" },
+    });
+
+    expect(adminWss.logEntries[0].summary).toContain("Looks good to me!");
+  });
+
+  it("broadcasts push event with branch", () => {
+    routeEvent("evt-1", "push", {
+      ref: "refs/heads/main",
+      commits: [{}],
+      repository: { html_url: "https://github.com/owner/repo" },
+    });
+
+    expect(adminWss.logEntries[0].summary).toContain("refs/heads/main");
+  });
+
+  it("broadcasts delete event with ref_type and ref", () => {
+    routeEvent("evt-1", "delete", {
+      ref_type: "branch",
+      ref: "feature/old",
+      repository: { html_url: "https://github.com/owner/repo" },
+    });
+
+    expect(adminWss.logEntries[0].summary).toContain("branch");
+    expect(adminWss.logEntries[0].summary).toContain("feature/old");
+  });
+
+  it("broadcasts issues/labeled event with label name", () => {
+    routeEvent("evt-1", "issues", {
+      action: "labeled",
+      label: { name: "wontfix" },
+      issue: { number: 5, title: "Minor thing", body: "", labels: [] },
+      repository: { html_url: "https://github.com/owner/repo" },
+    });
+
+    expect(adminWss.logEntries[0].summary).toContain("wontfix");
+  });
 });
 
 describe("foreman admin broadcast — sent messages", () => {
@@ -193,6 +249,18 @@ describe("foreman admin broadcast — received messages", () => {
       (e) => e.kind === "message" && e.summary.includes("received") && e.summary.includes("worker_hello"),
     );
     expect(received.length).toBeGreaterThan(0);
+  });
+
+  it("broadcasts worker_hello with 'idle' status in summary", async () => {
+    const ws = await connect();
+    const reply = nextMsg(ws);
+    send(ws, { type: "worker_hello", workerId: "worker-abc", status: "idle" });
+    await reply;
+
+    const hello = adminWss.logEntries.find(
+      (e) => e.kind === "message" && e.summary.includes("worker_hello"),
+    );
+    expect(hello?.summary).toContain("idle");
   });
 
   it("broadcasts received task_complete as kind='message'", async () => {

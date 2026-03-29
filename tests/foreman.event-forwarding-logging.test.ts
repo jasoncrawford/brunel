@@ -200,6 +200,24 @@ describe("forwardEvent — admin broadcast of event_notification messages", () =
     expect(evtEntry?.taskId).toBe("42");
     expect(evtEntry?.workerId).toBe("worker-abc");
   });
+
+  it("includes the forwarded event name in the event_notification summary", () => {
+    setupAssignedWorker("42", "worker-abc");
+
+    adminWss.logEntries.length = 0;
+
+    routeEvent("evt-1", "issue_comment", {
+      action: "created",
+      issue: { number: 42, title: "Fix the bug" },
+      comment: { body: "LGTM" },
+      repository: { html_url: "https://github.com/owner/repo" },
+    });
+
+    const evtEntry = adminWss.logEntries.find(
+      (e) => e.kind === "message" && e.summary.includes("event_notification"),
+    );
+    expect(evtEntry?.summary).toContain("issue_comment");
+  });
 });
 
 // ── Reconnect path tests (real WebSocket needed) ──────────────────────────────

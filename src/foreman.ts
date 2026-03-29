@@ -7,7 +7,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import type { WebSocket as WsSocket } from "ws";
 import type { WorkerMessage, ForemanMessage, GitHubEvent, TaskIssue, LabeledIssueState } from "./types.js";
 import { labelIssueDone } from "./github.js";
-import { fmtTimestamp, setVerbose } from "./display.js";
+import { fmtTimestamp, fmtEvent, setVerbose } from "./display.js";
 import { loadConfig } from "./config.js";
 import { isBlocked, setBlockers, fetchBlockers } from "./dependencies.js";
 import { fetchIssueStates } from "./github.js";
@@ -490,11 +490,19 @@ export function createForemanWss(
 
   function broadcastMessageEvent(data: { direction: string; workerId: string | null; taskId: string | null; msgType: string; payload?: Record<string, unknown> }) {
     if (!adminWss) return;
+    const payload = data.payload ?? {};
     let summary: string;
     if (data.msgType === "worker_disconnected") {
-      const payload = data.payload ?? {};
       const reason = payload.reason ? `: ${payload.reason}` : "";
       summary = `disconnected (code ${payload.code}${reason})`;
+    } else if (data.msgType === "worker_hello") {
+      const status = String(payload.status ?? "");
+      const taskId = payload.taskId ? ` task=#${payload.taskId}` : "";
+      summary = `${data.direction} worker_hello — ${status}${taskId}`;
+    } else if (data.msgType === "event_notification") {
+      const event = (payload.event ?? {}) as Record<string, unknown>;
+      const eventName = event.name ? ` — ${event.name}` : "";
+      summary = `${data.direction} event_notification${eventName}`;
     } else {
       summary = `${data.direction} ${data.msgType}`;
     }
@@ -511,8 +519,9 @@ export function createForemanWss(
   function sendMsg(workerId: string, msg: ForemanMessage): void {
     const taskId = "taskId" in msg ? msg.taskId : null;
     registry.send(workerId, msg);
-    dbLogger?.logForemanMessage({ direction: "sent", workerId, taskId, msgType: msg.type, payload: msg as unknown as Record<string, unknown> });
-    broadcastMessageEvent({ direction: "sent", workerId, taskId, msgType: msg.type });
+    const msgPayload = msg as unknown as Record<string, unknown>;
+    dbLogger?.logForemanMessage({ direction: "sent", workerId, taskId, msgType: msg.type, payload: msgPayload });
+    broadcastMessageEvent({ direction: "sent", workerId, taskId, msgType: msg.type, payload: msgPayload });
   }
 
   function log(wid: string, line: string) {
@@ -749,7 +758,7 @@ export function createForemanWss(
       timestamp: new Date().toISOString(),
       taskId,
       workerId,
-      summary: `${name}${action ? `/${action}` : ""}${webhookIssueNumber ? ` #${webhookIssueNumber}` : ""}`,
+      summary: fmtEvent(evt),
     });
   }
 
@@ -908,14 +917,15 @@ export function createForemanWss(
       // Log all received messages
       const rcvWorkerId = workerId || ((msg as { workerId?: string }).workerId ?? null);
       const rcvTaskId = (msg as { taskId?: string }).taskId ?? null;
+      const rcvPayload = msg as unknown as Record<string, unknown>;
       dbLogger?.logForemanMessage({
         direction: "received",
         workerId: rcvWorkerId,
         taskId: rcvTaskId,
         msgType: msg.type,
-        payload: msg as unknown as Record<string, unknown>,
+        payload: rcvPayload,
       });
-      broadcastMessageEvent({ direction: "received", workerId: rcvWorkerId, taskId: rcvTaskId, msgType: msg.type });
+      broadcastMessageEvent({ direction: "received", workerId: rcvWorkerId, taskId: rcvTaskId, msgType: msg.type, payload: rcvPayload });
 
       if (msg.type === "worker_hello") handleWorkerHello(msg);
       else if (msg.type === "task_complete") handleTaskComplete(msg);
