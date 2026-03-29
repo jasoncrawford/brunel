@@ -180,11 +180,35 @@ export async function dispatchInput(
 // ── Autocomplete ─────────────────────────────────────────────────────────────
 
 /**
- * Filter commands by prefix. Returns commands that start with prefix.
- * Empty prefix returns all commands. Preserves input order.
+ * Filter commands by substring. Case-insensitive. Empty query returns all.
+ * Prefix matches come before non-prefix substring matches. Preserves relative
+ * input order within each group.
  */
-export function matchCommands(prefix: string, commands: string[]): string[] {
-  return commands.filter(cmd => cmd.startsWith(prefix));
+export function matchCommands(query: string, commands: string[]): string[] {
+  if (query === "") return commands;
+  const q = query.toLowerCase();
+  const prefix = commands.filter(cmd => cmd.toLowerCase().startsWith(q));
+  const nonPrefix = commands.filter(cmd => !cmd.toLowerCase().startsWith(q) && cmd.toLowerCase().includes(q));
+  return [...prefix, ...nonPrefix];
+}
+
+/**
+ * Filter CommandSuggestion objects by substring of name or description.
+ * Case-insensitive. Empty query returns all commands.
+ * Sort order: prefix matches of name, then non-prefix name substring matches,
+ * then description-only matches.
+ */
+export function filterCommands(query: string, commands: CommandSuggestion[]): CommandSuggestion[] {
+  if (query === "") return commands;
+  const q = query.toLowerCase();
+  const prefixName = commands.filter(c => c.name.toLowerCase().startsWith(q));
+  const substringName = commands.filter(
+    c => !c.name.toLowerCase().startsWith(q) && c.name.toLowerCase().includes(q),
+  );
+  const descOnly = commands.filter(
+    c => !c.name.toLowerCase().includes(q) && c.description.toLowerCase().includes(q),
+  );
+  return [...prefixName, ...substringName, ...descOnly];
 }
 
 /** A command name paired with a display description for autocomplete. */
@@ -566,9 +590,9 @@ export function ask(
     function computeMatches(): CommandSuggestion[] {
       if (!buffer.startsWith("/")) return [];
       if (buffer.slice(1).includes(" ")) return [];
-      const prefix = buffer.slice(1).split(/\s+/)[0];
-      // prefix is "" when buffer is exactly "/" — filter("", ...) returns all
-      return commands.filter(c => c.name.startsWith(prefix)).slice(0, 5);
+      const query = buffer.slice(1).split(/\s+/)[0];
+      // query is "" when buffer is exactly "/" — filterCommands("", ...) returns all
+      return filterCommands(query, commands).slice(0, 5);
     }
 
     // ── Editing operations (all use fullRedraw) ──────────────────────────────
