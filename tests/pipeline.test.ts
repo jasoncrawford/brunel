@@ -646,8 +646,10 @@ describe("pipeline: PR events forwarded and logged to DB", () => {
     await Promise.all([
       supabase.from("tasks").delete().neq("task_id", ""),
       supabase.from("task_assignments").delete().neq("task_id", ""),
-      supabase.from("webhook_events").delete().gt("id", 0),
-      supabase.from("foreman_messages").delete().gt("id", 0),
+      // Only delete this scenario's rows — db.test.ts runs in parallel and owns
+      // these tables too; blanket truncation would delete its rows mid-test.
+      supabase.from("webhook_events").delete().in("delivery_id", ["evt-1", "evt-pr", "evt-cr"]),
+      supabase.from("foreman_messages").delete().eq("worker_id", "w-pr"),
     ]);
     foreman = buildForeman({ dbLogger: realDbLogger });
     await new Promise<void>((resolve) =>
