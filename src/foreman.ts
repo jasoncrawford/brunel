@@ -614,6 +614,7 @@ export function createForemanWss(
               flog(`ERROR Failed to update task PR for #${linkedTask.taskId}: ${fmtError(err)}`)
             );
             flog(`[task #${linkedIssue}] PR #${prNumber} registered`);
+            broadcastSnapshot();
             return result(linkedTask);
           }
         }

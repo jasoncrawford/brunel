@@ -12,7 +12,7 @@ import type { AddressInfo } from "net";
 import { TaskQueue, WorkerRegistry, createForemanWss } from "../src/foreman.js";
 import { loadDefaultConfig } from "../src/config.js";
 const defaultCfg = await loadDefaultConfig();
-import type { AdminWss, LogEntry } from "../src/admin-ws.js";
+import type { AdminWss, AdminSnapshot, LogEntry } from "../src/admin-ws.js";
 import { waitUntil } from "./helpers.js";
 
 // ── Mock AdminWss ─────────────────────────────────────────────────────────────
@@ -302,5 +302,28 @@ describe("foreman admin broadcast — unique IDs across all event types", () => 
     const uniqueIds = new Set(ids);
     expect(uniqueIds.size).toBe(ids.length);
     expect(ids.every((id) => id > 0)).toBe(true);
+  });
+});
+
+describe("foreman admin broadcast — snapshot on PR registration", () => {
+  it("broadcasts updated snapshot with prNumber when a PR is opened for a task", () => {
+    queue.addTask({ taskId: "42", issueNumber: 42, title: "Fix the bug", body: "", labels: [], repoUrl: "https://github.com/owner/repo" });
+
+    const snapshots: AdminSnapshot[] = [];
+    adminWss.broadcastSnapshot = (snapshot) => snapshots.push(snapshot);
+
+    routeEvent("evt-1", "pull_request", {
+      action: "opened",
+      pull_request: {
+        number: 101,
+        body: "Closes #42",
+        head: { ref: "fix-the-bug" },
+      },
+      repository: { html_url: "https://github.com/owner/repo" },
+    });
+
+    expect(snapshots.length).toBeGreaterThan(0);
+    const task = snapshots[snapshots.length - 1].tasks.find((t) => t.taskId === "42");
+    expect(task?.prNumber).toBe(101);
   });
 });
