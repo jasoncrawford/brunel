@@ -511,6 +511,104 @@ describe("waitUntilIdle", () => {
   });
 });
 
+// ── hello_ack handshake — buffering ──────────────────────────────────────────
+
+describe("hello_ack handshake — buffering", () => {
+  function reconnectWithNewWs(): FakeWs {
+    vi.spyOn(Math, "random").mockReturnValue(0); // deterministic 2000ms delay
+    const newWs = new FakeWs();
+    wsFactory.mockReturnValueOnce(newWs);
+    fakeWs.emit("close", 1006, Buffer.from(""));
+    vi.advanceTimersByTime(2001);
+    return newWs;
+  }
+
+  it("buffers task_complete in hello_sent state (before hello_ack) and flushes on ack", async () => {
+    vi.useFakeTimers();
+    try {
+      // Assign a task so the worker has something to complete
+      const issue = makeIssue();
+      sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+
+      // Reconnect: new WS is created
+      const newWs = reconnectWithNewWs();
+
+      // Open event → hello_sent state
+      newWs.emit("open");
+
+      // Try to send task_complete — should be buffered (hello_ack not yet received)
+      await session.handleUserInput("/task-complete");
+      expect(newWs.send).not.toHaveBeenCalled();
+
+      // Send hello_ack → buffer should be flushed
+      sendMsg(newWs, { type: "hello_ack", workerId: WORKER_ID, status: "busy" });
+      expect(newWs.send).toHaveBeenCalledOnce();
+      const sent = JSON.parse(newWs.send.mock.calls[0][0]);
+      expect(sent).toEqual({ type: "task_complete", workerId: WORKER_ID, taskId: "42" });
+    } finally {
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    }
+  });
+
+  it("discards buffered messages and clears task state on hello_ack cancelled", async () => {
+    vi.useFakeTimers();
+    try {
+      const issue = makeIssue();
+      sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+
+      const newWs = reconnectWithNewWs();
+      newWs.emit("open");
+
+      // Buffer a task_complete
+      await session.handleUserInput("/task-complete");
+      expect(newWs.send).not.toHaveBeenCalled();
+
+      // Send hello_ack cancelled → buffer discarded, task state cleared
+      sendMsg(newWs, { type: "hello_ack", workerId: WORKER_ID, status: "cancelled" });
+      expect(newWs.send).not.toHaveBeenCalled();
+
+      // Verify task state cleared: subsequent /task-complete sends nothing
+      await session.handleUserInput("/task-complete");
+      expect(newWs.send).not.toHaveBeenCalled();
+    } finally {
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    }
+  });
+
+  it("flushes buffered task_complete on hello_ack idle (worker had stale task before reconnect)", async () => {
+    vi.useFakeTimers();
+    try {
+      const issue = makeIssue();
+      sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+
+      const newWs = reconnectWithNewWs();
+      newWs.emit("open");
+
+      await session.handleUserInput("/task-complete");
+      expect(newWs.send).not.toHaveBeenCalled();
+
+      // hello_ack idle — task was reverted on foreman side; but worker flushes anyway
+      // (foreman's ownership check will reject the stale task_complete if needed)
+      sendMsg(newWs, { type: "hello_ack", workerId: WORKER_ID, status: "idle" });
+      expect(newWs.send).toHaveBeenCalledOnce();
+      const sent = JSON.parse(newWs.send.mock.calls[0][0]);
+      expect(sent.type).toBe("task_complete");
+    } finally {
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    }
+  });
+
+  it("hello_ack is passed to display.printForemanMessage", () => {
+    sendMsg(fakeWs, { type: "hello_ack", workerId: WORKER_ID, status: "idle" });
+    expect(display.printForemanMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "hello_ack", workerId: WORKER_ID, status: "idle" })
+    );
+  });
+});
+
 // ── classifyEvent ─────────────────────────────────────────────────────────────
 
 describe("classifyEvent", () => {

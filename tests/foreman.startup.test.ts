@@ -61,6 +61,23 @@ function nextMsg(ws: WebSocket): Promise<object> {
   });
 }
 
+function makeQueue(ws: WebSocket): { next: () => Promise<object> } {
+  const pending: object[] = [];
+  const waiters: Array<(m: object) => void> = [];
+  ws.on("message", (data: Buffer | string) => {
+    const msg = JSON.parse(data.toString()) as object;
+    const waiter = waiters.shift();
+    if (waiter) waiter(msg);
+    else pending.push(msg);
+  });
+  return {
+    next(): Promise<object> {
+      if (pending.length > 0) return Promise.resolve(pending.shift()!);
+      return new Promise((r) => waiters.push(r));
+    },
+  };
+}
+
 function closeClient(ws: WebSocket): Promise<void> {
   return new Promise((resolve) => {
     if (ws.readyState === WebSocket.CLOSED) { resolve(); return; }
@@ -131,7 +148,9 @@ describe("tryAssignWork — DB persistence", () => {
 
     port = await startServer();
     const ws = await connect({ type: "worker_hello", workerId: "w1", status: "idle" });
-    const msg = await nextMsg(ws);
+    const q = makeQueue(ws);
+    await q.next(); // hello_ack
+    const msg = await q.next(); // task_assigned
     callOrder.push("after-recv");
 
     expect(msg).toMatchObject({ type: "task_assigned", taskId: "42" });
@@ -163,7 +182,9 @@ describe("tryAssignWork — DB persistence", () => {
 
     port = await startServer();
     const ws = await connect({ type: "worker_hello", workerId: "w1", status: "idle" });
-    const msg = await nextMsg(ws);
+    const q = makeQueue(ws);
+    await q.next(); // hello_ack
+    const msg = await q.next(); // task_assigned
 
     expect(msg).toMatchObject({ type: "task_assigned", taskId: "42" });
   });
@@ -185,7 +206,9 @@ describe("startup reconnect behaviour", () => {
 
     port = await startServer();
     const ws = await connect({ type: "worker_hello", workerId: "w1", status: "idle" });
-    const msg = await nextMsg(ws);
+    const q = makeQueue(ws);
+    await q.next(); // hello_ack
+    const msg = await q.next(); // task_assigned
 
     // deleteAssignment should be called (the old session's row is removed)
     expect(store.deleteAssignment).toHaveBeenCalledWith("42");

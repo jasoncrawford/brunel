@@ -259,8 +259,9 @@ describe("webhook-triggered task routing", () => {
 
   it("issues/labeled with non-task label does not enqueue or assign", async () => {
     const ws = await connect();
+    const ackP = nextMsg(ws);
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
-    await waitUntil(() => !!registry.get("w1"));
+    await ackP; // consume hello_ack (worker is now registered)
 
     // No message should arrive after an unrelated label event
     routeEvent("evt-1", "issues", labeledPayload(42, "some-other-label"));
@@ -289,9 +290,9 @@ describe("webhook-triggered task routing", () => {
     routeEvent("evt-1", "issues", labeledPayload(42, "brunel:ready"));
     expect(queue.getTaskForIssue(42)?.status).toBe("pending");
 
-    // Worker connects afterwards and should receive the task
+    // Worker connects afterwards — use nextMsgWhere to skip hello_ack and get task_assigned
     const ws = await connect();
-    const reply = nextMsg(ws);
+    const reply = nextMsgWhere(ws, (m) => m.type === "task_assigned");
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
 
     const msg = await reply;
@@ -339,8 +340,9 @@ describe("webhook-triggered task routing", () => {
 
   it("issues/opened without task label does not enqueue", async () => {
     const ws = await connect();
+    const ackP = nextMsg(ws);
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
-    await waitUntil(() => !!registry.get("w1"));
+    await ackP; // consume hello_ack
 
     routeEvent("evt-1", "issues", openedPayload(99, ["bug", "enhancement"]));
     const raceResult = await Promise.race([
@@ -486,8 +488,9 @@ describe("PR event forwarding to workers", () => {
 
   it("check_run for unknown PR is silently dropped", async () => {
     const ws = await connect();
+    const ackP = nextMsg(ws);
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
-    await waitUntil(() => !!registry.get("w1"));
+    await ackP; // consume hello_ack
 
     routeEvent("evt-cr", "check_run", checkRunPayload(999, "failure"));
     const raceResult = await Promise.race([
@@ -523,8 +526,9 @@ describe("PR event forwarding to workers", () => {
 
   it("check_suite for unknown PR is silently dropped", async () => {
     const ws = await connect();
+    const ackP = nextMsg(ws);
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
-    await waitUntil(() => !!registry.get("w1"));
+    await ackP; // consume hello_ack
 
     routeEvent("evt-cs", "check_suite", checkSuitePayload(999, "failure"));
     const raceResult = await Promise.race([
@@ -574,8 +578,9 @@ describe("PR event forwarding to workers", () => {
 
   it("check_suite with empty pull_requests and unknown branch is silently dropped", async () => {
     const ws = await connect();
+    const ackP = nextMsg(ws);
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
-    await waitUntil(() => !!registry.get("w1"));
+    await ackP; // consume hello_ack
 
     routeEvent("evt-cs", "check_suite", checkSuitePayloadByBranch("unknown-branch", "failure"));
     const raceResult = await Promise.race([
