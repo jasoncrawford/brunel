@@ -552,6 +552,16 @@ describe("classifyEvent", () => {
     it("unrecognised event with no action is log_only", () => {
       expect(classifyEvent(evt("push"))).toBe("log_only");
     });
+    it("issue_comment starting with <!-- railway-bot-comment is log_only", () => {
+      const body = "<!-- railway-bot-comment-version=2 -->\n\n<!-- railway-project-id=\"abc\" -->\n🚅 Deployed";
+      const event = { id: "e1", name: "issue_comment", payload: { action: "created", comment: { body } } };
+      expect(classifyEvent(event)).toBe("log_only");
+    });
+    it("issue_comment edited starting with <!-- railway-bot-comment is log_only", () => {
+      const body = "<!-- railway-bot-comment-version=2 -->\nsome content";
+      const event = { id: "e1", name: "issue_comment", payload: { action: "edited", comment: { body } } };
+      expect(classifyEvent(event)).toBe("log_only");
+    });
   });
 
   describe("actionable events", () => {
@@ -569,6 +579,10 @@ describe("classifyEvent", () => {
     });
     it("issue_comment/edited is actionable", () => {
       expect(classifyEvent(evt("issue_comment", "edited"))).toBe("actionable");
+    });
+    it("issue_comment with railway-bot-comment body is actionable when no railway prefix", () => {
+      const event = { id: "e1", name: "issue_comment", payload: { action: "created", comment: { body: "Normal comment" } } };
+      expect(classifyEvent(event)).toBe("actionable");
     });
     it("pull_request/closed is actionable", () => {
       expect(classifyEvent(evt("pull_request", "closed"))).toBe("actionable");
