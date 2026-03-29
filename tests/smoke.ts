@@ -202,9 +202,15 @@ async function run(): Promise<void> {
   // Wait for the worker process to fully exit, then add a brief pause so the
   // foreman can process the TCP close event and remove the worker from its
   // registry before we post the webhook.
+  //
+  // SIGTERM alone doesn't always cause tsx to exit (pending async ops keep the
+  // process alive). Send SIGTERM first; if the process hasn't exited within
+  // 1 s, escalate to SIGKILL which is unconditional.
   const workerExited = new Promise<void>((resolve) => worker!.once("exit", resolve));
-  worker!.kill();
+  worker!.kill("SIGTERM");
+  const killTimer = setTimeout(() => worker!.kill("SIGKILL"), 1000);
   await workerExited;
+  clearTimeout(killTimer);
   await new Promise((r) => setTimeout(r, 200));
 
   // Wait for the foreman to confirm the real worker has disconnected before
