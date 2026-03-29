@@ -28,5 +28,4 @@ export type WorkerMessage =
 // Foreman → Worker messages
 export type ForemanMessage =
   | { type: "task_assigned"; taskId: string; issue: TaskIssue }
-  | { type: "event_notification"; taskId: string; event: GitHubEvent }
-  | { type: "standby" };
+  | { type: "event_notification"; taskId: string; event: GitHubEvent };

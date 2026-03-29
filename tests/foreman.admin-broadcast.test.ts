@@ -211,18 +211,6 @@ describe("foreman admin broadcast — webhook events", () => {
 });
 
 describe("foreman admin broadcast — sent messages", () => {
-  it("broadcasts standby sent to worker as kind='message'", async () => {
-    const ws = await connect();
-    const reply = nextMsg(ws);
-    send(ws, { type: "worker_hello", workerId: "worker-abc", status: "idle" });
-    await reply; // standby
-
-    const msgEntries = adminWss.logEntries.filter((e) => e.kind === "message");
-    expect(msgEntries.length).toBeGreaterThan(0);
-    const standby = msgEntries.find((e) => e.summary.includes("standby"));
-    expect(standby).toBeDefined();
-  });
-
   it("broadcasts task_assigned sent to worker as kind='message'", async () => {
     queue.addTask({ taskId: "1", issueNumber: 1, title: "Fix", body: "", labels: [], repoUrl: "https://github.com/owner/repo" });
 
@@ -241,9 +229,8 @@ describe("foreman admin broadcast — sent messages", () => {
 describe("foreman admin broadcast — received messages", () => {
   it("broadcasts received worker_hello as kind='message'", async () => {
     const ws = await connect();
-    const reply = nextMsg(ws);
     send(ws, { type: "worker_hello", workerId: "worker-abc", status: "idle" });
-    await reply;
+    await new Promise((r) => setTimeout(r, 20)); // let hello be processed
 
     const received = adminWss.logEntries.filter(
       (e) => e.kind === "message" && e.summary.includes("received") && e.summary.includes("worker_hello"),
@@ -253,9 +240,8 @@ describe("foreman admin broadcast — received messages", () => {
 
   it("broadcasts worker_hello with 'idle' status in summary", async () => {
     const ws = await connect();
-    const reply = nextMsg(ws);
     send(ws, { type: "worker_hello", workerId: "worker-abc", status: "idle" });
-    await reply;
+    await new Promise((r) => setTimeout(r, 20)); // let hello be processed
 
     const hello = adminWss.logEntries.find(
       (e) => e.kind === "message" && e.summary.includes("worker_hello"),
@@ -272,7 +258,7 @@ describe("foreman admin broadcast — received messages", () => {
 
     adminWss.logEntries.length = 0; // reset
     send(ws, { type: "task_complete", workerId: "worker-abc", taskId: "1" });
-    await nextMsg(ws); // standby
+    await new Promise((r) => setTimeout(r, 20)); // let task_complete be processed
 
     const received = adminWss.logEntries.filter(
       (e) => e.kind === "message" && e.summary.includes("task_complete"),
@@ -283,7 +269,7 @@ describe("foreman admin broadcast — received messages", () => {
   it("broadcasts disconnect event as kind='message'", async () => {
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "worker-abc", status: "idle" });
-    await nextMsg(ws); // standby
+    await new Promise((r) => setTimeout(r, 20)); // let hello be processed
 
     adminWss.logEntries.length = 0;
     await closeClient(ws);
@@ -299,9 +285,8 @@ describe("foreman admin broadcast — received messages", () => {
 describe("foreman admin broadcast — unique IDs across all event types", () => {
   it("assigns unique IDs to webhook and message broadcasts", async () => {
     const ws = await connect();
-    const reply = nextMsg(ws);
     send(ws, { type: "worker_hello", workerId: "worker-abc", status: "idle" });
-    await reply;
+    await new Promise((r) => setTimeout(r, 20)); // let hello be processed
 
     routeEvent("evt-1", "issues", {
       action: "labeled",

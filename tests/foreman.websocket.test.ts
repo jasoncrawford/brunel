@@ -109,11 +109,14 @@ afterEach(() => {
 // ── Scenarios ─────────────────────────────────────────────────────────────────
 
 describe("foreman WebSocket protocol", () => {
-  it("idle worker with no tasks receives standby", async () => {
+  it("idle worker with no tasks receives no message", async () => {
     const ws = await connect();
-    const reply = nextMsg(ws);
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
-    expect(await reply).toEqual({ type: "standby" });
+    const raceResult = await Promise.race([
+      nextMsg(ws).then(() => "message" as const),
+      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
+    ]);
+    expect(raceResult).toBe("timeout");
     expect(registry.get("w1")?.status).toBe("idle");
   });
 
@@ -130,15 +133,18 @@ describe("foreman WebSocket protocol", () => {
     expect(registry.get("w1")?.status).toBe("busy");
   });
 
-  it("second idle worker gets standby when only task is already assigned", async () => {
+  it("second idle worker gets no message when only task is already assigned", async () => {
     queue.addTask(makeTask(1));
     const ws1 = await connect();
     const ws2 = await connect();
     send(ws1, { type: "worker_hello", workerId: "w1", status: "idle" });
     await nextMsg(ws1); // task_assigned
-    const reply2 = nextMsg(ws2);
     send(ws2, { type: "worker_hello", workerId: "w2", status: "idle" });
-    expect(await reply2).toEqual({ type: "standby" });
+    const raceResult = await Promise.race([
+      nextMsg(ws2).then(() => "message" as const),
+      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
+    ]);
+    expect(raceResult).toBe("timeout");
   });
 
   it("task_complete triggers labelIssueDone and assigns next task", async () => {
@@ -160,14 +166,17 @@ describe("foreman WebSocket protocol", () => {
     expect(queue.get("1")?.status).toBe("complete");
   });
 
-  it("task_complete with no further tasks sends standby", async () => {
+  it("task_complete with no further tasks sends no message", async () => {
     queue.addTask(makeTask(1));
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
     await nextMsg(ws); // task_assigned
-    const reply = nextMsg(ws);
     send(ws, { type: "task_complete", workerId: "w1", taskId: "1" });
-    expect(await reply).toEqual({ type: "standby" });
+    const raceResult = await Promise.race([
+      nextMsg(ws).then(() => "message" as const),
+      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
+    ]);
+    expect(raceResult).toBe("timeout");
   });
 
   it("worker reconnects as busy and reclaims its own task (no task_assigned sent)", async () => {
@@ -243,9 +252,12 @@ describe("foreman WebSocket protocol", () => {
     ws.send("not valid json {{{");
     await new Promise((r) => setTimeout(r, 20));
     // Connection still usable after bad message
-    const reply = nextMsg(ws);
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
-    expect(await reply).toEqual({ type: "standby" });
+    const raceResult = await Promise.race([
+      nextMsg(ws).then(() => "message" as const),
+      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
+    ]);
+    expect(raceResult).toBe("timeout");
   });
 
   it("only the task's original owner can reclaim it on reconnect", async () => {
@@ -256,11 +268,14 @@ describe("foreman WebSocket protocol", () => {
     await nextMsg(wsA); // task_assigned
     await closeClient(wsA);
 
-    // Worker B tries to claim the same taskId — should get standby
+    // Worker B tries to claim the same taskId — task belongs to A, so B gets no message
     const wsB = await connect();
-    const replyB = nextMsg(wsB);
     send(wsB, { type: "worker_hello", workerId: "worker-b", taskId: "1", status: "busy" });
-    expect(await replyB).toEqual({ type: "standby" });
+    const raceResultB = await Promise.race([
+      nextMsg(wsB).then(() => "message" as const),
+      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
+    ]);
+    expect(raceResultB).toBe("timeout");
 
     // Worker A reconnects — should reclaim silently
     const wsA2 = await connect();
@@ -279,22 +294,20 @@ describe("foreman WebSocket protocol", () => {
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
     await nextMsg(ws); // task_assigned
-    const reply = nextMsg(ws);
     send(ws, { type: "task_complete", workerId: "w1", taskId: "1" });
-    expect(await reply).toEqual({ type: "standby" });
+    await new Promise((r) => setTimeout(r, 20)); // let task_complete be processed
     expect(queue.get("1")?.status).toBe("complete");
   });
 
-  it("worker reconnects as busy with a completed taskId gets standby", async () => {
+  it("worker reconnects as busy with a completed taskId is registered idle", async () => {
     queue.addTask(makeTask(1));
     // Mark task as complete directly (simulates another path completing it while worker was disconnected)
     queue.assignTask("1", "w1");
     queue.completeTask("1");
 
     const ws = await connect();
-    const reply = nextMsg(ws);
     send(ws, { type: "worker_hello", workerId: "w1", taskId: "1", status: "busy" });
-    expect(await reply).toEqual({ type: "standby" });
+    await new Promise((r) => setTimeout(r, 20)); // let hello be processed
     expect(registry.get("w1")?.status).toBe("idle");
   });
 
@@ -340,15 +353,18 @@ describe("foreman WebSocket protocol", () => {
 });
 
 describe("dependency-aware task assignment", () => {
-  it("idle worker gets standby when the only pending task is blocked", async () => {
+  it("idle worker gets no message when the only pending task is blocked", async () => {
     queue.addTask(makeTask(42));
     openIssues.add(10); // blocker is open
     setBlockers(42, [10], graph);
 
     const ws = await connect();
-    const reply = nextMsg(ws);
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
-    expect(await reply).toEqual({ type: "standby" });
+    const raceResult = await Promise.race([
+      nextMsg(ws).then(() => "message" as const),
+      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
+    ]);
+    expect(raceResult).toBe("timeout");
   });
 
   it("idle worker gets task_assigned when task has no open blockers", async () => {
@@ -372,15 +388,14 @@ describe("dependency-aware task assignment", () => {
 
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
-    const first = await nextMsg(ws);
-    expect(first).toEqual({ type: "standby" });
+    await new Promise((r) => setTimeout(r, 20)); // let hello be processed
 
-    const second = nextMsg(ws);
+    const reply = nextMsg(ws);
     routeEvent("evt-1", "issues", {
       action: "closed",
       issue: { number: 10, title: "Blocker", body: "", labels: [] },
     });
-    expect(await second).toMatchObject({ type: "task_assigned", taskId: "42" });
+    expect(await reply).toMatchObject({ type: "task_assigned", taskId: "42" });
   });
 
   it("issues/reopened re-blocks subsequent task assignments", async () => {
@@ -394,11 +409,14 @@ describe("dependency-aware task assignment", () => {
       issue: { number: 10, title: "Blocker", body: "", labels: [] },
     });
 
-    // Worker connects — task 43 is now blocked, so worker gets standby
+    // Worker connects — task 43 is now blocked, so worker gets no message
     const ws = await connect();
-    const reply = nextMsg(ws);
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
-    expect(await reply).toEqual({ type: "standby" });
+    const raceResult = await Promise.race([
+      nextMsg(ws).then(() => "message" as const),
+      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
+    ]);
+    expect(raceResult).toBe("timeout");
   });
 
   it("worker gets first unblocked task when queue has mixed blocked/unblocked tasks", async () => {
@@ -445,8 +463,7 @@ describe("worker secret enforcement", () => {
     try {
       const ws = await connectWorker(port);
       send(ws, { type: "worker_hello", workerId: "w1", status: "idle", workerSecret: "correct-secret" });
-      const msg = await nextMsg(ws);
-      expect(msg.type).toBe("standby");
+      await new Promise((r) => setTimeout(r, 20)); // connection accepted, no message expected
       ws.close();
     } finally {
       await new Promise<void>((r) => secretWss.close(() => server.close(r)));
@@ -457,8 +474,8 @@ describe("worker secret enforcement", () => {
     // Default setup (no workerSecret) — already tested elsewhere, just assert no regression
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
-    const msg = await nextMsg(ws);
-    expect(msg.type).toBe("standby");
+    await new Promise((r) => setTimeout(r, 20)); // connection accepted, no message expected
+    expect(registry.get("w1")?.status).toBe("idle");
   });
 });
 
@@ -478,7 +495,7 @@ function makeConnectToForeman(port: number) {
 }
 
 describe("worker WebSocket connection", () => {
-  it("worker client connects to foreman and completes handshake", async () => {
+  it("worker client connects to foreman successfully", async () => {
     const server = http.createServer();
     const { wss } = createForemanWss(new TaskQueue(), new WorkerRegistry(), server, { taskLabel: defaultCfg.taskLabel, reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs });
     const testPort = await new Promise<number>((resolve) => {
@@ -486,13 +503,14 @@ describe("worker WebSocket connection", () => {
     });
 
     const ws = makeConnectToForeman(testPort);
+    await new Promise<void>((resolve, reject) => { ws.once("open", resolve); ws.once("error", reject); });
 
-    const msg = await new Promise<ForemanMessage>((resolve, reject) => {
-      ws.on("message", (data) => resolve(JSON.parse(data.toString())));
-      ws.on("error", reject);
-    });
-
-    expect(msg.type).toBe("standby");
+    // No message expected when no tasks are available
+    const raceResult = await Promise.race([
+      new Promise<"message">((r) => ws.once("message", () => r("message"))),
+      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
+    ]);
+    expect(raceResult).toBe("timeout");
 
     ws.close();
     await new Promise<void>((resolve) => wss.close(() => server.close(resolve)));
@@ -539,8 +557,7 @@ describe("worker disconnect DB logging", () => {
     const ws = new WebSocket(`ws://localhost:${testPort}/worker`);
     await new Promise<void>((resolve, reject) => { ws.once("open", resolve); ws.once("error", reject); });
     ws.send(JSON.stringify({ type: "worker_hello", workerId: "w-disc-1", status: "idle" }));
-    // Wait for standby reply
-    await new Promise<void>((resolve) => ws.once("message", resolve));
+    await new Promise((r) => setTimeout(r, 20)); // let hello be processed
 
     await new Promise<void>((resolve) => {
       ws.once("close", resolve);
@@ -631,7 +648,7 @@ describe("disconnected worker state", () => {
   it("idle worker is removed from registry on close", async () => {
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
-    await nextMsg(ws); // standby
+    await new Promise((r) => setTimeout(r, 20)); // let hello be processed
 
     await closeClient(ws);
     await new Promise((r) => setTimeout(r, 20));
@@ -720,10 +737,10 @@ describe("disconnected worker state", () => {
     await closeClient(wsA);
     await new Promise((r) => setTimeout(r, 20));
 
-    // Worker B is already connected and on standby
+    // Worker B is already connected and idle
     const wsB = await connect();
     send(wsB, { type: "worker_hello", workerId: "worker-b", status: "idle" });
-    await nextMsg(wsB); // standby (task still assigned to disconnected A)
+    await new Promise((r) => setTimeout(r, 20)); // let hello be processed (task still assigned to disconnected A)
 
     // Worker A reconnects as idle (crashed and restarted)
     const wsA2 = await connect();
@@ -755,7 +772,7 @@ describe("worker_goodbye", () => {
   it("removes idle worker from registry when goodbye has no taskId", async () => {
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
-    await nextMsg(ws); // standby
+    await new Promise((r) => setTimeout(r, 20)); // let hello be processed
 
     send(ws, { type: "worker_goodbye", workerId: "w1" });
     await new Promise((r) => setTimeout(r, 20));
@@ -771,10 +788,10 @@ describe("worker_goodbye", () => {
     send(wsA, { type: "worker_hello", workerId: "worker-a", status: "idle" });
     await nextMsg(wsA); // task_assigned
 
-    // Worker B connects and waits on standby
+    // Worker B connects idle
     const wsB = await connect();
     send(wsB, { type: "worker_hello", workerId: "worker-b", status: "idle" });
-    await nextMsg(wsB); // standby
+    await new Promise((r) => setTimeout(r, 20)); // let hello be processed
 
     // Worker A says goodbye — task should revert and be assigned to B
     const replyB = nextMsg(wsB);
@@ -856,15 +873,12 @@ describe("reclaim timer (fake timers)", () => {
     expect(q.get("1")?.status).toBe("assigned");
     expect(r.get("worker-a")?.status).toBe("disconnected");
 
-    // Connect worker B (idle) — should get standby because task is still assigned
+    // Connect worker B (idle) — task is still assigned to A, so B gets no message yet
     const wsB = new WebSocket(`ws://localhost:${testPort}/worker`);
     await new Promise<void>((resolve, reject) => { wsB.once("open", resolve); wsB.once("error", reject); });
-    const replyB = nextMsg(wsB);
-    send(wsB, { type: "worker_hello", workerId: "worker-b", status: "idle" });
-    expect(await replyB).toEqual({ type: "standby" });
-
-    // Register listener BEFORE advancing time so we don't miss the message
     const msgB2Promise = nextMsg(wsB);
+    send(wsB, { type: "worker_hello", workerId: "worker-b", status: "idle" });
+    await new Promise((r) => setTimeout(r, 20)); // let hello be processed
 
     // Advance time past the reclaim timeout
     vi.advanceTimersByTime(reclaimTimeoutMs + 100);

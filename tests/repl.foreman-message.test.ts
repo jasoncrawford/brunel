@@ -135,19 +135,6 @@ describe("printForemanMessage", () => {
     expect(trimmed).not.toContain("\n");
   });
 
-  it("standby prints a waiting message", () => {
-    const msg: ForemanMessage = { type: "standby" };
-    const output = captureOutput(() => printForemanMessage(msg));
-    const plain = stripAnsi(output);
-    expect(plain.toLowerCase()).toMatch(/standby|waiting/);
-  });
-
-  it("standby output is a single line (no embedded newlines in content)", () => {
-    const msg: ForemanMessage = { type: "standby" };
-    const output = captureOutput(() => printForemanMessage(msg));
-    const trimmed = stripAnsi(output).trim();
-    expect(trimmed).not.toContain("\n");
-  });
 });
 
 describe("printForemanMessage - _default", () => {

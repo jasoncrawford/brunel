@@ -784,13 +784,11 @@ export function createForemanWss(
         await assignStore.upsertAssignment(task.taskId, workerId);
       } catch (err) {
         flog(`ERROR Failed to persist assignment for task #${task.taskId}: ${fmtError(err)}`);
-        // Revert in-memory state — worker gets standby instead.
+        // Revert in-memory state — worker returns to idle.
         taskQueue.revertTask(task.taskId);
         registry.releaseWorker(workerId);
         broadcastSnapshot();
-        const standbyMsg: ForemanMessage = { type: "standby" };
-        sendMsg(workerId, standbyMsg);
-        log(workerId, "→ standby (DB write failed)");
+        log(workerId, "→ idle (DB write failed)");
         return;
       }
 
@@ -813,10 +811,7 @@ export function createForemanWss(
         sendMsg(workerId, evtMsg);
         log(workerId, `→ event_notification #${task.issueNumber} ${evt.name} (queued)`);
       }
-    } else {
-      const standbyMsg: ForemanMessage = { type: "standby" };
-      sendMsg(workerId, standbyMsg);
-      log(workerId, "→ standby");
+
     }
   }
 
@@ -863,12 +858,10 @@ export function createForemanWss(
           log(workerId, `hello busy task=#${msg.taskId} — unknown task, respecting busy status`);
           registry.register(workerId, ws, "busy", msg.taskId);
         } else {
-          // Task is assigned to a different worker — standby
+          // Task is assigned to a different worker — register idle; assignIdleWorkers() will send standby
           log(workerId, `hello busy task=#${msg.taskId} — task taken by another worker`);
           registry.register(workerId, ws, "idle");
-          const standbyMsg: ForemanMessage = { type: "standby" };
-          sendMsg(workerId, standbyMsg);
-          log(workerId, "→ standby");
+
         }
       } else {
         // If the queue has a task assigned to this worker (from a prior foreman

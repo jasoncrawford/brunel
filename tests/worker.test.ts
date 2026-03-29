@@ -404,8 +404,6 @@ describe("createWsInputPromise", () => {
     const first = session.createWsInputPromise();
     const second = session.createWsInputPromise();
 
-    // standby doesn't resolve either promise (not a task/event signal)
-    sendMsg(fakeWs, { type: "standby" });
     sendMsg(fakeWs, { type: "task_assigned", taskId: "1", issue: makeIssue() });
 
     // second gets resolved since it holds the current resolveWsInput
