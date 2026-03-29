@@ -18,7 +18,13 @@ const _realFetch = globalThis.fetch;
   init?: RequestInit,
 ): Promise<Response> => {
   const urlStr = url.toString();
-  if (urlStr.includes("api.github.com")) {
+  let parsedHostname = "";
+  try {
+    parsedHostname = new URL(urlStr).hostname;
+  } catch {
+    // not a valid URL — leave parsedHostname empty
+  }
+  if (parsedHostname === "api.github.com") {
     return new Response(JSON.stringify({ data: { repository: null } }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
@@ -111,7 +117,7 @@ async function handleTestRoute(
       res.end(body);
     } catch (err) {
       res.writeHead(500, { "Content-Type": "text/plain" });
-      res.end(String(err));
+      res.end("Internal server error");
     }
     return;
   }
