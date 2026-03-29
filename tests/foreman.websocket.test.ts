@@ -58,6 +58,7 @@ let registry: WorkerRegistry;
 let httpServer: http.Server;
 let wss: WebSocketServer;
 let routeEvent: (id: string, name: string, payload: unknown) => void;
+let shutdown: () => Promise<void>;
 let labelDone: ReturnType<typeof vi.fn>;
 let port: number;
 let graph: DependencyGraph;
@@ -78,7 +79,7 @@ beforeEach(() => {
   openIssues = new Set();
   labeledIssues = new Map();
   httpServer = http.createServer();
-  ({ wss, routeEvent } = createForemanWss(queue, registry, httpServer, { taskLabel: defaultCfg.taskLabel, reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs, labelDone, graph, openIssues, labeledIssues }));
+  ({ wss, routeEvent, shutdown } = createForemanWss(queue, registry, httpServer, { taskLabel: defaultCfg.taskLabel, reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs, labelDone, graph, openIssues, labeledIssues }));
 
   return new Promise<void>((resolve) => {
     httpServer.listen(0, () => {
@@ -996,6 +997,68 @@ describe("reclaim timer (fake timers)", () => {
 
     wsA2.close();
     await new Promise<void>((r) => wsA2.once("close", r));
+    await new Promise<void>((r) => testWss.close(() => srv.close(r)));
+  });
+});
+
+// ── Graceful shutdown ──────────────────────────────────────────────────────────
+
+describe("graceful shutdown", () => {
+  it("resolves immediately when no workers are connected", async () => {
+    await expect(shutdown()).resolves.toBeUndefined();
+  });
+
+  it("closes all connected workers with close code 1001", async () => {
+    const ws1 = await connect();
+    const ws2 = await connect();
+    send(ws1, { type: "worker_hello", workerId: "w1", status: "idle" });
+    send(ws2, { type: "worker_hello", workerId: "w2", status: "idle" });
+    await waitUntil(() => !!registry.get("w1") && !!registry.get("w2"));
+
+    const close1 = new Promise<number>((resolve) => { ws1.once("close", (code) => resolve(code)); });
+    const close2 = new Promise<number>((resolve) => { ws2.once("close", (code) => resolve(code)); });
+
+    void shutdown();
+    const [code1, code2] = await Promise.all([close1, close2]);
+    expect(code1).toBe(1001);
+    expect(code2).toBe(1001);
+  });
+
+  it("logs worker_disconnected with code 1001 when shutdown closes a registered worker", async () => {
+    const mockDbLogger: DbLogger = {
+      logWebhookEvent: vi.fn(),
+      logForemanMessage: vi.fn(),
+      queryLog: vi.fn().mockResolvedValue([]),
+      queryTaskEvents: vi.fn().mockResolvedValue([]),
+      queryWorkerMessages: vi.fn().mockResolvedValue([]),
+    };
+    const localRegistry = new WorkerRegistry();
+    const srv = http.createServer();
+    const { wss: testWss, shutdown: localShutdown } = createForemanWss(
+      new TaskQueue(), localRegistry, srv,
+      { taskLabel: defaultCfg.taskLabel, reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs, dbLogger: mockDbLogger },
+    );
+    const testPort = await new Promise<number>((r) => srv.listen(0, () => r((srv.address() as AddressInfo).port)));
+
+    const ws = new WebSocket(`ws://localhost:${testPort}/worker`);
+    await new Promise<void>((resolve, reject) => { ws.once("open", resolve); ws.once("error", reject); });
+    ws.send(JSON.stringify({ type: "worker_hello", workerId: "w-shutdown", status: "idle" }));
+    await waitUntil(() => !!localRegistry.get("w-shutdown"));
+
+    // Await shutdown() — it resolves only after server-side close events fire,
+    // which means the close handler has already logged the disconnect to DB.
+    await localShutdown();
+
+    const calls = (mockDbLogger.logForemanMessage as ReturnType<typeof vi.fn>).mock.calls;
+    const disconnectCall = calls.find((c) => c[0].msgType === "worker_disconnected");
+    expect(disconnectCall).toBeDefined();
+    expect(disconnectCall![0]).toMatchObject({
+      direction: "received",
+      workerId: "w-shutdown",
+      msgType: "worker_disconnected",
+    });
+    expect(disconnectCall![0].payload.code).toBe(1001);
+
     await new Promise<void>((r) => testWss.close(() => srv.close(r)));
   });
 });
