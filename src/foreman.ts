@@ -243,16 +243,26 @@ export class TaskQueue {
     return undefined;
   }
 
-  getTaskSnapshots(): TaskSnapshot[] {
-    return [...this.tasks.values()].map((t) => ({
-      taskId: t.taskId,
-      issueNumber: t.issueNumber,
-      title: t.title,
-      status: t.status,
-      assignedWorkerId: t.assignedWorkerId,
-      prNumber: t.prNumber,
-      prUrl: t.prNumber !== undefined ? `${t.repoUrl}/pull/${t.prNumber}` : undefined,
-    }));
+  getTaskSnapshots(graph?: DependencyGraph, openIssues?: Set<number>): TaskSnapshot[] {
+    return [...this.tasks.values()].map((t) => {
+      const snapshot: TaskSnapshot = {
+        taskId: t.taskId,
+        issueNumber: t.issueNumber,
+        title: t.title,
+        status: t.status,
+        assignedWorkerId: t.assignedWorkerId,
+        prNumber: t.prNumber,
+        prUrl: t.prNumber !== undefined ? `${t.repoUrl}/pull/${t.prNumber}` : undefined,
+      };
+      if (graph !== undefined && openIssues !== undefined) {
+        const blockerSet = graph.get(t.issueNumber) ?? new Set<number>();
+        snapshot.blockers = Array.from(blockerSet).map((n) => ({
+          issueNumber: n,
+          isOpen: openIssues.has(n),
+        }));
+      }
+      return snapshot;
+    });
   }
 }
 
@@ -547,7 +557,7 @@ export function createForemanWss(
   function broadcastSnapshot() {
     if (!adminWss) return;
     adminWss.broadcastSnapshot({
-      tasks: taskQueue.getTaskSnapshots(),
+      tasks: taskQueue.getTaskSnapshots(graph, openIssues),
       workers: registry.getWorkerSnapshots(),
     });
   }
@@ -1113,7 +1123,7 @@ if (isMain) {
   // Admin WebSocket broadcaster
   const { createAdminWss } = await import("./admin-ws.js");
   const adminWss = createAdminWss(server, () => ({
-    tasks: taskQueue.getTaskSnapshots(),
+    tasks: taskQueue.getTaskSnapshots(graph, openIssues),
     workers: registry.getWorkerSnapshots(),
   }));
 
