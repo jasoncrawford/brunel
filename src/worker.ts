@@ -30,8 +30,13 @@ export function classifyEvent(event: GitHubEvent): "actionable" | "log_only" {
 
     case "pull_request_review":
     case "pull_request_review_comment":
-    case "issue_comment":
       return "actionable";
+
+    case "issue_comment": {
+      const body = (event.payload.comment as Record<string, unknown> | undefined)?.body;
+      if (typeof body === "string" && body.startsWith("<!-- railway-bot-comment")) return "log_only";
+      return "actionable";
+    }
 
     default:
       return "log_only";
