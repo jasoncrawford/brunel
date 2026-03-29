@@ -42,7 +42,7 @@ export async function loadIssuesToQueue(
     };
     labeledIssues.set(issue.number, { issue: issueData, depsLoaded: false });
     openIssues.add(issue.number);
-    const blockers = await fetchBlockers(issue.number, issue.body ?? "", { repo, token });
+    const blockers = await fetchBlockers(issue.number, issue.body ?? "", { repo, token, apiUrl });
     setBlockers(issue.number, blockers, graph);
     for (const b of blockers) allBlockerNumbers.add(b);
     loadedIssueNumbers.push(issue.number);
@@ -64,12 +64,12 @@ export async function loadIssuesToQueue(
 
 export async function labelIssueDone(
   issueNumber: number,
-  opts: { repo: string; token: string; doneLabel: string },
+  opts: { repo: string; token: string; doneLabel: string; apiUrl?: string },
 ): Promise<void> {
-  const { repo, token, doneLabel } = opts;
+  const { repo, token, doneLabel, apiUrl = "https://api.github.com" } = opts;
   const [owner, repoName] = repo.split("/");
   const res = await fetch(
-    `https://api.github.com/repos/${owner}/${repoName}/issues/${issueNumber}/labels`,
+    `${apiUrl}/repos/${owner}/${repoName}/issues/${issueNumber}/labels`,
     {
       method: "POST",
       headers: { ...ghHeaders(token), "Content-Type": "application/json" },
@@ -101,9 +101,9 @@ export async function fetchIssueStates(
 
 export async function fetchNativeBlockers(
   issueNumber: number,
-  opts: { repo: string; token: string },
+  opts: { repo: string; token: string; apiUrl?: string },
 ): Promise<number[]> {
-  const { repo, token } = opts;
+  const { repo, token, apiUrl = "https://api.github.com" } = opts;
   const [owner, repoName] = repo.split("/");
   const query = `
     query($owner: String!, $repo: String!, $number: Int!) {
@@ -116,7 +116,7 @@ export async function fetchNativeBlockers(
       }
     }
   `;
-  const res = await fetch("https://api.github.com/graphql", {
+  const res = await fetch(`${apiUrl}/graphql`, {
     method: "POST",
     headers: { ...ghHeaders(token), "Content-Type": "application/json" },
     body: JSON.stringify({ query, variables: { owner, repo: repoName, number: issueNumber } }),
