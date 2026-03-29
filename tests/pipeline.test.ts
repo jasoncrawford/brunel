@@ -647,6 +647,7 @@ describe("pipeline: PR events forwarded and logged to DB", () => {
       supabase.from("tasks").delete().neq("task_id", ""),
       supabase.from("task_assignments").delete().neq("task_id", ""),
       supabase.from("webhook_events").delete().gt("id", 0),
+      supabase.from("foreman_messages").delete().gt("id", 0),
     ]);
     foreman = buildForeman({ dbLogger: realDbLogger });
     await new Promise<void>((resolve) =>
