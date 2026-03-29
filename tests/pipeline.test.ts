@@ -20,8 +20,10 @@ import { WebSocket, WebSocketServer } from "ws";
 import type { AddressInfo } from "net";
 import type { ForemanMessage } from "../src/types.js";
 import { TaskQueue, WorkerRegistry, createForemanWss } from "../src/foreman.js";
+import type { DbLogger } from "../src/db.js";
 import {
   createDbLogger,
+  createNullDbLogger,
   createTaskAssignmentStore,
   createTaskStore,
 } from "../src/db.js";
@@ -32,7 +34,8 @@ import { createTestSupabase } from "./helpers/db.js";
 
 const defaultCfg = await loadDefaultConfig();
 const supabase = createTestSupabase();
-const dbLogger = createDbLogger(supabase);
+const realDbLogger = createDbLogger(supabase);
+const nullDbLogger = createNullDbLogger();
 const taskStore = createTaskStore(supabase);
 const assignStore = createTaskAssignmentStore(supabase);
 
@@ -211,6 +214,7 @@ function stubFetchNoBlockers() {
  */
 function buildForeman(opts: {
   reclaimTimeoutMs?: number;
+  dbLogger?: DbLogger;
 } = {}): {
   queue: TaskQueue;
   registry: WorkerRegistry;
@@ -230,7 +234,7 @@ function buildForeman(opts: {
   const { wss, routeEvent } = createForemanWss(queue, registry, httpServer, {
     taskLabel: defaultCfg.taskLabel,
     reclaimTimeoutMs: opts.reclaimTimeoutMs ?? defaultCfg.workerReclaimTimeoutMs,
-    dbLogger,
+    dbLogger: opts.dbLogger ?? nullDbLogger,
     assignStore,
     taskStore,
     repo: "owner/repo",
@@ -643,8 +647,9 @@ describe("pipeline: PR events forwarded and logged to DB", () => {
     await Promise.all([
       supabase.from("tasks").delete().neq("task_id", ""),
       supabase.from("task_assignments").delete().neq("task_id", ""),
+      supabase.from("webhook_events").delete().gt("id", 0),
     ]);
-    foreman = buildForeman();
+    foreman = buildForeman({ dbLogger: realDbLogger });
     await new Promise<void>((resolve) =>
       foreman.httpServer.once("listening", resolve),
     );
