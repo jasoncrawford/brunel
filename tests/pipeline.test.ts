@@ -42,7 +42,7 @@ const assignStore = createTaskAssignmentStore(supabase);
 // ── Generic helpers ───────────────────────────────────────────────────────────
 
 /** FIFO queue that buffers all incoming WebSocket messages. */
-function makeQueue(ws: WebSocket): { next: () => Promise<ForemanMessage> } {
+function makeQueue(ws: WebSocket): { next: () => Promise<ForemanMessage>; isEmpty: () => boolean } {
   const pending: ForemanMessage[] = [];
   const waiters: Array<(m: ForemanMessage) => void> = [];
   ws.on("message", (data: Buffer | string) => {
@@ -55,6 +55,9 @@ function makeQueue(ws: WebSocket): { next: () => Promise<ForemanMessage> } {
     next(): Promise<ForemanMessage> {
       if (pending.length > 0) return Promise.resolve(pending.shift()!);
       return new Promise((r) => waiters.push(r));
+    },
+    isEmpty(): boolean {
+      return pending.length === 0;
     },
   };
 }
@@ -610,12 +613,8 @@ describe("pipeline: dependency blocking", () => {
 
     // 4. Give deps-loading enough time to complete; worker should still be idle
     await new Promise((r) => setTimeout(r, 200));
-    // No task_assigned should have arrived yet
-    const raceResult = await Promise.race([
-      q.next().then(() => "message" as const),
-      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
-    ]);
-    expect(raceResult).toBe("timeout");
+    // No task_assigned should have arrived yet (check buffer without registering a waiter)
+    expect(q.isEmpty()).toBe(true);
 
     // 5. Close the blocker issue — this unblocks task #92
     routeEvent("evt-2", "issues", closedPayload(91));
