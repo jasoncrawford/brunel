@@ -159,15 +159,47 @@ function checkRunPayload(prNumber: number) {
 
 // ── Shared test harness ───────────────────────────────────────────────────────
 
+/**
+ * Returns a fetch mock that intercepts GitHub API calls while passing all
+ * other requests (e.g. Supabase) through to the real fetch.
+ *
+ * The Supabase postgrest-js client calls res.text() internally, so a simple
+ * stub that only provides res.json() breaks Supabase inserts/queries.
+ */
+function makeGithubFetchMock(
+  handler: (url: string) => Response | null,
+): typeof fetch {
+  const realFetch = globalThis.fetch;
+  return async function mockFetch(
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ): Promise<Response> {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : (input as Request).url;
+    const intercepted = handler(url);
+    if (intercepted) return intercepted;
+    return realFetch(input, init);
+  } as typeof fetch;
+}
+
+function makeGithubResponse(jsonBody: unknown): Response {
+  const body = JSON.stringify(jsonBody);
+  return new Response(body, {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 /** Default mock: fetchNativeBlockers returns empty, fetchIssueStates returns open. */
 function stubFetchNoBlockers() {
   vi.stubGlobal(
     "fetch",
-    vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        data: { repository: { issue: { blockedBy: { nodes: [] } } } },
-      }),
+    makeGithubFetchMock((url) => {
+      if (url.includes("api.github.com") || url.includes("/graphql")) {
+        return makeGithubResponse({
+          data: { repository: { issue: { blockedBy: { nodes: [] } } } },
+        });
+      }
+      return null; // pass through to real fetch
     }),
   );
 }
@@ -507,26 +539,22 @@ describe("pipeline: dependency blocking", () => {
   let foreman: ReturnType<typeof buildForeman>;
 
   beforeEach(async () => {
-    // Stub fetch: native blocker query returns empty; issue-state query for #91 returns open
+    // Stub fetch: native blocker query returns empty; issue-state query for #91 returns open.
+    // Supabase calls are passed through to real fetch (they call res.text() internally).
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockImplementation(async (url: string) => {
-        if (String(url).includes("/graphql")) {
+      makeGithubFetchMock((url) => {
+        if (url.includes("/graphql")) {
           // fetchNativeBlockers — no native blockers
-          return {
-            ok: true,
-            json: async () => ({
-              data: {
-                repository: { issue: { blockedBy: { nodes: [] } } },
-              },
-            }),
-          };
+          return makeGithubResponse({
+            data: { repository: { issue: { blockedBy: { nodes: [] } } } },
+          });
         }
-        // fetchIssueStates — issue #91 is open
-        return {
-          ok: true,
-          json: async () => ({ number: 91, state: "open" }),
-        };
+        if (url.includes("api.github.com")) {
+          // fetchIssueStates — issue #91 is open
+          return makeGithubResponse({ number: 91, state: "open" });
+        }
+        return null; // pass through to real fetch
       }),
     );
     process.env.GITHUB_REPO = "owner/repo";
