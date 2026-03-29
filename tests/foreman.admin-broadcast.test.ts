@@ -267,7 +267,7 @@ describe("foreman admin broadcast — received messages", () => {
     expect(received.length).toBeGreaterThan(0);
   });
 
-  it("broadcasts disconnect event as kind='message'", async () => {
+  it("broadcasts disconnect event as kind='message' with workerId and close code in summary", async () => {
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "worker-abc", status: "idle" });
     await waitUntil(() => !!registry.get("worker-abc"));
@@ -280,6 +280,8 @@ describe("foreman admin broadcast — received messages", () => {
       (e) => e.kind === "message" && e.summary.includes("disconnected"),
     );
     expect(disconnected).toBeDefined();
+    expect(disconnected!.workerId).toBe("worker-abc");
+    expect(disconnected!.summary).toMatch(/code \d+/);
   });
 });
 
