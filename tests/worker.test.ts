@@ -182,6 +182,21 @@ describe("handleUserInput", () => {
     expect(sent).toEqual({ type: "task_complete", workerId: WORKER_ID, taskId: "42" });
   });
 
+  it("/task-complete returns 'task-complete' so workerMain can hide the prompt", async () => {
+    const issue = makeIssue();
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+    await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
+
+    const result = await session.handleUserInput("/task-complete");
+
+    expect(result).toBe("task-complete");
+  });
+
+  it("/task-complete with no active task returns undefined (no prompt change needed)", async () => {
+    const result = await session.handleUserInput("/task-complete");
+    expect(result).toBeUndefined();
+  });
+
   it("/task-complete with no active task does not send to WS", async () => {
     await session.handleUserInput("/task-complete");
     expect(fakeWs.send).not.toHaveBeenCalled();

@@ -148,7 +148,7 @@ export class WorkerSession {
   /**
    * Process a line of stdin input: slash commands and user queries.
    */
-  async handleUserInput(input: string): Promise<"exit" | undefined> {
+  async handleUserInput(input: string): Promise<"exit" | "task-complete" | undefined> {
     if (!input || input === "__abort__") return;
     if (input === WS_TASK_ASSIGNED || input === WS_EVENT) return;
     // ^D / ^C on empty buffer resolves ask() with "__eof__" — treat as /exit
@@ -181,6 +181,7 @@ export class WorkerSession {
         this.currentIssue = undefined;
         this.currentSessionId = undefined;
         this.display.print(display.c.sageGreen("Task complete. Waiting for next task..."));
+        return "task-complete";
       }
       return;
     }
@@ -494,6 +495,7 @@ export async function workerMain(
     try {
       const result = await session.handleUserInput(input);
       if (result === "exit") break;
+      if (result === "task-complete") showPrompt = false;
     } catch (err) {
       display.print(display.c.boldRed(`\nERROR: ${fmtError(err)}`));
     }
