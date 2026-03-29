@@ -115,7 +115,7 @@ async function run(): Promise<void> {
       const urlPath = req.url ?? "/";
 
       // Record POST label calls: POST /repos/:owner/:repo/issues/:number/labels
-      if (req.method === "POST" && /\/repos\/.+\/issues\/\d+\/labels$/.test(urlPath)) {
+      if (req.method === "POST" && /\/repos\/[^/]+\/[^/]+\/issues\/\d+\/labels$/.test(urlPath)) {
         labelCalls.push({ path: urlPath, body });
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end("[]");
