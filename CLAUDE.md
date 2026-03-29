@@ -37,6 +37,17 @@ Config (in `.env` or `brunel.config.ts`; CLI flags also accepted). Precedence: C
 
 All four run in CI on every PR.
 
+## Running tests locally
+
+DB tests require a running local Supabase instance:
+
+```
+supabase start   # first time takes a few minutes to pull Docker images
+npm test
+```
+
+`tests/globalSetup.ts` runs once before the test suite. It reads the service-role key from `supabase status` (or from `SUPABASE_SERVICE_ROLE_KEY` if already set) and injects it into `process.env` so all Vitest worker threads inherit it. CI starts Supabase automatically via `supabase/setup-cli@v1` + `supabase start`.
+
 ## Database
 
 Supabase (hosted Postgres). Migrations live in `supabase/migrations/`. The GitHub Actions workflow at `.github/workflows/migrate.yml` runs `supabase db push` automatically on push to `main` when migration files change, and can also be triggered manually via `workflow_dispatch`.
@@ -71,3 +82,4 @@ A task moves through states: **pending → assigned → complete**.
 - In tests, use `loadDefaultConfig()` from `src/config.ts` to get a config object with schema defaults — don't export `DEFAULT_*` constants or repeat `loadConfig([], {...})` inline in each test file.
 - Options passed to `createForemanWss` that have a corresponding required config field should be required (not optional with `??` fallback) — the config schema is the single source of truth for defaults.
 - In WebSocket tests, use the `makeQueue` helper (defined in each test file) instead of sequential `ws.once("message")` calls. Both `hello_ack` and `task_assigned` can arrive in the same TCP packet and fire synchronously — `makeQueue` installs a permanent listener with a FIFO buffer so no message is missed.
+- In DB tests, each test file's `beforeEach` must only truncate the tables that file uses — not all tables. Vitest runs test files in parallel workers; if file A's `beforeEach` truncates tables owned by file B, file B's concurrent tests will lose their data. Use `tests/helpers/db.ts`'s `createTestSupabase()` and truncate inline with targeted `.delete()` calls.
