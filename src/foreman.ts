@@ -902,8 +902,6 @@ export function createForemanWss(
       // Cancel any pending reclaim timer — worker has reconnected.
       registry.cancelReclaimTimer(workerId);
 
-      let ackStatus: "idle" | "busy" | "cancelled";
-
       if (msg.status === "busy" && msg.taskId) {
         const existing = taskQueue.get(msg.taskId);
         if (existing && existing.status !== "complete" && (existing.status !== "assigned" || existing.assignedWorkerId === workerId)) {
@@ -911,8 +909,7 @@ export function createForemanWss(
           log(workerId, `hello busy task=#${msg.taskId} — reclaimed`);
           registry.register(workerId, ws, "busy", msg.taskId);
           taskQueue.assignTask(msg.taskId, workerId);
-          ackStatus = "busy";
-          sendMsg(workerId, { type: "hello_ack", workerId, status: ackStatus });
+          sendMsg(workerId, { type: "hello_ack", workerId, status: "busy" });
           const queued = taskQueue.drainEvents(msg.taskId);
           for (const evt of queued) {
             const evtMsg: ForemanMessage = { type: "event_notification", taskId: msg.taskId, event: evt };
@@ -924,19 +921,16 @@ export function createForemanWss(
           // Let them stay busy so they can call task_complete to release themselves.
           log(workerId, `hello busy task=#${msg.taskId} — reclaimed (issue closed, worker finishing)`);
           registry.register(workerId, ws, "busy", msg.taskId);
-          ackStatus = "busy";
-          sendMsg(workerId, { type: "hello_ack", workerId, status: ackStatus });
+          sendMsg(workerId, { type: "hello_ack", workerId, status: "busy" });
         } else if (!existing) {
           log(workerId, `hello busy task=#${msg.taskId} — unknown task, respecting busy status`);
           registry.register(workerId, ws, "busy", msg.taskId);
-          ackStatus = "busy";
-          sendMsg(workerId, { type: "hello_ack", workerId, status: ackStatus });
+          sendMsg(workerId, { type: "hello_ack", workerId, status: "busy" });
         } else {
           // Task is complete or assigned to a different worker — register idle
           log(workerId, `hello busy task=#${msg.taskId} — task taken by another worker`);
           registry.register(workerId, ws, "idle");
-          ackStatus = "cancelled";
-          sendMsg(workerId, { type: "hello_ack", workerId, status: ackStatus });
+          sendMsg(workerId, { type: "hello_ack", workerId, status: "cancelled" });
         }
       } else {
         // If the queue has a task assigned to this worker (from a prior foreman
@@ -955,8 +949,7 @@ export function createForemanWss(
           log(workerId, "hello idle");
         }
         registry.register(workerId, ws, "idle");
-        ackStatus = "idle";
-        sendMsg(workerId, { type: "hello_ack", workerId, status: ackStatus });
+        sendMsg(workerId, { type: "hello_ack", workerId, status: "idle" });
       }
     }
 

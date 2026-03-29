@@ -255,18 +255,25 @@ export class WorkerSession {
   // ── Private ───────────────────────────────────────────────────────────────
 
   /**
-   * Send a task-scoped message to the foreman. If the handshake is not yet
-   * complete (hello_sent state), the message is buffered until hello_ack
-   * arrives. On hello_ack, buffered messages are flushed (or discarded if the
-   * ack status is "cancelled").
+   * Send a task-scoped message to the foreman. Always buffers first, then
+   * immediately flushes if the handshake is complete. This way the buffer
+   * is the single code path regardless of connection state.
    */
   private sendTaskMessage(msg: BufferableMessage): void {
-    if (this.connectionState !== "registered") {
-      this.bufferedMessages.push(msg);
-      return;
-    }
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(msg));
+    this.bufferedMessages.push(msg);
+    this.flushBuffer();
+  }
+
+  /**
+   * Send all buffered messages if registered and the socket is open.
+   * No-ops if the handshake is still pending or the socket is not ready.
+   */
+  private flushBuffer(): void {
+    if (this.connectionState !== "registered") return;
+    if (this.ws?.readyState !== WebSocket.OPEN) return;
+    const pending = this.bufferedMessages.splice(0);
+    for (const m of pending) {
+      this.ws.send(JSON.stringify(m));
     }
   }
 
@@ -322,12 +329,7 @@ export class WorkerSession {
       } else {
         // "idle" or "busy": transition to registered and flush buffered messages.
         this.connectionState = "registered";
-        const pending = this.bufferedMessages.splice(0);
-        for (const m of pending) {
-          if (this.ws?.readyState === WebSocket.OPEN) {
-            this.ws.send(JSON.stringify(m));
-          }
-        }
+        this.flushBuffer();
       }
       return;
     }
