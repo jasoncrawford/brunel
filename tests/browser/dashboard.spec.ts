@@ -62,13 +62,16 @@ test("initial load: task list and worker list are visible", async ({ page }) => 
   try {
     await page.goto("/");
 
-    // Task appears in the task table
-    await expect(page.getByRole("link", { name: "#1001" })).toBeVisible();
+    // Task appears in the task table (the link may also appear in the Recent Events
+    // log — use .first() to avoid strict-mode violations from multiple matches)
+    await expect(page.getByRole("link", { name: "#1001" }).first()).toBeVisible();
     await expect(page.getByText("Dashboard initial load test")).toBeVisible();
 
-    // Worker appears in the workers list using the first 8 characters of the ID
-    const workerPrefix = workerId.slice(0, 8);
-    await expect(page.getByRole("link", { name: workerPrefix })).toBeVisible();
+    // Worker appears in the workers list — use href-based selector so the locator
+    // is unique even when other workers share the same short prefix
+    await expect(
+      page.locator(`a[href="/workers/${workerId}"]`).first(),
+    ).toBeVisible();
   } finally {
     await disconnectWorker(workerId);
   }
@@ -81,11 +84,13 @@ test("live task assignment: dashboard updates without page reload", async ({
 
   // Connect an idle worker before the task exists
   const workerId = await connectWorker();
-  const workerPrefix = workerId.slice(0, 8);
 
   try {
-    // Verify the worker shows up as idle
-    await expect(page.getByText(workerPrefix)).toBeVisible();
+    // Verify the worker shows up as idle — use href-based selector to avoid
+    // collisions with other workers that share the same short timestamp prefix
+    await expect(
+      page.locator(`a[href="/workers/${workerId}"]`).first(),
+    ).toBeVisible();
 
     // Fire a webhook to create issue #2001 — after depsLoaded resolves the
     // task will be assigned to the idle worker
@@ -102,14 +107,20 @@ test("live task assignment: dashboard updates without page reload", async ({
     });
 
     // Task row should appear and transition to "assigned" in real time.
-    // The task link is visible and the status column in the same row shows "assigned".
-    await expect(page.getByRole("link", { name: "#2001" })).toBeVisible();
-    const taskRow = page.getByRole("row").filter({ hasText: "#2001" });
+    // Use .first() since the same task ID link may appear in multiple places
+    // (task table + Recent Events log).
+    await expect(page.getByRole("link", { name: "#2001" }).first()).toBeVisible();
+    const taskRow = page
+      .getByRole("row")
+      .filter({ hasText: "#2001" })
+      .first();
     await expect(taskRow.getByText("assigned")).toBeVisible();
 
     // Workers section header shows "1 busy" (or at least the worker item
     // contains "busy" next to the worker prefix)
-    const workerItem = page.getByRole("listitem").filter({ hasText: workerPrefix });
+    const workerItem = page
+      .getByRole("listitem")
+      .filter({ has: page.locator(`a[href="/workers/${workerId}"]`) });
     await expect(workerItem.getByText("busy")).toBeVisible();
   } finally {
     await disconnectWorker(workerId);
@@ -130,7 +141,8 @@ test("log stream: webhook events appear in recent events with correct summaries"
   });
 
   // The Recent Events section on the dashboard should show the event
-  await expect(page.getByText(/push/)).toBeVisible();
+  // Use .first() in case prior tests also generated push events
+  await expect(page.getByText(/push/).first()).toBeVisible();
 
   // Post an issues/labeled event — fmtEvent: "issues/labeled — label: brunel:ready"
   await postWebhook("issues", {
@@ -146,8 +158,9 @@ test("log stream: webhook events appear in recent events with correct summaries"
     sender: { login: "dev" },
   });
 
-  // Both events should be present; the issues/labeled event appears first (newest first)
-  await expect(page.getByText(/issues\/labeled/)).toBeVisible();
+  // Both events should be present; use .first() since accumulated log state from
+  // other tests may contain additional issues/labeled entries
+  await expect(page.getByText(/issues\/labeled/).first()).toBeVisible();
   // Summary contains the label name produced by fmtEvent / fmtEventDetails
-  await expect(page.getByText(/label: brunel:ready/)).toBeVisible();
+  await expect(page.getByText(/label: brunel:ready/).first()).toBeVisible();
 });

@@ -45,8 +45,21 @@ test("worker detail page: live messages appear when the worker disconnects", asy
   // Connect a worker so we know its ID and can navigate to its detail page
   const workerId = await connectWorker();
 
+  // Set up the admin WebSocket listener BEFORE navigating so we don't miss the
+  // connection event.  React's useEffect runs after the page's load event, so
+  // without this wait we could disconnect the worker before the page's admin WS
+  // has subscribed — causing the log_event to be missed.
+  const adminWsReady = page.waitForEvent("websocket", (ws) =>
+    ws.url().includes("/admin/ws"),
+  );
+
   // Navigate to the worker's detail page while the worker is still connected
   await page.goto(`/workers/${workerId}`);
+
+  // Wait for the admin WebSocket to open and receive the initial snapshot/log,
+  // confirming the page is ready to receive live log_events
+  const adminWs = await adminWsReady;
+  await adminWs.waitForEvent("framereceived", { timeout: 5000 });
 
   // Disconnect the worker — the foreman broadcasts a "worker_disconnected"
   // log_event with workerId set.  WorkerDetail listens for log_events with
