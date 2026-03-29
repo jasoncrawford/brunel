@@ -242,6 +242,43 @@ describe("ask() - kill / delete", () => {
       expect(result).toBe("foo"); // ask() trims; "foo " → "foo"
     });
   });
+
+  it("^D in middle of buffer deletes character under cursor, cursor stays", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = ask("> ", () => []);
+      stdin.push("abcd");
+      stdin.push("\x01"); // ^A → go to start
+      stdin.push("\x1b[C"); // right → cursor after 'a', before 'b'
+      stdin.push("\x04"); // ^D → deletes 'b'
+      stdin.push("\r");
+      const result = await p;
+      expect(result).toBe("acd");
+    });
+  });
+
+  it("^D at start of buffer deletes first character", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = ask("> ", () => []);
+      stdin.push("hello");
+      stdin.push("\x01"); // ^A → go to start (cursor=0)
+      stdin.push("\x04"); // ^D → deletes 'h'
+      stdin.push("\r");
+      const result = await p;
+      expect(result).toBe("ello");
+    });
+  });
+
+  it("^D at end of buffer is a no-op", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = ask("> ", () => []);
+      stdin.push("hello");
+      // cursor is already at end after typing
+      stdin.push("\x04"); // ^D at end → no-op
+      stdin.push("\r");
+      const result = await p;
+      expect(result).toBe("hello");
+    });
+  });
 });
 
 describe("ask() - character insertion", () => {
@@ -270,11 +307,11 @@ describe("ask() - character insertion", () => {
 });
 
 describe("ask() - exit conditions", () => {
-  it("^D on non-empty buffer → no-op (does not exit)", async () => {
+  it("^D with cursor at end of buffer → no-op (does not exit)", async () => {
     await withFakeStdin(async (stdin) => {
       const p = ask("> ", () => []);
       stdin.push("hello");
-      stdin.push("\x04"); // ^D on non-empty → no-op
+      stdin.push("\x04"); // ^D at end → no-op (nothing to delete forward)
       stdin.push("\r");
       const result = await p;
       expect(result).toBe("hello");

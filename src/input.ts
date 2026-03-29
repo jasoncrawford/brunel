@@ -595,6 +595,13 @@ export function ask(
       fullRedraw(prevRow, computeMatches());
     }
 
+    function deleteForward() {
+      if (cursor === buffer.length) return;
+      const prevRow = screenPosOf(cursor).row;
+      buffer = buffer.slice(0, cursor) + buffer.slice(cursor + 1);
+      fullRedraw(prevRow, computeMatches());
+    }
+
     function moveTo(pos: number) {
       pos = Math.max(0, Math.min(buffer.length, pos));
       if (pos === cursor) return;
@@ -716,7 +723,7 @@ export function ask(
         }
         else if (ch === "\x7f" || ch === "\x08")      { deleteBack(); }
         else if (ch === "\x03") { if (buffer) { replaceBuffer(""); } else { process.stdout.write("^C"); exit(); } }
-        else if (ch === "\x04") { if (!buffer) exit(); }
+        else if (ch === "\x04") { if (!buffer) exit(); else deleteForward(); }
         else if (ch === "\x01")                       { moveTo(0); }             // ^A
         else if (ch === "\x05")                       { moveTo(buffer.length); } // ^E
         else if (ch === "\x0b")                       { killToEnd(); }           // ^K
