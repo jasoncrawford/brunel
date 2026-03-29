@@ -185,6 +185,43 @@ describe("GET /api/workers/:id/messages", () => {
   });
 });
 
+describe("GET /api/tasks", () => {
+  it("returns 200 with an empty JSON array when no taskStore is provided", async () => {
+    const res = await request(port, "GET", "/api/tasks");
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body)).toEqual([]);
+  });
+
+  it("returns task list from taskStore", async () => {
+    const tasks = [{ taskId: "42", issueNumber: 42, title: "Fix bug", status: "complete" }];
+    const taskStore = { listTasks: vi.fn().mockResolvedValue(tasks) } as never;
+    const s = createHttpServer(null, vi.fn(), undefined, taskStore);
+    const p = await startServer(s);
+    try {
+      const res = await request(p, "GET", "/api/tasks");
+      expect(res.status).toBe(200);
+      expect(JSON.parse(res.body)).toEqual(tasks);
+      expect(taskStore.listTasks).toHaveBeenCalled();
+    } finally {
+      await stopServer(s);
+    }
+  });
+
+  it("passes status query param to taskStore", async () => {
+    const taskStore = { listTasks: vi.fn().mockResolvedValue([]) } as never;
+    const s = createHttpServer(null, vi.fn(), undefined, taskStore);
+    const p = await startServer(s);
+    try {
+      await request(p, "GET", "/api/tasks?status=complete");
+      expect(taskStore.listTasks).toHaveBeenCalledWith(
+        expect.objectContaining({ status: "complete" }),
+      );
+    } finally {
+      await stopServer(s);
+    }
+  });
+});
+
 describe("404 fallback", () => {
   it("returns 404 for unknown routes when no static dist/ exists", async () => {
     const res = await request(port, "GET", "/nonexistent-route");

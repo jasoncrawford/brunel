@@ -2,6 +2,7 @@ import { Routes, Route, NavLink } from "react-router-dom";
 import Dashboard from "./pages/Dashboard.tsx";
 import EventLog from "./pages/EventLog.tsx";
 import TaskDetail from "./pages/TaskDetail.tsx";
+import TaskList from "./pages/TaskList.tsx";
 import WorkerDetail from "./pages/WorkerDetail.tsx";
 
 export default function App() {
@@ -12,12 +13,15 @@ export default function App() {
         {" · "}
         <NavLink to="/">Dashboard</NavLink>
         {" · "}
+        <NavLink to="/tasks">Tasks</NavLink>
+        {" · "}
         <NavLink to="/log">Event Log</NavLink>
       </header>
       <Routes>
         <Route path="/" element={<Dashboard />} />
-        <Route path="/log" element={<EventLog />} />
+        <Route path="/tasks" element={<TaskList />} />
         <Route path="/tasks/:id" element={<TaskDetail />} />
+        <Route path="/log" element={<EventLog />} />
         <Route path="/workers/:id" element={<WorkerDetail />} />
       </Routes>
     </div>
