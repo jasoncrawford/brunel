@@ -858,7 +858,7 @@ export function createForemanWss(
           log(workerId, `hello busy task=#${msg.taskId} — unknown task, respecting busy status`);
           registry.register(workerId, ws, "busy", msg.taskId);
         } else {
-          // Task is assigned to a different worker — register idle; assignIdleWorkers() will send standby
+          // Task is assigned to a different worker — register idle
           log(workerId, `hello busy task=#${msg.taskId} — task taken by another worker`);
           registry.register(workerId, ws, "idle");
 

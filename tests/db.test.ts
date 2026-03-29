@@ -310,7 +310,7 @@ describe("queryWorkerMessages includes webhook events", () => {
       [{
         id: 20, created_at: "2026-03-27T03:00:00Z",
         direction: "sent", worker_id: "w1", task_id: null,
-        msg_type: "standby", payload: {},
+        msg_type: "task_assigned", payload: {},
       }],
     );
     const logger = createDbLogger(supabase as unknown as Parameters<typeof createDbLogger>[0]);
