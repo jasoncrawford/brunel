@@ -36,7 +36,8 @@ describe("createDbLogger", () => {
 
     const { data } = await supabase
       .from("webhook_events")
-      .select("event_name, action, repo, sender, issue_number, task_id, payload");
+      .select("event_name, action, repo, sender, issue_number, task_id, payload")
+      .eq("delivery_id", "abc");
     expect(data).toHaveLength(1);
     expect(data![0]).toMatchObject({
       event_name: "issues",
@@ -64,7 +65,8 @@ describe("createDbLogger", () => {
 
     const { data } = await supabase
       .from("foreman_messages")
-      .select("direction, worker_id, task_id, msg_type");
+      .select("direction, worker_id, task_id, msg_type")
+      .eq("worker_id", "wid");
     expect(data).toHaveLength(1);
     expect(data![0]).toMatchObject({
       direction: "sent",
