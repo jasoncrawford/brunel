@@ -6,7 +6,9 @@ const supabase = createTestSupabase();
 
 beforeEach(async () => {
   await Promise.all([
-    supabase.from("webhook_events").delete().gt("id", 0),
+    // Only delete rows this file owns — pipeline.test.ts uses delivery_ids like "evt-*"
+    // and runs in a parallel Vitest worker; blanket truncation would delete its rows mid-test.
+    supabase.from("webhook_events").delete().or("delivery_id.is.null,delivery_id.eq.abc"),
     supabase.from("foreman_messages").delete().gt("id", 0),
   ]);
 });
@@ -34,7 +36,8 @@ describe("createDbLogger", () => {
 
     const { data } = await supabase
       .from("webhook_events")
-      .select("event_name, action, repo, sender, issue_number, task_id, payload");
+      .select("event_name, action, repo, sender, issue_number, task_id, payload")
+      .eq("delivery_id", "abc");
     expect(data).toHaveLength(1);
     expect(data![0]).toMatchObject({
       event_name: "issues",
@@ -62,7 +65,8 @@ describe("createDbLogger", () => {
 
     const { data } = await supabase
       .from("foreman_messages")
-      .select("direction, worker_id, task_id, msg_type");
+      .select("direction, worker_id, task_id, msg_type")
+      .eq("worker_id", "wid");
     expect(data).toHaveLength(1);
     expect(data![0]).toMatchObject({
       direction: "sent",
@@ -203,7 +207,9 @@ describe("webhookToEntry worker_id mapping", () => {
     await new Promise((r) => setTimeout(r, 50));
 
     const entries = await logger.queryLog({});
-    expect(entries[0].workerId).toBe("worker-2");
+    expect(entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ workerId: "worker-2" }),
+    ]));
   });
 });
 
@@ -309,8 +315,12 @@ describe("webhookToEntry richer summaries", () => {
     await new Promise((r) => setTimeout(r, 50));
 
     const entries = await logger.queryLog({});
-    expect(entries[0].summary).toContain("CI / build");
-    expect(entries[0].summary).toContain("success");
+    expect(entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ summary: expect.stringContaining("CI / build") }),
+    ]));
+    expect(entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ summary: expect.stringContaining("success") }),
+    ]));
   });
 
   it("includes branch ref for push events", async () => {
@@ -324,7 +334,9 @@ describe("webhookToEntry richer summaries", () => {
     await new Promise((r) => setTimeout(r, 50));
 
     const entries = await logger.queryLog({});
-    expect(entries[0].summary).toContain("refs/heads/main");
+    expect(entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ summary: expect.stringContaining("refs/heads/main") }),
+    ]));
   });
 
   it("includes PR number and title for pull_request events", async () => {
@@ -338,8 +350,12 @@ describe("webhookToEntry richer summaries", () => {
     await new Promise((r) => setTimeout(r, 50));
 
     const entries = await logger.queryLog({});
-    expect(entries[0].summary).toContain("10");
-    expect(entries[0].summary).toContain("Fix the bug");
+    expect(entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ summary: expect.stringContaining("Fix the bug") }),
+    ]));
+    expect(entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ summary: expect.stringContaining("10") }),
+    ]));
   });
 
   it("includes label name for issues/labeled events", async () => {
@@ -353,7 +369,9 @@ describe("webhookToEntry richer summaries", () => {
     await new Promise((r) => setTimeout(r, 50));
 
     const entries = await logger.queryLog({});
-    expect(entries[0].summary).toContain("bug");
+    expect(entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ summary: expect.stringContaining("bug") }),
+    ]));
   });
 
   it("includes ref_type and ref for delete events", async () => {
@@ -367,8 +385,12 @@ describe("webhookToEntry richer summaries", () => {
     await new Promise((r) => setTimeout(r, 50));
 
     const entries = await logger.queryLog({});
-    expect(entries[0].summary).toContain("branch");
-    expect(entries[0].summary).toContain("feature/old");
+    expect(entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ summary: expect.stringContaining("branch") }),
+    ]));
+    expect(entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ summary: expect.stringContaining("feature/old") }),
+    ]));
   });
 
   it("includes comment text for issue_comment events", async () => {
@@ -382,7 +404,9 @@ describe("webhookToEntry richer summaries", () => {
     await new Promise((r) => setTimeout(r, 50));
 
     const entries = await logger.queryLog({});
-    expect(entries[0].summary).toContain("LGTM!");
+    expect(entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ summary: expect.stringContaining("LGTM!") }),
+    ]));
   });
 
   it("falls back gracefully for rows without payload content", async () => {
@@ -396,8 +420,12 @@ describe("webhookToEntry richer summaries", () => {
     await new Promise((r) => setTimeout(r, 50));
 
     const entries = await logger.queryLog({});
-    expect(entries[0].summary).toContain("issues");
-    expect(entries[0].summary).toContain("labeled");
+    expect(entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ summary: expect.stringContaining("issues") }),
+    ]));
+    expect(entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ summary: expect.stringContaining("labeled") }),
+    ]));
   });
 });
 

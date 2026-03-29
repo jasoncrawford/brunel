@@ -198,26 +198,25 @@ async function run(): Promise<void> {
   // Kill the real worker — it has no task, so the foreman will remove it from
   // the registry immediately on disconnect. The in-process fake worker below
   // will be the only idle worker when the webhook fires.
-  worker!.kill();
-
-  // Wait for the foreman to confirm the real worker has disconnected before
-  // connecting the fake worker.  Without this wait there is a race: kill()
-  // sends SIGTERM but the worker process doesn't close its WebSocket instantly,
-  // so both workers can be idle at the moment the webhook fires.
-  await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error(`Timeout waiting for real worker to disconnect`)),
-      TIMEOUT_MS,
-    );
-    function onData(buf: Buffer) {
-      if (buf.toString().includes("disconnected")) {
-        clearTimeout(timer);
-        foreman.stdout!.off("data", onData);
-        resolve();
-      }
-    }
-    foreman.stdout!.on("data", onData);
-  });
+  //
+  // Wait for the worker process to fully exit, then add a brief pause so the
+  // foreman can process the TCP close event and remove the worker from its
+  // registry before we post the webhook.
+  //
+  // SIGTERM alone doesn't always cause tsx to exit (pending async ops keep the
+  // process alive). Send SIGTERM first; if the process hasn't exited within
+  // 1 s, escalate to SIGKILL which is unconditional.
+  // SIGTERM alone doesn't always cause tsx to exit (pending async ops keep the
+  // process alive). Send SIGTERM first; if the process hasn't exited within
+  // 1 s, escalate to SIGKILL which is unconditional. Once the process is gone
+  // the OS closes the TCP socket and the foreman removes the worker from its
+  // registry. The 200 ms pause lets that async processing complete.
+  const workerExited = new Promise<void>((resolve) => worker!.once("exit", resolve));
+  worker!.kill("SIGTERM");
+  const killTimer = setTimeout(() => worker!.kill("SIGKILL"), 1000);
+  await workerExited;
+  clearTimeout(killTimer);
+  await new Promise((r) => setTimeout(r, 200));
 
   // ── Phase 2–5: full webhook → task_assigned → task_complete → label pipeline
 
