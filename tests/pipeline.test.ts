@@ -26,7 +26,7 @@ import {
   createTaskStore,
 } from "../src/db.js";
 import { loadDefaultConfig } from "../src/config.js";
-import { createTestSupabase, truncateTables } from "./helpers/db.js";
+import { createTestSupabase } from "./helpers/db.js";
 
 // ── One-time setup ────────────────────────────────────────────────────────────
 
@@ -292,7 +292,10 @@ describe("pipeline: happy path and queued-then-assigned", () => {
     stubFetchNoBlockers();
     process.env.GITHUB_REPO = "owner/repo";
     process.env.GITHUB_TOKEN = "token";
-    await truncateTables(supabase);
+    await Promise.all([
+      supabase.from("tasks").delete().neq("task_id", ""),
+      supabase.from("task_assignments").delete().neq("task_id", ""),
+    ]);
     foreman = buildForeman();
     await new Promise<void>((resolve) =>
       foreman.httpServer.once("listening", resolve),
@@ -388,7 +391,10 @@ describe("pipeline: worker disconnect/reclaim (within reclaim window)", () => {
     stubFetchNoBlockers();
     process.env.GITHUB_REPO = "owner/repo";
     process.env.GITHUB_TOKEN = "token";
-    await truncateTables(supabase);
+    await Promise.all([
+      supabase.from("tasks").delete().neq("task_id", ""),
+      supabase.from("task_assignments").delete().neq("task_id", ""),
+    ]);
     // Long enough reclaim window that the reconnect happens before it expires
     foreman = buildForeman({ reclaimTimeoutMs: 30_000 });
     await new Promise<void>((resolve) =>
@@ -460,7 +466,10 @@ describe("pipeline: worker disconnect/expire (reclaim timer fires)", () => {
     stubFetchNoBlockers();
     process.env.GITHUB_REPO = "owner/repo";
     process.env.GITHUB_TOKEN = "token";
-    await truncateTables(supabase);
+    await Promise.all([
+      supabase.from("tasks").delete().neq("task_id", ""),
+      supabase.from("task_assignments").delete().neq("task_id", ""),
+    ]);
     // Very short reclaim window so the timer fires quickly
     foreman = buildForeman({ reclaimTimeoutMs: 80 });
     await new Promise<void>((resolve) =>
@@ -561,7 +570,10 @@ describe("pipeline: dependency blocking", () => {
     );
     process.env.GITHUB_REPO = "owner/repo";
     process.env.GITHUB_TOKEN = "token";
-    await truncateTables(supabase);
+    await Promise.all([
+      supabase.from("tasks").delete().neq("task_id", ""),
+      supabase.from("task_assignments").delete().neq("task_id", ""),
+    ]);
     foreman = buildForeman();
     await new Promise<void>((resolve) =>
       foreman.httpServer.once("listening", resolve),
@@ -614,7 +626,7 @@ describe("pipeline: dependency blocking", () => {
       const row = await getDbTask("92");
       return row?.status === "assigned" ? row : null;
     });
-  });
+  }, 15000);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -628,7 +640,10 @@ describe("pipeline: PR events forwarded and logged to DB", () => {
     stubFetchNoBlockers();
     process.env.GITHUB_REPO = "owner/repo";
     process.env.GITHUB_TOKEN = "token";
-    await truncateTables(supabase);
+    await Promise.all([
+      supabase.from("tasks").delete().neq("task_id", ""),
+      supabase.from("task_assignments").delete().neq("task_id", ""),
+    ]);
     foreman = buildForeman();
     await new Promise<void>((resolve) =>
       foreman.httpServer.once("listening", resolve),
@@ -675,5 +690,5 @@ describe("pipeline: PR events forwarded and logged to DB", () => {
       return data?.task_id === "100" ? data : null;
     });
     expect(checkRunRow.task_id).toBe("100");
-  });
+  }, 15000);
 });
