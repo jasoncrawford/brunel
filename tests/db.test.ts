@@ -1,11 +1,14 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { createDbLogger, createNullDbLogger } from "../src/db.js";
-import { createTestSupabase, truncateTables } from "./helpers/db.js";
+import { createTestSupabase } from "./helpers/db.js";
 
 const supabase = createTestSupabase();
 
 beforeEach(async () => {
-  await truncateTables(supabase);
+  await Promise.all([
+    supabase.from("webhook_events").delete().gt("id", 0),
+    supabase.from("foreman_messages").delete().gt("id", 0),
+  ]);
 });
 
 describe("createDbLogger", () => {

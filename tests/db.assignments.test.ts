@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { createTaskAssignmentStore, createNullTaskAssignmentStore } from "../src/db.js";
-import { createTestSupabase, truncateTables } from "./helpers/db.js";
+import { createTestSupabase } from "./helpers/db.js";
 
 const supabase = createTestSupabase();
 
 beforeEach(async () => {
-  await truncateTables(supabase);
+  await supabase.from("task_assignments").delete().neq("task_id", "");
 });
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
