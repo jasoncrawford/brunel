@@ -129,6 +129,7 @@ interface Task {
   repoUrl: string;
   status: "pending" | "assigned" | "complete";
   assignedWorkerId?: string;
+  prNumber?: number;
   eventQueue: GitHubEvent[];
   /** True once fetchBlockers has resolved and the dependency graph is populated. */
   depsLoaded: boolean;
@@ -200,6 +201,8 @@ export class TaskQueue {
 
   registerPr(prNumber: number, taskId: string) {
     this.prToTaskId.set(prNumber, taskId);
+    const t = this.tasks.get(taskId);
+    if (t) t.prNumber = prNumber;
   }
 
   getTaskForPr(prNumber: number): Task | undefined {
@@ -247,6 +250,8 @@ export class TaskQueue {
       title: t.title,
       status: t.status,
       assignedWorkerId: t.assignedWorkerId,
+      prNumber: t.prNumber,
+      prUrl: t.prNumber !== undefined ? `${t.repoUrl}/pull/${t.prNumber}` : undefined,
     }));
   }
 }

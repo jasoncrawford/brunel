@@ -96,6 +96,45 @@ describe("Dashboard", () => {
     expect(screen.getByText("No events yet.")).toBeInTheDocument();
   });
 
+  it("shows PR column header in tasks table", async () => {
+    renderDashboard();
+    act(() => {
+      capturedHandler!({
+        type: "snapshot",
+        tasks: [{ taskId: "42", issueNumber: 42, title: "Fix bug", status: "assigned", assignedWorkerId: "w1" }],
+        workers: [],
+      });
+    });
+    expect(screen.getByText("PR")).toBeInTheDocument();
+  });
+
+  it("shows PR link when task has a prUrl", async () => {
+    renderDashboard();
+    act(() => {
+      capturedHandler!({
+        type: "snapshot",
+        tasks: [{ taskId: "42", issueNumber: 42, title: "Fix bug", status: "assigned", prNumber: 7, prUrl: "https://github.com/test/repo/pull/7" }],
+        workers: [],
+      });
+    });
+    const link = screen.getByRole("link", { name: "#7" });
+    expect(link).toHaveAttribute("href", "https://github.com/test/repo/pull/7");
+  });
+
+  it("shows dash when task has no prUrl", async () => {
+    renderDashboard();
+    act(() => {
+      capturedHandler!({
+        type: "snapshot",
+        tasks: [{ taskId: "42", issueNumber: 42, title: "Fix bug", status: "pending" }],
+        workers: [],
+      });
+    });
+    // PR column should show "—" for tasks without a PR
+    const cells = screen.getAllByText("—");
+    expect(cells.length).toBeGreaterThan(0);
+  });
+
   it("replaces existing events when a new initial_log arrives (reconnect)", async () => {
     const freshEntry: LogEntry = { kind: "webhook", id: 10, timestamp: "2026-01-02T00:00:00.000Z", taskId: null, workerId: null, summary: "new event after reconnect" };
     renderDashboard();

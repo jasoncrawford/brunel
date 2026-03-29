@@ -73,6 +73,12 @@ describe("TaskQueue", () => {
     expect(q.getTaskForPr(10)?.taskId).toBe("42");
   });
 
+  it("registerPr stores prNumber on the task", () => {
+    q.addTask(baseTask);
+    q.registerPr(10, "42");
+    expect(q.get("42")?.prNumber).toBe(10);
+  });
+
   it("getTaskForPr returns undefined for unknown PR number", () => {
     expect(q.getTaskForPr(999)).toBeUndefined();
   });
@@ -90,6 +96,19 @@ describe("TaskQueue", () => {
 
   it("getTaskForBranch returns undefined for unknown branch", () => {
     expect(q.getTaskForBranch("unknown-branch")).toBeUndefined();
+  });
+
+  it("getTaskSnapshots includes prUrl when PR is registered", () => {
+    q.addTask(baseTask);
+    q.registerPr(10, "42");
+    const snapshots = q.getTaskSnapshots();
+    expect(snapshots[0].prUrl).toBe("https://github.com/test/repo/pull/10");
+  });
+
+  it("getTaskSnapshots omits prUrl when no PR registered", () => {
+    q.addTask(baseTask);
+    const snapshots = q.getTaskSnapshots();
+    expect(snapshots[0].prUrl).toBeUndefined();
   });
 });
 
