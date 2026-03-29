@@ -7,7 +7,6 @@ import { WebSocketServer, WebSocket } from "ws";
 import type { WebSocket as WsSocket } from "ws";
 import { EventEmitter } from "events";
 import type { WorkerMessage, ForemanMessage, GitHubEvent, TaskIssue, LabeledIssueState } from "./types.js";
-import { labelIssueDone } from "./github.js";
 import { fmtTimestamp, fmtEvent, setVerbose } from "./display.js";
 import { loadConfig } from "./config.js";
 import { isBlocked, setBlockers, fetchBlockers } from "./dependencies.js";
@@ -499,7 +498,6 @@ export function createForemanWss(
   server: http.Server,
   options: {
     taskLabel: string;
-    labelDone?: (issueNumber: number) => Promise<void>;
     graph?: DependencyGraph;
     openIssues?: Set<number>;
     repo?: string;
@@ -516,7 +514,6 @@ export function createForemanWss(
   },
 ): ForemanWss {
   const taskLabel = options.taskLabel;
-  const labelDone = options.labelDone ?? (() => Promise.resolve());
   const graph = options.graph ?? new Map<number, Set<number>>();
   const openIssues = options.openIssues ?? new Set<number>();
   const labeledIssues = options.labeledIssues ?? new Map<number, LabeledIssueState>();
@@ -971,9 +968,6 @@ export function createForemanWss(
         taskStore.markComplete(msg.taskId).catch(err =>
           flog(`ERROR Failed to mark task #${msg.taskId} complete: ${fmtError(err)}`)
         );
-        labelDone(task.issueNumber).catch(err =>
-          flog(`ERROR Failed to label issue done: ${fmtError(err)}`)
-        );
       }
       registry.releaseWorker(workerId);
     }
@@ -1186,13 +1180,6 @@ if (isMain) {
       assignStore,
       taskStore,
       reclaimTimeoutMs: config.workerReclaimTimeoutMs,
-      labelDone: (issueNumber) =>
-        labelIssueDone(issueNumber, {
-          repo: config.githubRepo,
-          token: config.githubToken,
-          doneLabel: config.doneLabel,
-          apiUrl: config.githubApiUrl,
-        }),
     },
   );
 

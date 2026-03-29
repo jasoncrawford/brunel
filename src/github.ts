@@ -62,22 +62,6 @@ export async function loadIssuesToQueue(
   }
 }
 
-export async function labelIssueDone(
-  issueNumber: number,
-  opts: { repo: string; token: string; doneLabel: string; apiUrl?: string },
-): Promise<void> {
-  const { repo, token, doneLabel, apiUrl = "https://api.github.com" } = opts;
-  const [owner, repoName] = repo.split("/");
-  const res = await fetch(
-    `${apiUrl}/repos/${owner}/${repoName}/issues/${issueNumber}/labels`,
-    {
-      method: "POST",
-      headers: { ...ghHeaders(token), "Content-Type": "application/json" },
-      body: JSON.stringify({ labels: [doneLabel] }),
-    },
-  );
-  if (!res.ok) throw new Error(`GitHub API error: ${res.status}`);
-}
 
 export async function fetchIssueStates(
   issueNumbers: number[],

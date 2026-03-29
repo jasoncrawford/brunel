@@ -194,7 +194,6 @@ beforeEach(() => {
   process.env.GITHUB_REPO = "owner/repo";
   process.env.GITHUB_TOKEN = "token";
   process.env.TASK_LABEL = "brunel:ready";
-  process.env.DONE_LABEL = "brunel:done";
 
   queue = new TaskQueue();
   registry = new WorkerRegistry();
@@ -214,7 +213,6 @@ afterEach(() => {
   delete process.env.GITHUB_REPO;
   delete process.env.GITHUB_TOKEN;
   delete process.env.TASK_LABEL;
-  delete process.env.DONE_LABEL;
 
   return new Promise<void>((resolve) => {
     const clients = openClients.splice(0);

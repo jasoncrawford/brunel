@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { loadIssuesToQueue, labelIssueDone, fetchIssueStates, fetchNativeBlockers } from "../src/github.js";
+import { loadIssuesToQueue, fetchIssueStates, fetchNativeBlockers } from "../src/github.js";
 import type { LabeledIssueState } from "../src/types.js";
 import { fetchBlockers } from "../src/dependencies.js";
 import type { DependencyGraph } from "../src/dependencies.js";
@@ -16,7 +16,6 @@ const mockIssues = [
 
 const OPTS = { repo: "owner/repo", token: "token123" };
 const QUEUE_OPTS = { ...OPTS, taskLabel: "brunel:ready" };
-const LABEL_OPTS = { ...OPTS, doneLabel: "brunel:done" };
 
 beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn());
@@ -47,25 +46,6 @@ describe("loadIssuesToQueue", () => {
   it("throws on non-ok response", async () => {
     vi.mocked(fetch).mockResolvedValueOnce({ ok: false, status: 403 } as any);
     await expect(loadIssuesToQueue(new Map<number, LabeledIssueState>(), new Map(), new Set(), QUEUE_OPTS)).rejects.toThrow("403");
-  });
-});
-
-describe("labelIssueDone", () => {
-  it("POSTs the done label to the issue", async () => {
-    vi.mocked(fetch).mockResolvedValueOnce({ ok: true } as any);
-    await labelIssueDone(42, LABEL_OPTS);
-    expect(fetch).toHaveBeenCalledWith(
-      expect.stringContaining("owner/repo/issues/42/labels"),
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ labels: ["brunel:done"] }),
-      }),
-    );
-  });
-
-  it("throws on non-ok response", async () => {
-    vi.mocked(fetch).mockResolvedValueOnce({ ok: false, status: 422 } as any);
-    await expect(labelIssueDone(42, LABEL_OPTS)).rejects.toThrow("422");
   });
 });
 

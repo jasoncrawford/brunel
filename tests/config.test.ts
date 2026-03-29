@@ -13,9 +13,9 @@ let stderrSpy: ReturnType<typeof vi.spyOn>;
 const savedEnv: Record<string, string | undefined> = {};
 const ENV_KEYS = [
   "GITHUB_REPO", "GITHUB_TOKEN", "GH_TOKEN",
-  "TASK_LABEL", "DONE_LABEL", "PORT", "WEBHOOK_SECRET",
+  "TASK_LABEL", "PORT", "WEBHOOK_SECRET",
   "BRUNEL_GITHUB_REPO", "BRUNEL_GITHUB_TOKEN",
-  "BRUNEL_TASK_LABEL", "BRUNEL_DONE_LABEL",
+  "BRUNEL_TASK_LABEL",
   "BRUNEL_VERBOSE", "BRUNEL_PORT", "BRUNEL_WEBHOOK_SECRET",
   "BRUNEL_FOREMAN_URL", "BRUNEL_PERMISSION_MODE",
   "BRUNEL_SUPABASE_URL", "BRUNEL_SUPABASE_SECRET_KEY", "BRUNEL_WORKER_SECRET",
@@ -64,7 +64,6 @@ describe("defaults", () => {
     baseEnv();
     const cfg = await loadConfig(["node", "repl.js"], {});
     expect(cfg.taskLabel).toBe("brunel:ready");
-    expect(cfg.doneLabel).toBe("brunel:done");
     expect(cfg.verbose).toBe(false);
     expect(cfg.port).toBe(3000);
     expect(cfg.webhookSecret).toBeUndefined();
@@ -155,15 +154,13 @@ describe("legacy fallback env vars", () => {
     expect(cfg.githubToken).toBe("primary");
   });
 
-  it("TASK_LABEL, DONE_LABEL, PORT, WEBHOOK_SECRET all resolve", async () => {
+  it("TASK_LABEL, PORT, WEBHOOK_SECRET all resolve", async () => {
     baseEnv();
     process.env.TASK_LABEL = "my-task";
-    process.env.DONE_LABEL = "my-done";
     process.env.PORT = "4567";
     process.env.WEBHOOK_SECRET = "shh";
     const cfg = await loadConfig(["node", "repl.js"]);
     expect(cfg.taskLabel).toBe("my-task");
-    expect(cfg.doneLabel).toBe("my-done");
     expect(cfg.port).toBe(4567);
     expect(cfg.webhookSecret).toBe("shh");
   });
@@ -239,12 +236,6 @@ describe("CLI flag parsing", () => {
     baseEnv();
     const cfg = await loadConfig(["node", "repl.js", "--task-label", "my:task"]);
     expect(cfg.taskLabel).toBe("my:task");
-  });
-
-  it("--done-label overrides env", async () => {
-    baseEnv();
-    const cfg = await loadConfig(["node", "repl.js", "--done-label", "my:done"]);
-    expect(cfg.doneLabel).toBe("my:done");
   });
 
   it("--foreman-url sets foremanUrl", async () => {

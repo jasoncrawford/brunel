@@ -12,7 +12,6 @@ export const VALID_PERMISSION_MODES = [
 // ── Schema defaults (exported so other modules don't duplicate these values) ──
 
 const DEFAULT_TASK_LABEL = "brunel:ready";
-const DEFAULT_DONE_LABEL = "brunel:done";
 const DEFAULT_WORKER_RECLAIM_TIMEOUT_MS = 300_000;
 
 // ── Schema ────────────────────────────────────────────────────────────────────
@@ -33,8 +32,6 @@ const BrunelConfigSchema = z.object({
   githubToken:    z.string().min(1),
   /** Issue label that triggers work (foreman picks up issues with this label). */
   taskLabel:      z.string().default(DEFAULT_TASK_LABEL),
-  /** Issue label applied to issues when work is complete. */
-  doneLabel:      z.string().default(DEFAULT_DONE_LABEL),
   /** Enable verbose output (shows full Claude message stream). */
   verbose:        z.preprocess(boolPreprocess, z.boolean()).default(false),
   /** Show full agent thinking text. Defaults to the value of verbose. */
@@ -211,7 +208,6 @@ function readFallbackEnvVars(env: NodeJS.ProcessEnv): Record<string, unknown> {
   if (env.GITHUB_TOKEN)    result.githubToken   = env.GITHUB_TOKEN;
   else if (env.GH_TOKEN)   result.githubToken   = env.GH_TOKEN;
   if (env.TASK_LABEL)      result.taskLabel     = env.TASK_LABEL;
-  if (env.DONE_LABEL)      result.doneLabel     = env.DONE_LABEL;
   if (env.PORT)            result.port          = env.PORT;
   if (env.WEBHOOK_SECRET)  result.webhookSecret = env.WEBHOOK_SECRET;
   return result;

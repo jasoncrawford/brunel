@@ -77,7 +77,6 @@ let httpServer: http.Server;
 let wss: WebSocketServer;
 let routeEvent: (id: string, name: string, payload: unknown) => void;
 let shutdown: () => Promise<void>;
-let labelDone: ReturnType<typeof vi.fn>;
 let port: number;
 let graph: DependencyGraph;
 let openIssues: Set<number>;
@@ -89,15 +88,13 @@ function connect(): Promise<WebSocket> {
 }
 
 beforeEach(() => {
-  labelDone = vi.fn().mockResolvedValue(undefined);
-
   queue = new TaskQueue();
   registry = new WorkerRegistry();
   graph = new Map();
   openIssues = new Set();
   labeledIssues = new Map();
   httpServer = http.createServer();
-  ({ wss, routeEvent, shutdown } = createForemanWss(queue, registry, httpServer, { taskLabel: defaultCfg.taskLabel, reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs, labelDone, graph, openIssues, labeledIssues }));
+  ({ wss, routeEvent, shutdown } = createForemanWss(queue, registry, httpServer, { taskLabel: defaultCfg.taskLabel, reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs, graph, openIssues, labeledIssues }));
 
   return new Promise<void>((resolve) => {
     httpServer.listen(0, () => {
@@ -174,7 +171,7 @@ describe("foreman WebSocket protocol", () => {
     expect(raceResult).toBe("timeout");
   });
 
-  it("task_complete triggers labelIssueDone and assigns next task", async () => {
+  it("task_complete completes task and assigns next task", async () => {
     queue.addTask(makeTask(1));
     queue.addTask(makeTask(2));
     const ws = await connect();
@@ -191,7 +188,6 @@ describe("foreman WebSocket protocol", () => {
     assert(msg.type === "task_assigned");
     expect(msg.issue.number).toBe(2);
 
-    expect(labelDone).toHaveBeenCalledWith(1);
     expect(queue.get("1")?.status).toBe("complete");
   });
 
@@ -333,8 +329,7 @@ describe("foreman WebSocket protocol", () => {
     expect(registry.get("worker-a")?.status).toBe("busy");
   });
 
-  it("labelIssueDone failure does not break task_complete flow", async () => {
-    labelDone.mockRejectedValueOnce(new Error("Network error"));
+  it("task_complete releases worker to idle", async () => {
     queue.addTask(makeTask(1));
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
@@ -499,7 +494,6 @@ describe("hello_ack handshake", () => {
 
     expect(queue.get("1")?.status).toBe("assigned");
     expect(queue.get("1")?.assignedWorkerId).toBe("worker-a");
-    expect(labelDone).not.toHaveBeenCalled();
   });
 });
 
@@ -985,7 +979,7 @@ describe("keepalive ping", () => {
     const { wss: testWss } = createForemanWss(q, r, srv, {
       taskLabel: defaultCfg.taskLabel,
       reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs,
-      labelDone: vi.fn().mockResolvedValue(undefined),
+
       pingIntervalMs: 50,
     });
     await new Promise<void>((resolve) => srv.listen(0, resolve));
@@ -1021,7 +1015,7 @@ describe("reclaim timer (fake timers)", () => {
     const srv = http.createServer();
     const { wss: testWss } = createForemanWss(q, r, srv, {
       taskLabel: defaultCfg.taskLabel,
-      labelDone: vi.fn().mockResolvedValue(undefined),
+
       reclaimTimeoutMs,
     });
     await new Promise<void>((resolve) => srv.listen(0, resolve));
@@ -1079,7 +1073,7 @@ describe("reclaim timer (fake timers)", () => {
     const srv = http.createServer();
     const { wss: testWss } = createForemanWss(q, r, srv, {
       taskLabel: defaultCfg.taskLabel,
-      labelDone: vi.fn().mockResolvedValue(undefined),
+
       reclaimTimeoutMs,
     });
     await new Promise<void>((resolve) => srv.listen(0, resolve));
@@ -1123,7 +1117,7 @@ describe("reclaim timer (fake timers)", () => {
     const srv = http.createServer();
     const { wss: testWss } = createForemanWss(q, r, srv, {
       taskLabel: defaultCfg.taskLabel,
-      labelDone: vi.fn().mockResolvedValue(undefined),
+
       reclaimTimeoutMs,
     });
     await new Promise<void>((resolve) => srv.listen(0, resolve));

@@ -53,7 +53,6 @@ beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
   process.env.GITHUB_REPO = "owner/repo";
   process.env.GITHUB_TOKEN = "token";
-  process.env.DONE_LABEL = "brunel:done";
 
   logLines = [];
   vi.spyOn(console, "log").mockImplementation((...args) => {
@@ -78,7 +77,6 @@ afterEach(() => {
   vi.restoreAllMocks();
   delete process.env.GITHUB_REPO;
   delete process.env.GITHUB_TOKEN;
-  delete process.env.DONE_LABEL;
 
   return new Promise<void>((resolve) => {
     const clients = openClients.splice(0);
