@@ -301,16 +301,18 @@ describe("foreman WebSocket protocol", () => {
     expect(queue.get("1")?.status).toBe("complete");
   });
 
-  it("worker reconnects as busy with a completed taskId is registered idle", async () => {
+  it("worker reconnects as busy with its own completed taskId is registered busy (issue closed while active)", async () => {
     queue.addTask(makeTask(1));
-    // Mark task as complete directly (simulates another path completing it while worker was disconnected)
+    // Simulate: issue was closed, foreman marked task complete, worker briefly disconnects
     queue.assignTask("1", "w1");
     queue.completeTask("1");
 
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "w1", taskId: "1", status: "busy" });
-    await waitUntil(() => registry.get("w1")?.status === "idle");
-    expect(registry.get("w1")?.status).toBe("idle");
+    await waitUntil(() => registry.get("w1") !== undefined);
+    // Worker stays busy so it can call task_complete to release itself
+    expect(registry.get("w1")?.status).toBe("busy");
+    expect(registry.get("w1")?.currentTaskId).toBe("1");
   });
 
   it("events are routed to the correct worker when multiple workers have different tasks", async () => {

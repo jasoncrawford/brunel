@@ -137,6 +137,48 @@ describe("reconcile()", () => {
   });
 });
 
+describe("issues/closed — task lifecycle", () => {
+  it("marks an assigned task complete when its issue is closed", () => {
+    labeledIssues.set(42, { issue: makeIssue(42), depsLoaded: true });
+    queue.addTask({ taskId: "42", issueNumber: 42, title: "T", body: "b", labels: [], repoUrl: "" });
+    queue.assignTask("42", "worker-1");
+
+    routeEvent("evt-1", "issues", {
+      action: "closed",
+      issue: { number: 42, title: "T", body: "", labels: [] },
+    });
+
+    expect(queue.get("42")?.status).toBe("complete");
+  });
+
+  it("leaves a complete task complete when its issue is closed again", () => {
+    labeledIssues.set(42, { issue: makeIssue(42), depsLoaded: true });
+    queue.addTask({ taskId: "42", issueNumber: 42, title: "T", body: "b", labels: [], repoUrl: "" });
+    queue.completeTask("42");
+
+    routeEvent("evt-1", "issues", {
+      action: "closed",
+      issue: { number: 42, title: "T", body: "", labels: [] },
+    });
+
+    expect(queue.get("42")?.status).toBe("complete");
+  });
+
+  it("does not affect a pending task when its issue is closed", () => {
+    // A pending task's issue being closed should not mark it complete —
+    // reconcile() will remove it if the label is also gone.
+    labeledIssues.set(42, { issue: makeIssue(42), depsLoaded: true });
+    queue.addTask({ taskId: "42", issueNumber: 42, title: "T", body: "b", labels: [], repoUrl: "" });
+
+    routeEvent("evt-1", "issues", {
+      action: "closed",
+      issue: { number: 42, title: "T", body: "", labels: [] },
+    });
+
+    expect(queue.get("42")?.status).toBe("pending");
+  });
+});
+
 describe("startDepsLoad() error handling", () => {
   afterEach(() => {
     vi.unstubAllGlobals();

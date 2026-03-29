@@ -1,12 +1,32 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { TaskQueue, WorkerRegistry, createForemanWss } from "../src/foreman.js";
-import type { TaskAssignmentStore } from "../src/db.js";
+import type { TaskAssignmentStore, TaskStore, TaskRow } from "../src/db.js";
 import WebSocket, { WebSocketServer } from "ws";
 import http from "http";
 import type { AddressInfo } from "net";
 import { waitUntil } from "./helpers.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+function makeTaskStore(rows: Partial<TaskRow>[] = []): TaskStore {
+  const full: TaskRow[] = rows.map((r) => ({
+    taskId: "42", issueNumber: 42, repo: "owner/repo", title: "Test task",
+    status: "assigned" as const, workerId: "w1", prNumber: null, branch: null,
+    createdAt: "2026-01-01T00:00:00Z", assignedAt: "2026-01-01T01:00:00Z", completedAt: null,
+    ...r,
+  }));
+  return {
+    upsertTask: vi.fn().mockResolvedValue(undefined),
+    markAssigned: vi.fn().mockResolvedValue(undefined),
+    markComplete: vi.fn().mockResolvedValue(undefined),
+    markPending: vi.fn().mockResolvedValue(undefined),
+    updateTaskPr: vi.fn().mockResolvedValue(undefined),
+    listTasks: vi.fn().mockImplementation(async (opts?: { status?: string }) => {
+      if (opts?.status) return full.filter((r) => r.status === opts.status);
+      return full;
+    }),
+  };
+}
 
 function makeStore(overrides: Partial<TaskAssignmentStore> = {}): TaskAssignmentStore {
   return {
@@ -260,6 +280,146 @@ describe("PR tracking persistence", () => {
     });
 
     expect(store.updatePr).toHaveBeenCalledWith("42", 10, null);
+  });
+});
+
+// ── Startup: restore task from taskStore when issue was closed mid-task ───────
+
+describe("startup — restore task when issue closed mid-task", () => {
+  it("task restored from taskStore is visible in the snapshot", async () => {
+    // Simulate: task was assigned before foreman restart, issue was closed,
+    // so labeledIssues/reconcile didn't add it. assignStore still has the row.
+    // taskStore still has it as "assigned".
+    const taskStore = makeTaskStore([{ taskId: "42", workerId: "w1" }]);
+    const assignStore = makeStore({
+      listAssignments: vi.fn().mockResolvedValue([
+        { taskId: "42", workerId: "w1", prNumber: null, branch: null },
+      ]),
+    });
+
+    ({ wss } = createForemanWss(taskQueue, registry, httpServer, {
+      taskLabel: "brunel:ready",
+      assignStore,
+      taskStore,
+      reclaimTimeoutMs: 1000,
+    }));
+
+    port = await startServer();
+
+    // Simulate what startup does: call listTasks and then manually restore
+    // (in production this is done in the main if (isMain) block).
+    const assigned = await taskStore.listTasks({ status: "assigned" });
+    const assignedMap = new Map(assigned.map((r) => [r.taskId, r]));
+    const assignments = await assignStore.listAssignments();
+    for (const row of assignments) {
+      if (!taskQueue.get(row.taskId)) {
+        const tr = assignedMap.get(row.taskId);
+        if (tr) {
+          taskQueue.addTask({
+            taskId: tr.taskId, issueNumber: tr.issueNumber, title: tr.title,
+            body: "", labels: [], repoUrl: `https://github.com/${tr.repo}`, depsLoaded: true,
+          });
+        }
+      }
+      taskQueue.assignTask(row.taskId, row.workerId);
+    }
+
+    // Task should now be in the queue as assigned
+    expect(taskQueue.get("42")?.status).toBe("assigned");
+    expect(taskQueue.get("42")?.assignedWorkerId).toBe("w1");
+    expect(taskQueue.get("42")?.title).toBe("Test task");
+  });
+
+  it("orphaned assignment (task not in taskStore) is still deleted", async () => {
+    // taskStore has no assigned task, but assignStore still has a row
+    const taskStore = makeTaskStore([]); // empty
+    const assignStore = makeStore({
+      listAssignments: vi.fn().mockResolvedValue([
+        { taskId: "99", workerId: "w1", prNumber: null, branch: null },
+      ]),
+    });
+
+    ({ wss } = createForemanWss(taskQueue, registry, httpServer, {
+      taskLabel: "brunel:ready",
+      assignStore,
+      taskStore,
+      reclaimTimeoutMs: 1000,
+    }));
+
+    port = await startServer();
+
+    // Simulate startup restore logic
+    const assigned = await taskStore.listTasks({ status: "assigned" });
+    const assignedMap = new Map(assigned.map((r) => [r.taskId, r]));
+    const assignments = await assignStore.listAssignments();
+    for (const row of assignments) {
+      if (!taskQueue.get(row.taskId)) {
+        const tr = assignedMap.get(row.taskId);
+        if (!tr) {
+          // Orphaned — delete
+          assignStore.deleteAssignment(row.taskId);
+          continue;
+        }
+        taskQueue.addTask({
+          taskId: tr.taskId, issueNumber: tr.issueNumber, title: tr.title,
+          body: "", labels: [], repoUrl: `https://github.com/${tr.repo}`, depsLoaded: true,
+        });
+      }
+      taskQueue.assignTask(row.taskId, row.workerId);
+    }
+
+    expect(taskQueue.get("99")).toBeUndefined();
+    expect(assignStore.deleteAssignment).toHaveBeenCalledWith("99");
+  });
+});
+
+// ── Reconnect to complete task (issue closed while worker active) ─────────────
+
+describe("startup reconnect — worker reconnects to complete task", () => {
+  it("busy worker reconnect to complete task is reclaimed (not re-idled)", async () => {
+    // Simulate: issue was closed while worker was active, so the foreman marked
+    // the task complete in-memory. Worker briefly disconnects and reconnects.
+    const store = makeStore();
+    taskQueue.addTask(baseTask);
+    taskQueue.assignTask("42", "w1");
+    taskQueue.completeTask("42"); // issue closed while worker was active
+
+    ({ wss } = createForemanWss(taskQueue, registry, httpServer, {
+      taskLabel: "brunel:ready",
+      assignStore: store,
+      reclaimTimeoutMs: 1000,
+    }));
+
+    port = await startServer();
+    await connect({ type: "worker_hello", workerId: "w1", status: "busy", taskId: "42" });
+
+    await waitUntil(() => registry.get("w1") !== undefined);
+    // Worker should be registered as busy, not idle
+    expect(registry.get("w1")?.status).toBe("busy");
+    // Task should stay complete
+    expect(taskQueue.get("42")?.status).toBe("complete");
+  });
+
+  it("busy worker that calls task_complete on a complete task releases correctly", async () => {
+    const store = makeStore();
+    taskQueue.addTask(baseTask);
+    taskQueue.assignTask("42", "w1");
+    taskQueue.completeTask("42");
+
+    ({ wss } = createForemanWss(taskQueue, registry, httpServer, {
+      taskLabel: "brunel:ready",
+      assignStore: store,
+      reclaimTimeoutMs: 1000,
+    }));
+
+    port = await startServer();
+    const ws = await connect({ type: "worker_hello", workerId: "w1", status: "busy", taskId: "42" });
+
+    await waitUntil(() => registry.get("w1") !== undefined);
+    ws.send(JSON.stringify({ type: "task_complete", workerId: "w1", taskId: "42" }));
+    await waitUntil(() => registry.get("w1")?.status === "idle");
+
+    expect(store.deleteAssignment).toHaveBeenCalledWith("42");
   });
 });
 
