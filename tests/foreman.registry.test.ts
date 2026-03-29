@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { WorkerRegistry } from "../src/foreman.js";
+import type { ForemanMessage } from "../src/types.js";
 
 function fakeWs() {
   return { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
@@ -56,8 +57,9 @@ describe("WorkerRegistry", () => {
   it("send serializes message and calls ws.send", () => {
     const ws = fakeWs();
     reg.register("w1", ws, "idle");
-    reg.send("w1", { type: "standby" });
-    expect(ws.send).toHaveBeenCalledWith(JSON.stringify({ type: "standby" }));
+    const msg: ForemanMessage = { type: "task_assigned", taskId: "1", issue: { number: 1, title: "T", body: "", labels: [], repoUrl: "https://github.com/o/r" } };
+    reg.send("w1", msg);
+    expect(ws.send).toHaveBeenCalledWith(JSON.stringify(msg));
   });
 
   describe("markDisconnected", () => {
@@ -86,7 +88,7 @@ describe("WorkerRegistry", () => {
       ws.readyState = 3; // CLOSED
       reg.register("w1", ws, "busy");
       reg.markDisconnected("w1");
-      reg.send("w1", { type: "standby" });
+      reg.send("w1", { type: "task_assigned", taskId: "1", issue: { number: 1, title: "T", body: "", labels: [], repoUrl: "https://github.com/o/r" } });
       expect(ws.send).not.toHaveBeenCalled();
     });
 

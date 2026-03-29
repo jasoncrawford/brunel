@@ -499,7 +499,7 @@ describe("createNullDbLogger", () => {
     const logger = createNullDbLogger();
     expect(() => logger.logForemanMessage({
       direction: "sent", workerId: "w1", taskId: "1",
-      msgType: "standby", payload: {},
+      msgType: "task_assigned", payload: {},
     })).not.toThrow();
   });
 
