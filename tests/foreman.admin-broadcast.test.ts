@@ -306,7 +306,7 @@ describe("foreman admin broadcast — unique IDs across all event types", () => 
 });
 
 describe("foreman admin broadcast — snapshot on PR registration", () => {
-  it("broadcasts updated snapshot with prNumber when a PR is opened for a task", () => {
+  it("broadcasts updated snapshot with prNumber when a PR is opened for a task", async () => {
     queue.addTask({ taskId: "42", issueNumber: 42, title: "Fix the bug", body: "", labels: [], repoUrl: "https://github.com/owner/repo" });
 
     const snapshots: AdminSnapshot[] = [];
@@ -322,8 +322,36 @@ describe("foreman admin broadcast — snapshot on PR registration", () => {
       repository: { html_url: "https://github.com/owner/repo" },
     });
 
-    expect(snapshots.length).toBeGreaterThan(0);
+    await waitUntil(() => snapshots.length > 0);
     const task = snapshots[snapshots.length - 1].tasks.find((t) => t.taskId === "42");
     expect(task?.prNumber).toBe(101);
+  });
+});
+
+describe("foreman admin broadcast — reactive snapshot pipeline", () => {
+  it("broadcasts snapshot when a worker connects (reactive, not manual callsite)", async () => {
+    const snapshots: AdminSnapshot[] = [];
+    adminWss.broadcastSnapshot = (snapshot) => snapshots.push(snapshot);
+
+    const ws = await connect();
+    send(ws, { type: "worker_hello", workerId: "worker-abc", status: "idle" });
+    await waitUntil(() => snapshots.some((s) => s.workers.some((w) => w.workerId === "worker-abc")));
+
+    const last = snapshots[snapshots.length - 1];
+    expect(last.workers.find((w) => w.workerId === "worker-abc")).toBeDefined();
+  });
+
+  it("collapses burst mutations into a single snapshot broadcast", async () => {
+    const snapshots: AdminSnapshot[] = [];
+    adminWss.broadcastSnapshot = (snapshot) => snapshots.push(snapshot);
+
+    queue.addTask({ taskId: "1", issueNumber: 1, title: "T1", body: "", labels: [], repoUrl: "https://github.com/owner/repo" });
+    queue.addTask({ taskId: "2", issueNumber: 2, title: "T2", body: "", labels: [], repoUrl: "https://github.com/owner/repo" });
+    queue.addTask({ taskId: "3", issueNumber: 3, title: "T3", body: "", labels: [], repoUrl: "https://github.com/owner/repo" });
+
+    await waitUntil(() => snapshots.length > 0);
+    // All three addTask calls are within the same tick, so debounce collapses them
+    expect(snapshots.length).toBe(1);
+    expect(snapshots[0].tasks).toHaveLength(3);
   });
 });

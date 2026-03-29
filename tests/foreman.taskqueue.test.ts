@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { TaskQueue } from "../src/foreman.js";
 import type { GitHubEvent } from "../src/types.js";
 
@@ -182,5 +182,76 @@ describe("nextPending with predicate", () => {
     q.addTask({ ...baseTask, taskId: "1", issueNumber: 1 });
     q.addTask({ ...baseTask, taskId: "2", issueNumber: 2 });
     expect(q.nextPending()?.taskId).toBe("1");
+  });
+});
+
+describe("TaskQueue changed events", () => {
+  let q: TaskQueue;
+  beforeEach(() => { q = new TaskQueue(); });
+
+  it("addTask emits changed", () => {
+    const changed = vi.fn();
+    q.on("changed", changed);
+    q.addTask(baseTask);
+    expect(changed).toHaveBeenCalledOnce();
+  });
+
+  it("assignTask emits changed", () => {
+    q.addTask(baseTask);
+    const changed = vi.fn();
+    q.on("changed", changed);
+    q.assignTask("42", "w1");
+    expect(changed).toHaveBeenCalledOnce();
+  });
+
+  it("completeTask emits changed", () => {
+    q.addTask(baseTask);
+    q.assignTask("42", "w1");
+    const changed = vi.fn();
+    q.on("changed", changed);
+    q.completeTask("42");
+    expect(changed).toHaveBeenCalledOnce();
+  });
+
+  it("revertTask emits changed", () => {
+    q.addTask(baseTask);
+    q.assignTask("42", "w1");
+    const changed = vi.fn();
+    q.on("changed", changed);
+    q.revertTask("42");
+    expect(changed).toHaveBeenCalledOnce();
+  });
+
+  it("removeTask emits changed when task removed", () => {
+    q.addTask(baseTask);
+    const changed = vi.fn();
+    q.on("changed", changed);
+    q.removeTask("42");
+    expect(changed).toHaveBeenCalledOnce();
+  });
+
+  it("removeTask does not emit changed for assigned task", () => {
+    q.addTask(baseTask);
+    q.assignTask("42", "w1");
+    const changed = vi.fn();
+    q.on("changed", changed);
+    q.removeTask("42"); // no-op for assigned tasks
+    expect(changed).not.toHaveBeenCalled();
+  });
+
+  it("registerPr emits changed", () => {
+    q.addTask(baseTask);
+    const changed = vi.fn();
+    q.on("changed", changed);
+    q.registerPr(10, "42");
+    expect(changed).toHaveBeenCalledOnce();
+  });
+
+  it("markDepsLoaded emits changed", () => {
+    q.addTask({ ...baseTask, depsLoaded: false });
+    const changed = vi.fn();
+    q.on("changed", changed);
+    q.markDepsLoaded([42]);
+    expect(changed).toHaveBeenCalledOnce();
   });
 });
