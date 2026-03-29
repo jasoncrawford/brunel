@@ -3,7 +3,7 @@ export default defineConfig({
   test: {
     environment: "node",
     globalSetup: "./tests/globalSetup.ts",
-    exclude: ["node_modules", "frontend/**", ".worktrees/**", ".claude/**"],
+    exclude: ["node_modules", "frontend/**", ".worktrees/**", ".claude/**", "tests/browser/**"],
     coverage: {
       provider: "v8",
       reporter: ["text", "html"],

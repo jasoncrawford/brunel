@@ -57,6 +57,24 @@ jobs:
 
       - run: npm run lint
 
+      - name: Build frontend for browser tests
+        run: npm run build
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run browser tests
+        run: npm run test:browser
+        env:
+          CI: true
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
