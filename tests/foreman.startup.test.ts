@@ -4,6 +4,7 @@ import type { TaskAssignmentStore } from "../src/db.js";
 import WebSocket, { WebSocketServer } from "ws";
 import http from "http";
 import type { AddressInfo } from "net";
+import { waitUntil } from "./helpers.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -131,7 +132,7 @@ describe("tryAssignWork — DB persistence", () => {
 
     port = await startServer();
     const ws = await connect({ type: "worker_hello", workerId: "w1", status: "idle" });
-    await new Promise((r) => setTimeout(r, 20)); // let hello be processed
+    await waitUntil(() => registry.get("w1")?.status === "idle");
 
     expect(taskQueue.get("42")?.status).toBe("pending");
   });
@@ -184,7 +185,7 @@ describe("startup reconnect behaviour", () => {
 
     port = await startServer();
     const ws = await connect({ type: "worker_hello", workerId: "new-worker", status: "idle" });
-    await new Promise((r) => setTimeout(r, 20)); // let hello be processed
+    await waitUntil(() => registry.get("new-worker")?.status === "idle");
 
     // new-worker should NOT get task 42 — it belongs to original-worker
     expect(taskQueue.get("42")?.status).toBe("assigned");
@@ -204,7 +205,7 @@ describe("startup reconnect behaviour", () => {
     port = await startServer();
     await connect({ type: "worker_hello", workerId: "w1", status: "busy", taskId: "42" });
 
-    await new Promise((r) => setTimeout(r, 50));
+    await waitUntil(() => registry.get("w1")?.status === "busy");
     expect(taskQueue.get("42")?.status).toBe("assigned");
     expect(taskQueue.get("42")?.assignedWorkerId).toBe("w1");
     // deleteAssignment must NOT be called — worker reclaimed its task
@@ -278,9 +279,9 @@ describe("task_complete deletes DB row", () => {
     port = await startServer();
     const ws = await connect({ type: "worker_hello", workerId: "w1", status: "busy", taskId: "42" });
 
-    await new Promise((r) => setTimeout(r, 50));
+    await waitUntil(() => registry.get("w1")?.status === "busy");
     ws.send(JSON.stringify({ type: "task_complete", workerId: "w1", taskId: "42" }));
-    await new Promise((r) => setTimeout(r, 50));
+    await waitUntil(() => registry.get("w1")?.status === "idle");
 
     expect(store.deleteAssignment).toHaveBeenCalledWith("42");
   });

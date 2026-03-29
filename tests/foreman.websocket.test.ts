@@ -10,6 +10,7 @@ import type { ForemanMessage, LabeledIssueState } from "../src/types.js";
 import { setBlockers } from "../src/dependencies.js";
 import type { DependencyGraph } from "../src/dependencies.js";
 import type { DbLogger } from "../src/db.js";
+import { waitUntil } from "./helpers.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -295,7 +296,7 @@ describe("foreman WebSocket protocol", () => {
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
     await nextMsg(ws); // task_assigned
     send(ws, { type: "task_complete", workerId: "w1", taskId: "1" });
-    await new Promise((r) => setTimeout(r, 20)); // let task_complete be processed
+    await waitUntil(() => registry.get("w1")?.status === "idle");
     expect(queue.get("1")?.status).toBe("complete");
   });
 
@@ -307,7 +308,7 @@ describe("foreman WebSocket protocol", () => {
 
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "w1", taskId: "1", status: "busy" });
-    await new Promise((r) => setTimeout(r, 20)); // let hello be processed
+    await waitUntil(() => registry.get("w1")?.status === "idle");
     expect(registry.get("w1")?.status).toBe("idle");
   });
 
@@ -388,7 +389,7 @@ describe("dependency-aware task assignment", () => {
 
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
-    await new Promise((r) => setTimeout(r, 20)); // let hello be processed
+    await waitUntil(() => !!registry.get("w1"));
 
     const reply = nextMsg(ws);
     routeEvent("evt-1", "issues", {
@@ -474,7 +475,7 @@ describe("worker secret enforcement", () => {
     // Default setup (no workerSecret) — already tested elsewhere, just assert no regression
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
-    await new Promise((r) => setTimeout(r, 20)); // connection accepted, no message expected
+    await waitUntil(() => registry.get("w1")?.status === "idle");
     expect(registry.get("w1")?.status).toBe("idle");
   });
 });
@@ -547,9 +548,10 @@ describe("worker disconnect DB logging", () => {
       queryWorkerMessages: vi.fn().mockResolvedValue([]),
     };
 
+    const localRegistry1 = new WorkerRegistry();
     const server = http.createServer();
     const { wss: testWss } = createForemanWss(
-      new TaskQueue(), new WorkerRegistry(), server,
+      new TaskQueue(), localRegistry1, server,
       { taskLabel: defaultCfg.taskLabel, reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs, dbLogger: mockDbLogger },
     );
     const testPort = await new Promise<number>((r) => server.listen(0, () => r((server.address() as AddressInfo).port)));
@@ -557,13 +559,13 @@ describe("worker disconnect DB logging", () => {
     const ws = new WebSocket(`ws://localhost:${testPort}/worker`);
     await new Promise<void>((resolve, reject) => { ws.once("open", resolve); ws.once("error", reject); });
     ws.send(JSON.stringify({ type: "worker_hello", workerId: "w-disc-1", status: "idle" }));
-    await new Promise((r) => setTimeout(r, 20)); // let hello be processed
+    await waitUntil(() => !!localRegistry1.get("w-disc-1"));
 
     await new Promise<void>((resolve) => {
       ws.once("close", resolve);
       ws.close();
     });
-    await new Promise((r) => setTimeout(r, 20)); // let close handler fire
+    await waitUntil(() => !localRegistry1.get("w-disc-1") || localRegistry1.get("w-disc-1")?.status === "disconnected");
 
     const calls = (mockDbLogger.logForemanMessage as ReturnType<typeof vi.fn>).mock.calls;
     const disconnectCall = calls.find((c) => c[0].msgType === "worker_disconnected");
@@ -598,9 +600,10 @@ describe("worker disconnect DB logging", () => {
       repoUrl: "https://github.com/owner/repo",
     });
 
+    const localRegistry2 = new WorkerRegistry();
     const server = http.createServer();
     const { wss: testWss } = createForemanWss(
-      taskQueue, new WorkerRegistry(), server,
+      taskQueue, localRegistry2, server,
       { taskLabel: defaultCfg.taskLabel, reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs, dbLogger: mockDbLogger },
     );
     const testPort = await new Promise<number>((r) => server.listen(0, () => r((server.address() as AddressInfo).port)));
@@ -615,7 +618,7 @@ describe("worker disconnect DB logging", () => {
       ws.once("close", resolve);
       ws.close();
     });
-    await new Promise((r) => setTimeout(r, 20)); // let close handler fire
+    await waitUntil(() => localRegistry2.get("w-disc-2")?.status === "disconnected");
 
     const calls = (mockDbLogger.logForemanMessage as ReturnType<typeof vi.fn>).mock.calls;
     const disconnectCall = calls.find((c) => c[0].msgType === "worker_disconnected");
@@ -636,7 +639,7 @@ describe("disconnected worker state", () => {
     await nextMsg(ws); // task_assigned
 
     await closeClient(ws);
-    await new Promise((r) => setTimeout(r, 20)); // let close handler fire
+    await waitUntil(() => registry.get("w1")?.status === "disconnected");
 
     const entry = registry.get("w1");
     expect(entry).toBeDefined();
@@ -648,10 +651,10 @@ describe("disconnected worker state", () => {
   it("idle worker is removed from registry on close", async () => {
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
-    await new Promise((r) => setTimeout(r, 20)); // let hello be processed
+    await waitUntil(() => !!registry.get("w1"));
 
     await closeClient(ws);
-    await new Promise((r) => setTimeout(r, 20));
+    await waitUntil(() => !registry.get("w1"));
 
     expect(registry.get("w1")).toBeUndefined();
   });
@@ -663,7 +666,7 @@ describe("disconnected worker state", () => {
     await nextMsg(ws); // task_assigned
 
     await closeClient(ws);
-    await new Promise((r) => setTimeout(r, 20));
+    await waitUntil(() => registry.get("w1")?.status === "disconnected");
 
     // Route an event while the worker is disconnected
     routeEvent("evt-1", "issue_comment", { issue: { number: 1 }, comment: { body: "hi" } });
@@ -681,7 +684,7 @@ describe("disconnected worker state", () => {
     await nextMsg(ws1); // task_assigned
 
     await closeClient(ws1);
-    await new Promise((r) => setTimeout(r, 20));
+    await waitUntil(() => registry.get("w1")?.status === "disconnected");
 
     // Queue an event while disconnected
     routeEvent("evt-1", "issue_comment", { issue: { number: 1 }, comment: { body: "hi" } });
@@ -709,7 +712,7 @@ describe("disconnected worker state", () => {
     await nextMsg(ws1); // task_assigned
 
     await closeClient(ws1);
-    await new Promise((r) => setTimeout(r, 20));
+    await waitUntil(() => registry.get("w1")?.status === "disconnected");
 
     // Worker reconnects as idle (process restarted, no session context)
     const ws2 = await connect();
@@ -735,12 +738,12 @@ describe("disconnected worker state", () => {
     await nextMsg(wsA); // task_assigned
 
     await closeClient(wsA);
-    await new Promise((r) => setTimeout(r, 20));
+    await waitUntil(() => registry.get("worker-a")?.status === "disconnected");
 
     // Worker B is already connected and idle
     const wsB = await connect();
     send(wsB, { type: "worker_hello", workerId: "worker-b", status: "idle" });
-    await new Promise((r) => setTimeout(r, 20)); // let hello be processed (task still assigned to disconnected A)
+    await waitUntil(() => registry.get("worker-b")?.status === "idle");
 
     // Worker A reconnects as idle (crashed and restarted)
     const wsA2 = await connect();
@@ -763,7 +766,7 @@ describe("worker_goodbye", () => {
     await nextMsg(ws); // task_assigned
 
     send(ws, { type: "worker_goodbye", workerId: "w1", taskId: "1" });
-    await new Promise((r) => setTimeout(r, 20));
+    await waitUntil(() => !registry.get("w1"));
 
     expect(registry.get("w1")).toBeUndefined();
     expect(queue.get("1")?.status).toBe("pending");
@@ -772,10 +775,10 @@ describe("worker_goodbye", () => {
   it("removes idle worker from registry when goodbye has no taskId", async () => {
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
-    await new Promise((r) => setTimeout(r, 20)); // let hello be processed
+    await waitUntil(() => !!registry.get("w1"));
 
     send(ws, { type: "worker_goodbye", workerId: "w1" });
-    await new Promise((r) => setTimeout(r, 20));
+    await waitUntil(() => !registry.get("w1"));
 
     expect(registry.get("w1")).toBeUndefined();
   });
@@ -791,7 +794,7 @@ describe("worker_goodbye", () => {
     // Worker B connects idle
     const wsB = await connect();
     send(wsB, { type: "worker_hello", workerId: "worker-b", status: "idle" });
-    await new Promise((r) => setTimeout(r, 20)); // let hello be processed
+    await waitUntil(() => registry.get("worker-b")?.status === "idle");
 
     // Worker A says goodbye — task should revert and be assigned to B
     const replyB = nextMsg(wsB);
@@ -867,7 +870,7 @@ describe("reclaim timer (fake timers)", () => {
 
     // Worker A disconnects (crash)
     await new Promise<void>((resolve) => { wsA.once("close", resolve); wsA.close(); });
-    await new Promise((r) => setTimeout(r, 20)); // let close handler fire
+    await waitUntil(() => r.get("worker-a")?.status === "disconnected");
 
     // Task should still be assigned (timer hasn't fired)
     expect(q.get("1")?.status).toBe("assigned");
@@ -878,7 +881,7 @@ describe("reclaim timer (fake timers)", () => {
     await new Promise<void>((resolve, reject) => { wsB.once("open", resolve); wsB.once("error", reject); });
     const msgB2Promise = nextMsg(wsB);
     send(wsB, { type: "worker_hello", workerId: "worker-b", status: "idle" });
-    await new Promise((r) => setTimeout(r, 20)); // let hello be processed
+    await waitUntil(() => r.get("worker-b")?.status === "idle");
 
     // Advance time past the reclaim timeout
     vi.advanceTimersByTime(reclaimTimeoutMs + 100);
@@ -923,13 +926,13 @@ describe("reclaim timer (fake timers)", () => {
 
     // Disconnect
     await new Promise<void>((resolve) => { wsA.once("close", resolve); wsA.close(); });
-    await new Promise((r) => setTimeout(r, 20));
+    await waitUntil(() => r.get("worker-a")?.status === "disconnected");
 
     // Reconnect before timer fires
     const wsA2 = new WebSocket(`ws://localhost:${testPort}/worker`);
     await new Promise<void>((resolve, reject) => { wsA2.once("open", resolve); wsA2.once("error", reject); });
     send(wsA2, { type: "worker_hello", workerId: "worker-a", taskId: "1", status: "busy" });
-    await new Promise((r) => setTimeout(r, 20)); // let hello handler run
+    await waitUntil(() => r.get("worker-a")?.status === "busy");
 
     // Advance time past original timeout — timer should have been cancelled
     vi.advanceTimersByTime(reclaimTimeoutMs + 100);
@@ -967,11 +970,11 @@ describe("reclaim timer (fake timers)", () => {
 
     // Disconnect
     await new Promise<void>((resolve) => { wsA.once("close", resolve); wsA.close(); });
-    await new Promise((r) => setTimeout(r, 20));
+    await waitUntil(() => r.get("worker-a")?.status === "disconnected");
 
     // Let the timer fire
     vi.advanceTimersByTime(reclaimTimeoutMs + 100);
-    await new Promise((r) => setTimeout(r, 20));
+    await waitUntil(() => q.get("1")?.status === "pending");
 
     // Task is now pending
     expect(q.get("1")?.status).toBe("pending");

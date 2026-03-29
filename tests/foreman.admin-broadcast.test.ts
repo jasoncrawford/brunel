@@ -13,6 +13,7 @@ import { TaskQueue, WorkerRegistry, createForemanWss } from "../src/foreman.js";
 import { loadDefaultConfig } from "../src/config.js";
 const defaultCfg = await loadDefaultConfig();
 import type { AdminWss, LogEntry } from "../src/admin-ws.js";
+import { waitUntil } from "./helpers.js";
 
 // ── Mock AdminWss ─────────────────────────────────────────────────────────────
 
@@ -230,7 +231,7 @@ describe("foreman admin broadcast — received messages", () => {
   it("broadcasts received worker_hello as kind='message'", async () => {
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "worker-abc", status: "idle" });
-    await new Promise((r) => setTimeout(r, 20)); // let hello be processed
+    await waitUntil(() => !!registry.get("worker-abc"));
 
     const received = adminWss.logEntries.filter(
       (e) => e.kind === "message" && e.summary.includes("received") && e.summary.includes("worker_hello"),
@@ -241,7 +242,7 @@ describe("foreman admin broadcast — received messages", () => {
   it("broadcasts worker_hello with 'idle' status in summary", async () => {
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "worker-abc", status: "idle" });
-    await new Promise((r) => setTimeout(r, 20)); // let hello be processed
+    await waitUntil(() => !!registry.get("worker-abc"));
 
     const hello = adminWss.logEntries.find(
       (e) => e.kind === "message" && e.summary.includes("worker_hello"),
@@ -258,7 +259,7 @@ describe("foreman admin broadcast — received messages", () => {
 
     adminWss.logEntries.length = 0; // reset
     send(ws, { type: "task_complete", workerId: "worker-abc", taskId: "1" });
-    await new Promise((r) => setTimeout(r, 20)); // let task_complete be processed
+    await waitUntil(() => registry.get("worker-abc")?.status === "idle");
 
     const received = adminWss.logEntries.filter(
       (e) => e.kind === "message" && e.summary.includes("task_complete"),
@@ -269,11 +270,11 @@ describe("foreman admin broadcast — received messages", () => {
   it("broadcasts disconnect event as kind='message'", async () => {
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "worker-abc", status: "idle" });
-    await new Promise((r) => setTimeout(r, 20)); // let hello be processed
+    await waitUntil(() => !!registry.get("worker-abc"));
 
     adminWss.logEntries.length = 0;
     await closeClient(ws);
-    await new Promise((r) => setTimeout(r, 20)); // let close handler run
+    await waitUntil(() => !registry.get("worker-abc"));
 
     const disconnected = adminWss.logEntries.find(
       (e) => e.kind === "message" && e.summary.includes("disconnected"),
@@ -286,7 +287,7 @@ describe("foreman admin broadcast — unique IDs across all event types", () => 
   it("assigns unique IDs to webhook and message broadcasts", async () => {
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "worker-abc", status: "idle" });
-    await new Promise((r) => setTimeout(r, 20)); // let hello be processed
+    await waitUntil(() => !!registry.get("worker-abc"));
 
     routeEvent("evt-1", "issues", {
       action: "labeled",

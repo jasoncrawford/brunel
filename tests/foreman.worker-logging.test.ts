@@ -10,6 +10,7 @@ import { TaskQueue, WorkerRegistry, createForemanWss } from "../src/foreman.js";
 import { loadDefaultConfig } from "../src/config.js";
 const defaultCfg = await loadDefaultConfig();
 import type { ForemanMessage } from "../src/types.js";
+import { waitUntil } from "./helpers.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -108,7 +109,7 @@ describe("foreman worker message logging", () => {
   it("logs worker_hello (idle) as a one-liner", async () => {
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "worker-abc123", status: "idle" });
-    await new Promise((r) => setTimeout(r, 20)); // let hello be processed
+    await waitUntil(() => !!registry.get("worker-abc123"));
 
     // Log format: "<timestamp> [worker <first-8-chars>] ..."
     const workerLogs = logLines.filter(l => l.includes("[worker "));
@@ -157,7 +158,7 @@ describe("foreman worker message logging", () => {
 
     logLines.length = 0; // reset to focus on task_complete log
     send(ws, { type: "task_complete", workerId: "worker-abc123", taskId: "1" });
-    await new Promise((r) => setTimeout(r, 20)); // let task_complete be processed
+    await waitUntil(() => registry.get("worker-abc123")?.status === "idle");
 
     const completeLog = logLines.find(l => l.includes("task_complete"));
     expect(completeLog).toBeDefined();
@@ -212,7 +213,7 @@ describe("foreman worker message logging", () => {
   it("logs disconnect with close code as a one-liner", async () => {
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "worker-abc123", status: "idle" });
-    await new Promise((r) => setTimeout(r, 20)); // let hello be processed
+    await waitUntil(() => !!registry.get("worker-abc123"));
 
     logLines.length = 0;
     await new Promise<void>((resolve) => {
@@ -220,7 +221,7 @@ describe("foreman worker message logging", () => {
       ws.close();
     });
     // Give the server-side close handler time to run
-    await new Promise((r) => setTimeout(r, 20));
+    await waitUntil(() => !registry.get("worker-abc123"));
 
     const disconnectLog = logLines.find(l => l.includes("disconnected"));
     expect(disconnectLog).toBeDefined();
