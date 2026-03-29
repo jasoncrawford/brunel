@@ -754,6 +754,12 @@ export function createForemanWss(
 
       if (action === "closed") {
         openIssues.delete(issueNumber);
+        // Mark the task done in the dashboard while the worker finishes up.
+        // We don't persist to DB here — the worker will call task_complete to
+        // finalize and release itself.
+        if (task && task.status === "assigned") {
+          taskQueue.completeTask(task.taskId);
+        }
         reconcile();
         return result(task);
       }
@@ -909,6 +915,11 @@ export function createForemanWss(
             sendMsg(workerId, evtMsg);
             log(workerId, `→ event_notification #${existing.issueNumber} ${evt.name} (queued)`);
           }
+        } else if (existing && existing.status === "complete" && existing.assignedWorkerId === workerId) {
+          // Issue was closed (task marked done) but worker is still finishing up.
+          // Let them stay busy so they can call task_complete to release themselves.
+          log(workerId, `hello busy task=#${msg.taskId} — reclaimed (issue closed, worker finishing)`);
+          registry.register(workerId, ws, "busy", msg.taskId);
         } else if (!existing) {
           log(workerId, `hello busy task=#${msg.taskId} — unknown task, respecting busy status`);
           registry.register(workerId, ws, "busy", msg.taskId);
@@ -1198,16 +1209,38 @@ if (isMain) {
   // Step 2: read task_assignments table and restore assigned state
   flog("[startup] step 2: loading task assignments from DB...");
   try {
+    // Pre-fetch tasks that are still "assigned" in the DB so we can restore any
+    // whose issue was closed (and therefore excluded from labeledIssues) while the
+    // worker was still active.
+    const assignedInDb = await taskStore.listTasks({ status: "assigned" });
+    const assignedMap = new Map(assignedInDb.map(r => [r.taskId, r]));
+
     const assignments = await assignStore.listAssignments();
     for (const row of assignments) {
-      const task = taskQueue.get(row.taskId);
-      if (!task) {
-        // Orphaned row: issue was closed, label removed, or task already completed.
-        flog(`[startup] orphaned assignment for task #${row.taskId}, deleting`);
-        assignStore.deleteAssignment(row.taskId).catch(err =>
-          flog(`ERROR Failed to delete orphaned assignment: ${fmtError(err)}`)
-        );
-        continue;
+      if (!taskQueue.get(row.taskId)) {
+        const taskRow = assignedMap.get(row.taskId);
+        if (taskRow) {
+          // Task was assigned when the foreman last stopped, but its issue is no
+          // longer open (e.g. PR was merged). Restore it so the worker can finish.
+          const repoUrl = `https://github.com/${taskRow.repo}`;
+          taskQueue.addTask({
+            taskId: taskRow.taskId,
+            issueNumber: taskRow.issueNumber,
+            title: taskRow.title,
+            body: "",
+            labels: [],
+            repoUrl,
+            depsLoaded: true,
+          });
+          flog(`[startup] restored task #${row.taskId} (issue closed while worker active)`);
+        } else {
+          // Orphaned row: task was completed, truly abandoned, or never persisted.
+          flog(`[startup] orphaned assignment for task #${row.taskId}, deleting`);
+          assignStore.deleteAssignment(row.taskId).catch(err =>
+            flog(`ERROR Failed to delete orphaned assignment: ${fmtError(err)}`)
+          );
+          continue;
+        }
       }
       // Restore assigned state from DB; when the worker reconnects it will reclaim
       // (if busy) or trigger a revert (if idle) via getAssignedTaskForWorker.
