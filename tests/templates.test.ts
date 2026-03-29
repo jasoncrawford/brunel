@@ -307,7 +307,7 @@ describe("EVENT_FMT table", () => {
       payload: { action: "closed", pull_request: { number: 5, merged: true } },
     };
     const result = EVENT_FMT.pull_request(evt.payload, evt);
-    expect(result).toContain("delete the branch");
+    expect(result).toContain("delete the local branch");
   });
 
   it("pull_request/closed not merged — asks how to proceed", () => {
