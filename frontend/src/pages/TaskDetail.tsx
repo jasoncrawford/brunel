@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useAdminWs } from "../hooks/useAdminWs.ts";
-import type { LogEntry, AdminMessage } from "../types.ts";
+import type { LogEntry, AdminMessage, TaskSnapshot } from "../types.ts";
 
 export default function TaskDetail() {
   const { id } = useParams<{ id: string }>();
   const [events, setEvents] = useState<LogEntry[]>([]);
+  const [task, setTask] = useState<TaskSnapshot | null>(null);
 
   useEffect(() => {
     fetch(`/api/tasks/${id}/events`)
@@ -15,7 +16,10 @@ export default function TaskDetail() {
   }, [id]);
 
   const handleMessage = useCallback((msg: AdminMessage) => {
-    if (msg.type === "log_event" && msg.entry.taskId === id) {
+    if (msg.type === "snapshot") {
+      const found = msg.tasks.find((t) => t.taskId === id);
+      if (found) setTask(found);
+    } else if (msg.type === "log_event" && msg.entry.taskId === id) {
       setEvents((prev) => [msg.entry, ...prev]);
     }
   }, [id]);
@@ -26,6 +30,20 @@ export default function TaskDetail() {
     <div>
       <h2>Task #{id}</h2>
       <p><Link to="/">← Dashboard</Link></p>
+
+      {task?.blockers && task.blockers.length > 0 && (
+        <section style={{ marginBottom: "1.5rem" }}>
+          <h3>Dependencies</h3>
+          <ul style={{ margin: 0, paddingLeft: "1.5rem" }}>
+            {task.blockers.map((b) => (
+              <li key={b.issueNumber} style={b.isOpen ? blockerOpen : blockerClosed}>
+                #{b.issueNumber}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       {events.length === 0 ? <p>No events for this task.</p> : (
         <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "monospace", fontSize: "0.85em" }}>
           <thead>
@@ -54,3 +72,5 @@ export default function TaskDetail() {
 
 const th: React.CSSProperties = { textAlign: "left", borderBottom: "1px solid #ccc", padding: "4px 8px" };
 const td: React.CSSProperties = { padding: "4px 8px", borderBottom: "1px solid #eee" };
+const blockerOpen: React.CSSProperties = { color: "#c00" };
+const blockerClosed: React.CSSProperties = { color: "#999", textDecoration: "line-through" };

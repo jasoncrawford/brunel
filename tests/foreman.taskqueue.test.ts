@@ -110,6 +110,31 @@ describe("TaskQueue", () => {
     const snapshots = q.getTaskSnapshots();
     expect(snapshots[0].prUrl).toBeUndefined();
   });
+
+  it("getTaskSnapshots with no graph/openIssues omits blockers field", () => {
+    q.addTask(baseTask);
+    const snapshots = q.getTaskSnapshots();
+    expect(snapshots[0].blockers).toBeUndefined();
+  });
+
+  it("getTaskSnapshots with graph includes blockers with isOpen status", () => {
+    q.addTask(baseTask); // issueNumber: 42
+    const graph = new Map([[42, new Set([10, 11])]]);
+    const openIssues = new Set([10]); // 10 is open, 11 is closed
+    const snapshots = q.getTaskSnapshots(graph, openIssues);
+    expect(snapshots[0].blockers).toEqual([
+      { issueNumber: 10, isOpen: true },
+      { issueNumber: 11, isOpen: false },
+    ]);
+  });
+
+  it("getTaskSnapshots with graph shows empty blockers array when no deps", () => {
+    q.addTask(baseTask); // issueNumber: 42, no entry in graph
+    const graph = new Map<number, Set<number>>();
+    const openIssues = new Set<number>();
+    const snapshots = q.getTaskSnapshots(graph, openIssues);
+    expect(snapshots[0].blockers).toEqual([]);
+  });
 });
 
 describe("removeTask", () => {

@@ -11,6 +11,11 @@ export interface LogEntry {
   summary: string;
 }
 
+export interface BlockerInfo {
+  issueNumber: number;
+  isOpen: boolean;
+}
+
 export interface TaskSnapshot {
   taskId: string;
   issueNumber: number;
@@ -19,6 +24,7 @@ export interface TaskSnapshot {
   assignedWorkerId?: string;
   prNumber?: number;
   prUrl?: string;
+  blockers?: BlockerInfo[];
 }
 
 export interface WorkerSnapshot {
