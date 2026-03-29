@@ -4,6 +4,7 @@ import type { TaskAssignmentStore } from "../src/db.js";
 import WebSocket, { WebSocketServer } from "ws";
 import http from "http";
 import type { AddressInfo } from "net";
+import { waitUntil } from "./helpers.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -118,7 +119,7 @@ describe("tryAssignWork — DB persistence", () => {
     expect(callOrder[0]).toBe("db");
   });
 
-  it("sends standby and reverts task if DB write fails", async () => {
+  it("reverts task to pending if DB write fails", async () => {
     const store = makeStore({
       upsertAssignment: vi.fn().mockRejectedValue(new Error("db down")),
     });
@@ -131,9 +132,8 @@ describe("tryAssignWork — DB persistence", () => {
 
     port = await startServer();
     const ws = await connect({ type: "worker_hello", workerId: "w1", status: "idle" });
-    const msg = await nextMsg(ws);
+    await waitUntil(() => registry.get("w1")?.status === "idle");
 
-    expect(msg).toMatchObject({ type: "standby" });
     expect(taskQueue.get("42")?.status).toBe("pending");
   });
 
@@ -169,8 +169,8 @@ describe("startup reconnect behaviour", () => {
 
     // deleteAssignment should be called (the old session's row is removed)
     expect(store.deleteAssignment).toHaveBeenCalledWith("42");
-    // Worker gets the task re-assigned (fresh session) or standby — either is valid
-    expect(["task_assigned", "standby"]).toContain((msg as { type: string }).type);
+    // Worker gets the task re-assigned (fresh session — prior assignment was reverted)
+    expect(msg).toMatchObject({ type: "task_assigned" });
   });
 
   it("a different idle worker does not steal a startup-assigned task", async () => {
@@ -185,10 +185,9 @@ describe("startup reconnect behaviour", () => {
 
     port = await startServer();
     const ws = await connect({ type: "worker_hello", workerId: "new-worker", status: "idle" });
-    const msg = await nextMsg(ws);
+    await waitUntil(() => registry.get("new-worker")?.status === "idle");
 
     // new-worker should NOT get task 42 — it belongs to original-worker
-    expect(msg).toMatchObject({ type: "standby" });
     expect(taskQueue.get("42")?.status).toBe("assigned");
     expect(taskQueue.get("42")?.assignedWorkerId).toBe("original-worker");
   });
@@ -206,7 +205,7 @@ describe("startup reconnect behaviour", () => {
     port = await startServer();
     await connect({ type: "worker_hello", workerId: "w1", status: "busy", taskId: "42" });
 
-    await new Promise((r) => setTimeout(r, 50));
+    await waitUntil(() => registry.get("w1")?.status === "busy");
     expect(taskQueue.get("42")?.status).toBe("assigned");
     expect(taskQueue.get("42")?.assignedWorkerId).toBe("w1");
     // deleteAssignment must NOT be called — worker reclaimed its task
@@ -280,9 +279,9 @@ describe("task_complete deletes DB row", () => {
     port = await startServer();
     const ws = await connect({ type: "worker_hello", workerId: "w1", status: "busy", taskId: "42" });
 
-    await new Promise((r) => setTimeout(r, 50));
+    await waitUntil(() => registry.get("w1")?.status === "busy");
     ws.send(JSON.stringify({ type: "task_complete", workerId: "w1", taskId: "42" }));
-    await new Promise((r) => setTimeout(r, 50));
+    await waitUntil(() => registry.get("w1")?.status === "idle");
 
     expect(store.deleteAssignment).toHaveBeenCalledWith("42");
   });

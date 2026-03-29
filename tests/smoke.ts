@@ -1,6 +1,6 @@
 /**
  * Smoke test: spawns a real foreman process and a real worker process and
- * asserts that the worker connects and receives standby.
+ * asserts that the worker connects to the foreman.
  *
  * Run with: npm run smoke
  */
@@ -99,15 +99,14 @@ async function run(): Promise<void> {
 
   let worker: ChildProcess | null = null;
   let connected = false;
-  let standby = false;
 
   await new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => {
-      reject(new Error(`Timeout after ${TIMEOUT_MS}ms – connected=${connected}, standby=${standby}`));
+      reject(new Error(`Timeout after ${TIMEOUT_MS}ms – connected=${connected}`));
     }, TIMEOUT_MS);
 
     function check() {
-      if (connected && standby) { clearTimeout(timer); resolve(); }
+      if (connected) { clearTimeout(timer); resolve(); }
     }
 
     function spawnWorker() {
@@ -119,11 +118,10 @@ async function run(): Promise<void> {
         process.stderr.write(`[worker stdout] ${buf}`);
         const text = buf.toString();
         if (text.includes("Connected to foreman")) { connected = true; check(); }
-        if (text.includes("Standby")) { standby = true; check(); }
       });
       worker.stderr!.on("data", (buf: Buffer) => process.stderr.write(`[worker stderr] ${buf}`));
       worker.on("exit", (code) => {
-        if (!connected || !standby)
+        if (!connected)
           reject(new Error(`Worker exited prematurely with code ${code}`));
       });
     }
@@ -134,12 +132,12 @@ async function run(): Promise<void> {
     });
     foreman.stderr!.on("data", (buf: Buffer) => process.stderr.write(`[foreman stderr] ${buf}`));
     foreman.on("exit", (code) => {
-      if (!connected || !standby)
+      if (!connected)
         reject(new Error(`Foreman exited prematurely with code ${code}`));
     });
   });
 
-  console.log("✓ Worker connected to foreman and received standby");
+  console.log("✓ Worker connected to foreman");
   foreman.kill();
   worker!.kill();
   mockApi.close();

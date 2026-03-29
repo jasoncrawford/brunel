@@ -9,6 +9,7 @@ import { TaskQueue, WorkerRegistry, createForemanWss } from "../src/foreman.js";
 import { loadDefaultConfig } from "../src/config.js";
 const defaultCfg = await loadDefaultConfig();
 import type { ForemanMessage } from "../src/types.js";
+import { waitUntil } from "./helpers.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -99,11 +100,10 @@ afterEach(() => {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe("foreman log timestamps", () => {
-  it("worker hello/standby log lines start with ISO 8601 timestamp", async () => {
+  it("worker hello log lines start with ISO 8601 timestamp", async () => {
     const ws = await connect();
-    const reply = nextMsg(ws);
     send(ws, { type: "worker_hello", workerId: "worker-abc123", status: "idle" });
-    await reply;
+    await waitUntil(() => !!registry.get("worker-abc123"));
 
     expect(logLines.length).toBeGreaterThan(0);
     for (const line of logLines) {
@@ -158,7 +158,7 @@ describe("foreman log timestamps", () => {
   it("task enqueue log line starts with ISO 8601 timestamp", async () => {
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "worker-abc123", status: "idle" });
-    await nextMsg(ws); // standby
+    await waitUntil(() => !!registry.get("worker-abc123"));
 
     logLines.length = 0;
     routeEvent("evt-1", "issues", {
