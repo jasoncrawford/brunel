@@ -55,8 +55,10 @@ export class Workspace {
       if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
       display.print(display.c.sageGreen(`[workspace] Cloning ${repoUrl} → ${dir}`));
       await exec(["clone", repoUrl, dir], undefined);
-      display.print(display.c.sageGreen(`[workspace] Installing dependencies in ${dir}`));
-      await npm(["install"], dir);
+      if (fs.existsSync(path.join(dir, "package.json"))) {
+        display.print(display.c.sageGreen(`[workspace] Installing dependencies in ${dir}`));
+        await npm(["install"], dir);
+      }
     }
     fs.writeFileSync(path.join(dir, ".brunel.lock"), String(process.pid));
     return new Workspace(dir, repoUrl, exec, npm);
@@ -94,8 +96,10 @@ export class Workspace {
     await this.exec(["checkout", "main"], this.dir);
     await this.exec(["reset", "--hard", "origin/main"], this.dir);
     await this.exec(["clean", "-fdx"], this.dir);
-    display.print(display.c.sageGreen(`[workspace] Installing dependencies in ${this.dir}`));
-    await this.npm(["install"], this.dir);
+    if (fs.existsSync(path.join(this.dir, "package.json"))) {
+      display.print(display.c.sageGreen(`[workspace] Installing dependencies in ${this.dir}`));
+      await this.npm(["install"], this.dir);
+    }
   }
 
   /** Return safety info about the current checkout state. */

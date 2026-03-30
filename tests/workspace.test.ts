@@ -12,8 +12,11 @@ const REPO_URL = "https://token@github.com/owner/repo.git";
 
 function makeExec(responses: Record<string, string> = {}) {
   return vi.fn().mockImplementation(async (args: string[]) => {
-    // Simulate git clone creating the target directory with a .git subdirectory
-    if (args[0] === "clone") fs.mkdirSync(path.join(args[2], ".git"), { recursive: true });
+    // Simulate git clone creating the target directory with .git and package.json
+    if (args[0] === "clone") {
+      fs.mkdirSync(path.join(args[2], ".git"), { recursive: true });
+      fs.writeFileSync(path.join(args[2], "package.json"), "{}");
+    }
     const key = args.join(" ");
     return responses[key] ?? "";
   });
@@ -82,6 +85,17 @@ describe("Workspace.create", () => {
     await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec, npm);
     expect(npm).not.toHaveBeenCalled();
   });
+
+  it("does not run npm install when cloned repo has no package.json", async () => {
+    const exec = vi.fn().mockImplementation(async (args: string[]) => {
+      // Clone creates .git but no package.json
+      if (args[0] === "clone") fs.mkdirSync(path.join(args[2], ".git"), { recursive: true });
+      return "";
+    });
+    const npm = makeNpmExec();
+    await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec, npm);
+    expect(npm).not.toHaveBeenCalled();
+  });
 });
 
 // ── destroy ────────────────────────────────────────────────────────────────
@@ -116,9 +130,22 @@ describe("Workspace.reset", () => {
     const exec = makeExec();
     const npm = makeNpmExec();
     const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec, npm);
+    // makeExec clone creates package.json; it persists through the mocked clean
     npm.mockClear();
     await ws.reset();
     expect(npm).toHaveBeenCalledWith(["install"], ws.dir);
+  });
+
+  it("does not run npm install on reset when repo has no package.json", async () => {
+    const workerDir = path.join(BASE_DIR, WORKER_ID);
+    fs.mkdirSync(path.join(workerDir, ".git"), { recursive: true });
+    // No package.json in this workspace
+    const exec = makeExec();
+    const npm = makeNpmExec();
+    const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec, npm);
+    npm.mockClear();
+    await ws.reset();
+    expect(npm).not.toHaveBeenCalled();
   });
 
   it("retries once on failure before succeeding", async () => {
