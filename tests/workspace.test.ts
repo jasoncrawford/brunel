@@ -127,7 +127,7 @@ describe("Workspace.reset", () => {
     expect(exec).toHaveBeenCalledWith(["fetch", "origin"], ws.dir);
     expect(exec).toHaveBeenCalledWith(["checkout", "main"], ws.dir);
     expect(exec).toHaveBeenCalledWith(["reset", "--hard", "origin/main"], ws.dir);
-    expect(exec).toHaveBeenCalledWith(["clean", "-fdx", "-e", "node_modules"], ws.dir);
+    expect(exec).toHaveBeenCalledWith(["clean", "-fdx", "-e", "node_modules", "-e", ".env", "-e", ".brunel.lock"], ws.dir);
   });
 
   it("runs npm install after git operations", async () => {
