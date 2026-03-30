@@ -500,7 +500,7 @@ export function renderMarkdown(text: string): string {
     if (line.startsWith("> ")) { out.push("▏ " + mdInline(line.slice(2))); continue; }
 
     const li = line.match(/^(\s*)[-*+]\s+(.*)/);
-    if (li) { out.push(li[1] + "∙ " + mdInline(li[2])); continue; }
+    if (li) { out.push(li[1] + "• " + mdInline(li[2])); continue; }
 
     const oli = line.match(/^(\s*)(\d+)\.\s+(.*)/);
     if (oli) { out.push(oli[1] + oli[2] + ". " + mdInline(oli[3])); continue; }
@@ -535,17 +535,17 @@ export const USER_BLOCK_FMT: FmtTable = {
 
 export const TOOL_CALL_FMT: FmtTable = {
   Bash:       (b) => fmtToolCall(b, `$ ${b.input?.command ?? ""}`),
-  Read:       (b) => fmtToolCall(b, `∙ Read(${toRelativePath(b.input?.file_path ?? "?")})`),
-  Write:      (b) => fmtToolCall(b, `∙ Write(${toRelativePath(b.input?.file_path ?? "?")})`),
-  Edit:       (b) => fmtToolCall(b, `∙ Edit(${toRelativePath(b.input?.file_path ?? "?")})`),
-  Glob:       (b) => fmtToolCall(b, `∙ Glob(${b.input?.pattern ?? "?"})`),
-  Grep:       (b) => fmtToolCall(b, `∙ grep ${trunc(b.input?.pattern ?? "?", 30)} ${b.input?.path != null ? toRelativePath(b.input.path as string) : "."}`),
-  Skill:      (b) => fmtToolCall(b, `∙ Skill(${b.input?.skill ?? "?"})`),
-  Agent:      (b) => fmtToolCall(b, `∙ ${b.input?.subagent_type ?? "Agent"}(${trunc(b.input?.prompt ?? "", 80)})`),
-  ToolSearch: (b) => fmtToolCall(b, `∙ ToolSearch(${b.input?.query ?? "?"})`),
-  TodoWrite:  (b) => fmtToolCall(b, `∙ TodoWrite(${fmtTodoWriteInput(b.input?.todos)})`),
-  AskUserQuestion: (b) => fmtToolCall(b, `∙ AskUserQuestion(${fmtAskUserQuestionInput(b.input?.questions)})`),
-  _default:   (b) => fmtToolCall(b, `∙ ${b.name}(${fmtArgs(b.input)})`),
+  Read:       (b) => fmtToolCall(b, `• Read(${toRelativePath(b.input?.file_path ?? "?")})`),
+  Write:      (b) => fmtToolCall(b, `• Write(${toRelativePath(b.input?.file_path ?? "?")})`),
+  Edit:       (b) => fmtToolCall(b, `• Edit(${toRelativePath(b.input?.file_path ?? "?")})`),
+  Glob:       (b) => fmtToolCall(b, `• Glob(${b.input?.pattern ?? "?"})`),
+  Grep:       (b) => fmtToolCall(b, `• grep ${trunc(b.input?.pattern ?? "?", 30)} ${b.input?.path != null ? toRelativePath(b.input.path as string) : "."}`),
+  Skill:      (b) => fmtToolCall(b, `• Skill(${b.input?.skill ?? "?"})`),
+  Agent:      (b) => fmtToolCall(b, `• ${b.input?.subagent_type ?? "Agent"}(${trunc(b.input?.prompt ?? "", 80)})`),
+  ToolSearch: (b) => fmtToolCall(b, `• ToolSearch(${b.input?.query ?? "?"})`),
+  TodoWrite:  (b) => fmtToolCall(b, `• TodoWrite(${fmtTodoWriteInput(b.input?.todos)})`),
+  AskUserQuestion: (b) => fmtToolCall(b, `• AskUserQuestion(${fmtAskUserQuestionInput(b.input?.questions)})`),
+  _default:   (b) => fmtToolCall(b, `• ${b.name}(${fmtArgs(b.input)})`),
 };
 
 export const TOOL_RESULT_FMT: FmtTable = {
@@ -591,7 +591,7 @@ function fmtApiRetryDetail(m: { error_status?: number | null; error?: string }):
 export const SYSTEM_FMT: FmtTable = {
   init:              { verbose: (m) => c.darkGray(`init: session ${m.session_id}`) },
   task_started:      (m) => c.lavender(`  ▶ agent started: ${m.description}`),
-  task_progress:     (m) => c.lavender(`  ∙ ${m.description}`),
+  task_progress:     (m) => c.lavender(`  • ${m.description}`),
   task_notification: (m) => c.lavender(`  ◀︎ ${m.status}: ${m.summary}`),
   compact_boundary:  (m) => c.darkGray(`↩ Context compacted (${fmtCompactionDetail(m.compact_metadata)})`),
   status:            (m) => m.status === "compacting" ? c.darkGray("Compacting context...") : null,
@@ -623,32 +623,39 @@ export const FOREMAN_MESSAGE_FMT: FmtTable = {
 
 export interface WorkerStatusOpts {
   workerId: string;
-  status: "busy" | "idle";
   taskNumber?: number;
   prNumber?: number;
   branch?: string;
-  connectionStatus: "connected" | "disconnected" | "reconnecting";
-  /** WebSocket close code, shown in verbose mode when reconnecting. */
+  connectionStatus: "connected" | "disconnected" | "reconnecting" | "handshaking";
+  /** WebSocket close code, shown in verbose mode when disconnected. */
   disconnectCode?: number;
+  /** Seconds until reconnect attempt, shown when disconnected. */
+  retryInSeconds?: number;
   width?: number;
 }
 
 export function fmtWorkerStatus(opts: WorkerStatusOpts): string {
-  const { workerId, status, taskNumber, prNumber, branch, connectionStatus, disconnectCode } = opts;
-  const width = opts.width ?? (process.stdout.columns ?? W);
+  const { workerId, taskNumber, prNumber, branch, connectionStatus, disconnectCode, retryInSeconds } = opts;
+  const width = (opts.width ?? (process.stdout.columns ?? W)) - 1; // -1 to avoid last-column wrap
 
-  // Right side: connection status (always shown, right-justified)
+  // Right side: connection status
   const codeStr = verbose && disconnectCode != null ? ` (${disconnectCode})` : "";
   const rightText =
     connectionStatus === "connected"    ? "Connected" :
-    connectionStatus === "reconnecting" ? `Reconnecting...${codeStr}` :
-                                          "Disconnected";
+    connectionStatus === "handshaking"  ? "Handshaking..." :
+    connectionStatus === "reconnecting" ? "Reconnecting..." :
+    retryInSeconds != null              ? `Disconnected${codeStr}. Retrying in ${retryInSeconds}s` :
+                                          `Disconnected${codeStr}`;
 
-  // Left side: worker {id8} ∙ {status}[ ∙ task #{N}][ ∙ PR #{N}][ ∙ {branch}]
-  const parts: string[] = [`worker ${workerId.slice(0, 8)}`, status];
-  if (taskNumber != null) parts.push(`task #${taskNumber}`);
-  if (prNumber != null) parts.push(`PR #${prNumber}`);
-  if (branch) parts.push(branch);
+  // Left side: worker {id8} ∙ {task info}
+  const parts: string[] = [`worker ${workerId.slice(0, 8)}`];
+  if (taskNumber != null) {
+    parts.push(`task #${taskNumber}`);
+    if (prNumber != null) parts.push(`PR #${prNumber}`);
+    if (branch) parts.push(branch);
+  } else {
+    parts.push("no current task");
+  }
   let leftText = parts.join(" ∙ ");
 
   // Truncate left side if needed to leave room for right side with a gap of 1
@@ -697,10 +704,12 @@ export function getInputPrintCallback(): (() => void) | null {
 
 /** Number of active status lines (primary + persistent). */
 function _lineCount(): number {
-  return (_statusActive ? 1 : 0) + (_persistentStatusActive ? 1 : 0);
+  const n = (_statusActive ? 1 : 0) + (_persistentStatusActive ? 1 : 0);
+  return n === 2 ? 3 : n; // blank separator between the two bars when both are active
 }
 
 function _clearStatus() {
+  if (_inputPrintCallback) return; // ask() owns the screen; drawFresh handles redraws
   const n = _lineCount();
   if (n === 0) return;
   // Cursor rests on the blank separator row above the status lines.
@@ -714,22 +723,41 @@ function _clearStatus() {
 }
 
 function _drawStatus() {
+  if (_inputPrintCallback) {
+    // ask() is active — let drawFresh handle the full redraw including status bars.
+    _inputPrintCallback();
+    return;
+  }
   const n = _lineCount();
   if (n === 0) return;
   // Cursor is on the blank separator row. Draw each status line below it,
-  // then return cursor to the blank separator row and hide it. The blank
-  // row acts as a visual spacer between content and the status bar cluster,
-  // and keeps third-party writes (e.g. permission prompts) above the bars.
+  // then return cursor to the blank separator row and hide it.
   let seq = "";
-  // Re-assert the bg after _statusText (which may reset it with \x1b[0m)
-  // so that \x1b[K fills the rest of the line with sage green, not black.
-  if (_statusActive) seq += `\n\r\x1b[48;5;22m${_statusText}\x1b[48;5;22m\x1b[K\x1b[0m`;
+  if (_statusActive) seq += `\n\r${_statusText}\x1b[K\x1b[0m`;
+  if (_statusActive && _persistentStatusActive) seq += `\n\r\x1b[K`; // blank line between bars
   if (_persistentStatusActive) seq += `\n\r${_persistentStatusText}\x1b[K\x1b[0m`;
   seq += `\x1b[${n}A\r`;
-  // Only hide the cursor when no interactive prompt is waiting for input.
-  // If ask() has registered a callback the user needs to see the cursor.
-  if (!_inputPrintCallback) seq += "\x1b[?25l";
+  seq += "\x1b[?25l";  // hide cursor (only reached when _inputPrintCallback is null)
   process.stdout.write(seq);
+}
+
+/**
+ * Write the status bar rows starting from the current cursor position (no
+ * leading blank separator — the cursor should already be at the row just above
+ * the desired blank-separator position).  Writes a blank separator row then
+ * the active bar rows.  Returns the total number of extra rows written
+ * (0 if no bars are active), so the caller can account for them in cursor math.
+ * Called by ask() to integrate the status bars into the prompt+suggestion area.
+ */
+export function drawStatusBarsRaw(): number {
+  const n = _lineCount();
+  if (n === 0) return 0;
+  let seq = "\r\n\x1b[K"; // blank separator row
+  if (_statusActive) seq += `\r\n${_statusText}\x1b[K\x1b[0m`;
+  if (_statusActive && _persistentStatusActive) seq += `\r\n\x1b[K`;
+  if (_persistentStatusActive) seq += `\r\n${_persistentStatusText}\x1b[K\x1b[0m`;
+  process.stdout.write(seq);
+  return 1 + n; // blank separator + n bar rows (n already includes blank-between when both active)
 }
 
 export function startStatus(getText: () => string) {
@@ -780,30 +808,32 @@ export function updatePersistentStatus(): void {
 
 export function print(line: string | null) {
   if (line === null) return;
+  if (_inputPrintCallback) {
+    // ask() is active: erase from current cursor position to end of screen
+    // (clears the prompt, suggestion row, and status bars), write the new
+    // content line, then let drawFresh redraw the prompt + status bars below.
+    process.stdout.write("\r\x1b[J");
+    if (verbose) {
+      const ts = `\x1b[90m${fmtTime()} \x1b[39m`;
+      const parts = line.split("\n");
+      const openColor = (line.match(/^(\x1b\[[0-9;]*m)+/) ?? [""])[0];
+      console.log(parts.map((p, i) => ts + (i > 0 ? openColor : "") + p).join("\n"));
+    } else {
+      console.log(line);
+    }
+    _inputPrintCallback();
+    return;
+  }
   _clearStatus();
-  // If ask() is waiting with a visible prompt, erase the prompt line before
-  // printing so the message appears on a clean line (not appended to the
-  // prompt). The prompt is then redrawn below via _inputPrintCallback.
-  if (_inputPrintCallback) process.stdout.write("\r\x1b[K");
   if (verbose) {
-    // \x1b[39m resets only the foreground ("pop-color") rather than \x1b[0m
-    // which would reset everything including the content's own color codes.
     const ts = `\x1b[90m${fmtTime()} \x1b[39m`;
     const parts = line.split("\n");
-    // Re-apply any opening ANSI color codes to continuation lines so that
-    // inserting the timestamp prefix doesn't strip color mid-block.
     const openColor = (line.match(/^(\x1b\[[0-9;]*m)+/) ?? [""])[0];
     console.log(parts.map((p, i) => ts + (i > 0 ? openColor : "") + p).join("\n"));
   } else {
     console.log(line);
   }
   _drawStatus();
-  // Only redraw the input prompt when no query is running and no primary status
-  // bar is active. During a query the status bar is active; calling drawFresh()
-  // then would interleave the prompt with query output and corrupt the display.
-  // ask() re-registers the callback on each new call, so prompt-redrawing after
-  // background notifications still works between runs.
-  if (!_statusActive) _inputPrintCallback?.();
 }
 
 export function resolve(table: FmtTable, key: string, data: unknown): string | null {

@@ -659,10 +659,10 @@ export function createForemanWss(
               flog(`ERROR Failed to update task PR for #${linkedTask.taskId}: ${fmtError(err)}`)
             );
             flog(`[task #${linkedIssue}] PR #${prNumber} registered`);
-            return result(linkedTask);
+            // Fall through to forward the event to the worker
           }
         }
-        return result(null);
+        // Fall through: the PR is now registered (if linked), forward event below
       }
 
       const task = taskQueue.getTaskForPr(prNumber);

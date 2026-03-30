@@ -12,22 +12,20 @@ describe("fmtWorkerStatus", () => {
     display.setVerbose(false);
   });
 
-  it("idle with no task shows worker id and idle", () => {
+  it("idle with no task shows worker id and no current task", () => {
     const result = stripAnsi(display.fmtWorkerStatus({
       workerId: "7c254628-abcd-1234-efgh-000000000000",
-      status: "idle",
       connectionStatus: "connected",
       width: 80,
     }));
     expect(result).toContain("worker 7c254628");
-    expect(result).toContain("idle");
+    expect(result).toContain("no current task");
     expect(result).toContain("Connected");
   });
 
-  it("busy with task, PR, and branch", () => {
+  it("with task, PR, and branch", () => {
     const result = stripAnsi(display.fmtWorkerStatus({
       workerId: "7c254628-abcd-1234-efgh-000000000000",
-      status: "busy",
       taskNumber: 374,
       prNumber: 406,
       branch: "db-single-source-of-truth",
@@ -35,7 +33,6 @@ describe("fmtWorkerStatus", () => {
       width: 120,
     }));
     expect(result).toContain("worker 7c254628");
-    expect(result).toContain("busy");
     expect(result).toContain("task #374");
     expect(result).toContain("PR #406");
     expect(result).toContain("db-single-source-of-truth");
@@ -45,7 +42,6 @@ describe("fmtWorkerStatus", () => {
   it("disconnected shows Disconnected on right", () => {
     const result = stripAnsi(display.fmtWorkerStatus({
       workerId: "abc12345-0000-0000-0000-000000000000",
-      status: "idle",
       connectionStatus: "disconnected",
       width: 80,
     }));
@@ -53,45 +49,61 @@ describe("fmtWorkerStatus", () => {
     expect(result).not.toContain("Connected");
   });
 
+  it("disconnected with retryInSeconds shows Retrying in", () => {
+    const result = stripAnsi(display.fmtWorkerStatus({
+      workerId: "abc12345-0000-0000-0000-000000000000",
+      connectionStatus: "disconnected",
+      retryInSeconds: 3,
+      width: 80,
+    }));
+    expect(result).toContain("Retrying in 3s");
+  });
+
   it("reconnecting shows Reconnecting... on right", () => {
     const result = stripAnsi(display.fmtWorkerStatus({
       workerId: "abc12345-0000-0000-0000-000000000000",
-      status: "idle",
       connectionStatus: "reconnecting",
       width: 80,
     }));
     expect(result).toContain("Reconnecting...");
   });
 
-  it("reconnecting with disconnectCode omits code in non-verbose mode", () => {
+  it("handshaking shows Handshaking... on right", () => {
+    const result = stripAnsi(display.fmtWorkerStatus({
+      workerId: "abc12345-0000-0000-0000-000000000000",
+      connectionStatus: "handshaking",
+      width: 80,
+    }));
+    expect(result).toContain("Handshaking...");
+  });
+
+  it("disconnected with disconnectCode omits code in non-verbose mode", () => {
     display.setVerbose(false);
     const result = stripAnsi(display.fmtWorkerStatus({
       workerId: "abc12345-0000-0000-0000-000000000000",
-      status: "idle",
-      connectionStatus: "reconnecting",
+      connectionStatus: "disconnected",
       disconnectCode: 1006,
       width: 80,
     }));
-    expect(result).toContain("Reconnecting...");
+    expect(result).toContain("Disconnected");
     expect(result).not.toContain("1006");
   });
 
-  it("reconnecting with disconnectCode shows code in verbose mode", () => {
+  it("disconnected with disconnectCode shows code in verbose mode when retryInSeconds given", () => {
     display.setVerbose(true);
     const result = stripAnsi(display.fmtWorkerStatus({
       workerId: "abc12345-0000-0000-0000-000000000000",
-      status: "idle",
-      connectionStatus: "reconnecting",
+      connectionStatus: "disconnected",
       disconnectCode: 1006,
+      retryInSeconds: 2,
       width: 80,
     }));
-    expect(result).toContain("Reconnecting... (1006)");
+    expect(result).toContain("Disconnected (1006). Retrying in 2s");
   });
 
   it("omits task when taskNumber is undefined", () => {
     const result = stripAnsi(display.fmtWorkerStatus({
       workerId: "abc12345-0000-0000-0000-000000000000",
-      status: "idle",
       connectionStatus: "connected",
       width: 80,
     }));
@@ -101,7 +113,6 @@ describe("fmtWorkerStatus", () => {
   it("omits PR when prNumber is undefined", () => {
     const result = stripAnsi(display.fmtWorkerStatus({
       workerId: "abc12345-0000-0000-0000-000000000000",
-      status: "busy",
       taskNumber: 5,
       connectionStatus: "connected",
       width: 80,
@@ -112,7 +123,6 @@ describe("fmtWorkerStatus", () => {
   it("omits branch when branch is empty string", () => {
     const result = stripAnsi(display.fmtWorkerStatus({
       workerId: "abc12345-0000-0000-0000-000000000000",
-      status: "busy",
       taskNumber: 5,
       branch: "",
       connectionStatus: "connected",
@@ -120,26 +130,24 @@ describe("fmtWorkerStatus", () => {
     }));
     // Should not have a trailing separator after task
     const parts = result.split("∙");
-    expect(parts.length).toBe(3); // "worker abc12345 ", " busy ", " task #5      Connected"
+    expect(parts.length).toBe(3); // "worker abc12345 ", " task #5      Connected" (with separator)
   });
 
   it("result fits within specified width", () => {
     const result = stripAnsi(display.fmtWorkerStatus({
       workerId: "7c254628-abcd-1234-efgh-000000000000",
-      status: "busy",
       taskNumber: 374,
       prNumber: 406,
       branch: "my-very-long-branch-name-that-is-quite-verbose",
       connectionStatus: "connected",
       width: 80,
     }));
-    expect(result.length).toBe(80);
+    expect(result.length).toBe(79); // width - 1 (last-column wrap avoidance)
   });
 
   it("uses first 8 chars of workerId", () => {
     const result = stripAnsi(display.fmtWorkerStatus({
       workerId: "abcdefgh-1111-2222-3333-444444444444",
-      status: "idle",
       connectionStatus: "connected",
       width: 80,
     }));

@@ -380,9 +380,9 @@ describe("connection status bar", () => {
     vi.useRealTimers();
   });
 
-  it("shows Reconnecting in status text after open (pre-hello_ack)", () => {
+  it("shows Handshaking... in status text after open (pre-hello_ack)", () => {
     fakeWs.emit("open");
-    expect(stripAnsi(session.getStatusText())).toContain("Reconnecting");
+    expect(stripAnsi(session.getStatusText())).toContain("Handshaking...");
   });
 
   it("shows Connected in status text after hello_ack", () => {
@@ -452,9 +452,9 @@ describe("status bar content", () => {
     expect(text).toContain(`worker ${WORKER_ID.slice(0, 8)}`);
   });
 
-  it("shows idle when no query is running", () => {
+  it("shows no current task when no task assigned", () => {
     const text = stripAnsi(session.getStatusText());
-    expect(text).toContain("idle");
+    expect(text).toContain("no current task");
   });
 
   it("shows task number after task_assigned", async () => {

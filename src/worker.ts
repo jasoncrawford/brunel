@@ -119,8 +119,10 @@ export class WorkerSession {
   private bufferedMessages: BufferableMessage[] = [];
 
   // Status bar state
-  private connectionStatus: "connected" | "disconnected" | "reconnecting" = "disconnected";
+  private connectionStatus: "connected" | "disconnected" | "reconnecting" | "handshaking" = "disconnected";
   private disconnectCode: number | undefined;
+  private reconnectAt: number | undefined;
+  private countdownTimer: ReturnType<typeof setInterval> | null = null;
   private currentPrNumber: number | undefined;
   private currentBranch = "";
 
@@ -134,15 +136,17 @@ export class WorkerSession {
 
   /** Returns the formatted worker status bar text. Used by startPersistentStatus and tests. */
   getStatusText(): string {
-    const status = this.isRunningQuery ? "busy" : "idle";
+    const retryInSeconds = this.reconnectAt != null
+      ? Math.max(0, Math.ceil((this.reconnectAt - Date.now()) / 1000))
+      : undefined;
     return display.fmtWorkerStatus({
       workerId: this.workerId,
-      status,
       taskNumber: this.currentIssue?.number,
       prNumber: this.currentPrNumber,
       branch: this.currentBranch || undefined,
       connectionStatus: this.connectionStatus,
       disconnectCode: this.disconnectCode,
+      retryInSeconds,
     });
   }
 
@@ -337,6 +341,8 @@ export class WorkerSession {
   }
 
   private connect(): void {
+    if (this.countdownTimer) { clearInterval(this.countdownTimer); this.countdownTimer = null; }
+    this.reconnectAt = undefined;
     this.connectionStatus = "reconnecting";
     const ws = this.wsFactory(this.workerId, this.currentTaskId);
     this.ws = ws;
@@ -345,6 +351,7 @@ export class WorkerSession {
     ws.on("open", () => {
       connectedAt = Date.now();
       this.connectionState = "hello_sent";
+      this.connectionStatus = "handshaking";
       this.refreshStatus();
     });
 
@@ -359,7 +366,10 @@ export class WorkerSession {
       this.connectionStatus = "disconnected";
       this.disconnectCode = code;
       this.refreshStatus();
-      setTimeout(() => this.connect(), 2000 + Math.random() * 3000);
+      const delay = 2000 + Math.random() * 3000;
+      this.reconnectAt = Date.now() + delay;
+      this.countdownTimer = setInterval(() => this.refreshStatus(), 1000);
+      setTimeout(() => this.connect(), delay);
     });
 
     ws.on("error", (err: Error) => {

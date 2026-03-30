@@ -133,48 +133,48 @@ describe("TOOL_CALL_FMT", () => {
     expect(result).toContain("$ ls -la");
   });
 
-  it("Read: shows ∙ Read(<file_path>)", () => {
+  it("Read: shows • Read(<file_path>)", () => {
     const result = r(TOOL_CALL_FMT, "Read", { input: { file_path: "/foo/bar.ts" } });
-    expect(result).toContain("∙ Read(/foo/bar.ts)");
+    expect(result).toContain("• Read(/foo/bar.ts)");
   });
 
-  it("Write: shows ∙ Write(<file_path>)", () => {
+  it("Write: shows • Write(<file_path>)", () => {
     const result = r(TOOL_CALL_FMT, "Write", { input: { file_path: "/foo/out.ts" } });
-    expect(result).toContain("∙ Write(/foo/out.ts)");
+    expect(result).toContain("• Write(/foo/out.ts)");
   });
 
-  it("Edit: shows ∙ Edit(<file_path>)", () => {
+  it("Edit: shows • Edit(<file_path>)", () => {
     const result = r(TOOL_CALL_FMT, "Edit", { input: { file_path: "/foo/edit.ts" } });
-    expect(result).toContain("∙ Edit(/foo/edit.ts)");
+    expect(result).toContain("• Edit(/foo/edit.ts)");
   });
 
-  it("Glob: shows ∙ Glob(<pattern>)", () => {
+  it("Glob: shows • Glob(<pattern>)", () => {
     const result = r(TOOL_CALL_FMT, "Glob", { input: { pattern: "**/*.ts" } });
-    expect(result).toContain("∙ Glob(**/*.ts)");
+    expect(result).toContain("• Glob(**/*.ts)");
   });
 
-  it("Grep: shows ∙ grep <pattern> <path>", () => {
+  it("Grep: shows • grep <pattern> <path>", () => {
     const result = r(TOOL_CALL_FMT, "Grep", { input: { pattern: "foo", path: "/src" } });
-    expect(result).toContain("∙ grep foo /src");
+    expect(result).toContain("• grep foo /src");
   });
 
-  it("Skill: shows ∙ Skill(<skill>)", () => {
+  it("Skill: shows • Skill(<skill>)", () => {
     const result = r(TOOL_CALL_FMT, "Skill", { input: { skill: "test-discipline" } });
-    expect(result).toContain("∙ Skill(test-discipline)");
+    expect(result).toContain("• Skill(test-discipline)");
   });
 
   it("Agent: shows • <subagent_type>(<prompt>)", () => {
     const result = r(TOOL_CALL_FMT, "Agent", {
       input: { subagent_type: "Explore", prompt: "find files" },
     });
-    expect(result).toContain("∙ Explore(find files)");
+    expect(result).toContain("• Explore(find files)");
   });
 
   it("AskUserQuestion: shows question text(s)", () => {
     const result = r(TOOL_CALL_FMT, "AskUserQuestion", {
       input: { questions: [{ question: "Which approach?", header: "Approach", options: [], multiSelect: false }] },
     });
-    expect(result).toContain('∙ AskUserQuestion("Which approach?")');
+    expect(result).toContain('• AskUserQuestion("Which approach?")');
   });
 
   it("AskUserQuestion: shows multiple question texts", () => {
@@ -186,7 +186,7 @@ describe("TOOL_CALL_FMT", () => {
         ],
       },
     });
-    expect(result).toContain('∙ AskUserQuestion("Which approach?", "Which format?")');
+    expect(result).toContain('• AskUserQuestion("Which approach?", "Which format?")');
   });
 
   it("_default: shows • <name>(<fmtArgs(input)>)", () => {
@@ -194,7 +194,7 @@ describe("TOOL_CALL_FMT", () => {
       name: "MyTool",
       input: { key: "val" },
     });
-    expect(result).toContain("∙ MyTool(key=val)");
+    expect(result).toContain("• MyTool(key=val)");
   });
 
   it("with input.description: description appended in gray", () => {
@@ -416,26 +416,26 @@ describe("fmtTodoWriteOutput()", () => {
 });
 
 describe("TOOL_CALL_FMT — ToolSearch and TodoWrite", () => {
-  it("ToolSearch: shows ∙ ToolSearch(<query>) without key= prefix", () => {
+  it("ToolSearch: shows • ToolSearch(<query>) without key= prefix", () => {
     const result = r(TOOL_CALL_FMT, "ToolSearch", { input: { query: "TodoWrite" } });
-    expect(result).toContain("∙ ToolSearch(TodoWrite)");
+    expect(result).toContain("• ToolSearch(TodoWrite)");
     expect(result).not.toContain("query=");
   });
 
-  it("TodoWrite: shows ∙ TodoWrite(<N> todo(s)) with count, not [object Object]", () => {
+  it("TodoWrite: shows • TodoWrite(<N> todo(s)) with count, not [object Object]", () => {
     const todos = [
       { content: "task a", status: "in_progress" },
       { content: "task b", status: "pending" },
       { content: "task c", status: "pending" },
     ];
     const result = r(TOOL_CALL_FMT, "TodoWrite", { input: { todos } });
-    expect(result).toContain("∙ TodoWrite(3 todos)");
+    expect(result).toContain("• TodoWrite(3 todos)");
     expect(result).not.toContain("[object Object]");
   });
 
   it("TodoWrite: singular for 1 todo", () => {
     const result = r(TOOL_CALL_FMT, "TodoWrite", { input: { todos: [{ content: "x" }] } });
-    expect(result).toContain("∙ TodoWrite(1 todo)");
+    expect(result).toContain("• TodoWrite(1 todo)");
   });
 });
 
@@ -521,7 +521,7 @@ describe("SYSTEM_FMT", () => {
   it("task_progress → lavender • <description>", () => {
     const raw = resolve(SYSTEM_FMT, "task_progress", { description: "Step 2" })!;
     expect(raw).toContain("\x1b[38;5;183m");
-    expect(stripAnsi(raw)).toContain("∙ Step 2");
+    expect(stripAnsi(raw)).toContain("• Step 2");
   });
 
   it("task_notification → lavender ◀︎ <status>: <summary>", () => {
