@@ -46,37 +46,37 @@ describe("TOOL_CALL_FMT — relative paths for Read/Write/Edit", () => {
   it("Read: relativizes absolute path under cwd", () => {
     const abs = path.join(process.cwd(), "src/foreman.ts");
     const result = r(TOOL_CALL_FMT, "Read", { input: { file_path: abs } });
-    expect(result).toContain("• Read(src/foreman.ts)");
+    expect(result).toContain("∙ Read(src/foreman.ts)");
     expect(result).not.toContain(process.cwd());
   });
 
   it("Read: keeps path outside cwd as-is", () => {
     const result = r(TOOL_CALL_FMT, "Read", { input: { file_path: "/foo/bar.ts" } });
-    expect(result).toContain("• Read(/foo/bar.ts)");
+    expect(result).toContain("∙ Read(/foo/bar.ts)");
   });
 
   it("Write: relativizes absolute path under cwd", () => {
     const abs = path.join(process.cwd(), "src/output.ts");
     const result = r(TOOL_CALL_FMT, "Write", { input: { file_path: abs } });
-    expect(result).toContain("• Write(src/output.ts)");
+    expect(result).toContain("∙ Write(src/output.ts)");
     expect(result).not.toContain(process.cwd());
   });
 
   it("Write: keeps path outside cwd as-is", () => {
     const result = r(TOOL_CALL_FMT, "Write", { input: { file_path: "/foo/out.ts" } });
-    expect(result).toContain("• Write(/foo/out.ts)");
+    expect(result).toContain("∙ Write(/foo/out.ts)");
   });
 
   it("Edit: relativizes absolute path under cwd", () => {
     const abs = path.join(process.cwd(), "src/edit.ts");
     const result = r(TOOL_CALL_FMT, "Edit", { input: { file_path: abs } });
-    expect(result).toContain("• Edit(src/edit.ts)");
+    expect(result).toContain("∙ Edit(src/edit.ts)");
     expect(result).not.toContain(process.cwd());
   });
 
   it("Edit: keeps path outside cwd as-is", () => {
     const result = r(TOOL_CALL_FMT, "Edit", { input: { file_path: "/foo/edit.ts" } });
-    expect(result).toContain("• Edit(/foo/edit.ts)");
+    expect(result).toContain("∙ Edit(/foo/edit.ts)");
   });
 });
 
@@ -84,12 +84,12 @@ describe("TOOL_CALL_FMT — relative paths for Grep", () => {
   it("Grep: relativizes absolute path under cwd", () => {
     const abs = path.join(process.cwd(), "src");
     const result = r(TOOL_CALL_FMT, "Grep", { input: { pattern: "foo", path: abs } });
-    expect(result).toContain("• grep foo src");
+    expect(result).toContain("∙ grep foo src");
     expect(result).not.toContain(process.cwd());
   });
 
   it("Grep: keeps path outside cwd as-is", () => {
     const result = r(TOOL_CALL_FMT, "Grep", { input: { pattern: "foo", path: "/src" } });
-    expect(result).toContain("• grep foo /src");
+    expect(result).toContain("∙ grep foo /src");
   });
 });
