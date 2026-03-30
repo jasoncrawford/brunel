@@ -4,9 +4,17 @@ import { createTestSupabase } from "./helpers/db.js";
 
 const supabase = createTestSupabase();
 
+// Task IDs owned by this test file — only these are cleaned up in beforeEach.
+const OWN_IDS = ["1", "2", "3", "42"];
+
 beforeEach(async () => {
-  await supabase.from("tasks").delete().in("task_id", ["1", "2", "3", "42"]);
+  await supabase.from("tasks").delete().in("task_id", OWN_IDS);
 });
+
+/** Filter listTasks() results to only the rows this file owns. */
+function ownTasks<T extends { taskId: string }>(rows: T[]): T[] {
+  return rows.filter((r) => OWN_IDS.includes(r.taskId));
+}
 
 // ── Tests: createTaskStore ─────────────────────────────────────────────────────
 
@@ -15,7 +23,7 @@ describe("createTaskStore", () => {
     const store = createTaskStore(supabase);
     await store.upsertTask("42", 42, "owner/repo", "Fix the bug");
 
-    const tasks = await store.listTasks();
+    const tasks = ownTasks(await store.listTasks());
     expect(tasks).toHaveLength(1);
     expect(tasks[0]).toMatchObject({
       taskId: "42",
@@ -38,7 +46,7 @@ describe("createTaskStore", () => {
     // Should not throw (ignoreDuplicates: true)
     await expect(store.upsertTask("42", 42, "owner/repo", "Fix the bug")).resolves.toBeUndefined();
 
-    const tasks = await store.listTasks();
+    const tasks = ownTasks(await store.listTasks());
     expect(tasks).toHaveLength(1);
   });
 
@@ -49,9 +57,10 @@ describe("createTaskStore", () => {
     // Second upsert with same task_id should be ignored
     await store.upsertTask("42", 42, "owner/repo", "New title");
 
-    const tasks = await store.listTasks();
-    expect(tasks[0].title).toBe("Original title");
-    expect(tasks[0].status).toBe("assigned"); // status was not reset to pending
+    const tasks = ownTasks(await store.listTasks());
+    const task = tasks.find((t) => t.taskId === "42")!;
+    expect(task.title).toBe("Original title");
+    expect(task.status).toBe("assigned"); // status was not reset to pending
   });
 
   it("markAssigned updates status, worker_id, and sets assigned_at", async () => {
@@ -59,10 +68,10 @@ describe("createTaskStore", () => {
     await store.upsertTask("42", 42, "owner/repo", "Fix the bug");
     await store.markAssigned("42", "worker-1");
 
-    const tasks = await store.listTasks();
-    expect(tasks[0].status).toBe("assigned");
-    expect(tasks[0].workerId).toBe("worker-1");
-    expect(tasks[0].assignedAt).toBeTruthy();
+    const task = ownTasks(await store.listTasks()).find((t) => t.taskId === "42")!;
+    expect(task.status).toBe("assigned");
+    expect(task.workerId).toBe("worker-1");
+    expect(task.assignedAt).toBeTruthy();
   });
 
   it("markComplete updates status and sets completed_at", async () => {
@@ -71,9 +80,9 @@ describe("createTaskStore", () => {
     await store.markAssigned("42", "worker-1");
     await store.markComplete("42");
 
-    const tasks = await store.listTasks();
-    expect(tasks[0].status).toBe("complete");
-    expect(tasks[0].completedAt).toBeTruthy();
+    const task = ownTasks(await store.listTasks()).find((t) => t.taskId === "42")!;
+    expect(task.status).toBe("complete");
+    expect(task.completedAt).toBeTruthy();
   });
 
   it("markPending reverts status to pending and clears worker_id", async () => {
@@ -82,9 +91,9 @@ describe("createTaskStore", () => {
     await store.markAssigned("42", "worker-1");
     await store.markPending("42");
 
-    const tasks = await store.listTasks();
-    expect(tasks[0].status).toBe("pending");
-    expect(tasks[0].workerId).toBeNull();
+    const task = ownTasks(await store.listTasks()).find((t) => t.taskId === "42")!;
+    expect(task.status).toBe("pending");
+    expect(task.workerId).toBeNull();
   });
 
   it("updateTaskPr stores pr_number and branch", async () => {
@@ -92,9 +101,9 @@ describe("createTaskStore", () => {
     await store.upsertTask("42", 42, "owner/repo", "Fix the bug");
     await store.updateTaskPr("42", 10, "fix-issue-42");
 
-    const tasks = await store.listTasks();
-    expect(tasks[0].prNumber).toBe(10);
-    expect(tasks[0].branch).toBe("fix-issue-42");
+    const task = ownTasks(await store.listTasks()).find((t) => t.taskId === "42")!;
+    expect(task.prNumber).toBe(10);
+    expect(task.branch).toBe("fix-issue-42");
   });
 
   it("updateTaskPr stores null branch when branch is null", async () => {
@@ -102,9 +111,9 @@ describe("createTaskStore", () => {
     await store.upsertTask("42", 42, "owner/repo", "Fix the bug");
     await store.updateTaskPr("42", 10, null);
 
-    const tasks = await store.listTasks();
-    expect(tasks[0].prNumber).toBe(10);
-    expect(tasks[0].branch).toBeNull();
+    const task = ownTasks(await store.listTasks()).find((t) => t.taskId === "42")!;
+    expect(task.prNumber).toBe(10);
+    expect(task.branch).toBeNull();
   });
 
   it("listTasks returns rows in descending created_at order", async () => {
@@ -123,13 +132,13 @@ describe("createTaskStore", () => {
       status: "pending", created_at: "2026-03-27T02:00:00Z",
     });
 
-    const tasks = await store.listTasks();
+    const tasks = ownTasks(await store.listTasks());
     expect(tasks.map((t) => t.taskId)).toEqual(["2", "3", "1"]);
   });
 
   it("listTasks returns empty array when no rows", async () => {
     const store = createTaskStore(supabase);
-    expect(await store.listTasks()).toEqual([]);
+    expect(ownTasks(await store.listTasks())).toEqual([]);
   });
 
   it("listTasks filters by status when provided", async () => {
@@ -139,11 +148,11 @@ describe("createTaskStore", () => {
     await store.markAssigned("2", "w1");
     await store.markComplete("2");
 
-    const pending = await store.listTasks({ status: "pending" });
+    const pending = ownTasks(await store.listTasks({ status: "pending" }));
     expect(pending).toHaveLength(1);
     expect(pending[0].taskId).toBe("1");
 
-    const complete = await store.listTasks({ status: "complete" });
+    const complete = ownTasks(await store.listTasks({ status: "complete" }));
     expect(complete).toHaveLength(1);
     expect(complete[0].taskId).toBe("2");
   });
@@ -154,7 +163,7 @@ describe("createTaskStore", () => {
     await store.upsertTask("2", 2, "r/r", "Assigned");
     await store.markAssigned("2", "w1");
 
-    const all = await store.listTasks();
+    const all = ownTasks(await store.listTasks());
     expect(all).toHaveLength(2);
   });
 
@@ -162,12 +171,12 @@ describe("createTaskStore", () => {
     const store = createTaskStore(supabase);
     await store.upsertTask("1", 1, "r/r", "T");
 
-    const tasks = await store.listTasks();
-    expect(tasks[0].workerId).toBeNull();
-    expect(tasks[0].prNumber).toBeNull();
-    expect(tasks[0].branch).toBeNull();
-    expect(tasks[0].assignedAt).toBeNull();
-    expect(tasks[0].completedAt).toBeNull();
+    const task = ownTasks(await store.listTasks()).find((t) => t.taskId === "1")!;
+    expect(task.workerId).toBeNull();
+    expect(task.prNumber).toBeNull();
+    expect(task.branch).toBeNull();
+    expect(task.assignedAt).toBeNull();
+    expect(task.completedAt).toBeNull();
   });
 });
 
@@ -179,9 +188,9 @@ describe("createTaskStore — blocked status", () => {
     await store.upsertTask("42", 42, "owner/repo", "Fix the bug");
     await store.markBlocked("42");
 
-    const tasks = await store.listTasks();
-    expect(tasks[0].status).toBe("blocked");
-    expect(tasks[0].workerId).toBeNull();
+    const task = ownTasks(await store.listTasks()).find((t) => t.taskId === "42")!;
+    expect(task.status).toBe("blocked");
+    expect(task.workerId).toBeNull();
   });
 
   it("listTasks filters by status=blocked", async () => {
@@ -190,7 +199,7 @@ describe("createTaskStore — blocked status", () => {
     await store.upsertTask("2", 2, "r/r", "Blocked");
     await store.markBlocked("2");
 
-    const blocked = await store.listTasks({ status: "blocked" });
+    const blocked = ownTasks(await store.listTasks({ status: "blocked" }));
     expect(blocked).toHaveLength(1);
     expect(blocked[0].taskId).toBe("2");
   });
@@ -201,7 +210,7 @@ describe("createTaskStore — blocked status", () => {
     await store.upsertTask("2", 2, "r/r", "Blocked");
     await store.markBlocked("2");
 
-    const all = await store.listTasks();
+    const all = ownTasks(await store.listTasks());
     expect(all).toHaveLength(2);
     expect(all.map((t) => t.status)).toEqual(expect.arrayContaining(["pending", "blocked"]));
   });
