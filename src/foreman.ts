@@ -12,7 +12,7 @@ import { loadConfig } from "./config.js";
 import { isBlocked, setBlockers, fetchBlockers } from "./dependencies.js";
 import { fetchIssueStates } from "./github.js";
 import type { DependencyGraph } from "./dependencies.js";
-import { type DbLogger, type TaskAssignmentStore, type TaskStore, createDbLogger, createTaskAssignmentStore, createTaskStore, createNullDbLogger, createNullTaskAssignmentStore, createNullTaskStore } from "./db.js";
+import { type DbLogger, type TaskAssignmentStore, type TaskStore, type TaskBlockerStore, createDbLogger, createTaskAssignmentStore, createTaskStore, createNullDbLogger, createNullTaskAssignmentStore, createNullTaskStore, createNullTaskBlockerStore } from "./db.js";
 import type { AdminWss, TaskSnapshot, WorkerSnapshot } from "./admin-ws.js";
 import { fmtError } from "./utils.js";
 
@@ -528,6 +528,7 @@ export function createForemanWss(
     pingIntervalMs?: number;
     assignStore?: TaskAssignmentStore;
     taskStore?: TaskStore;
+    blockerStore?: TaskBlockerStore;
     reclaimTimeoutMs: number;
   },
 ): ForemanWss {
@@ -549,6 +550,7 @@ export function createForemanWss(
     async listAssignments() { return []; },
   };
   const taskStore: TaskStore = options.taskStore ?? createNullTaskStore();
+  const blockerStore: TaskBlockerStore = options.blockerStore ?? createNullTaskBlockerStore();
   const reclaimTimeoutMs = options.reclaimTimeoutMs;
 
   // Incrementing counter for unique broadcast IDs (React uses these as keys).
@@ -771,6 +773,26 @@ export function createForemanWss(
 
       if (action === "closed") {
         openIssues.delete(issueNumber);
+
+        // Close this issue as a blocker for any tasks that depend on it.
+        // If unblocking a task, transition it from blocked → pending.
+        for (const [depIssueNum, blockers] of graph) {
+          if (blockers.has(issueNumber)) {
+            const blockedTask = taskQueue.getTaskForIssue(depIssueNum);
+            if (blockedTask && blockedTask.status === "blocked") {
+              blockerStore.closeBlocker(blockedTask.taskId, issueNumber).catch((err) =>
+                flog(`ERROR Failed to close blocker #${issueNumber} for task #${blockedTask.taskId}: ${fmtError(err)}`)
+              );
+              if (!isBlocked(depIssueNum, graph, openIssues)) {
+                taskQueue.setUnblocked(blockedTask.taskId);
+                taskStore.markPending(blockedTask.taskId).catch((err) =>
+                  flog(`ERROR Failed to mark task #${blockedTask.taskId} pending: ${fmtError(err)}`)
+                );
+              }
+            }
+          }
+        }
+
         // Mark the task done in the dashboard while the worker finishes up.
         // We don't persist to DB here — the worker will call task_complete to
         // finalize and release itself.
@@ -1069,19 +1091,29 @@ export function createForemanWss(
 
   function startDepsLoad(issueNumber: number, body: string): void {
     fetchBlockers(issueNumber, body, { repo, token, apiUrl: githubApiUrl })
-      .then((blockers) => {
+      .then(async (blockers) => {
         setBlockers(issueNumber, blockers, graph);
-        return blockers.length > 0
-          ? fetchIssueStates(blockers, { repo, token })
-          : Promise.resolve(new Map<number, "open" | "closed">());
-      })
-      .then((states) => {
-        for (const [num, state] of states) {
-          if (state === "open") openIssues.add(num);
-          else openIssues.delete(num);
+        if (blockers.length > 0) {
+          // Persist blocker relationships to DB (fire-and-forget).
+          blockerStore.upsertBlockers(String(issueNumber), blockers).catch((err) =>
+            flog(`ERROR Failed to upsert blockers for #${issueNumber}: ${fmtError(err)}`)
+          );
+          const states = await fetchIssueStates(blockers, { repo, token });
+          for (const [num, state] of states) {
+            if (state === "open") openIssues.add(num);
+            else openIssues.delete(num);
+          }
         }
         const entry = labeledIssues.get(issueNumber);
         if (entry) entry.depsLoaded = true;
+        // If the task is currently pending and is now blocked, persist blocked status.
+        const task = taskQueue.getTaskForIssue(issueNumber);
+        if (task && task.status === "pending" && isBlocked(issueNumber, graph, openIssues)) {
+          taskQueue.setBlocked(task.taskId);
+          taskStore.markBlocked(task.taskId).catch((err) =>
+            flog(`ERROR Failed to mark task #${task.taskId} blocked: ${fmtError(err)}`)
+          );
+        }
         reconcile();
       })
       .catch((err) => flog(`ERROR fetching deps for #${issueNumber}: ${fmtError(err)}`));
