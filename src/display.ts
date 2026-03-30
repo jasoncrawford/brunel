@@ -198,6 +198,14 @@ export function fmtStats(secs: number, turns?: number, outputTokens?: number, in
   return parts.join(", ");
 }
 
+export function toRelativePath(filePath: string): string {
+  const cwd = process.cwd();
+  if (filePath === cwd) return ".";
+  const prefix = cwd + "/";
+  if (filePath.startsWith(prefix)) return filePath.slice(prefix.length);
+  return filePath;
+}
+
 export function fmtArgs(input: Record<string, unknown>, maxVal = 50): string {
   return Object.entries(input ?? {})
     .map(([k, v]) => `${k}=${trunc(String(v), maxVal)}`)
@@ -515,11 +523,11 @@ export const USER_BLOCK_FMT: FmtTable = {
 
 export const TOOL_CALL_FMT: FmtTable = {
   Bash:       (b) => fmtToolCall(b, `$ ${b.input?.command ?? ""}`),
-  Read:       (b) => fmtToolCall(b, `• Read(${b.input?.file_path ?? "?"})`),
-  Write:      (b) => fmtToolCall(b, `• Write(${b.input?.file_path ?? "?"})`),
-  Edit:       (b) => fmtToolCall(b, `• Edit(${b.input?.file_path ?? "?"})`),
+  Read:       (b) => fmtToolCall(b, `• Read(${toRelativePath(b.input?.file_path ?? "?")})`),
+  Write:      (b) => fmtToolCall(b, `• Write(${toRelativePath(b.input?.file_path ?? "?")})`),
+  Edit:       (b) => fmtToolCall(b, `• Edit(${toRelativePath(b.input?.file_path ?? "?")})`),
   Glob:       (b) => fmtToolCall(b, `• Glob(${b.input?.pattern ?? "?"})`),
-  Grep:       (b) => fmtToolCall(b, `• grep ${trunc(b.input?.pattern ?? "?", 30)} ${b.input?.path ?? "."}`),
+  Grep:       (b) => fmtToolCall(b, `• grep ${trunc(b.input?.pattern ?? "?", 30)} ${b.input?.path != null ? toRelativePath(b.input.path as string) : "."}`),
   Skill:      (b) => fmtToolCall(b, `• Skill(${b.input?.skill ?? "?"})`),
   Agent:      (b) => fmtToolCall(b, `• ${b.input?.subagent_type ?? "Agent"}(${trunc(b.input?.prompt ?? "", 80)})`),
   ToolSearch: (b) => fmtToolCall(b, `• ToolSearch(${b.input?.query ?? "?"})`),
