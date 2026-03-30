@@ -7,6 +7,7 @@ import * as display from "./display.js";
 import { buildInitialPrompt, buildEventPrompt } from "./templates.js";
 import { ask, listWorkerCommands, dispatchInput, pick } from "./input.js";
 import type { ForemanMessage, GitHubEvent, TaskIssue, WorkerMessage } from "./types.js";
+import type { PermissionMode } from "@anthropic-ai/claude-agent-sdk";
 import { Workspace, confirmIfUnsafe } from "./workspace.js";
 import { fmtError } from "./utils.js";
 
@@ -440,6 +441,9 @@ export async function workerMain(
     githubToken: string;
     githubRepo: string;
     repoUrl?: string;
+    permissionMode: PermissionMode;
+    verbose: boolean;
+    logFile: string;
   },
 ): Promise<void> {
   const FOREMAN_URL = config.foremanUrl;
@@ -520,6 +524,7 @@ export async function workerMain(
   display.print(display.c.sageGreen(display.hr("═")));
   display.print(display.c.skyBlue(display.s.bold("  Brunel Worker")));
   display.print(display.c.lavender(`  Worker ID: ${workerId} | Foreman: ${FOREMAN_URL}`));
+  display.print(display.c.lavender(`  Permissions: ${config.permissionMode} | Output: ${config.verbose ? "verbose" : "quiet"} | Log: ${config.logFile}`));
   display.print(display.c.sageGreen(display.hr("═")));
 
   session.start();
