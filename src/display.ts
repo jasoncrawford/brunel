@@ -649,13 +649,10 @@ export function fmtWorkerStatus(opts: WorkerStatusOpts): string {
 
   // Left side: worker {id8} ∙ {task info}
   const parts: string[] = [`worker ${workerId.slice(0, 8)}`];
-  if (taskNumber != null) {
-    parts.push(`task #${taskNumber}`);
-    if (prNumber != null) parts.push(`PR #${prNumber}`);
-    if (branch) parts.push(branch);
-  } else {
-    parts.push("no current task");
-  }
+  if (taskNumber != null) parts.push(`task #${taskNumber}`);
+  if (prNumber != null) parts.push(`PR #${prNumber}`);
+  if (branch) parts.push(branch);
+  if (taskNumber == null) parts.push("no current task");
   let leftText = parts.join(" ∙ ");
 
   // Truncate left side if needed to leave room for right side with a gap of 1
