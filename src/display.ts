@@ -726,7 +726,9 @@ function _drawStatus() {
   if (_statusActive) seq += `\n\r\x1b[48;5;22m${_statusText}\x1b[48;5;22m\x1b[K\x1b[0m`;
   if (_persistentStatusActive) seq += `\n\r${_persistentStatusText}\x1b[K\x1b[0m`;
   seq += `\x1b[${n}A\r`;
-  seq += "\x1b[?25l";  // hide cursor
+  // Only hide the cursor when no interactive prompt is waiting for input.
+  // If ask() has registered a callback the user needs to see the cursor.
+  if (!_inputPrintCallback) seq += "\x1b[?25l";
   process.stdout.write(seq);
 }
 

@@ -372,21 +372,27 @@ describe("stale WebSocket handlers", () => {
 // ── Connection status in status bar ───────────────────────────────────────────
 
 describe("connection status bar", () => {
-  it("shows Reconnecting in status text after close", () => {
+  it("shows Disconnected in status text after close", () => {
     vi.useFakeTimers();
     fakeWs.emit("open");
     fakeWs.emit("close", 1006, Buffer.from(""));
-    expect(stripAnsi(session.getStatusText())).toContain("Reconnecting");
+    expect(stripAnsi(session.getStatusText())).toContain("Disconnected");
     vi.useRealTimers();
   });
 
-  it("shows Connected in status text after open", () => {
+  it("shows Reconnecting in status text after open (pre-hello_ack)", () => {
     fakeWs.emit("open");
+    expect(stripAnsi(session.getStatusText())).toContain("Reconnecting");
+  });
+
+  it("shows Connected in status text after hello_ack", () => {
+    fakeWs.emit("open");
+    sendMsg(fakeWs, { type: "hello_ack", status: "idle" });
     expect(stripAnsi(session.getStatusText())).toContain("Connected");
   });
 
-  it("shows Disconnected in status text before any connection", () => {
-    expect(stripAnsi(session.getStatusText())).toContain("Disconnected");
+  it("shows Reconnecting in status text on initial connect", () => {
+    expect(stripAnsi(session.getStatusText())).toContain("Reconnecting");
   });
 
   it("calls startPersistentStatus on start()", () => {
@@ -422,13 +428,12 @@ describe("connection status bar", () => {
     expect(display.updatePersistentStatus).toHaveBeenCalled();
   });
 
-  it("disconnect code appears in status text when reconnecting", () => {
+  it("disconnect code is stored on close and shown in Reconnecting... state (verbose)", () => {
     vi.useFakeTimers();
     fakeWs.emit("open");
     fakeWs.emit("close", 1006, Buffer.from(""));
-    // disconnectCode is stored but only shown in verbose mode
-    // (non-verbose: just "Reconnecting...")
-    expect(stripAnsi(session.getStatusText())).toContain("Reconnecting");
+    // After close we are Disconnected; the timer hasn't fired yet.
+    expect(stripAnsi(session.getStatusText())).toContain("Disconnected");
     vi.useRealTimers();
   });
 

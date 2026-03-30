@@ -337,6 +337,8 @@ export class WorkerSession {
   }
 
   private connect(): void {
+    this.connectionStatus = "reconnecting";
+    this.refreshStatus();
     const ws = this.wsFactory(this.workerId, this.currentTaskId);
     this.ws = ws;
     let connectedAt: number | undefined;
@@ -344,8 +346,6 @@ export class WorkerSession {
     ws.on("open", () => {
       connectedAt = Date.now();
       this.connectionState = "hello_sent";
-      this.connectionStatus = "connected";
-      this.disconnectCode = undefined;
       this.refreshStatus();
     });
 
@@ -357,7 +357,7 @@ export class WorkerSession {
 
     ws.on("close", (code: number, _reason: Buffer) => {
       if (ws !== this.ws) return; // stale close from a previous connection
-      this.connectionStatus = "reconnecting";
+      this.connectionStatus = "disconnected";
       this.disconnectCode = code;
       this.refreshStatus();
       setTimeout(() => this.connect(), 2000 + Math.random() * 3000);
@@ -374,6 +374,8 @@ export class WorkerSession {
     this.display.printForemanMessage(msg);
 
     if (msg.type === "hello_ack") {
+      this.connectionStatus = "connected";
+      this.disconnectCode = undefined;
       if (msg.status === "cancelled") {
         // Task was reassigned while worker was disconnected — stop and reset.
         this.connectionState = "registered";
@@ -387,6 +389,7 @@ export class WorkerSession {
       } else {
         // "idle" or "busy": transition to registered and flush buffered messages.
         this.connectionState = "registered";
+        this.refreshStatus();
         this.flushBuffer();
       }
       return;
@@ -618,7 +621,7 @@ export async function workerMain(
     // Use an empty prompt string when not ready for interactive input.  An
     // empty promptLine suppresses the drawFresh callback so incoming messages
     // are printed cleanly without a prompt preceding or following them.
-    const promptStr = showPrompt ? "\n[worker] > " : "";
+    const promptStr = showPrompt ? "[worker] > " : "";
     const input = await ask(promptStr, listWorkerCommands, wsAbort);
 
     const isSentinel = input === WS_TASK_ASSIGNED || input === WS_EVENT;
