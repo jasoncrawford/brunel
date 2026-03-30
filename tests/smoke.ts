@@ -2,7 +2,7 @@
  * Smoke test: spawns a real foreman process and a real worker process and
  * asserts the full webhook → task → worker pipeline:
  *
- * 1. Worker connects to foreman ("Connected to foreman")
+ * 1. Worker connects to foreman (status bar shows "Connected")
  * 2. POST a fake webhook payload to /webhook (issues/labeled event)
  * 3. Assert the worker receives task_assigned within the timeout
  * 4. Worker sends task_complete
@@ -161,7 +161,8 @@ async function run(): Promise<void> {
       worker.stdout!.on("data", (buf: Buffer) => {
         process.stderr.write(`[worker stdout] ${buf}`);
         const text = buf.toString();
-        if (text.includes("Connected to foreman")) { connected = true; check(); }
+        // The worker status bar shows "Connected" when connected to foreman
+        if (text.includes("Connected")) { connected = true; check(); }
       });
       worker.stderr!.on("data", (buf: Buffer) => process.stderr.write(`[worker stderr] ${buf}`));
       worker.on("exit", (code) => {

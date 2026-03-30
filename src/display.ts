@@ -619,11 +619,56 @@ export const FOREMAN_MESSAGE_FMT: FmtTable = {
   _default:           (m) => c.darkGray(`Unknown foreman message: ${m.type}`),
 };
 
+// ── Worker status bar formatting ──────────────────────────────────────────────
+
+export interface WorkerStatusOpts {
+  workerId: string;
+  status: "busy" | "idle";
+  taskNumber?: number;
+  prNumber?: number;
+  branch?: string;
+  connectionStatus: "connected" | "disconnected" | "reconnecting";
+  width?: number;
+}
+
+export function fmtWorkerStatus(opts: WorkerStatusOpts): string {
+  const { workerId, status, taskNumber, prNumber, branch, connectionStatus } = opts;
+  const width = opts.width ?? (process.stdout.columns ?? W);
+
+  // Right side: connection status (always shown, right-justified)
+  const rightText =
+    connectionStatus === "connected"    ? "Connected" :
+    connectionStatus === "reconnecting" ? "Reconnecting..." :
+                                          "Disconnected";
+
+  // Left side: worker {id8} • {status}[ • task #{N}][ • PR #{N}][ • {branch}]
+  const parts: string[] = [`worker ${workerId.slice(0, 8)}`, status];
+  if (taskNumber != null) parts.push(`task #${taskNumber}`);
+  if (prNumber != null) parts.push(`PR #${prNumber}`);
+  if (branch) parts.push(branch);
+  let leftText = parts.join(" • ");
+
+  // Truncate left side if needed to leave room for right side with a gap of 1
+  const maxLeftLen = Math.max(0, width - rightText.length - 1);
+  if (leftText.length > maxLeftLen) {
+    leftText = leftText.slice(0, Math.max(0, maxLeftLen - 1)) + "…";
+  }
+
+  const gap = Math.max(1, width - leftText.length - rightText.length);
+  return c.darkGray(leftText + " ".repeat(gap) + rightText);
+}
+
 // ── Printing engine ───────────────────────────────────────────────────────────
 
 let _statusText = "";
 export let _statusActive = false;
 let _statusInterval: ReturnType<typeof setInterval> | null = null;
+
+// Persistent (worker) status bar — drawn below the primary status line.
+// Unlike the primary status this stays active between queries.
+let _persistentStatusText = "";
+export let _persistentStatusActive = false;
+let _persistentGetText: (() => string) | null = null;
 
 // Callback invoked after print() writes output, so the input layer can redraw
 // the prompt (needed in worker mode when WebSocket messages arrive during ask()).
@@ -636,17 +681,31 @@ export function getInputPrintCallback(): (() => void) | null {
   return _inputPrintCallback;
 }
 
+/** Number of active status lines (primary + persistent). */
+function _lineCount(): number {
+  return (_statusActive ? 1 : 0) + (_persistentStatusActive ? 1 : 0);
+}
+
 function _clearStatus() {
-  if (!_statusActive) return;
-  process.stdout.write("\r\x1b[K\x1b[A\x1b[K");
+  const n = _lineCount();
+  if (n === 0) return;
+  // Erase current (bottom-most) status line, then move up and erase each
+  // remaining line, plus the blank line that console.log always emits.
+  let seq = "\r\x1b[K";
+  for (let i = 0; i < n; i++) seq += "\x1b[A\x1b[K";
+  process.stdout.write(seq);
 }
 
 function _drawStatus() {
-  if (!_statusActive) return;
-  process.stdout.write("\n\r" + _statusText + "\x1b[K");
+  if (_lineCount() === 0) return;
+  let seq = "";
+  if (_statusActive) seq += "\n\r" + _statusText + "\x1b[K";
+  if (_persistentStatusActive) seq += "\n\r" + _persistentStatusText + "\x1b[K";
+  process.stdout.write(seq);
 }
 
 export function startStatus(getText: () => string) {
+  _clearStatus();
   _statusActive = true;
   _statusText = getText();
   _drawStatus();
@@ -662,6 +721,33 @@ export function stopStatus() {
   _clearStatus();
   _statusActive = false;
   _statusText = "";
+  // Redraw the persistent line (if any) now that the primary line is gone.
+  _drawStatus();
+}
+
+export function startPersistentStatus(getText: () => string): void {
+  _clearStatus();
+  _persistentStatusActive = true;
+  _persistentGetText = getText;
+  _persistentStatusText = getText();
+  _drawStatus();
+}
+
+export function stopPersistentStatus(): void {
+  _clearStatus();
+  _persistentStatusActive = false;
+  _persistentGetText = null;
+  _persistentStatusText = "";
+  // Redraw primary status if still active.
+  _drawStatus();
+}
+
+/** Refresh the persistent status line text and redraw. */
+export function updatePersistentStatus(): void {
+  if (!_persistentStatusActive || !_persistentGetText) return;
+  _clearStatus();
+  _persistentStatusText = _persistentGetText();
+  _drawStatus();
 }
 
 export function print(line: string | null) {
@@ -684,11 +770,11 @@ export function print(line: string | null) {
     console.log(line);
   }
   _drawStatus();
-  // Only redraw the input prompt when no query is running. During a query the
-  // status bar is active; calling drawFresh() then would interleave the prompt
-  // with query output and corrupt the display (causing double-spacing and
-  // swallowed output). ask() re-registers the callback on each new call, so
-  // prompt-redrawing after background notifications still works between runs.
+  // Only redraw the input prompt when no query is running and no primary status
+  // bar is active. During a query the status bar is active; calling drawFresh()
+  // then would interleave the prompt with query output and corrupt the display.
+  // ask() re-registers the callback on each new call, so prompt-redrawing after
+  // background notifications still works between runs.
   if (!_statusActive) _inputPrintCallback?.();
 }
 
