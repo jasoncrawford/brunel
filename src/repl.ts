@@ -403,6 +403,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       githubToken: config.githubToken,
       githubRepo: config.githubRepo,
       repoUrl: config.repoUrl,
+      permissionMode: config.permissionMode,
+      verbose: config.verbose,
+      logFile: LOG_FILE,
     });
   } else {
     void main(permConfig, workspaceCfg);

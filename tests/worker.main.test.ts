@@ -42,6 +42,8 @@ vi.mock("../src/input.js", async (importOriginal) => {
 import { workerMain } from "../src/worker.js";
 import { Workspace, confirmIfUnsafe } from "../src/workspace.js";
 import * as inputModule from "../src/input.js";
+import * as displayModule from "../src/display.js";
+import { stripAnsi } from "./helpers.js";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -50,6 +52,9 @@ const WORKER_CONFIG = {
   workspaceDir: "/fake/workers",
   githubToken: "test-token",
   githubRepo: "owner/repo",
+  permissionMode: "bypassPermissions" as const,
+  verbose: true,
+  logFile: "worker.log",
 };
 
 async function runWorkerMain(): Promise<{ exitCalled: boolean; exitCode: number | undefined }> {
@@ -73,6 +78,32 @@ async function runWorkerMain(): Promise<{ exitCalled: boolean; exitCode: number 
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
+
+describe("workerMain startup banner", () => {
+  let chdirSpy: ReturnType<typeof vi.spyOn>;
+  let printSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    chdirSpy = vi.spyOn(process, "chdir").mockImplementation(() => {});
+    printSpy = vi.spyOn(displayModule, "print").mockImplementation(() => {});
+    vi.mocked(inputModule.ask).mockResolvedValue("__eof__");
+    vi.mocked(confirmIfUnsafe).mockResolvedValue(true);
+  });
+
+  afterEach(() => {
+    chdirSpy.mockRestore();
+    printSpy.mockRestore();
+    vi.clearAllMocks();
+  });
+
+  it("includes permissions, output mode, and logfile in the startup banner", async () => {
+    await runWorkerMain();
+    const printed = printSpy.mock.calls.map(([s]: [unknown]) => stripAnsi(String(s))).join("\n");
+    expect(printed).toContain("Permissions: bypassPermissions");
+    expect(printed).toContain("Output: verbose");
+    expect(printed).toContain("Log: worker.log");
+  });
+});
 
 describe("workerMain exit behavior", () => {
   let chdirSpy: ReturnType<typeof vi.spyOn>;
