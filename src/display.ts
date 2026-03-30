@@ -500,7 +500,7 @@ export function renderMarkdown(text: string): string {
     if (line.startsWith("> ")) { out.push("▏ " + mdInline(line.slice(2))); continue; }
 
     const li = line.match(/^(\s*)[-*+]\s+(.*)/);
-    if (li) { out.push(li[1] + "• " + mdInline(li[2])); continue; }
+    if (li) { out.push(li[1] + "∙ " + mdInline(li[2])); continue; }
 
     const oli = line.match(/^(\s*)(\d+)\.\s+(.*)/);
     if (oli) { out.push(oli[1] + oli[2] + ". " + mdInline(oli[3])); continue; }
@@ -535,17 +535,17 @@ export const USER_BLOCK_FMT: FmtTable = {
 
 export const TOOL_CALL_FMT: FmtTable = {
   Bash:       (b) => fmtToolCall(b, `$ ${b.input?.command ?? ""}`),
-  Read:       (b) => fmtToolCall(b, `• Read(${toRelativePath(b.input?.file_path ?? "?")})`),
-  Write:      (b) => fmtToolCall(b, `• Write(${toRelativePath(b.input?.file_path ?? "?")})`),
-  Edit:       (b) => fmtToolCall(b, `• Edit(${toRelativePath(b.input?.file_path ?? "?")})`),
-  Glob:       (b) => fmtToolCall(b, `• Glob(${b.input?.pattern ?? "?"})`),
-  Grep:       (b) => fmtToolCall(b, `• grep ${trunc(b.input?.pattern ?? "?", 30)} ${b.input?.path != null ? toRelativePath(b.input.path as string) : "."}`),
-  Skill:      (b) => fmtToolCall(b, `• Skill(${b.input?.skill ?? "?"})`),
-  Agent:      (b) => fmtToolCall(b, `• ${b.input?.subagent_type ?? "Agent"}(${trunc(b.input?.prompt ?? "", 80)})`),
-  ToolSearch: (b) => fmtToolCall(b, `• ToolSearch(${b.input?.query ?? "?"})`),
-  TodoWrite:  (b) => fmtToolCall(b, `• TodoWrite(${fmtTodoWriteInput(b.input?.todos)})`),
-  AskUserQuestion: (b) => fmtToolCall(b, `• AskUserQuestion(${fmtAskUserQuestionInput(b.input?.questions)})`),
-  _default:   (b) => fmtToolCall(b, `• ${b.name}(${fmtArgs(b.input)})`),
+  Read:       (b) => fmtToolCall(b, `∙ Read(${toRelativePath(b.input?.file_path ?? "?")})`),
+  Write:      (b) => fmtToolCall(b, `∙ Write(${toRelativePath(b.input?.file_path ?? "?")})`),
+  Edit:       (b) => fmtToolCall(b, `∙ Edit(${toRelativePath(b.input?.file_path ?? "?")})`),
+  Glob:       (b) => fmtToolCall(b, `∙ Glob(${b.input?.pattern ?? "?"})`),
+  Grep:       (b) => fmtToolCall(b, `∙ grep ${trunc(b.input?.pattern ?? "?", 30)} ${b.input?.path != null ? toRelativePath(b.input.path as string) : "."}`),
+  Skill:      (b) => fmtToolCall(b, `∙ Skill(${b.input?.skill ?? "?"})`),
+  Agent:      (b) => fmtToolCall(b, `∙ ${b.input?.subagent_type ?? "Agent"}(${trunc(b.input?.prompt ?? "", 80)})`),
+  ToolSearch: (b) => fmtToolCall(b, `∙ ToolSearch(${b.input?.query ?? "?"})`),
+  TodoWrite:  (b) => fmtToolCall(b, `∙ TodoWrite(${fmtTodoWriteInput(b.input?.todos)})`),
+  AskUserQuestion: (b) => fmtToolCall(b, `∙ AskUserQuestion(${fmtAskUserQuestionInput(b.input?.questions)})`),
+  _default:   (b) => fmtToolCall(b, `∙ ${b.name}(${fmtArgs(b.input)})`),
 };
 
 export const TOOL_RESULT_FMT: FmtTable = {
@@ -591,7 +591,7 @@ function fmtApiRetryDetail(m: { error_status?: number | null; error?: string }):
 export const SYSTEM_FMT: FmtTable = {
   init:              { verbose: (m) => c.darkGray(`init: session ${m.session_id}`) },
   task_started:      (m) => c.lavender(`  ▶ agent started: ${m.description}`),
-  task_progress:     (m) => c.lavender(`  • ${m.description}`),
+  task_progress:     (m) => c.lavender(`  ∙ ${m.description}`),
   task_notification: (m) => c.lavender(`  ◀︎ ${m.status}: ${m.summary}`),
   compact_boundary:  (m) => c.darkGray(`↩ Context compacted (${fmtCompactionDetail(m.compact_metadata)})`),
   status:            (m) => m.status === "compacting" ? c.darkGray("Compacting context...") : null,
@@ -644,12 +644,12 @@ export function fmtWorkerStatus(opts: WorkerStatusOpts): string {
     connectionStatus === "reconnecting" ? `Reconnecting...${codeStr}` :
                                           "Disconnected";
 
-  // Left side: worker {id8} • {status}[ • task #{N}][ • PR #{N}][ • {branch}]
+  // Left side: worker {id8} ∙ {status}[ ∙ task #{N}][ ∙ PR #{N}][ ∙ {branch}]
   const parts: string[] = [`worker ${workerId.slice(0, 8)}`, status];
   if (taskNumber != null) parts.push(`task #${taskNumber}`);
   if (prNumber != null) parts.push(`PR #${prNumber}`);
   if (branch) parts.push(branch);
-  let leftText = parts.join(" • ");
+  let leftText = parts.join(" ∙ ");
 
   // Truncate left side if needed to leave room for right side with a gap of 1
   const maxLeftLen = Math.max(0, width - rightText.length - 1);
@@ -658,7 +658,9 @@ export function fmtWorkerStatus(opts: WorkerStatusOpts): string {
   }
 
   const gap = Math.max(1, width - leftText.length - rightText.length);
-  return c.darkGray(leftText + " ".repeat(gap) + rightText);
+  // Dim sage-green background + bright-white text. No trailing reset: _drawStatus
+  // appends \x1b[K (fills remaining width with the same background) then \x1b[0m.
+  return `\x1b[48;5;22m\x1b[97m${leftText + " ".repeat(gap) + rightText}`;
 }
 
 // ── Printing engine ───────────────────────────────────────────────────────────
@@ -701,18 +703,30 @@ function _lineCount(): number {
 function _clearStatus() {
   const n = _lineCount();
   if (n === 0) return;
-  // Erase current (bottom-most) status line, then move up and erase each
-  // remaining line, plus the blank line that console.log always emits.
-  let seq = "\r\x1b[K";
-  for (let i = 0; i < n; i++) seq += "\x1b[A\x1b[K";
+  // Cursor rests on the blank separator row above the status lines.
+  // Move down through each status line erasing it, then return to the
+  // blank separator row and restore the cursor.
+  let seq = "";
+  for (let i = 0; i < n; i++) seq += "\x1b[B\r\x1b[K";
+  seq += `\x1b[${n}A\r`;
+  seq += "\x1b[?25h";  // show cursor
   process.stdout.write(seq);
 }
 
 function _drawStatus() {
-  if (_lineCount() === 0) return;
+  const n = _lineCount();
+  if (n === 0) return;
+  // Cursor is on the blank separator row. Draw each status line below it,
+  // then return cursor to the blank separator row and hide it. The blank
+  // row acts as a visual spacer between content and the status bar cluster,
+  // and keeps third-party writes (e.g. permission prompts) above the bars.
   let seq = "";
-  if (_statusActive) seq += "\n\r" + _statusText + "\x1b[K";
-  if (_persistentStatusActive) seq += "\n\r" + _persistentStatusText + "\x1b[K";
+  // Re-assert the bg after _statusText (which may reset it with \x1b[0m)
+  // so that \x1b[K fills the rest of the line with sage green, not black.
+  if (_statusActive) seq += `\n\r\x1b[48;5;22m${_statusText}\x1b[48;5;22m\x1b[K\x1b[0m`;
+  if (_persistentStatusActive) seq += `\n\r${_persistentStatusText}\x1b[K\x1b[0m`;
+  seq += `\x1b[${n}A\r`;
+  seq += "\x1b[?25l";  // hide cursor
   process.stdout.write(seq);
 }
 

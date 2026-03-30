@@ -119,7 +119,7 @@ describe("fmtWorkerStatus", () => {
       width: 80,
     }));
     // Should not have a trailing separator after task
-    const parts = result.split("•");
+    const parts = result.split("∙");
     expect(parts.length).toBe(3); // "worker abc12345 ", " busy ", " task #5      Connected"
   });
 
