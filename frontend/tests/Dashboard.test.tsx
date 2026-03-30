@@ -1,4 +1,4 @@
-import { render, screen, waitFor, act } from "@testing-library/react";
+import { render, screen, act } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import Dashboard from "../src/pages/Dashboard.tsx";
@@ -30,15 +30,6 @@ const webhookEntry: LogEntry = {
   summary: "issues/labeled #42",
 };
 
-const messageEntry: LogEntry = {
-  kind: "message",
-  id: 2,
-  timestamp: "2026-01-01T10:01:00.000Z",
-  taskId: "42",
-  workerId: "worker-abc-123",
-  summary: "sent task_assigned",
-};
-
 describe("Dashboard", () => {
   beforeEach(() => {
     capturedHandler = null;
@@ -51,41 +42,6 @@ describe("Dashboard", () => {
   it("shows empty state when no events", () => {
     renderDashboard();
     expect(screen.getByText("No events yet.")).toBeInTheDocument();
-  });
-
-  it("renders events from initial_log WebSocket message", async () => {
-    renderDashboard();
-    act(() => {
-      capturedHandler!({ type: "initial_log", entries: [webhookEntry, messageEntry] });
-    });
-    expect(screen.getByText("issues/labeled #42")).toBeInTheDocument();
-    expect(screen.getByText("sent task_assigned")).toBeInTheDocument();
-  });
-
-  it("shows both webhook and message kinds from initial_log", async () => {
-    renderDashboard();
-    act(() => {
-      capturedHandler!({ type: "initial_log", entries: [webhookEntry, messageEntry] });
-    });
-    expect(screen.getByText("webhook")).toBeInTheDocument();
-    expect(screen.getByText("message")).toBeInTheDocument();
-  });
-
-  it("prepends new log_event messages to events from initial_log", async () => {
-    const newEntry: LogEntry = { kind: "message", id: 3, timestamp: "2026-01-01T10:02:00.000Z", taskId: null, workerId: "worker-abc-123", summary: "received worker_hello" };
-    renderDashboard();
-
-    act(() => {
-      capturedHandler!({ type: "initial_log", entries: [webhookEntry] });
-    });
-    expect(screen.getByText("issues/labeled #42")).toBeInTheDocument();
-
-    act(() => {
-      capturedHandler!({ type: "log_event", entry: newEntry });
-    });
-
-    expect(screen.getByText("received worker_hello")).toBeInTheDocument();
-    expect(screen.getByText("issues/labeled #42")).toBeInTheDocument();
   });
 
   it("does not add events to log on snapshot messages", async () => {

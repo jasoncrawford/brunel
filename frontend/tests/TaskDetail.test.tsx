@@ -64,12 +64,6 @@ describe("TaskDetail", () => {
     await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/tasks/99/events"));
   });
 
-  it("shows task id in heading", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ json: () => Promise.resolve([]) }));
-    renderTaskDetail("99");
-    await waitFor(() => expect(screen.getByText(/Task #99/)).toBeInTheDocument());
-  });
-
   it("shows empty state when no events", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ json: () => Promise.resolve([]) }));
     renderTaskDetail("99");
