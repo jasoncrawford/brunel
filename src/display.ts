@@ -5,6 +5,18 @@ import type { ForemanMessage, GitHubEvent } from "./types.js";
 export const W = 70;
 export const hr = (ch = "─") => ch.repeat(W);
 
+/** Visible width of the verbose timestamp prefix "HH:mm:ss " */
+export const VERBOSE_PREFIX_LEN = 9;
+
+/**
+ * Returns the usable terminal width, accounting for the verbose timestamp
+ * prefix when verbose mode is active. Pass a fallback used when
+ * process.stdout.columns is unavailable.
+ */
+export function effectiveWidth(fallback = W): number {
+  return (process.stdout.columns ?? fallback) - (verbose ? VERBOSE_PREFIX_LEN : 0);
+}
+
 // ── Verbose flag ──────────────────────────────────────────────────────────────
 
 export let verbose = false;
@@ -40,7 +52,7 @@ export const s = {
 };
 
 export function clearBreak(): string {
-  const width = process.stdout.columns ?? W;
+  const width = effectiveWidth();
   const label = "=== Context cleared ";
   const fill = "=".repeat(Math.max(0, width - label.length));
   return "\n" + c.sageGreen(s.bold(label + fill));
@@ -220,7 +232,7 @@ export function fmtToolCall(b: ToolUseBlock, fmt: string) {
 
 export function fmtHunk(hunk: Hunk): string {
   const header = c.darkGray(`@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`);
-  const width = process.stdout.columns ?? 80;
+  const width = effectiveWidth(80);
   const lines = hunk.lines.map(line => {
     if (line.startsWith("+")) return c.bgGreen(line.padEnd(width));
     if (line.startsWith("-")) return c.bgRed(line.padEnd(width));
@@ -413,7 +425,7 @@ function distributeWidths(naturalWidths: number[], available: number): number[] 
 }
 
 export function renderTable(tableLines: string[], maxWidth?: number): string {
-  const termWidth = maxWidth ?? (process.stdout.columns || W);
+  const termWidth = maxWidth ?? effectiveWidth();
   const rows = tableLines.map(line =>
     line.split("|").slice(1, -1).map(cell => cell.trim())
   );
