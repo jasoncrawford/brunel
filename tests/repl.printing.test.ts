@@ -249,7 +249,7 @@ describe("printMessage", () => {
     const output = captureOutput(() => {
       printMessage({ type: "system", subtype: "task_progress", description: "Step 1" });
     });
-    expect(stripAnsi(output)).toContain("• Step 1");
+    expect(stripAnsi(output)).toContain("∙ Step 1");
   });
 
   it("system/task_notification → lavender output", () => {

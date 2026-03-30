@@ -95,20 +95,20 @@ describe("renderMarkdown - blockquotes", () => {
 });
 
 describe("renderMarkdown - lists", () => {
-  it("- item → • item", () => {
-    expect(stripAnsi(renderMarkdown("- item"))).toBe("• item");
+  it("- item → ∙ item", () => {
+    expect(stripAnsi(renderMarkdown("- item"))).toBe("∙ item");
   });
 
-  it("* item → • item", () => {
-    expect(stripAnsi(renderMarkdown("* item"))).toBe("• item");
+  it("* item → ∙ item", () => {
+    expect(stripAnsi(renderMarkdown("* item"))).toBe("∙ item");
   });
 
-  it("+ item → • item", () => {
-    expect(stripAnsi(renderMarkdown("+ item"))).toBe("• item");
+  it("+ item → ∙ item", () => {
+    expect(stripAnsi(renderMarkdown("+ item"))).toBe("∙ item");
   });
 
   it("indented list item preserves indentation", () => {
-    expect(stripAnsi(renderMarkdown("  - indented"))).toBe("  • indented");
+    expect(stripAnsi(renderMarkdown("  - indented"))).toBe("  ∙ indented");
   });
 
   it("ordered list: 1. stays as-is", () => {
@@ -371,8 +371,8 @@ describe("renderMarkdown - mixed content", () => {
     const result = stripAnsi(renderMarkdown(input));
     expect(result).toContain("TITLE");
     expect(result).toContain("Some text.");
-    expect(result).toContain("• item1");
-    expect(result).toContain("• item2");
+    expect(result).toContain("∙ item1");
+    expect(result).toContain("∙ item2");
   });
 
   it("code block interior not processed as markdown", () => {
