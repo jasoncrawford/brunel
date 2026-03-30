@@ -20,8 +20,29 @@ jobs:
         with:
           version: latest
 
+      - name: Get Supabase CLI version for cache key
+        id: supabase-version
+        run: echo "version=$(supabase --version)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Supabase Docker images
+        id: supabase-cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/supabase-images.tar
+          key: supabase-docker-${{ runner.os }}-${{ steps.supabase-version.outputs.version }}
+
+      - name: Load cached Supabase images
+        if: steps.supabase-cache.outputs.cache-hit == 'true'
+        run: docker load -i /tmp/supabase-images.tar
+
       - name: Start local Supabase
         run: supabase start
+
+      - name: Save Supabase Docker images
+        if: steps.supabase-cache.outputs.cache-hit != 'true'
+        run: |
+          docker save $(docker images --format '{{.Repository}}:{{.Tag}}' | grep -v '<none>') \
+            -o /tmp/supabase-images.tar
 
       - name: Export Supabase credentials for tests
         run: |
@@ -57,8 +78,27 @@ jobs:
 
       - run: npm run lint
 
+  browser-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - run: npm ci
+
       - name: Build frontend for browser tests
         run: npm run build
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('package-lock.json') }}
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
