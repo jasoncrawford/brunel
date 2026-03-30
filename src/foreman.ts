@@ -132,7 +132,7 @@ interface Task {
   body: string;
   labels: string[];
   repoUrl: string;
-  status: "pending" | "assigned" | "complete";
+  status: "pending" | "assigned" | "complete" | "blocked";
   assignedWorkerId?: string;
   prNumber?: number;
   eventQueue: GitHubEvent[];
@@ -197,6 +197,20 @@ export class TaskQueue extends EventEmitter {
     this.emit("changed");
   }
 
+  setBlocked(taskId: string) {
+    const t = this.tasks.get(taskId);
+    if (!t || t.status !== "pending") return;
+    t.status = "blocked";
+    this.emit("changed");
+  }
+
+  setUnblocked(taskId: string) {
+    const t = this.tasks.get(taskId);
+    if (!t || t.status !== "blocked") return;
+    t.status = "pending";
+    this.emit("changed");
+  }
+
   queueEvent(taskId: string, event: GitHubEvent) {
     const t = this.tasks.get(taskId);
     if (t) t.eventQueue.push(event);
@@ -233,13 +247,17 @@ export class TaskQueue extends EventEmitter {
 
   removeTask(taskId: string) {
     const t = this.tasks.get(taskId);
-    if (!t || t.status !== "pending") return;
+    if (!t || (t.status !== "pending" && t.status !== "blocked")) return;
     this.tasks.delete(taskId);
     this.emit("changed");
   }
 
   getPendingTasks(): Task[] {
     return [...this.tasks.values()].filter((t) => t.status === "pending");
+  }
+
+  getPendingAndBlockedTasks(): Task[] {
+    return [...this.tasks.values()].filter((t) => t.status === "pending" || t.status === "blocked");
   }
 
   markDepsLoaded(issueNumbers: number[]) {
@@ -1095,8 +1113,8 @@ export function createForemanWss(
       if (t) t.depsLoaded = depsLoaded;
     }
 
-    // Step 3: remove pending tasks whose issue no longer has the label
-    for (const t of taskQueue.getPendingTasks()) {
+    // Step 3: remove pending/blocked tasks whose issue no longer has the label
+    for (const t of taskQueue.getPendingAndBlockedTasks()) {
       if (!labeledIssues.has(t.issueNumber)) {
         taskQueue.removeTask(t.taskId);
       }

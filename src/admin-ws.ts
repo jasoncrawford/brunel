@@ -20,7 +20,7 @@ export interface TaskSnapshot {
   taskId: string;
   issueNumber: number;
   title: string;
-  status: "pending" | "assigned" | "complete";
+  status: "pending" | "assigned" | "complete" | "blocked";
   assignedWorkerId?: string;
   prNumber?: number;
   prUrl?: string;
