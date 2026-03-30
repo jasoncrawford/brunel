@@ -5,7 +5,7 @@ import type { AdminMessage, TaskRow } from "../types.ts";
 
 export default function TaskList() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const statusFilter = (searchParams.get("status") ?? "all") as "all" | "pending" | "assigned" | "complete";
+  const statusFilter = (searchParams.get("status") ?? "all") as "all" | "pending" | "blocked" | "assigned" | "complete";
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -30,7 +30,7 @@ export default function TaskList() {
 
   useAdminWs(handleMessage);
 
-  function setFilter(s: "all" | "pending" | "assigned" | "complete") {
+  function setFilter(s: "all" | "pending" | "blocked" | "assigned" | "complete") {
     if (s === "all") setSearchParams({});
     else setSearchParams({ status: s });
   }
@@ -40,7 +40,7 @@ export default function TaskList() {
       <h2>Tasks</h2>
 
       <div style={{ marginBottom: "1rem" }}>
-        {(["all", "pending", "assigned", "complete"] as const).map((s) => (
+        {(["all", "pending", "blocked", "assigned", "complete"] as const).map((s) => (
           <button
             key={s}
             onClick={() => setFilter(s)}
