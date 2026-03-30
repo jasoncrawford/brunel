@@ -12,11 +12,27 @@ const REPO_URL = "https://token@github.com/owner/repo.git";
 
 function makeExec(responses: Record<string, string> = {}) {
   return vi.fn().mockImplementation(async (args: string[]) => {
-    // Simulate git clone creating the target directory with a .git subdirectory
-    if (args[0] === "clone") fs.mkdirSync(path.join(args[2], ".git"), { recursive: true });
+    // Simulate git clone creating the target directory with .git and package.json
+    if (args[0] === "clone") {
+      fs.mkdirSync(path.join(args[2], ".git"), { recursive: true });
+      fs.writeFileSync(path.join(args[2], "package.json"), "{}");
+    }
     const key = args.join(" ");
     return responses[key] ?? "";
   });
+}
+
+function makeNpmExec() {
+  return vi.fn().mockResolvedValue("");
+}
+
+async function makeWorkspace(
+  exec = makeExec(),
+  npm = makeNpmExec(),
+): Promise<Workspace> {
+  const ws = new Workspace(BASE_DIR, WORKER_ID, REPO_URL, exec, npm);
+  await ws.create();
+  return ws;
 }
 
 beforeEach(() => {
@@ -32,7 +48,8 @@ afterEach(() => {
 describe("Workspace.create", () => {
   it("runs git clone when directory does not exist", async () => {
     const exec = makeExec();
-    const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec);
+    const npm = makeNpmExec();
+    const ws = await makeWorkspace(exec, npm);
     expect(exec).toHaveBeenCalledWith(
       ["clone", REPO_URL, path.join(BASE_DIR, WORKER_ID)],
       undefined,
@@ -44,7 +61,8 @@ describe("Workspace.create", () => {
     const workerDir = path.join(BASE_DIR, WORKER_ID);
     fs.mkdirSync(path.join(workerDir, ".git"), { recursive: true });
     const exec = makeExec();
-    await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec);
+    const npm = makeNpmExec();
+    await makeWorkspace(exec, npm);
     expect(exec).not.toHaveBeenCalledWith(
       expect.arrayContaining(["clone"]),
       expect.anything(),
@@ -52,12 +70,37 @@ describe("Workspace.create", () => {
   });
 
   it("writes a PID lockfile containing the current PID", async () => {
-    const exec = makeExec();
-    const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec);
-    // create() only writes the lockfile when cloning (dir didn't exist before)
+    const ws = await makeWorkspace();
     const lockPath = path.join(ws.dir, ".brunel.lock");
     expect(fs.existsSync(lockPath)).toBe(true);
     expect(fs.readFileSync(lockPath, "utf8").trim()).toBe(String(process.pid));
+  });
+
+  it("runs npm install after cloning", async () => {
+    const exec = makeExec();
+    const npm = makeNpmExec();
+    await makeWorkspace(exec, npm);
+    expect(npm).toHaveBeenCalledWith(["install"], path.join(BASE_DIR, WORKER_ID));
+  });
+
+  it("does not run npm install when directory already exists", async () => {
+    const workerDir = path.join(BASE_DIR, WORKER_ID);
+    fs.mkdirSync(path.join(workerDir, ".git"), { recursive: true });
+    const exec = makeExec();
+    const npm = makeNpmExec();
+    await makeWorkspace(exec, npm);
+    expect(npm).not.toHaveBeenCalled();
+  });
+
+  it("does not run npm install when cloned repo has no package.json", async () => {
+    const exec = vi.fn().mockImplementation(async (args: string[]) => {
+      // Clone creates .git but no package.json
+      if (args[0] === "clone") fs.mkdirSync(path.join(args[2], ".git"), { recursive: true });
+      return "";
+    });
+    const npm = makeNpmExec();
+    await makeWorkspace(exec, npm);
+    expect(npm).not.toHaveBeenCalled();
   });
 });
 
@@ -65,8 +108,7 @@ describe("Workspace.create", () => {
 
 describe("Workspace.destroy", () => {
   it("removes the workspace directory", async () => {
-    const exec = makeExec();
-    const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec);
+    const ws = await makeWorkspace();
     expect(fs.existsSync(ws.dir)).toBe(true);
     await ws.destroy();
     expect(fs.existsSync(ws.dir)).toBe(false);
@@ -78,22 +120,46 @@ describe("Workspace.destroy", () => {
 describe("Workspace.reset", () => {
   it("runs fetch, checkout main, reset --hard, clean -fdx", async () => {
     const exec = makeExec();
-    const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec);
+    const npm = makeNpmExec();
+    const ws = await makeWorkspace(exec, npm);
     exec.mockClear();
     await ws.reset();
     expect(exec).toHaveBeenCalledWith(["fetch", "origin"], ws.dir);
     expect(exec).toHaveBeenCalledWith(["checkout", "main"], ws.dir);
     expect(exec).toHaveBeenCalledWith(["reset", "--hard", "origin/main"], ws.dir);
-    expect(exec).toHaveBeenCalledWith(["clean", "-fdx"], ws.dir);
+    expect(exec).toHaveBeenCalledWith(["clean", "-fdx", "-e", "node_modules", "-e", ".env", "-e", ".brunel.lock"], ws.dir);
+  });
+
+  it("runs npm install after git operations", async () => {
+    const exec = makeExec();
+    const npm = makeNpmExec();
+    const ws = await makeWorkspace(exec, npm);
+    // makeExec clone creates package.json; it persists through the mocked clean
+    npm.mockClear();
+    await ws.reset();
+    expect(npm).toHaveBeenCalledWith(["install"], ws.dir);
+  });
+
+  it("does not run npm install on reset when repo has no package.json", async () => {
+    const workerDir = path.join(BASE_DIR, WORKER_ID);
+    fs.mkdirSync(path.join(workerDir, ".git"), { recursive: true });
+    // No package.json in this workspace
+    const exec = makeExec();
+    const npm = makeNpmExec();
+    const ws = await makeWorkspace(exec, npm);
+    npm.mockClear();
+    await ws.reset();
+    expect(npm).not.toHaveBeenCalled();
   });
 
   it("retries once on failure before succeeding", async () => {
     const exec = vi.fn()
       .mockRejectedValueOnce(new Error("transient"))
       .mockResolvedValue("");
+    const npm = makeNpmExec();
     // Pre-create the .git dir so create() skips cloning
     fs.mkdirSync(path.join(BASE_DIR, WORKER_ID, ".git"), { recursive: true });
-    const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec);
+    const ws = await makeWorkspace(exec, npm);
     exec.mockReset();
     // First reset attempt fails, second succeeds
     exec
@@ -114,7 +180,8 @@ describe("Workspace.reset", () => {
       if (callCount <= 2) throw new Error("reset fail");
       return ""; // third attempt (after re-clone) succeeds
     });
-    const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec);
+    const npm = makeNpmExec();
+    const ws = await makeWorkspace(exec, npm);
     exec.mockClear();
     callCount = 0;
     await ws.reset();
@@ -128,7 +195,8 @@ describe("Workspace.reset", () => {
       if (args[0] === "clone") { fs.mkdirSync(path.join(args[2], ".git"), { recursive: true }); return ""; }
       throw new Error("always fails");
     });
-    const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec);
+    const npm = makeNpmExec();
+    const ws = await makeWorkspace(exec, npm);
     exec.mockClear();
     await expect(ws.reset()).rejects.toThrow("always fails");
   });
@@ -142,7 +210,7 @@ describe("Workspace.checkSafety", () => {
       "status --porcelain": "",
       "log @{u}..HEAD --oneline": "",
     });
-    const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec);
+    const ws = await makeWorkspace(exec);
     const result = await ws.checkSafety();
     expect(result.uncommittedFiles).toEqual([]);
     expect(result.unpushedCommits).toEqual([]);
@@ -154,7 +222,7 @@ describe("Workspace.checkSafety", () => {
       "status --porcelain": " M src/foo.ts\n?? newfile.ts",
       "log @{u}..HEAD --oneline": "",
     });
-    const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec);
+    const ws = await makeWorkspace(exec);
     const result = await ws.checkSafety();
     expect(result.uncommittedFiles).toEqual(["M src/foo.ts", "?? newfile.ts"]);
   });
@@ -164,7 +232,7 @@ describe("Workspace.checkSafety", () => {
       "status --porcelain": "",
       "log @{u}..HEAD --oneline": "abc1234 feat: my commit",
     });
-    const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec);
+    const ws = await makeWorkspace(exec);
     const result = await ws.checkSafety();
     expect(result.unpushedCommits).toEqual(["abc1234 feat: my commit"]);
     expect(result.noUpstream).toBe(false);
@@ -177,7 +245,7 @@ describe("Workspace.checkSafety", () => {
       if (args[0] === "log") throw new Error("fatal: no upstream configured for branch 'my-branch'");
       return "";
     });
-    const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec);
+    const ws = await makeWorkspace(exec);
     const result = await ws.checkSafety();
     expect(result.noUpstream).toBe(true);
   });
@@ -191,7 +259,7 @@ describe("confirmIfUnsafe", () => {
       "status --porcelain": "",
       "log @{u}..HEAD --oneline": "",
     });
-    const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec);
+    const ws = await makeWorkspace(exec);
     const confirm = vi.fn().mockResolvedValue(true);
     const result = await confirmIfUnsafe(ws, confirm);
     expect(result).toBe(true);
@@ -203,7 +271,7 @@ describe("confirmIfUnsafe", () => {
       "status --porcelain": " M src/foo.ts",
       "log @{u}..HEAD --oneline": "",
     });
-    const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec);
+    const ws = await makeWorkspace(exec);
     const confirm = vi.fn().mockResolvedValue(true);
     const result = await confirmIfUnsafe(ws, confirm);
     expect(confirm).toHaveBeenCalledOnce();
@@ -216,7 +284,7 @@ describe("confirmIfUnsafe", () => {
       "status --porcelain": " M src/foo.ts",
       "log @{u}..HEAD --oneline": "",
     });
-    const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec);
+    const ws = await makeWorkspace(exec);
     const confirm = vi.fn().mockResolvedValue(false);
     const result = await confirmIfUnsafe(ws, confirm);
     expect(result).toBe(false);

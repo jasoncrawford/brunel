@@ -8,9 +8,15 @@ import { fmtError } from "./utils.js";
 const execFileAsync = promisify(execFileCb);
 
 export type GitExec = (args: string[], cwd?: string) => Promise<string>;
+export type NpmExec = (args: string[], cwd: string) => Promise<string>;
 
 const defaultGitExec: GitExec = async (args, cwd) => {
   const { stdout } = await execFileAsync("git", args, cwd ? { cwd } : {});
+  return stdout.trimEnd();
+};
+
+const defaultNpmExec: NpmExec = async (args, cwd) => {
+  const { stdout } = await execFileAsync("npm", args, { cwd });
   return stdout.trimEnd();
 };
 
@@ -24,31 +30,45 @@ function isProcessAlive(pid: number): boolean {
 }
 
 export class Workspace {
-  private constructor(
-    readonly dir: string,
-    private readonly repoUrl: string,
-    private readonly exec: GitExec,
-  ) {}
+  readonly dir: string;
 
-  /**
-   * Clone the repo into baseDir/workerId if not already present.
-   * Writes a PID lockfile after cloning (or on any create call).
-   */
+  constructor(
+    baseDir: string,
+    workerId: string,
+    private readonly repoUrl: string,
+    private readonly exec: GitExec = defaultGitExec,
+    private readonly npm: NpmExec = defaultNpmExec,
+  ) {
+    this.dir = path.join(baseDir, workerId);
+  }
+
+  /** Convenience factory: constructs a Workspace and calls create(). */
   static async create(
     baseDir: string,
     workerId: string,
     repoUrl: string,
     exec: GitExec = defaultGitExec,
+    npm: NpmExec = defaultNpmExec,
   ): Promise<Workspace> {
-    const dir = path.join(baseDir, workerId);
-    fs.mkdirSync(baseDir, { recursive: true });
-    if (!fs.existsSync(path.join(dir, ".git"))) {
-      if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
-      display.print(display.c.sageGreen(`[workspace] Cloning ${repoUrl} → ${dir}`));
-      await exec(["clone", repoUrl, dir], undefined);
+    const ws = new Workspace(baseDir, workerId, repoUrl, exec, npm);
+    await ws.create();
+    return ws;
+  }
+
+  /**
+   * Clone the repo into baseDir/workerId if not already present.
+   * Runs npm install after a fresh clone.
+   * Writes a PID lockfile on every call.
+   */
+  async create(): Promise<void> {
+    fs.mkdirSync(path.dirname(this.dir), { recursive: true });
+    if (!fs.existsSync(path.join(this.dir, ".git"))) {
+      if (fs.existsSync(this.dir)) fs.rmSync(this.dir, { recursive: true, force: true });
+      display.print(display.c.sageGreen(`[workspace] Cloning ${this.repoUrl} → ${this.dir}`));
+      await this.exec(["clone", this.repoUrl, this.dir], undefined);
+      await this._npmInstall();
     }
-    fs.writeFileSync(path.join(dir, ".brunel.lock"), String(process.pid));
-    return new Workspace(dir, repoUrl, exec);
+    fs.writeFileSync(path.join(this.dir, ".brunel.lock"), String(process.pid));
   }
 
   /**
@@ -82,7 +102,15 @@ export class Workspace {
     await this.exec(["fetch", "origin"], this.dir);
     await this.exec(["checkout", "main"], this.dir);
     await this.exec(["reset", "--hard", "origin/main"], this.dir);
-    await this.exec(["clean", "-fdx"], this.dir);
+    await this.exec(["clean", "-fdx", "-e", "node_modules", "-e", ".env", "-e", ".brunel.lock"], this.dir);
+    await this._npmInstall();
+  }
+
+  /** Run npm install if a package.json is present. */
+  private async _npmInstall(): Promise<void> {
+    if (!fs.existsSync(path.join(this.dir, "package.json"))) return;
+    display.print(display.c.sageGreen(`[workspace] Installing dependencies in ${this.dir}`));
+    await this.npm(["install"], this.dir);
   }
 
   /** Return safety info about the current checkout state. */
