@@ -407,6 +407,8 @@ describe("connection status bar", () => {
 
   it("tool result callback does not refresh status for non-Bash tools", async () => {
     const cb = display.setOnToolResultCallback.mock.calls[0][0] as (toolName: string) => void;
+    // Drain the startup refreshBranch() call fired by start() before clearing
+    await vi.waitFor(() => expect(display.updatePersistentStatus).toHaveBeenCalled());
     display.updatePersistentStatus.mockClear();
     cb("Read");
     // Give a tick for any potential async work

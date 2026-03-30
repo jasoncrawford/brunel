@@ -290,7 +290,10 @@ describe("pipeline: happy path and queued-then-assigned", () => {
     stubFetchNoBlockers();
     process.env.GITHUB_REPO = "owner/repo";
     process.env.GITHUB_TOKEN = "token";
-    await supabase.from("tasks").delete().neq("task_id", "");
+    await Promise.all([
+      supabase.from("tasks").delete().in("task_id", ["42", "55"]),
+      supabase.from("task_assignments").delete().in("task_id", ["42", "55"]),
+    ]);
     foreman = buildForeman();
     await new Promise<void>((resolve) =>
       foreman.httpServer.once("listening", resolve),
@@ -386,7 +389,10 @@ describe("pipeline: worker disconnect/reclaim (within reclaim window)", () => {
     stubFetchNoBlockers();
     process.env.GITHUB_REPO = "owner/repo";
     process.env.GITHUB_TOKEN = "token";
-    await supabase.from("tasks").delete().neq("task_id", "");
+    await Promise.all([
+      supabase.from("tasks").delete().in("task_id", ["70"]),
+      supabase.from("task_assignments").delete().in("task_id", ["70"]),
+    ]);
     // Long enough reclaim window that the reconnect happens before it expires
     foreman = buildForeman({ reclaimTimeoutMs: 30_000 });
     await new Promise<void>((resolve) =>
@@ -458,7 +464,10 @@ describe("pipeline: worker disconnect/expire (reclaim timer fires)", () => {
     stubFetchNoBlockers();
     process.env.GITHUB_REPO = "owner/repo";
     process.env.GITHUB_TOKEN = "token";
-    await supabase.from("tasks").delete().neq("task_id", "");
+    await Promise.all([
+      supabase.from("tasks").delete().in("task_id", ["80"]),
+      supabase.from("task_assignments").delete().in("task_id", ["80"]),
+    ]);
     // Very short reclaim window so the timer fires quickly
     foreman = buildForeman({ reclaimTimeoutMs: 80 });
     await new Promise<void>((resolve) =>
@@ -559,7 +568,10 @@ describe("pipeline: dependency blocking", () => {
     );
     process.env.GITHUB_REPO = "owner/repo";
     process.env.GITHUB_TOKEN = "token";
-    await supabase.from("tasks").delete().neq("task_id", "");
+    await Promise.all([
+      supabase.from("tasks").delete().in("task_id", ["91", "92"]),
+      supabase.from("task_assignments").delete().in("task_id", ["91", "92"]),
+    ]);
     foreman = buildForeman();
     await new Promise<void>((resolve) =>
       foreman.httpServer.once("listening", resolve),
@@ -623,9 +635,8 @@ describe("pipeline: PR events forwarded and logged to DB", () => {
     process.env.GITHUB_REPO = "owner/repo";
     process.env.GITHUB_TOKEN = "token";
     await Promise.all([
-      supabase.from("tasks").delete().neq("task_id", ""),
-      // Only delete this scenario's rows — db.test.ts runs in parallel and owns
-      // these tables too; blanket truncation would delete its rows mid-test.
+      supabase.from("tasks").delete().in("task_id", ["100"]),
+      supabase.from("task_assignments").delete().in("task_id", ["100"]),
       supabase.from("webhook_events").delete().in("delivery_id", ["evt-1", "evt-pr", "evt-cr"]),
       supabase.from("foreman_messages").delete().eq("worker_id", "w-pr"),
     ]);
