@@ -766,6 +766,10 @@ export function createForemanWss(
 
         // Close this issue as a blocker for any tasks that depend on it.
         // If unblocking a task, transition it from blocked → pending.
+        // Collect markPending promises so we can await them before calling
+        // reconcile() — otherwise markPending races with markAssigned (which
+        // tryAssignWork awaits) and the DB can end up stuck at "pending".
+        const markPendingPromises: Promise<void>[] = [];
         for (const [depIssueNum, blockers] of graph) {
           if (blockers.has(issueNumber)) {
             const blockedTask = taskQueue.getTaskForIssue(depIssueNum);
@@ -775,8 +779,10 @@ export function createForemanWss(
               );
               if (!isBlocked(depIssueNum, graph, openIssues)) {
                 taskQueue.setUnblocked(blockedTask.taskId);
-                taskStore.markPending(blockedTask.taskId).catch((err) =>
-                  flog(`ERROR Failed to mark task #${blockedTask.taskId} pending: ${fmtError(err)}`)
+                markPendingPromises.push(
+                  taskStore.markPending(blockedTask.taskId).catch((err) =>
+                    flog(`ERROR Failed to mark task #${blockedTask.taskId} pending: ${fmtError(err)}`)
+                  )
                 );
               }
             }
@@ -789,7 +795,13 @@ export function createForemanWss(
         if (task && task.status === "assigned") {
           taskQueue.completeTask(task.taskId);
         }
-        reconcile();
+        // Defer reconcile until markPending writes have flushed so that
+        // tryAssignWork's markAssigned (which is awaited) always wins the race.
+        if (markPendingPromises.length > 0) {
+          Promise.all(markPendingPromises).then(() => reconcile()).catch(() => reconcile());
+        } else {
+          reconcile();
+        }
         return result(task);
       }
 

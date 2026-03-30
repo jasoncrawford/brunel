@@ -1,7 +1,16 @@
 import { describe, it, expect, vi } from "vitest";
 import { TaskQueue, WorkerRegistry, createForemanWss } from "../src/foreman.js";
 import type { TaskBlockerStore, TaskStore } from "../src/db.js";
+import type { LabeledIssueState } from "../src/types.js";
 import http from "http";
+
+/** Build a labeledIssues map for a single issue so reconcile doesn't evict it. */
+function makeLabeledIssues(issueNumber: number): Map<number, LabeledIssueState> {
+  return new Map([[issueNumber, {
+    issue: { title: "T", body: "b", labels: [], repoUrl: "r" },
+    depsLoaded: true,
+  }]]);
+}
 
 function makeBlockerStore(overrides: Partial<TaskBlockerStore> = {}): TaskBlockerStore {
   return {
@@ -47,6 +56,7 @@ describe("foreman — blocker transitions via routeEvent", () => {
       taskLabel: "brunel:ready",
       graph,
       openIssues,
+      labeledIssues: makeLabeledIssues(10),
       blockerStore,
       reclaimTimeoutMs: 300_000,
     });
@@ -76,6 +86,7 @@ describe("foreman — blocker transitions via routeEvent", () => {
       taskLabel: "brunel:ready",
       graph,
       openIssues,
+      labeledIssues: makeLabeledIssues(10),
       reclaimTimeoutMs: 300_000,
     });
     wss.close();
@@ -105,6 +116,7 @@ describe("foreman — blocker transitions via routeEvent", () => {
       taskLabel: "brunel:ready",
       graph,
       openIssues,
+      labeledIssues: makeLabeledIssues(10),
       taskStore,
       reclaimTimeoutMs: 300_000,
     });
@@ -136,6 +148,7 @@ describe("foreman — blocker transitions via routeEvent", () => {
       taskLabel: "brunel:ready",
       graph,
       openIssues,
+      labeledIssues: makeLabeledIssues(10),
       taskStore,
       reclaimTimeoutMs: 300_000,
     });
