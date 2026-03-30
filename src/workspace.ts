@@ -30,18 +30,19 @@ function isProcessAlive(pid: number): boolean {
 }
 
 export class Workspace {
-  private constructor(
-    readonly dir: string,
-    private readonly repoUrl: string,
-    private readonly exec: GitExec,
-    private readonly npm: NpmExec,
-  ) {}
+  readonly dir: string;
 
-  /**
-   * Clone the repo into baseDir/workerId if not already present.
-   * Runs npm install after a fresh clone.
-   * Writes a PID lockfile after cloning (or on any create call).
-   */
+  constructor(
+    baseDir: string,
+    workerId: string,
+    private readonly repoUrl: string,
+    private readonly exec: GitExec = defaultGitExec,
+    private readonly npm: NpmExec = defaultNpmExec,
+  ) {
+    this.dir = path.join(baseDir, workerId);
+  }
+
+  /** Convenience factory: constructs a Workspace and calls create(). */
   static async create(
     baseDir: string,
     workerId: string,
@@ -49,18 +50,25 @@ export class Workspace {
     exec: GitExec = defaultGitExec,
     npm: NpmExec = defaultNpmExec,
   ): Promise<Workspace> {
-    const dir = path.join(baseDir, workerId);
-    fs.mkdirSync(baseDir, { recursive: true });
-    const needsClone = !fs.existsSync(path.join(dir, ".git"));
-    if (needsClone) {
-      if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
-      display.print(display.c.sageGreen(`[workspace] Cloning ${repoUrl} → ${dir}`));
-      await exec(["clone", repoUrl, dir], undefined);
-    }
-    fs.writeFileSync(path.join(dir, ".brunel.lock"), String(process.pid));
-    const ws = new Workspace(dir, repoUrl, exec, npm);
-    if (needsClone) await ws._npmInstall();
+    const ws = new Workspace(baseDir, workerId, repoUrl, exec, npm);
+    await ws.create();
     return ws;
+  }
+
+  /**
+   * Clone the repo into baseDir/workerId if not already present.
+   * Runs npm install after a fresh clone.
+   * Writes a PID lockfile on every call.
+   */
+  async create(): Promise<void> {
+    fs.mkdirSync(path.dirname(this.dir), { recursive: true });
+    if (!fs.existsSync(path.join(this.dir, ".git"))) {
+      if (fs.existsSync(this.dir)) fs.rmSync(this.dir, { recursive: true, force: true });
+      display.print(display.c.sageGreen(`[workspace] Cloning ${this.repoUrl} → ${this.dir}`));
+      await this.exec(["clone", this.repoUrl, this.dir], undefined);
+      await this._npmInstall();
+    }
+    fs.writeFileSync(path.join(this.dir, ".brunel.lock"), String(process.pid));
   }
 
   /**

@@ -26,6 +26,15 @@ function makeNpmExec() {
   return vi.fn().mockResolvedValue("");
 }
 
+async function makeWorkspace(
+  exec = makeExec(),
+  npm = makeNpmExec(),
+): Promise<Workspace> {
+  const ws = new Workspace(BASE_DIR, WORKER_ID, REPO_URL, exec, npm);
+  await ws.create();
+  return ws;
+}
+
 beforeEach(() => {
   fs.mkdirSync(BASE_DIR, { recursive: true });
 });
@@ -40,7 +49,7 @@ describe("Workspace.create", () => {
   it("runs git clone when directory does not exist", async () => {
     const exec = makeExec();
     const npm = makeNpmExec();
-    const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec, npm);
+    const ws = await makeWorkspace(exec, npm);
     expect(exec).toHaveBeenCalledWith(
       ["clone", REPO_URL, path.join(BASE_DIR, WORKER_ID)],
       undefined,
@@ -53,7 +62,7 @@ describe("Workspace.create", () => {
     fs.mkdirSync(path.join(workerDir, ".git"), { recursive: true });
     const exec = makeExec();
     const npm = makeNpmExec();
-    await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec, npm);
+    await makeWorkspace(exec, npm);
     expect(exec).not.toHaveBeenCalledWith(
       expect.arrayContaining(["clone"]),
       expect.anything(),
@@ -61,10 +70,7 @@ describe("Workspace.create", () => {
   });
 
   it("writes a PID lockfile containing the current PID", async () => {
-    const exec = makeExec();
-    const npm = makeNpmExec();
-    const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec, npm);
-    // create() only writes the lockfile when cloning (dir didn't exist before)
+    const ws = await makeWorkspace();
     const lockPath = path.join(ws.dir, ".brunel.lock");
     expect(fs.existsSync(lockPath)).toBe(true);
     expect(fs.readFileSync(lockPath, "utf8").trim()).toBe(String(process.pid));
@@ -73,7 +79,7 @@ describe("Workspace.create", () => {
   it("runs npm install after cloning", async () => {
     const exec = makeExec();
     const npm = makeNpmExec();
-    await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec, npm);
+    await makeWorkspace(exec, npm);
     expect(npm).toHaveBeenCalledWith(["install"], path.join(BASE_DIR, WORKER_ID));
   });
 
@@ -82,7 +88,7 @@ describe("Workspace.create", () => {
     fs.mkdirSync(path.join(workerDir, ".git"), { recursive: true });
     const exec = makeExec();
     const npm = makeNpmExec();
-    await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec, npm);
+    await makeWorkspace(exec, npm);
     expect(npm).not.toHaveBeenCalled();
   });
 
@@ -93,7 +99,7 @@ describe("Workspace.create", () => {
       return "";
     });
     const npm = makeNpmExec();
-    await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec, npm);
+    await makeWorkspace(exec, npm);
     expect(npm).not.toHaveBeenCalled();
   });
 });
@@ -102,9 +108,7 @@ describe("Workspace.create", () => {
 
 describe("Workspace.destroy", () => {
   it("removes the workspace directory", async () => {
-    const exec = makeExec();
-    const npm = makeNpmExec();
-    const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec, npm);
+    const ws = await makeWorkspace();
     expect(fs.existsSync(ws.dir)).toBe(true);
     await ws.destroy();
     expect(fs.existsSync(ws.dir)).toBe(false);
@@ -117,7 +121,7 @@ describe("Workspace.reset", () => {
   it("runs fetch, checkout main, reset --hard, clean -fdx", async () => {
     const exec = makeExec();
     const npm = makeNpmExec();
-    const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec, npm);
+    const ws = await makeWorkspace(exec, npm);
     exec.mockClear();
     await ws.reset();
     expect(exec).toHaveBeenCalledWith(["fetch", "origin"], ws.dir);
@@ -129,7 +133,7 @@ describe("Workspace.reset", () => {
   it("runs npm install after git operations", async () => {
     const exec = makeExec();
     const npm = makeNpmExec();
-    const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec, npm);
+    const ws = await makeWorkspace(exec, npm);
     // makeExec clone creates package.json; it persists through the mocked clean
     npm.mockClear();
     await ws.reset();
@@ -142,7 +146,7 @@ describe("Workspace.reset", () => {
     // No package.json in this workspace
     const exec = makeExec();
     const npm = makeNpmExec();
-    const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec, npm);
+    const ws = await makeWorkspace(exec, npm);
     npm.mockClear();
     await ws.reset();
     expect(npm).not.toHaveBeenCalled();
@@ -155,7 +159,7 @@ describe("Workspace.reset", () => {
     const npm = makeNpmExec();
     // Pre-create the .git dir so create() skips cloning
     fs.mkdirSync(path.join(BASE_DIR, WORKER_ID, ".git"), { recursive: true });
-    const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec, npm);
+    const ws = await makeWorkspace(exec, npm);
     exec.mockReset();
     // First reset attempt fails, second succeeds
     exec
@@ -177,7 +181,7 @@ describe("Workspace.reset", () => {
       return ""; // third attempt (after re-clone) succeeds
     });
     const npm = makeNpmExec();
-    const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec, npm);
+    const ws = await makeWorkspace(exec, npm);
     exec.mockClear();
     callCount = 0;
     await ws.reset();
@@ -192,7 +196,7 @@ describe("Workspace.reset", () => {
       throw new Error("always fails");
     });
     const npm = makeNpmExec();
-    const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec, npm);
+    const ws = await makeWorkspace(exec, npm);
     exec.mockClear();
     await expect(ws.reset()).rejects.toThrow("always fails");
   });
@@ -206,8 +210,7 @@ describe("Workspace.checkSafety", () => {
       "status --porcelain": "",
       "log @{u}..HEAD --oneline": "",
     });
-    const npm = makeNpmExec();
-    const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec, npm);
+    const ws = await makeWorkspace(exec);
     const result = await ws.checkSafety();
     expect(result.uncommittedFiles).toEqual([]);
     expect(result.unpushedCommits).toEqual([]);
@@ -219,8 +222,7 @@ describe("Workspace.checkSafety", () => {
       "status --porcelain": " M src/foo.ts\n?? newfile.ts",
       "log @{u}..HEAD --oneline": "",
     });
-    const npm = makeNpmExec();
-    const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec, npm);
+    const ws = await makeWorkspace(exec);
     const result = await ws.checkSafety();
     expect(result.uncommittedFiles).toEqual(["M src/foo.ts", "?? newfile.ts"]);
   });
@@ -230,8 +232,7 @@ describe("Workspace.checkSafety", () => {
       "status --porcelain": "",
       "log @{u}..HEAD --oneline": "abc1234 feat: my commit",
     });
-    const npm = makeNpmExec();
-    const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec, npm);
+    const ws = await makeWorkspace(exec);
     const result = await ws.checkSafety();
     expect(result.unpushedCommits).toEqual(["abc1234 feat: my commit"]);
     expect(result.noUpstream).toBe(false);
@@ -244,8 +245,7 @@ describe("Workspace.checkSafety", () => {
       if (args[0] === "log") throw new Error("fatal: no upstream configured for branch 'my-branch'");
       return "";
     });
-    const npm = makeNpmExec();
-    const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec, npm);
+    const ws = await makeWorkspace(exec);
     const result = await ws.checkSafety();
     expect(result.noUpstream).toBe(true);
   });
@@ -259,8 +259,7 @@ describe("confirmIfUnsafe", () => {
       "status --porcelain": "",
       "log @{u}..HEAD --oneline": "",
     });
-    const npm = makeNpmExec();
-    const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec, npm);
+    const ws = await makeWorkspace(exec);
     const confirm = vi.fn().mockResolvedValue(true);
     const result = await confirmIfUnsafe(ws, confirm);
     expect(result).toBe(true);
@@ -272,8 +271,7 @@ describe("confirmIfUnsafe", () => {
       "status --porcelain": " M src/foo.ts",
       "log @{u}..HEAD --oneline": "",
     });
-    const npm = makeNpmExec();
-    const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec, npm);
+    const ws = await makeWorkspace(exec);
     const confirm = vi.fn().mockResolvedValue(true);
     const result = await confirmIfUnsafe(ws, confirm);
     expect(confirm).toHaveBeenCalledOnce();
@@ -286,8 +284,7 @@ describe("confirmIfUnsafe", () => {
       "status --porcelain": " M src/foo.ts",
       "log @{u}..HEAD --oneline": "",
     });
-    const npm = makeNpmExec();
-    const ws = await Workspace.create(BASE_DIR, WORKER_ID, REPO_URL, exec, npm);
+    const ws = await makeWorkspace(exec);
     const confirm = vi.fn().mockResolvedValue(false);
     const result = await confirmIfUnsafe(ws, confirm);
     expect(result).toBe(false);
