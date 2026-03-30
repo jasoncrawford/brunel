@@ -12,7 +12,7 @@ import { loadConfig } from "./config.js";
 import { isBlocked, setBlockers, fetchBlockers } from "./dependencies.js";
 import { fetchIssueStates } from "./github.js";
 import type { DependencyGraph } from "./dependencies.js";
-import { type DbLogger, type TaskAssignmentStore, type TaskStore, type TaskBlockerStore, createDbLogger, createTaskAssignmentStore, createTaskStore, createNullDbLogger, createNullTaskAssignmentStore, createNullTaskStore, createNullTaskBlockerStore } from "./db.js";
+import { type DbLogger, type TaskAssignmentStore, type TaskStore, type TaskBlockerStore, createDbLogger, createTaskAssignmentStore, createTaskStore, createTaskBlockerStore, createNullDbLogger, createNullTaskAssignmentStore, createNullTaskStore, createNullTaskBlockerStore } from "./db.js";
 import type { AdminWss, TaskSnapshot, WorkerSnapshot } from "./admin-ws.js";
 import { fmtError } from "./utils.js";
 
@@ -1187,21 +1187,25 @@ if (isMain) {
     ? new Webhooks({ secret: config.webhookSecret })
     : null;
 
-  // Setup DB logger, assignment store, and task store (share the same Supabase client if configured)
+  // Setup DB logger, assignment store, task store, and blocker store
+  // (all share the same Supabase client if configured)
   let dbLogger: DbLogger;
   let assignStore: TaskAssignmentStore;
   let taskStore: TaskStore;
+  let blockerStore: TaskBlockerStore;
   if (config.supabaseUrl && config.supabaseSecretKey) {
     const { createClient } = await import("@supabase/supabase-js");
     const supabase = createClient(config.supabaseUrl, config.supabaseSecretKey);
     dbLogger = createDbLogger(supabase);
     assignStore = createTaskAssignmentStore(supabase);
     taskStore = createTaskStore(supabase);
+    blockerStore = createTaskBlockerStore(supabase);
     flog("Supabase logging enabled");
   } else {
     dbLogger = createNullDbLogger();
     assignStore = createNullTaskAssignmentStore();
     taskStore = createNullTaskStore();
+    blockerStore = createNullTaskBlockerStore();
   }
 
   let foremanWss: ForemanWss;
@@ -1229,6 +1233,7 @@ if (isMain) {
       workerSecret: config.workerSecret,
       assignStore,
       taskStore,
+      blockerStore,
       reclaimTimeoutMs: config.workerReclaimTimeoutMs,
     },
   );
@@ -1241,8 +1246,55 @@ if (isMain) {
   }
 
   // Load all state before accepting WebSocket connections.
-  // Step 1: fetch brunel:ready issues from GitHub → all tasks start pending
-  flog("[startup] step 1: fetching brunel:ready issues from GitHub...");
+
+  // Step 1: Load active tasks from DB (primary source of truth).
+  // Restores pending, assigned, and blocked tasks; skips complete.
+  flog("[startup] step 1: loading active tasks from DB...");
+  try {
+    const activeTasks = await taskStore.listTasks();
+    for (const row of activeTasks) {
+      if (row.status === "complete") continue;
+      taskQueue.addTask({
+        taskId: row.taskId,
+        issueNumber: row.issueNumber,
+        title: row.title,
+        body: "",
+        labels: [],
+        repoUrl: `https://github.com/${row.repo}`,
+        status: row.status as "pending" | "assigned" | "blocked",
+        depsLoaded: true,
+      });
+      if (row.workerId) taskQueue.assignTask(row.taskId, row.workerId);
+      if (row.prNumber !== null) taskQueue.registerPr(row.prNumber, row.taskId);
+      if (row.branch) taskQueue.registerBranch(row.branch, row.taskId);
+      flog(`[startup] restored task #${row.taskId} (${row.status})`);
+    }
+  } catch (err) {
+    flog(`ERROR Failed to load tasks from DB: ${fmtError(err)}`);
+    process.exit(1);
+  }
+
+  // Step 2: Reconstruct in-memory dependency graph from open task_blockers rows.
+  flog("[startup] step 2: loading open blockers from DB...");
+  try {
+    const openBlockers = await blockerStore.listAllOpenBlockers();
+    for (const row of openBlockers) {
+      const task = taskQueue.get(row.taskId);
+      if (!task) continue;
+      const existing = graph.get(task.issueNumber) ?? new Set<number>();
+      existing.add(row.blockerIssueNumber);
+      graph.set(task.issueNumber, existing);
+      openIssues.add(row.blockerIssueNumber);
+    }
+    flog(`[startup] loaded ${openBlockers.length} open blocker(s)`);
+  } catch (err) {
+    flog(`ERROR Failed to load blockers from DB: ${fmtError(err)}`);
+    process.exit(1);
+  }
+
+  // Step 3: Fetch brunel:ready issues from GitHub for reconciliation.
+  // Adds new tasks not yet in the DB; removes tasks whose label was removed.
+  flog("[startup] step 3: fetching brunel:ready issues from GitHub for reconciliation...");
   try {
     await loadIssuesToQueue(labeledIssues, graph, openIssues, {
       repo: config.githubRepo,
@@ -1256,55 +1308,7 @@ if (isMain) {
     process.exit(1);
   }
 
-  // Step 2: read task_assignments table and restore assigned state
-  flog("[startup] step 2: loading task assignments from DB...");
-  try {
-    // Pre-fetch tasks that are still "assigned" in the DB so we can restore any
-    // whose issue was closed (and therefore excluded from labeledIssues) while the
-    // worker was still active.
-    const assignedInDb = await taskStore.listTasks({ status: "assigned" });
-    const assignedMap = new Map(assignedInDb.map(r => [r.taskId, r]));
-
-    const assignments = await assignStore.listAssignments();
-    for (const row of assignments) {
-      if (!taskQueue.get(row.taskId)) {
-        const taskRow = assignedMap.get(row.taskId);
-        if (taskRow) {
-          // Task was assigned when the foreman last stopped, but its issue is no
-          // longer open (e.g. PR was merged). Restore it so the worker can finish.
-          const repoUrl = `https://github.com/${taskRow.repo}`;
-          taskQueue.addTask({
-            taskId: taskRow.taskId,
-            issueNumber: taskRow.issueNumber,
-            title: taskRow.title,
-            body: "",
-            labels: [],
-            repoUrl,
-            depsLoaded: true,
-          });
-          flog(`[startup] restored task #${row.taskId} (issue closed while worker active)`);
-        } else {
-          // Orphaned row: task was completed, truly abandoned, or never persisted.
-          flog(`[startup] orphaned assignment for task #${row.taskId}, deleting`);
-          assignStore.deleteAssignment(row.taskId).catch(err =>
-            flog(`ERROR Failed to delete orphaned assignment: ${fmtError(err)}`)
-          );
-          continue;
-        }
-      }
-      // Restore assigned state from DB; when the worker reconnects it will reclaim
-      // (if busy) or trigger a revert (if idle) via getAssignedTaskForWorker.
-      taskQueue.assignTask(row.taskId, row.workerId);
-      if (row.prNumber !== null) taskQueue.registerPr(row.prNumber, row.taskId);
-      if (row.branch) taskQueue.registerBranch(row.branch, row.taskId);
-      flog(`[startup] loaded assignment: task #${row.taskId} → worker ${row.workerId.slice(0, 8)}`);
-    }
-  } catch (err) {
-    flog(`ERROR Failed to load task assignments: ${fmtError(err)}`);
-    process.exit(1);
-  }
-
-  // Step 3: start listening — state is fully loaded
+  // Step 4: start listening — state is fully loaded
   const httpBase = config.foremanUrl.replace(/^ws:\/\//, "http://").replace(/^wss:\/\//, "https://").replace(/\/$/, "");
   const wsBase = config.foremanUrl.replace(/\/$/, "");
   server.listen(config.port, () => {
