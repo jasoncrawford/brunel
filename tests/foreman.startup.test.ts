@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { TaskQueue, WorkerRegistry, createForemanWss } from "../src/foreman.js";
-import type { TaskAssignmentStore, TaskStore, TaskRow } from "../src/db.js";
+import type { TaskStore, TaskRow } from "../src/db.js";
 import WebSocket, { WebSocketServer } from "ws";
 import http from "http";
 import type { AddressInfo } from "net";
@@ -26,16 +26,6 @@ function makeTaskStore(rows: Partial<TaskRow>[] = []): TaskStore {
       if (opts?.status) return full.filter((r) => r.status === opts.status);
       return full;
     }),
-  };
-}
-
-function makeStore(overrides: Partial<TaskAssignmentStore> = {}): TaskAssignmentStore {
-  return {
-    upsertAssignment: vi.fn().mockResolvedValue(undefined),
-    updatePr: vi.fn().mockResolvedValue(undefined),
-    deleteAssignment: vi.fn().mockResolvedValue(undefined),
-    listAssignments: vi.fn().mockResolvedValue([]),
-    ...overrides,
   };
 }
 
@@ -133,18 +123,17 @@ function startServer(): Promise<number> {
 // ── tryAssignWork — DB persistence ────────────────────────────────────────────
 
 describe("tryAssignWork — DB persistence", () => {
-  it("calls upsertAssignment before sending task_assigned", async () => {
+  it("calls markAssigned before sending task_assigned", async () => {
     const callOrder: string[] = [];
-    const store = makeStore({
-      upsertAssignment: vi.fn().mockImplementation(async () => {
-        callOrder.push("db");
-      }),
+    const taskStore = makeTaskStore();
+    taskStore.markAssigned = vi.fn().mockImplementation(async () => {
+      callOrder.push("db");
     });
 
     taskQueue.addTask(baseTask);
     ({ wss } = createForemanWss(taskQueue, registry, httpServer, {
       taskLabel: "brunel:ready",
-      assignStore: store,
+      taskStore,
     }));
 
     port = await startServer();
@@ -155,19 +144,18 @@ describe("tryAssignWork — DB persistence", () => {
     callOrder.push("after-recv");
 
     expect(msg).toMatchObject({ type: "task_assigned", taskId: "42" });
-    expect(store.upsertAssignment).toHaveBeenCalledWith("42", "w1");
+    expect(taskStore.markAssigned).toHaveBeenCalledWith("42", "w1");
     expect(callOrder[0]).toBe("db");
   });
 
   it("reverts task to pending if DB write fails", async () => {
-    const store = makeStore({
-      upsertAssignment: vi.fn().mockRejectedValue(new Error("db down")),
-    });
+    const taskStore = makeTaskStore();
+    taskStore.markAssigned = vi.fn().mockRejectedValue(new Error("db down"));
 
     taskQueue.addTask(baseTask);
     ({ wss } = createForemanWss(taskQueue, registry, httpServer, {
       taskLabel: "brunel:ready",
-      assignStore: store,
+      taskStore,
     }));
 
     port = await startServer();
@@ -177,7 +165,7 @@ describe("tryAssignWork — DB persistence", () => {
     expect(taskQueue.get("42")?.status).toBe("pending");
   });
 
-  it("works transparently without assignStore (null store)", async () => {
+  it("works transparently without taskStore (null store)", async () => {
     taskQueue.addTask(baseTask);
     ({ wss } = createForemanWss(taskQueue, registry, httpServer, { taskLabel: "brunel:ready" }));
 
@@ -194,15 +182,15 @@ describe("tryAssignWork — DB persistence", () => {
 // ── Startup reconnect behaviour ───────────────────────────────────────────────
 
 describe("startup reconnect behaviour", () => {
-  it("idle worker whose task was loaded from DB triggers deleteAssignment and revert", async () => {
+  it("idle worker whose task was loaded from DB triggers markPending and revert", async () => {
     // After revert, tryAssignWork will offer the task again (correct: worker starts fresh).
-    const store = makeStore();
+    const taskStore = makeTaskStore();
     taskQueue.addTask(baseTask);
-    taskQueue.assignTask("42", "w1"); // simulate what main block does after loadAssignments
+    taskQueue.assignTask("42", "w1"); // simulate what main block does after startup restore
 
     ({ wss } = createForemanWss(taskQueue, registry, httpServer, {
       taskLabel: "brunel:ready",
-      assignStore: store,
+      taskStore,
     }));
 
     port = await startServer();
@@ -211,20 +199,20 @@ describe("startup reconnect behaviour", () => {
     await q.next(); // hello_ack
     const msg = await q.next(); // task_assigned
 
-    // deleteAssignment should be called (the old session's row is removed)
-    expect(store.deleteAssignment).toHaveBeenCalledWith("42");
+    // markPending should be called (task reverted from old session)
+    expect(taskStore.markPending).toHaveBeenCalledWith("42");
     // Worker gets the task re-assigned (fresh session — prior assignment was reverted)
     expect(msg).toMatchObject({ type: "task_assigned" });
   });
 
   it("a different idle worker does not steal a startup-assigned task", async () => {
-    const store = makeStore();
+    const taskStore = makeTaskStore();
     taskQueue.addTask(baseTask);
     taskQueue.assignTask("42", "original-worker"); // simulate startup loading
 
     ({ wss } = createForemanWss(taskQueue, registry, httpServer, {
       taskLabel: "brunel:ready",
-      assignStore: store,
+      taskStore,
     }));
 
     port = await startServer();
@@ -237,13 +225,13 @@ describe("startup reconnect behaviour", () => {
   });
 
   it("busy worker reconnect correctly reclaims its task", async () => {
-    const store = makeStore();
+    const taskStore = makeTaskStore();
     taskQueue.addTask(baseTask);
     taskQueue.assignTask("42", "w1");
 
     ({ wss } = createForemanWss(taskQueue, registry, httpServer, {
       taskLabel: "brunel:ready",
-      assignStore: store,
+      taskStore,
     }));
 
     port = await startServer();
@@ -252,22 +240,22 @@ describe("startup reconnect behaviour", () => {
     await waitUntil(() => registry.get("w1")?.status === "busy");
     expect(taskQueue.get("42")?.status).toBe("assigned");
     expect(taskQueue.get("42")?.assignedWorkerId).toBe("w1");
-    // deleteAssignment must NOT be called — worker reclaimed its task
-    expect(store.deleteAssignment).not.toHaveBeenCalled();
+    // markPending must NOT be called — worker reclaimed its task
+    expect(taskStore.markPending).not.toHaveBeenCalled();
   });
 });
 
 // ── PR tracking persistence ───────────────────────────────────────────────────
 
 describe("PR tracking persistence", () => {
-  it("calls updatePr when PR opened event is routed", () => {
-    const store = makeStore();
+  it("calls updateTaskPr when PR opened event is routed", () => {
+    const taskStore = makeTaskStore();
     taskQueue.addTask(baseTask);
     taskQueue.assignTask("42", "w1");
 
     const result = createForemanWss(taskQueue, registry, httpServer, {
       taskLabel: "brunel:ready",
-      assignStore: store,
+      taskStore,
     });
     ({ wss } = result);
 
@@ -280,17 +268,17 @@ describe("PR tracking persistence", () => {
       },
     });
 
-    expect(store.updatePr).toHaveBeenCalledWith("42", 10, "fix-issue-42");
+    expect(taskStore.updateTaskPr).toHaveBeenCalledWith("42", 10, "fix-issue-42");
   });
 
-  it("calls updatePr with null branch when PR has no head ref", () => {
-    const store = makeStore();
+  it("calls updateTaskPr with null branch when PR has no head ref", () => {
+    const taskStore = makeTaskStore();
     taskQueue.addTask(baseTask);
     taskQueue.assignTask("42", "w1");
 
     const result = createForemanWss(taskQueue, registry, httpServer, {
       taskLabel: "brunel:ready",
-      assignStore: store,
+      taskStore,
     });
     ({ wss } = result);
 
@@ -303,7 +291,7 @@ describe("PR tracking persistence", () => {
       },
     });
 
-    expect(store.updatePr).toHaveBeenCalledWith("42", 10, null);
+    expect(taskStore.updateTaskPr).toHaveBeenCalledWith("42", 10, null);
   });
 });
 
@@ -413,14 +401,12 @@ describe("startup reconnect — worker reconnects to complete task", () => {
   it("busy worker reconnect to complete task is reclaimed (not re-idled)", async () => {
     // Simulate: issue was closed while worker was active, so the foreman marked
     // the task complete in-memory. Worker briefly disconnects and reconnects.
-    const store = makeStore();
     taskQueue.addTask(baseTask);
     taskQueue.assignTask("42", "w1");
     taskQueue.completeTask("42"); // issue closed while worker was active
 
     ({ wss } = createForemanWss(taskQueue, registry, httpServer, {
       taskLabel: "brunel:ready",
-      assignStore: store,
       reclaimTimeoutMs: 1000,
     }));
 
@@ -435,14 +421,14 @@ describe("startup reconnect — worker reconnects to complete task", () => {
   });
 
   it("busy worker that calls task_complete on a complete task releases correctly", async () => {
-    const store = makeStore();
+    const taskStore = makeTaskStore();
     taskQueue.addTask(baseTask);
     taskQueue.assignTask("42", "w1");
     taskQueue.completeTask("42");
 
     ({ wss } = createForemanWss(taskQueue, registry, httpServer, {
       taskLabel: "brunel:ready",
-      assignStore: store,
+      taskStore,
       reclaimTimeoutMs: 1000,
     }));
 
@@ -453,21 +439,21 @@ describe("startup reconnect — worker reconnects to complete task", () => {
     ws.send(JSON.stringify({ type: "task_complete", workerId: "w1", taskId: "42" }));
     await waitUntil(() => registry.get("w1")?.status === "idle");
 
-    expect(store.deleteAssignment).toHaveBeenCalledWith("42");
+    expect(taskStore.markComplete).toHaveBeenCalledWith("42");
   });
 });
 
-// ── task_complete deletes DB row ──────────────────────────────────────────────
+// ── task_complete marks task complete in DB ────────────────────────────────────
 
-describe("task_complete deletes DB row", () => {
-  it("calls deleteAssignment when task_complete received", async () => {
-    const store = makeStore();
+describe("task_complete marks task complete in DB", () => {
+  it("calls markComplete when task_complete received", async () => {
+    const taskStore = makeTaskStore();
     taskQueue.addTask(baseTask);
     taskQueue.assignTask("42", "w1");
 
     ({ wss } = createForemanWss(taskQueue, registry, httpServer, {
       taskLabel: "brunel:ready",
-      assignStore: store,
+      taskStore,
     }));
 
     port = await startServer();
@@ -477,6 +463,6 @@ describe("task_complete deletes DB row", () => {
     ws.send(JSON.stringify({ type: "task_complete", workerId: "w1", taskId: "42" }));
     await waitUntil(() => registry.get("w1")?.status === "idle");
 
-    expect(store.deleteAssignment).toHaveBeenCalledWith("42");
+    expect(taskStore.markComplete).toHaveBeenCalledWith("42");
   });
 });

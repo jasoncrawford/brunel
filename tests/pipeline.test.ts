@@ -24,7 +24,6 @@ import type { DbLogger } from "../src/db.js";
 import {
   createDbLogger,
   createNullDbLogger,
-  createTaskAssignmentStore,
   createTaskStore,
 } from "../src/db.js";
 import { loadDefaultConfig } from "../src/config.js";
@@ -37,7 +36,6 @@ const supabase = createTestSupabase();
 const realDbLogger = createDbLogger(supabase);
 const nullDbLogger = createNullDbLogger();
 const taskStore = createTaskStore(supabase);
-const assignStore = createTaskAssignmentStore(supabase);
 
 // ── Generic helpers ───────────────────────────────────────────────────────────
 
@@ -96,12 +94,6 @@ async function pollUntil<T>(
 async function getDbTask(taskId: string) {
   const tasks = await taskStore.listTasks();
   return tasks.find((t) => t.taskId === taskId);
-}
-
-/** Fetch the latest assignment row for a task. */
-async function getDbAssignment(taskId: string) {
-  const assignments = await assignStore.listAssignments();
-  return assignments.find((a) => a.taskId === taskId);
 }
 
 // ── Webhook payload factories ─────────────────────────────────────────────────
@@ -238,7 +230,6 @@ function buildForeman(opts: {
     taskLabel: defaultCfg.taskLabel,
     reclaimTimeoutMs: opts.reclaimTimeoutMs ?? defaultCfg.workerReclaimTimeoutMs,
     dbLogger: opts.dbLogger ?? nullDbLogger,
-    assignStore,
     taskStore,
     repo: "owner/repo",
     token: "token",
@@ -299,10 +290,7 @@ describe("pipeline: happy path and queued-then-assigned", () => {
     stubFetchNoBlockers();
     process.env.GITHUB_REPO = "owner/repo";
     process.env.GITHUB_TOKEN = "token";
-    await Promise.all([
-      supabase.from("tasks").delete().neq("task_id", ""),
-      supabase.from("task_assignments").delete().neq("task_id", ""),
-    ]);
+    await supabase.from("tasks").delete().neq("task_id", "");
     foreman = buildForeman();
     await new Promise<void>((resolve) =>
       foreman.httpServer.once("listening", resolve),
@@ -398,10 +386,7 @@ describe("pipeline: worker disconnect/reclaim (within reclaim window)", () => {
     stubFetchNoBlockers();
     process.env.GITHUB_REPO = "owner/repo";
     process.env.GITHUB_TOKEN = "token";
-    await Promise.all([
-      supabase.from("tasks").delete().neq("task_id", ""),
-      supabase.from("task_assignments").delete().neq("task_id", ""),
-    ]);
+    await supabase.from("tasks").delete().neq("task_id", "");
     // Long enough reclaim window that the reconnect happens before it expires
     foreman = buildForeman({ reclaimTimeoutMs: 30_000 });
     await new Promise<void>((resolve) =>
@@ -473,10 +458,7 @@ describe("pipeline: worker disconnect/expire (reclaim timer fires)", () => {
     stubFetchNoBlockers();
     process.env.GITHUB_REPO = "owner/repo";
     process.env.GITHUB_TOKEN = "token";
-    await Promise.all([
-      supabase.from("tasks").delete().neq("task_id", ""),
-      supabase.from("task_assignments").delete().neq("task_id", ""),
-    ]);
+    await supabase.from("tasks").delete().neq("task_id", "");
     // Very short reclaim window so the timer fires quickly
     foreman = buildForeman({ reclaimTimeoutMs: 80 });
     await new Promise<void>((resolve) =>
@@ -577,10 +559,7 @@ describe("pipeline: dependency blocking", () => {
     );
     process.env.GITHUB_REPO = "owner/repo";
     process.env.GITHUB_TOKEN = "token";
-    await Promise.all([
-      supabase.from("tasks").delete().neq("task_id", ""),
-      supabase.from("task_assignments").delete().neq("task_id", ""),
-    ]);
+    await supabase.from("tasks").delete().neq("task_id", "");
     foreman = buildForeman();
     await new Promise<void>((resolve) =>
       foreman.httpServer.once("listening", resolve),
@@ -645,7 +624,6 @@ describe("pipeline: PR events forwarded and logged to DB", () => {
     process.env.GITHUB_TOKEN = "token";
     await Promise.all([
       supabase.from("tasks").delete().neq("task_id", ""),
-      supabase.from("task_assignments").delete().neq("task_id", ""),
       // Only delete this scenario's rows — db.test.ts runs in parallel and owns
       // these tables too; blanket truncation would delete its rows mid-test.
       supabase.from("webhook_events").delete().in("delivery_id", ["evt-1", "evt-pr", "evt-cr"]),

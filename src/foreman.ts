@@ -12,7 +12,7 @@ import { loadConfig } from "./config.js";
 import { isBlocked, setBlockers, fetchBlockers } from "./dependencies.js";
 import { fetchIssueStates } from "./github.js";
 import type { DependencyGraph } from "./dependencies.js";
-import { type DbLogger, type TaskAssignmentStore, type TaskStore, type TaskBlockerStore, createDbLogger, createTaskAssignmentStore, createTaskStore, createTaskBlockerStore, createNullDbLogger, createNullTaskAssignmentStore, createNullTaskStore, createNullTaskBlockerStore } from "./db.js";
+import { type DbLogger, type TaskStore, type TaskBlockerStore, createDbLogger, createTaskStore, createTaskBlockerStore, createNullDbLogger, createNullTaskStore, createNullTaskBlockerStore } from "./db.js";
 import type { AdminWss, TaskSnapshot, WorkerSnapshot } from "./admin-ws.js";
 import { fmtError } from "./utils.js";
 
@@ -526,7 +526,6 @@ export function createForemanWss(
     workerSecret?: string;
     labeledIssues?: Map<number, LabeledIssueState>;
     pingIntervalMs?: number;
-    assignStore?: TaskAssignmentStore;
     taskStore?: TaskStore;
     blockerStore?: TaskBlockerStore;
     reclaimTimeoutMs: number;
@@ -543,12 +542,6 @@ export function createForemanWss(
   const dbLogger = options.dbLogger;
   const adminWss = options.adminWss;
   const workerSecret = options.workerSecret;
-  const assignStore: TaskAssignmentStore = options.assignStore ?? {
-    async upsertAssignment() {},
-    async updatePr() {},
-    async deleteAssignment() {},
-    async listAssignments() { return []; },
-  };
   const taskStore: TaskStore = options.taskStore ?? createNullTaskStore();
   const blockerStore: TaskBlockerStore = options.blockerStore ?? createNullTaskBlockerStore();
   const reclaimTimeoutMs = options.reclaimTimeoutMs;
@@ -663,9 +656,6 @@ export function createForemanWss(
             const branch = strProp(pr.head, "ref");
             if (branch) taskQueue.registerBranch(branch, linkedTask.taskId);
             // Persist PR number and branch so routing survives a foreman restart.
-            assignStore.updatePr(linkedTask.taskId, prNumber, branch ?? null).catch(err =>
-              flog(`ERROR Failed to update PR for task #${linkedTask.taskId}: ${fmtError(err)}`)
-            );
             taskStore.updateTaskPr(linkedTask.taskId, prNumber, branch ?? null).catch(err =>
               flog(`ERROR Failed to update task PR for #${linkedTask.taskId}: ${fmtError(err)}`)
             );
@@ -880,7 +870,7 @@ export function createForemanWss(
 
       // Persist to DB before sending task_assigned to the worker.
       try {
-        await assignStore.upsertAssignment(task.taskId, workerId);
+        await taskStore.markAssigned(task.taskId, workerId);
       } catch (err) {
         flog(`ERROR Failed to persist assignment for task #${task.taskId}: ${fmtError(err)}`);
         // Revert in-memory state — worker returns to idle.
@@ -889,9 +879,6 @@ export function createForemanWss(
         log(workerId, "→ idle (DB write failed)");
         return;
       }
-      taskStore.markAssigned(task.taskId, workerId).catch(err =>
-        flog(`ERROR Failed to mark task #${task.taskId} assigned: ${fmtError(err)}`)
-      );
 
       const queued = taskQueue.drainEvents(task.taskId);
       const assignMsg: ForemanMessage = {
@@ -977,9 +964,6 @@ export function createForemanWss(
         const priorTask = taskQueue.getAssignedTaskForWorker(workerId);
         if (priorTask) {
           taskQueue.revertTask(priorTask.taskId);
-          assignStore.deleteAssignment(priorTask.taskId).catch(err =>
-            flog(`ERROR Failed to delete assignment for #${priorTask.taskId}: ${fmtError(err)}`)
-          );
           taskStore.markPending(priorTask.taskId).catch(err =>
             flog(`ERROR Failed to mark task #${priorTask.taskId} pending: ${fmtError(err)}`)
           );
@@ -1002,9 +986,6 @@ export function createForemanWss(
       }
       if (task) {
         taskQueue.completeTask(msg.taskId);
-        assignStore.deleteAssignment(msg.taskId).catch(err =>
-          flog(`ERROR Failed to delete assignment for #${msg.taskId}: ${fmtError(err)}`)
-        );
         taskStore.markComplete(msg.taskId).catch(err =>
           flog(`ERROR Failed to mark task #${msg.taskId} complete: ${fmtError(err)}`)
         );
@@ -1187,23 +1168,20 @@ if (isMain) {
     ? new Webhooks({ secret: config.webhookSecret })
     : null;
 
-  // Setup DB logger, assignment store, task store, and blocker store
+  // Setup DB logger, task store, and blocker store
   // (all share the same Supabase client if configured)
   let dbLogger: DbLogger;
-  let assignStore: TaskAssignmentStore;
   let taskStore: TaskStore;
   let blockerStore: TaskBlockerStore;
   if (config.supabaseUrl && config.supabaseSecretKey) {
     const { createClient } = await import("@supabase/supabase-js");
     const supabase = createClient(config.supabaseUrl, config.supabaseSecretKey);
     dbLogger = createDbLogger(supabase);
-    assignStore = createTaskAssignmentStore(supabase);
     taskStore = createTaskStore(supabase);
     blockerStore = createTaskBlockerStore(supabase);
     flog("Supabase logging enabled");
   } else {
     dbLogger = createNullDbLogger();
-    assignStore = createNullTaskAssignmentStore();
     taskStore = createNullTaskStore();
     blockerStore = createNullTaskBlockerStore();
   }
@@ -1231,7 +1209,6 @@ if (isMain) {
       dbLogger,
       adminWss,
       workerSecret: config.workerSecret,
-      assignStore,
       taskStore,
       blockerStore,
       reclaimTimeoutMs: config.workerReclaimTimeoutMs,

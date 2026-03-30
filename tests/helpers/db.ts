@@ -15,14 +15,14 @@ export function createTestSupabase(): SupabaseClient {
 }
 
 /**
- * Deletes all rows from the four DB tables used by tests.
+ * Deletes all rows from the DB tables used by tests.
  * Call this in `beforeEach` to give each test a clean slate.
  */
 export async function truncateTables(supabase: SupabaseClient): Promise<void> {
   await Promise.all([
     supabase.from("webhook_events").delete().gt("id", 0),
     supabase.from("foreman_messages").delete().gt("id", 0),
+    supabase.from("task_blockers").delete().neq("task_id", ""),
     supabase.from("tasks").delete().neq("task_id", ""),
-    supabase.from("task_assignments").delete().neq("task_id", ""),
   ]);
 }
