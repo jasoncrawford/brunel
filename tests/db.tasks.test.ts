@@ -5,7 +5,7 @@ import { createTestSupabase } from "./helpers/db.js";
 const supabase = createTestSupabase();
 
 beforeEach(async () => {
-  await supabase.from("tasks").delete().neq("task_id", "");
+  await supabase.from("tasks").delete().in("task_id", ["1", "2", "3", "42"]);
 });
 
 // ── Tests: createTaskStore ─────────────────────────────────────────────────────
