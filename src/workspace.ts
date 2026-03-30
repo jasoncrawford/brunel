@@ -8,9 +8,15 @@ import { fmtError } from "./utils.js";
 const execFileAsync = promisify(execFileCb);
 
 export type GitExec = (args: string[], cwd?: string) => Promise<string>;
+export type NpmExec = (args: string[], cwd: string) => Promise<string>;
 
 const defaultGitExec: GitExec = async (args, cwd) => {
   const { stdout } = await execFileAsync("git", args, cwd ? { cwd } : {});
+  return stdout.trimEnd();
+};
+
+const defaultNpmExec: NpmExec = async (args, cwd) => {
+  const { stdout } = await execFileAsync("npm", args, { cwd });
   return stdout.trimEnd();
 };
 
@@ -28,10 +34,12 @@ export class Workspace {
     readonly dir: string,
     private readonly repoUrl: string,
     private readonly exec: GitExec,
+    private readonly npm: NpmExec,
   ) {}
 
   /**
    * Clone the repo into baseDir/workerId if not already present.
+   * Runs npm install after a fresh clone.
    * Writes a PID lockfile after cloning (or on any create call).
    */
   static async create(
@@ -39,6 +47,7 @@ export class Workspace {
     workerId: string,
     repoUrl: string,
     exec: GitExec = defaultGitExec,
+    npm: NpmExec = defaultNpmExec,
   ): Promise<Workspace> {
     const dir = path.join(baseDir, workerId);
     fs.mkdirSync(baseDir, { recursive: true });
@@ -46,9 +55,11 @@ export class Workspace {
       if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
       display.print(display.c.sageGreen(`[workspace] Cloning ${repoUrl} → ${dir}`));
       await exec(["clone", repoUrl, dir], undefined);
+      display.print(display.c.sageGreen(`[workspace] Installing dependencies in ${dir}`));
+      await npm(["install"], dir);
     }
     fs.writeFileSync(path.join(dir, ".brunel.lock"), String(process.pid));
-    return new Workspace(dir, repoUrl, exec);
+    return new Workspace(dir, repoUrl, exec, npm);
   }
 
   /**
@@ -83,6 +94,8 @@ export class Workspace {
     await this.exec(["checkout", "main"], this.dir);
     await this.exec(["reset", "--hard", "origin/main"], this.dir);
     await this.exec(["clean", "-fdx"], this.dir);
+    display.print(display.c.sageGreen(`[workspace] Installing dependencies in ${this.dir}`));
+    await this.npm(["install"], this.dir);
   }
 
   /** Return safety info about the current checkout state. */
