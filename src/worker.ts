@@ -338,7 +338,6 @@ export class WorkerSession {
 
   private connect(): void {
     this.connectionStatus = "reconnecting";
-    this.refreshStatus();
     const ws = this.wsFactory(this.workerId, this.currentTaskId);
     this.ws = ws;
     let connectedAt: number | undefined;
