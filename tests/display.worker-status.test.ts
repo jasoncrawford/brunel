@@ -130,7 +130,7 @@ describe("fmtWorkerStatus", () => {
     }));
     // Should not have a trailing separator after task
     const parts = result.split("∙");
-    expect(parts.length).toBe(3); // "worker abc12345 ", " task #5      Connected" (with separator)
+    expect(parts.length).toBe(2); // "worker abc12345 ", " task #5      Connected"
   });
 
   it("result fits within specified width", () => {

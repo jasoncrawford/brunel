@@ -664,8 +664,9 @@ describe("pipeline: PR events forwarded and logged to DB", () => {
     await q.next(); // hello_ack
     await q.next(); // task_assigned
 
-    // 2. Worker opens a PR that closes issue #100
+    // 2. Worker opens a PR that closes issue #100 (now also forwarded as event_notification)
     routeEvent("evt-pr", "pull_request", prOpenedPayload(20, "Closes #100"));
+    await q.next(); // pull_request event_notification
 
     // 3. A check_run fires for PR #20
     routeEvent("evt-cr", "check_run", checkRunPayload(20));

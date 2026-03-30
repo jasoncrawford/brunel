@@ -345,8 +345,8 @@ describe("print()", () => {
       const output = captureOutput(() => {
         print("hello");
       });
-      // \r\x1b[K (CR + clear to end of line) must appear BEFORE the logged text
-      const clearIdx = output.indexOf("\r\x1b[K");
+      // \r\x1b[J (CR + clear to end of screen) must appear BEFORE the logged text
+      const clearIdx = output.indexOf("\r\x1b[J");
       const helloIdx = output.indexOf("hello");
       expect(clearIdx).toBeGreaterThan(-1);
       expect(helloIdx).toBeGreaterThan(clearIdx);
