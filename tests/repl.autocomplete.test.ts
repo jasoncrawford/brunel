@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PassThrough } from "stream";
-import { ask, matchCommands, listCommandNames, listWorkerCommandNames, listCommands, parseFrontmatter, listSkillNames, type ListDir, type CommandSuggestion } from "../src/input.js";
+import { ask, matchCommands, filterCommands, listCommandNames, listWorkerCommandNames, listCommands, parseFrontmatter, listSkillNames, type ListDir, type CommandSuggestion } from "../src/input.js";
 
 // ── Test harness for ask() integration tests ──────────────────────────────────
 
@@ -225,8 +225,12 @@ describe("matchCommands", () => {
     expect(matchCommands("zzz", ["brainstorm", "clear", "exit"])).toEqual([]);
   });
 
-  it("is case-sensitive", () => {
-    expect(matchCommands("Ex", ["brainstorm", "clear", "exit"])).toEqual([]);
+  it("is case-insensitive", () => {
+    expect(matchCommands("EX", ["brainstorm", "clear", "exit"])).toEqual(["exit"]);
+  });
+
+  it("matches non-prefix substrings", () => {
+    expect(matchCommands("xit", ["brainstorm", "clear", "exit"])).toEqual(["exit"]);
   });
 
   it("prefix matching includes exact matches", () => {
@@ -235,6 +239,70 @@ describe("matchCommands", () => {
 
   it("handles empty command list", () => {
     expect(matchCommands("ex", [])).toEqual([]);
+  });
+
+  it("prefix matches come before non-prefix substring matches", () => {
+    // "storm" is a prefix of "storm-abc" and a non-prefix substring of "brainstorm"
+    expect(matchCommands("storm", ["brainstorm", "storm-abc"])).toEqual(["storm-abc", "brainstorm"]);
+  });
+});
+
+// ── filterCommands ────────────────────────────────────────────────────────────
+
+describe("filterCommands", () => {
+  const suggestions: CommandSuggestion[] = [
+    { name: "brainstorm",  description: "Brainstorm ideas" },
+    { name: "clear",       description: "Clear conversation" },
+    { name: "exit",        description: "Exit the REPL" },
+    { name: "run-tests",   description: "Run the test suite" },
+  ];
+
+  it("empty query returns all commands in original order", () => {
+    expect(filterCommands("", suggestions)).toEqual(suggestions);
+  });
+
+  it("prefix match of command name", () => {
+    const result = filterCommands("ex", suggestions);
+    expect(result.map(c => c.name)).toContain("exit");
+  });
+
+  it("non-prefix substring match of command name", () => {
+    const result = filterCommands("xit", suggestions);
+    expect(result.map(c => c.name)).toContain("exit");
+  });
+
+  it("matches description when name does not match", () => {
+    const result = filterCommands("suite", suggestions);
+    expect(result.map(c => c.name)).toContain("run-tests");
+  });
+
+  it("is case-insensitive for name matching", () => {
+    const result = filterCommands("EX", suggestions);
+    expect(result.map(c => c.name)).toContain("exit");
+  });
+
+  it("is case-insensitive for description matching", () => {
+    const result = filterCommands("SUITE", suggestions);
+    expect(result.map(c => c.name)).toContain("run-tests");
+  });
+
+  it("no matches returns empty array", () => {
+    expect(filterCommands("zzz", suggestions)).toEqual([]);
+  });
+
+  it("sort order: prefix name matches before non-prefix name matches before description-only matches", () => {
+    const cmds: CommandSuggestion[] = [
+      { name: "test-suite",   description: "Run the suite"  },  // description matches "run", name doesn't
+      { name: "run-tests",    description: "Execute suite"  },  // name prefix matches "run"
+      { name: "dry-run",      description: "Preview only"   },  // name non-prefix substring matches "run"
+    ];
+    const result = filterCommands("run", cmds);
+    const names = result.map(c => c.name);
+    expect(names).toEqual(["run-tests", "dry-run", "test-suite"]);
+  });
+
+  it("handles empty command list", () => {
+    expect(filterCommands("ex", [])).toEqual([]);
   });
 });
 
@@ -809,6 +877,83 @@ describe("ask() - autocomplete edge cases", () => {
       const shortCol = shortDescPos - lineContainingShort;
       const longCol  = longDescPos - lineContainingLong;
       expect(shortCol).toBe(longCol);
+    });
+  });
+});
+
+// ── Substring and description matching ────────────────────────────────────────
+
+describe("ask() - substring and description autocomplete", () => {
+  const extCmds = (): CommandSuggestion[] => [
+    { name: "brainstorm",  description: "Brainstorm ideas" },
+    { name: "clear",       description: "Clear conversation" },
+    { name: "exit",        description: "Exit the REPL" },
+    { name: "run-tests",   description: "Run the test suite" },
+  ];
+
+  it("non-prefix substring of command name triggers Tab completion", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = ask("> ", extCmds);
+      stdin.push("/xit");   // non-prefix substring of "exit"
+      stdin.push("\x09");   // Tab
+      stdin.push("\r");
+      const result = await p;
+      expect(result).toBe("/exit");
+    });
+  });
+
+  it("description substring shows matching command in suggestions", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = ask("> ", extCmds);
+      stdin.push("/suite"); // matches "run-tests" description
+      stdin.push("\r");     // Enter
+      await p;
+      const allOutput = vi.mocked(process.stdout.write).mock.calls.map(c => String(c[0])).join("");
+      expect(allOutput).toContain("run-tests");
+    });
+  });
+
+  it("description substring Enter-completes to matching command", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = ask("> ", extCmds);
+      stdin.push("/suite"); // only matches "run-tests" via description
+      stdin.push("\r");
+      const result = await p;
+      expect(result).toBe("/run-tests");
+    });
+  });
+
+  it("matching is case-insensitive for command name", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = ask("> ", extCmds);
+      stdin.push("/EXIT");
+      stdin.push("\r");
+      const result = await p;
+      expect(result).toBe("/exit");
+    });
+  });
+
+  it("matching is case-insensitive for description", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = ask("> ", extCmds);
+      stdin.push("/SUITE");
+      stdin.push("\r");
+      const result = await p;
+      expect(result).toBe("/run-tests");
+    });
+  });
+
+  it("sort order: prefix name match comes before description-only match", async () => {
+    const sortCmds = (): CommandSuggestion[] => [
+      { name: "run-tests",  description: "Execute the suite"   },
+      { name: "brainstorm", description: "Run ideas by the AI" },  // description matches "run"
+    ];
+    await withFakeStdin(async (stdin) => {
+      const p = ask("> ", sortCmds);
+      stdin.push("/run");
+      stdin.push("\r"); // Enter picks first match
+      const result = await p;
+      expect(result).toBe("/run-tests"); // prefix match before description match
     });
   });
 });
