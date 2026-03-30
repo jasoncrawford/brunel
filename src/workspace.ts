@@ -102,7 +102,7 @@ export class Workspace {
     await this.exec(["fetch", "origin"], this.dir);
     await this.exec(["checkout", "main"], this.dir);
     await this.exec(["reset", "--hard", "origin/main"], this.dir);
-    await this.exec(["clean", "-fdx", "-e", "node_modules"], this.dir);
+    await this.exec(["clean", "-fdx", "-e", "node_modules", "-e", ".env", "-e", ".brunel.lock"], this.dir);
     await this._npmInstall();
   }
 
