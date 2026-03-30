@@ -275,7 +275,7 @@ export interface TaskRow {
   issueNumber: number;
   repo: string;
   title: string;
-  status: "pending" | "assigned" | "complete";
+  status: "pending" | "assigned" | "complete" | "blocked";
   workerId: string | null;
   prNumber: number | null;
   branch: string | null;
@@ -285,7 +285,7 @@ export interface TaskRow {
 }
 
 export interface ListTasksOpts {
-  status?: "pending" | "assigned" | "complete";
+  status?: "pending" | "assigned" | "complete" | "blocked";
   limit?: number;
 }
 
@@ -298,6 +298,8 @@ export interface TaskStore {
   markComplete(taskId: string): Promise<void>;
   /** Revert task to pending, clearing worker_id. */
   markPending(taskId: string): Promise<void>;
+  /** Mark task as blocked (waiting on a dependency). */
+  markBlocked(taskId: string): Promise<void>;
   /** Update PR number and branch for a task. */
   updateTaskPr(taskId: string, prNumber: number, branch: string | null): Promise<void>;
   /** List tasks, optionally filtered by status. */
@@ -311,7 +313,7 @@ export function createTaskStore(supabase: SupabaseClient): TaskStore {
       issueNumber: row.issue_number as number,
       repo: row.repo as string,
       title: row.title as string,
-      status: row.status as "pending" | "assigned" | "complete",
+      status: row.status as "pending" | "assigned" | "complete" | "blocked",
       workerId: (row.worker_id as string | null) ?? null,
       prNumber: (row.pr_number as number | null) ?? null,
       branch: (row.branch as string | null) ?? null,
@@ -351,6 +353,13 @@ export function createTaskStore(supabase: SupabaseClient): TaskStore {
       if (error) throw error;
     },
 
+    async markBlocked(taskId) {
+      const { error } = await supabase.from("tasks")
+        .update({ status: "blocked", worker_id: null })
+        .eq("task_id", taskId);
+      if (error) throw error;
+    },
+
     async updateTaskPr(taskId, prNumber, branch) {
       const { error } = await supabase.from("tasks")
         .update({ pr_number: prNumber, branch })
@@ -377,7 +386,86 @@ export function createNullTaskStore(): TaskStore {
     async markAssigned() {},
     async markComplete() {},
     async markPending() {},
+    async markBlocked() {},
     async updateTaskPr() {},
     async listTasks() { return []; },
+  };
+}
+
+// ── TaskBlockerStore ───────────────────────────────────────────────────────────
+
+export interface TaskBlockerRow {
+  taskId: string;
+  blockerIssueNumber: number;
+  closedAt: string | null;
+}
+
+export interface TaskBlockerStore {
+  /** Insert or ignore rows for each blocker issue number. */
+  upsertBlockers(taskId: string, blockerIssueNumbers: number[]): Promise<void>;
+  /** Set closed_at = now() for a specific (taskId, blockerIssueNumber) pair. */
+  closeBlocker(taskId: string, blockerIssueNumber: number): Promise<void>;
+  /** List all blockers for a single task. */
+  listTaskBlockers(taskId: string): Promise<TaskBlockerRow[]>;
+  /** List all open (not closed) blocker rows across all tasks, used on restart. */
+  listAllOpenBlockers(): Promise<TaskBlockerRow[]>;
+}
+
+export function createTaskBlockerStore(supabase: SupabaseClient): TaskBlockerStore {
+  function rowToBlockerRow(row: Record<string, unknown>): TaskBlockerRow {
+    return {
+      taskId: row.task_id as string,
+      blockerIssueNumber: row.blocker_issue_number as number,
+      closedAt: (row.closed_at as string | null) ?? null,
+    };
+  }
+
+  return {
+    async upsertBlockers(taskId, blockerIssueNumbers) {
+      if (blockerIssueNumbers.length === 0) return;
+      const rows = blockerIssueNumbers.map((n) => ({
+        task_id: taskId,
+        blocker_issue_number: n,
+      }));
+      const { error } = await supabase.from("task_blockers").upsert(rows, {
+        onConflict: "task_id,blocker_issue_number",
+        ignoreDuplicates: true,
+      });
+      if (error) throw error;
+    },
+
+    async closeBlocker(taskId, blockerIssueNumber) {
+      const { error } = await supabase.from("task_blockers")
+        .update({ closed_at: new Date().toISOString() })
+        .eq("task_id", taskId)
+        .eq("blocker_issue_number", blockerIssueNumber)
+        .is("closed_at", null);
+      if (error) throw error;
+    },
+
+    async listTaskBlockers(taskId) {
+      const { data, error } = await supabase.from("task_blockers")
+        .select("task_id, blocker_issue_number, closed_at")
+        .eq("task_id", taskId);
+      if (error) throw error;
+      return ((data ?? []) as Record<string, unknown>[]).map(rowToBlockerRow);
+    },
+
+    async listAllOpenBlockers() {
+      const { data, error } = await supabase.from("task_blockers")
+        .select("task_id, blocker_issue_number, closed_at")
+        .is("closed_at", null);
+      if (error) throw error;
+      return ((data ?? []) as Record<string, unknown>[]).map(rowToBlockerRow);
+    },
+  };
+}
+
+export function createNullTaskBlockerStore(): TaskBlockerStore {
+  return {
+    async upsertBlockers() {},
+    async closeBlocker() {},
+    async listTaskBlockers() { return []; },
+    async listAllOpenBlockers() { return []; },
   };
 }

@@ -171,6 +171,42 @@ describe("createTaskStore", () => {
   });
 });
 
+// ── Tests: createTaskStore — blocked status ────────────────────────────────────
+
+describe("createTaskStore — blocked status", () => {
+  it("markBlocked sets status to blocked", async () => {
+    const store = createTaskStore(supabase);
+    await store.upsertTask("42", 42, "owner/repo", "Fix the bug");
+    await store.markBlocked("42");
+
+    const tasks = await store.listTasks();
+    expect(tasks[0].status).toBe("blocked");
+    expect(tasks[0].workerId).toBeNull();
+  });
+
+  it("listTasks filters by status=blocked", async () => {
+    const store = createTaskStore(supabase);
+    await store.upsertTask("1", 1, "r/r", "Pending");
+    await store.upsertTask("2", 2, "r/r", "Blocked");
+    await store.markBlocked("2");
+
+    const blocked = await store.listTasks({ status: "blocked" });
+    expect(blocked).toHaveLength(1);
+    expect(blocked[0].taskId).toBe("2");
+  });
+
+  it("listTasks returns blocked tasks when no filter", async () => {
+    const store = createTaskStore(supabase);
+    await store.upsertTask("1", 1, "r/r", "Pending");
+    await store.upsertTask("2", 2, "r/r", "Blocked");
+    await store.markBlocked("2");
+
+    const all = await store.listTasks();
+    expect(all).toHaveLength(2);
+    expect(all.map((t) => t.status)).toEqual(expect.arrayContaining(["pending", "blocked"]));
+  });
+});
+
 // ── Tests: createNullTaskStore ─────────────────────────────────────────────────
 
 describe("createNullTaskStore", () => {
@@ -192,6 +228,11 @@ describe("createNullTaskStore", () => {
   it("markPending resolves without error", async () => {
     const store = createNullTaskStore();
     await expect(store.markPending("42")).resolves.toBeUndefined();
+  });
+
+  it("markBlocked resolves without error", async () => {
+    const store = createNullTaskStore();
+    await expect(store.markBlocked("42")).resolves.toBeUndefined();
   });
 
   it("updateTaskPr resolves without error", async () => {
