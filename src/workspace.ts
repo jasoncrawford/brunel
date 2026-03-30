@@ -51,14 +51,16 @@ export class Workspace {
   ): Promise<Workspace> {
     const dir = path.join(baseDir, workerId);
     fs.mkdirSync(baseDir, { recursive: true });
-    if (!fs.existsSync(path.join(dir, ".git"))) {
+    const needsClone = !fs.existsSync(path.join(dir, ".git"));
+    if (needsClone) {
       if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
       display.print(display.c.sageGreen(`[workspace] Cloning ${repoUrl} → ${dir}`));
       await exec(["clone", repoUrl, dir], undefined);
-      await Workspace._npmInstall(npm, dir);
     }
     fs.writeFileSync(path.join(dir, ".brunel.lock"), String(process.pid));
-    return new Workspace(dir, repoUrl, exec, npm);
+    const ws = new Workspace(dir, repoUrl, exec, npm);
+    if (needsClone) await ws._npmInstall();
+    return ws;
   }
 
   /**
@@ -92,15 +94,15 @@ export class Workspace {
     await this.exec(["fetch", "origin"], this.dir);
     await this.exec(["checkout", "main"], this.dir);
     await this.exec(["reset", "--hard", "origin/main"], this.dir);
-    await this.exec(["clean", "-fdx"], this.dir);
-    await Workspace._npmInstall(this.npm, this.dir);
+    await this.exec(["clean", "-fdx", "-e", "node_modules"], this.dir);
+    await this._npmInstall();
   }
 
-  /** Run npm install in dir if a package.json is present. */
-  private static async _npmInstall(npm: NpmExec, dir: string): Promise<void> {
-    if (!fs.existsSync(path.join(dir, "package.json"))) return;
-    display.print(display.c.sageGreen(`[workspace] Installing dependencies in ${dir}`));
-    await npm(["install"], dir);
+  /** Run npm install if a package.json is present. */
+  private async _npmInstall(): Promise<void> {
+    if (!fs.existsSync(path.join(this.dir, "package.json"))) return;
+    display.print(display.c.sageGreen(`[workspace] Installing dependencies in ${this.dir}`));
+    await this.npm(["install"], this.dir);
   }
 
   /** Return safety info about the current checkout state. */
