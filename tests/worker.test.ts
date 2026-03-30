@@ -38,6 +38,7 @@ let display: {
   startPersistentStatus: ReturnType<typeof vi.fn>;
   stopPersistentStatus: ReturnType<typeof vi.fn>;
   updatePersistentStatus: ReturnType<typeof vi.fn>;
+  setOnToolResultCallback: ReturnType<typeof vi.fn>;
 };
 let session: WorkerSession;
 
@@ -51,6 +52,7 @@ beforeEach(() => {
     startPersistentStatus: vi.fn(),
     stopPersistentStatus: vi.fn(),
     updatePersistentStatus: vi.fn(),
+    setOnToolResultCallback: vi.fn(),
   };
   session = new WorkerSession(WORKER_ID, wsFactory, runQuery, display);
   session.start();
@@ -391,10 +393,41 @@ describe("connection status bar", () => {
     expect(display.startPersistentStatus).toHaveBeenCalledOnce();
   });
 
+  it("registers a tool result callback on start()", () => {
+    expect(display.setOnToolResultCallback).toHaveBeenCalledOnce();
+    expect(typeof display.setOnToolResultCallback.mock.calls[0][0]).toBe("function");
+  });
+
+  it("tool result callback refreshes status on Bash tool", async () => {
+    const cb = display.setOnToolResultCallback.mock.calls[0][0] as (toolName: string) => void;
+    display.updatePersistentStatus.mockClear();
+    cb("Bash");
+    await vi.waitFor(() => expect(display.updatePersistentStatus).toHaveBeenCalled());
+  });
+
+  it("tool result callback does not refresh status for non-Bash tools", async () => {
+    const cb = display.setOnToolResultCallback.mock.calls[0][0] as (toolName: string) => void;
+    display.updatePersistentStatus.mockClear();
+    cb("Read");
+    // Give a tick for any potential async work
+    await new Promise((r) => setTimeout(r, 10));
+    expect(display.updatePersistentStatus).not.toHaveBeenCalled();
+  });
+
   it("calls updatePersistentStatus after open", () => {
     display.updatePersistentStatus.mockClear();
     fakeWs.emit("open");
     expect(display.updatePersistentStatus).toHaveBeenCalled();
+  });
+
+  it("disconnect code appears in status text when reconnecting", () => {
+    vi.useFakeTimers();
+    fakeWs.emit("open");
+    fakeWs.emit("close", 1006, Buffer.from(""));
+    // disconnectCode is stored but only shown in verbose mode
+    // (non-verbose: just "Reconnecting...")
+    expect(stripAnsi(session.getStatusText())).toContain("Reconnecting");
+    vi.useRealTimers();
   });
 
   it("logs error message on ws error event", () => {

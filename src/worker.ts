@@ -76,6 +76,8 @@ export type WorkerDisplay = {
   startPersistentStatus?: (getText: () => string) => void;
   stopPersistentStatus?: () => void;
   updatePersistentStatus?: () => void;
+  /** Register a callback fired after each tool result (tool has just finished). */
+  setOnToolResultCallback?: (fn: ((toolName: string) => void) | null) => void;
 };
 
 export type WorkspaceCtx = {
@@ -118,6 +120,7 @@ export class WorkerSession {
 
   // Status bar state
   private connectionStatus: "connected" | "disconnected" | "reconnecting" = "disconnected";
+  private disconnectCode: number | undefined;
   private currentPrNumber: number | undefined;
   private currentBranch = "";
 
@@ -139,6 +142,7 @@ export class WorkerSession {
       prNumber: this.currentPrNumber,
       branch: this.currentBranch || undefined,
       connectionStatus: this.connectionStatus,
+      disconnectCode: this.disconnectCode,
     });
   }
 
@@ -158,6 +162,12 @@ export class WorkerSession {
 
   start(): void {
     this.display.startPersistentStatus?.(() => this.getStatusText());
+    this.display.setOnToolResultCallback?.((toolName) => {
+      // Refresh the branch display after each Bash tool completes so the status
+      // bar reflects branch changes (e.g. git checkout) without waiting for the
+      // full query to finish.
+      if (toolName === "Bash") void this.refreshBranch();
+    });
     void this.refreshBranch();
     this.connect();
   }
@@ -335,6 +345,7 @@ export class WorkerSession {
       connectedAt = Date.now();
       this.connectionState = "hello_sent";
       this.connectionStatus = "connected";
+      this.disconnectCode = undefined;
       this.refreshStatus();
     });
 
@@ -344,9 +355,10 @@ export class WorkerSession {
       this.handleMessage(msg);
     });
 
-    ws.on("close", (_code: number, _reason: Buffer) => {
+    ws.on("close", (code: number, _reason: Buffer) => {
       if (ws !== this.ws) return; // stale close from a previous connection
       this.connectionStatus = "reconnecting";
+      this.disconnectCode = code;
       this.refreshStatus();
       setTimeout(() => this.connect(), 2000 + Math.random() * 3000);
     });
@@ -569,6 +581,7 @@ export async function workerMain(
     startPersistentStatus: display.startPersistentStatus,
     stopPersistentStatus: display.stopPersistentStatus,
     updatePersistentStatus: display.updatePersistentStatus,
+    setOnToolResultCallback: display.setOnToolResultCallback,
   };
 
   const session = new WorkerSession(workerId, wsFactory, runQueryFn, workerDisplay, {

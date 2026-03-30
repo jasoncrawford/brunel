@@ -7,6 +7,11 @@ function stripAnsi(s: string): string {
 }
 
 describe("fmtWorkerStatus", () => {
+  afterEach(() => {
+    // Reset verbose flag so tests that call setVerbose(true) don't bleed over.
+    display.setVerbose(false);
+  });
+
   it("idle with no task shows worker id and idle", () => {
     const result = stripAnsi(display.fmtWorkerStatus({
       workerId: "7c254628-abcd-1234-efgh-000000000000",
@@ -56,6 +61,31 @@ describe("fmtWorkerStatus", () => {
       width: 80,
     }));
     expect(result).toContain("Reconnecting...");
+  });
+
+  it("reconnecting with disconnectCode omits code in non-verbose mode", () => {
+    display.setVerbose(false);
+    const result = stripAnsi(display.fmtWorkerStatus({
+      workerId: "abc12345-0000-0000-0000-000000000000",
+      status: "idle",
+      connectionStatus: "reconnecting",
+      disconnectCode: 1006,
+      width: 80,
+    }));
+    expect(result).toContain("Reconnecting...");
+    expect(result).not.toContain("1006");
+  });
+
+  it("reconnecting with disconnectCode shows code in verbose mode", () => {
+    display.setVerbose(true);
+    const result = stripAnsi(display.fmtWorkerStatus({
+      workerId: "abc12345-0000-0000-0000-000000000000",
+      status: "idle",
+      connectionStatus: "reconnecting",
+      disconnectCode: 1006,
+      width: 80,
+    }));
+    expect(result).toContain("Reconnecting... (1006)");
   });
 
   it("omits task when taskNumber is undefined", () => {

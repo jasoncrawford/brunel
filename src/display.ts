@@ -628,17 +628,20 @@ export interface WorkerStatusOpts {
   prNumber?: number;
   branch?: string;
   connectionStatus: "connected" | "disconnected" | "reconnecting";
+  /** WebSocket close code, shown in verbose mode when reconnecting. */
+  disconnectCode?: number;
   width?: number;
 }
 
 export function fmtWorkerStatus(opts: WorkerStatusOpts): string {
-  const { workerId, status, taskNumber, prNumber, branch, connectionStatus } = opts;
+  const { workerId, status, taskNumber, prNumber, branch, connectionStatus, disconnectCode } = opts;
   const width = opts.width ?? (process.stdout.columns ?? W);
 
   // Right side: connection status (always shown, right-justified)
+  const codeStr = verbose && disconnectCode != null ? ` (${disconnectCode})` : "";
   const rightText =
     connectionStatus === "connected"    ? "Connected" :
-    connectionStatus === "reconnecting" ? "Reconnecting..." :
+    connectionStatus === "reconnecting" ? `Reconnecting...${codeStr}` :
                                           "Disconnected";
 
   // Left side: worker {id8} • {status}[ • task #{N}][ • PR #{N}][ • {branch}]
@@ -669,6 +672,15 @@ let _statusInterval: ReturnType<typeof setInterval> | null = null;
 let _persistentStatusText = "";
 export let _persistentStatusActive = false;
 let _persistentGetText: (() => string) | null = null;
+
+// Callback invoked when a tool_result block is printed, i.e. immediately after
+// a tool has finished running. Used by the worker to refresh the git branch in
+// the status bar after each Bash invocation.
+let _onToolResultCallback: ((toolName: string) => void) | null = null;
+
+export function setOnToolResultCallback(fn: ((toolName: string) => void) | null): void {
+  _onToolResultCallback = fn;
+}
 
 // Callback invoked after print() writes output, so the input layer can redraw
 // the prompt (needed in worker mode when WebSocket messages arrive during ask()).
@@ -804,6 +816,8 @@ export function printBlock(b: ContentBlock, role: "assistant" | "user", msg?: Re
     const name = toolUseNames.get(tr.tool_use_id) ?? "";
     const _input = toolUseInputs.get(tr.tool_use_id);
     print(resolve(tr.is_error ? TOOL_ERROR_FMT : TOOL_RESULT_FMT, name, { ...tr, _msg: msg, _input }));
+    // Fire after the tool result is printed — tool has just finished running.
+    _onToolResultCallback?.(name);
     return;
   }
   const blockFmt = role === "assistant" ? ASSISTANT_BLOCK_FMT : USER_BLOCK_FMT;
