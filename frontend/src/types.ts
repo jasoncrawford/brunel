@@ -7,7 +7,7 @@ export interface TaskSnapshot {
   taskId: string;
   issueNumber: number;
   title: string;
-  status: "pending" | "assigned" | "complete";
+  status: "pending" | "assigned" | "complete" | "blocked";
   assignedWorkerId?: string;
   prNumber?: number;
   prUrl?: string;
@@ -39,7 +39,7 @@ export interface TaskRow {
   issueNumber: number;
   repo: string;
   title: string;
-  status: "pending" | "assigned" | "complete";
+  status: "pending" | "assigned" | "complete" | "blocked";
   workerId: string | null;
   prNumber: number | null;
   branch: string | null;
