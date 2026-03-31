@@ -1,5 +1,4 @@
 import "dotenv/config";
-import crypto from "crypto";
 import os from "node:os";
 import path from "node:path";
 import { WebSocket } from "ws";
@@ -9,7 +8,7 @@ import { ask, listWorkerCommands, dispatchInput, pick } from "./input.js";
 import type { ForemanMessage, GitHubEvent, TaskIssue, WorkerMessage } from "./types.js";
 import type { PermissionMode } from "@anthropic-ai/claude-agent-sdk";
 import { Workspace, confirmIfUnsafe } from "./workspace.js";
-import { fmtError } from "./utils.js";
+import { fmtError, generateWorkerId } from "./utils.js";
 
 // ── Event classification ───────────────────────────────────────────────────────
 
@@ -447,7 +446,7 @@ export async function workerMain(
   },
 ): Promise<void> {
   const FOREMAN_URL = config.foremanUrl;
-  const workerId = crypto.randomUUID();
+  const workerId = generateWorkerId();
 
   const originalCwd = process.cwd();
   const workspaceDir = config.workspaceDir ?? path.join(os.homedir(), ".brunel", "workers");
