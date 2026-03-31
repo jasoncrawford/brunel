@@ -746,3 +746,32 @@ export function printMessage(msg: unknown) {
 export function printForemanMessage(msg: ForemanMessage) {
   print(resolve(FOREMAN_MESSAGE_FMT, msg.type, msg));
 }
+
+// ── Working verb ───────────────────────────────────────────────────────────────
+
+export const WORKING_VERBS = [
+  "Building",
+  "Constructing",
+  "Surveying",
+  "Drafting",
+  "Engineering",
+  "Excavating",
+  "Framing",
+  "Grading",
+  "Laying foundations",
+  "Paving",
+  "Scaffolding",
+  "Welding",
+  "Wiring",
+  "Plumbing",
+  "Blueprinting",
+  "Pouring concrete",
+  "Raising beams",
+  "Riveting",
+  "Hoisting",
+  "Bolting",
+];
+
+export function pickWorkingVerb(): string {
+  return WORKING_VERBS[Math.floor(Math.random() * WORKING_VERBS.length)];
+}

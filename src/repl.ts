@@ -99,10 +99,11 @@ export async function runQuery(
   // message_delta.usage.output_tokens is cumulative per message, so we sum
   // completed messages and track the current one separately.
   const stats = { turns: 0, inputTokens: 0, completedOutputTokens: 0, currentOutputTokens: 0 };
+  const workingVerb = display.pickWorkingVerb();
   const getStatusText = () => {
     const secs = Math.floor((Date.now() - startTime) / 1000);
     const outTokens = stats.completedOutputTokens + stats.currentOutputTokens;
-    return display.c.darkGray(`Working… ${display.fmtStats(secs, stats.turns || undefined, outTokens || undefined, stats.inputTokens || undefined)}`);
+    return display.c.darkGray(`${workingVerb}… ${display.fmtStats(secs, stats.turns || undefined, outTokens || undefined, stats.inputTokens || undefined)}`);
   };
   display.startStatus(getStatusText);
 
