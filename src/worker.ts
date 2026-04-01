@@ -191,6 +191,7 @@ export class WorkerSession {
   private ws: WebSocket | undefined;
   private resolveWsInput: ((v: string) => void) | null = null;
   private isRunningQuery = false;
+  private currentAc: AbortController | null = null;
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private prIsClosed = false;
   private queryDoneResolvers: Array<() => void> = [];
@@ -267,6 +268,20 @@ export class WorkerSession {
         this.queryDoneResolvers.push(resolve);
       });
     }
+  }
+
+  /**
+   * Abort the currently running query, if any.
+   * Returns true if a query was aborted, false if no query was running.
+   * Called by the SIGINT handler so ^C interrupts the current query
+   * rather than shutting down the worker.
+   */
+  interrupt(): boolean {
+    if (this.currentAc) {
+      this.currentAc.abort();
+      return true;
+    }
+    return false;
   }
 
   /**
@@ -551,6 +566,7 @@ export class WorkerSession {
     // Always notify waitUntilIdle() callers when this loop exits, even on ^C interrupt.
     try {
       const ac = new AbortController();
+      this.currentAc = ac;
       this.isRunningQuery = true;
       let queryFailed = false;
       try {
@@ -560,6 +576,7 @@ export class WorkerSession {
         this.display.print(display.c.boldRed(`\nERROR: ${fmtError(err)}`));
         queryFailed = true;
       } finally {
+        this.currentAc = null;
         this.isRunningQuery = false;
         void this.refreshBranch();
       }
@@ -569,6 +586,7 @@ export class WorkerSession {
 
       while (this.pendingEvents.length > 0 && this.currentTaskId && this.currentIssue) {
         const eventAc = new AbortController();
+        this.currentAc = eventAc;
         const events = this.pendingEvents.splice(0);
         const prompt = this.buildAndLogEventPrompt(events);
         this.isRunningQuery = true;
@@ -579,6 +597,7 @@ export class WorkerSession {
           this.display.print(display.c.boldRed(`\nERROR: ${fmtError(err)}`));
           return;
         } finally {
+          this.currentAc = null;
           this.isRunningQuery = false;
           void this.refreshBranch();
         }
@@ -650,8 +669,6 @@ export async function workerMain(
     if (ok) await workspace.destroy();
     process.exit(0);
   };
-  // SIGINT received as a signal: prompt before destroying.
-  process.on("SIGINT", () => { void shutdown(); });
 
   const wsFactory: WsFactory = (wid, taskId) => {
     const ws = new WebSocket(`${FOREMAN_URL}/worker`);
@@ -678,6 +695,14 @@ export async function workerMain(
   const session = new WorkerSession(workerId, wsFactory, runQueryFn, workerDisplay, {
     afterTask,
     workspaceCtx: { workspace, originalCwd, workspaceDir, repoUrl, confirm },
+  });
+
+  // SIGINT: interrupt the running query if one is active; otherwise prompt and shut down.
+  // This lets the user press ^C to interrupt a running tool without killing the worker.
+  process.on("SIGINT", () => {
+    if (!session.interrupt()) {
+      void shutdown();
+    }
   });
 
   // SIGTERM is a system/orchestrator signal: send goodbye then force-destroy without prompting.
