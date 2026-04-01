@@ -22,7 +22,6 @@ export async function truncateTables(supabase: SupabaseClient): Promise<void> {
   await Promise.all([
     supabase.from("webhook_events").delete().gt("id", 0),
     supabase.from("foreman_messages").delete().gt("id", 0),
-    supabase.from("task_blockers").delete().neq("task_id", ""),
     supabase.from("tasks").delete().neq("task_id", ""),
   ]);
 }

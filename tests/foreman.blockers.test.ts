@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { TaskQueue, WorkerRegistry, createForemanWss } from "../src/foreman.js";
-import type { TaskBlockerStore, TaskStore } from "../src/db.js";
+import type { TaskStore } from "../src/db.js";
 import type { LabeledIssueState } from "../src/types.js";
 import http from "http";
 
@@ -10,16 +10,6 @@ function makeLabeledIssues(issueNumber: number): Map<number, LabeledIssueState> 
     issue: { title: "T", body: "b", labels: [], repoUrl: "r" },
     depsLoaded: true,
   }]]);
-}
-
-function makeBlockerStore(overrides: Partial<TaskBlockerStore> = {}): TaskBlockerStore {
-  return {
-    upsertBlockers: vi.fn().mockResolvedValue(undefined),
-    closeBlocker: vi.fn().mockResolvedValue(undefined),
-    listTaskBlockers: vi.fn().mockResolvedValue([]),
-    listAllOpenBlockers: vi.fn().mockResolvedValue([]),
-    ...overrides,
-  };
 }
 
 function makeTaskStore(overrides: Partial<TaskStore> = {}): TaskStore {
@@ -35,41 +25,9 @@ function makeTaskStore(overrides: Partial<TaskStore> = {}): TaskStore {
   };
 }
 
-// ── Issue close → closeBlocker + markPending ──────────────────────────────────
+// ── Issue close → markPending ─────────────────────────────────────────────────
 
 describe("foreman — blocker transitions via routeEvent", () => {
-  it("issue close calls closeBlocker for tasks blocked by that issue", () => {
-    const taskQueue = new TaskQueue();
-    const registry = new WorkerRegistry();
-    const server = http.createServer();
-    const blockerStore = makeBlockerStore();
-
-    // Task 10 is blocked by issue 5
-    taskQueue.addTask({
-      taskId: "10", issueNumber: 10, title: "T", body: "b",
-      labels: [], repoUrl: "r", status: "blocked",
-    });
-    const graph = new Map([[10, new Set([5])]]);
-    const openIssues = new Set([5]);
-
-    const { wss, routeEvent } = createForemanWss(taskQueue, registry, server, {
-      taskLabel: "brunel:ready",
-      graph,
-      openIssues,
-      labeledIssues: makeLabeledIssues(10),
-      blockerStore,
-      reclaimTimeoutMs: 300_000,
-    });
-    wss.close();
-
-    routeEvent("evt-1", "issues", {
-      action: "closed",
-      issue: { number: 5, title: "Blocker", labels: [] },
-    });
-
-    expect(blockerStore.closeBlocker).toHaveBeenCalledWith("10", 5);
-  });
-
   it("issue close unblocks task in memory when no open blockers remain", () => {
     const taskQueue = new TaskQueue();
     const registry = new WorkerRegistry();

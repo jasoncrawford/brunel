@@ -12,7 +12,7 @@ import { loadConfig } from "./config.js";
 import { isBlocked, setBlockers, fetchBlockers } from "./dependencies.js";
 import { fetchIssueStates } from "./github.js";
 import type { DependencyGraph } from "./dependencies.js";
-import { type DbLogger, type TaskStore, type TaskBlockerStore, createDbLogger, createTaskStore, createTaskBlockerStore, createNullDbLogger, createNullTaskStore, createNullTaskBlockerStore } from "./db.js";
+import { type DbLogger, type TaskStore, createDbLogger, createTaskStore, createNullDbLogger, createNullTaskStore } from "./db.js";
 import type { AdminWss, TaskSnapshot, WorkerSnapshot } from "./admin-ws.js";
 import { fmtError } from "./utils.js";
 
@@ -527,7 +527,6 @@ export function createForemanWss(
     labeledIssues?: Map<number, LabeledIssueState>;
     pingIntervalMs?: number;
     taskStore?: TaskStore;
-    blockerStore?: TaskBlockerStore;
     reclaimTimeoutMs: number;
   },
 ): ForemanWss {
@@ -543,7 +542,6 @@ export function createForemanWss(
   const adminWss = options.adminWss;
   const workerSecret = options.workerSecret;
   const taskStore: TaskStore = options.taskStore ?? createNullTaskStore();
-  const blockerStore: TaskBlockerStore = options.blockerStore ?? createNullTaskBlockerStore();
   const reclaimTimeoutMs = options.reclaimTimeoutMs;
 
   // Incrementing counter for unique broadcast IDs (React uses these as keys).
@@ -774,9 +772,6 @@ export function createForemanWss(
           if (blockers.has(issueNumber)) {
             const blockedTask = taskQueue.getTaskForIssue(depIssueNum);
             if (blockedTask && blockedTask.status === "blocked") {
-              blockerStore.closeBlocker(blockedTask.taskId, issueNumber).catch((err) =>
-                flog(`ERROR Failed to close blocker #${issueNumber} for task #${blockedTask.taskId}: ${fmtError(err)}`)
-              );
               if (!isBlocked(depIssueNum, graph, openIssues)) {
                 taskQueue.setUnblocked(blockedTask.taskId);
                 markPendingPromises.push(
@@ -1087,10 +1082,6 @@ export function createForemanWss(
       .then(async (blockers) => {
         setBlockers(issueNumber, blockers, graph);
         if (blockers.length > 0) {
-          // Persist blocker relationships to DB (fire-and-forget).
-          blockerStore.upsertBlockers(String(issueNumber), blockers).catch((err) =>
-            flog(`ERROR Failed to upsert blockers for #${issueNumber}: ${fmtError(err)}`)
-          );
           const states = await fetchIssueStates(blockers, { repo, token });
           for (const [num, state] of states) {
             if (state === "open") openIssues.add(num);
@@ -1180,22 +1171,18 @@ if (isMain) {
     ? new Webhooks({ secret: config.webhookSecret })
     : null;
 
-  // Setup DB logger, task store, and blocker store
-  // (all share the same Supabase client if configured)
+  // Setup DB logger and task store (share the same Supabase client if configured)
   let dbLogger: DbLogger;
   let taskStore: TaskStore;
-  let blockerStore: TaskBlockerStore;
   if (config.supabaseUrl && config.supabaseSecretKey) {
     const { createClient } = await import("@supabase/supabase-js");
     const supabase = createClient(config.supabaseUrl, config.supabaseSecretKey);
     dbLogger = createDbLogger(supabase);
     taskStore = createTaskStore(supabase);
-    blockerStore = createTaskBlockerStore(supabase);
     flog("Supabase logging enabled");
   } else {
     dbLogger = createNullDbLogger();
     taskStore = createNullTaskStore();
-    blockerStore = createNullTaskBlockerStore();
   }
 
   let foremanWss: ForemanWss;
@@ -1222,7 +1209,6 @@ if (isMain) {
       adminWss,
       workerSecret: config.workerSecret,
       taskStore,
-      blockerStore,
       reclaimTimeoutMs: config.workerReclaimTimeoutMs,
     },
   );
@@ -1263,27 +1249,10 @@ if (isMain) {
     process.exit(1);
   }
 
-  // Step 2: Reconstruct in-memory dependency graph from open task_blockers rows.
-  flog("[startup] step 2: loading open blockers from DB...");
-  try {
-    const openBlockers = await blockerStore.listAllOpenBlockers();
-    for (const row of openBlockers) {
-      const task = taskQueue.get(row.taskId);
-      if (!task) continue;
-      const existing = graph.get(task.issueNumber) ?? new Set<number>();
-      existing.add(row.blockerIssueNumber);
-      graph.set(task.issueNumber, existing);
-      openIssues.add(row.blockerIssueNumber);
-    }
-    flog(`[startup] loaded ${openBlockers.length} open blocker(s)`);
-  } catch (err) {
-    flog(`ERROR Failed to load blockers from DB: ${fmtError(err)}`);
-    process.exit(1);
-  }
-
-  // Step 3: Fetch brunel:ready issues from GitHub for reconciliation.
+  // Step 2: Fetch brunel:ready issues from GitHub for reconciliation.
   // Adds new tasks not yet in the DB; removes tasks whose label was removed.
-  flog("[startup] step 3: fetching brunel:ready issues from GitHub for reconciliation...");
+  // Also rebuilds the in-memory dependency graph (derived state — not stored in DB).
+  flog("[startup] step 2: fetching brunel:ready issues from GitHub for reconciliation...");
   try {
     await loadIssuesToQueue(labeledIssues, graph, openIssues, {
       repo: config.githubRepo,
@@ -1297,7 +1266,7 @@ if (isMain) {
     process.exit(1);
   }
 
-  // Step 4: start listening — state is fully loaded
+  // Step 3: start listening — state is fully loaded
   const httpBase = config.foremanUrl.replace(/^ws:\/\//, "http://").replace(/^wss:\/\//, "https://").replace(/\/$/, "");
   const wsBase = config.foremanUrl.replace(/\/$/, "");
   server.listen(config.port, () => {
