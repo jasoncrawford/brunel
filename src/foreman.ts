@@ -1260,6 +1260,25 @@ if (isMain) {
       taskLabel: config.taskLabel,
       apiUrl: config.githubApiUrl,
     });
+
+    // After rebuilding the graph from GitHub, reconcile blocked status for tasks
+    // that were loaded from DB. If a blocker closed while the foreman was down,
+    // the DB still shows 'blocked' but the graph no longer reflects it.
+    for (const t of taskQueue.getPendingAndBlockedTasks()) {
+      const shouldBeBlocked = isBlocked(t.issueNumber, graph, openIssues);
+      if (t.status === "blocked" && !shouldBeBlocked) {
+        taskQueue.setUnblocked(t.taskId);
+        taskStore.markPending(t.taskId).catch((err) =>
+          flog(`ERROR Failed to mark task #${t.taskId} pending on startup: ${fmtError(err)}`)
+        );
+      } else if (t.status === "pending" && shouldBeBlocked) {
+        taskQueue.setBlocked(t.taskId);
+        taskStore.markBlocked(t.taskId).catch((err) =>
+          flog(`ERROR Failed to mark task #${t.taskId} blocked on startup: ${fmtError(err)}`)
+        );
+      }
+    }
+
     foremanWss.reconcile();
   } catch (err) {
     flog(`ERROR Failed to load issues from GitHub: ${fmtError(err)}`);

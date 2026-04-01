@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { TaskQueue, WorkerRegistry, createForemanWss } from "../src/foreman.js";
+import { isBlocked } from "../src/dependencies.js";
 import type { TaskStore, TaskRow } from "../src/db.js";
 import WebSocket, { WebSocketServer } from "ws";
 import http from "http";
@@ -396,6 +397,59 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
 });
 
 // ── Reconnect to complete task (issue closed while worker active) ─────────────
+
+describe("startup — blocked status reconciliation after graph rebuild", () => {
+  it("blocked task whose blocker closed while foreman was down becomes pending", async () => {
+    const taskStore = makeTaskStore([{ taskId: "42", workerId: null, status: "blocked" }]);
+
+    // Restore from DB: task is blocked
+    const activeTasks = await taskStore.listTasks();
+    restoreTasksFromDb(activeTasks, taskQueue);
+    expect(taskQueue.get("42")?.status).toBe("blocked");
+
+    // After GitHub reconcile: task 42 was blocked by issue 5, which is now closed
+    const graph = new Map([[42, new Set([5])]]);
+    const openIssues = new Set<number>(); // issue 5 is closed — not in openIssues
+
+    // Simulate the startup reconciliation loop
+    for (const t of taskQueue.getPendingAndBlockedTasks()) {
+      if (t.status === "blocked" && !isBlocked(t.issueNumber, graph, openIssues)) {
+        taskQueue.setUnblocked(t.taskId);
+        taskStore.markPending(t.taskId).catch(() => {});
+      } else if (t.status === "pending" && isBlocked(t.issueNumber, graph, openIssues)) {
+        taskQueue.setBlocked(t.taskId);
+        taskStore.markBlocked(t.taskId).catch(() => {});
+      }
+    }
+
+    expect(taskQueue.get("42")?.status).toBe("pending");
+    expect(taskStore.markPending).toHaveBeenCalledWith("42");
+  });
+
+  it("pending task whose blocker was open when foreman was down becomes blocked", async () => {
+    const taskStore = makeTaskStore([{ taskId: "42", workerId: null, status: "pending" }]);
+
+    const activeTasks = await taskStore.listTasks();
+    restoreTasksFromDb(activeTasks, taskQueue);
+
+    // After GitHub reconcile: issue 5 is still open and blocks task 42
+    const graph = new Map([[42, new Set([5])]]);
+    const openIssues = new Set([5]);
+
+    for (const t of taskQueue.getPendingAndBlockedTasks()) {
+      if (t.status === "blocked" && !isBlocked(t.issueNumber, graph, openIssues)) {
+        taskQueue.setUnblocked(t.taskId);
+        taskStore.markPending(t.taskId).catch(() => {});
+      } else if (t.status === "pending" && isBlocked(t.issueNumber, graph, openIssues)) {
+        taskQueue.setBlocked(t.taskId);
+        taskStore.markBlocked(t.taskId).catch(() => {});
+      }
+    }
+
+    expect(taskQueue.get("42")?.status).toBe("blocked");
+    expect(taskStore.markBlocked).toHaveBeenCalledWith("42");
+  });
+});
 
 describe("startup reconnect — worker reconnects to complete task", () => {
   it("busy worker reconnect to complete task is reclaimed (not re-idled)", async () => {
