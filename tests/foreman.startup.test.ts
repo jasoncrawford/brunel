@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { TaskQueue, WorkerRegistry, createForemanWss } from "../src/foreman.js";
 import { isBlocked } from "../src/dependencies.js";
 import type { TaskStore, TaskRow } from "../src/db.js";
+import type { TaskStatus } from "../src/types.js";
 import WebSocket, { WebSocketServer } from "ws";
 import http from "http";
 import type { AddressInfo } from "net";
@@ -309,7 +310,7 @@ function restoreTasksFromDb(rows: TaskRow[], tq: TaskQueue): void {
       body: "",
       labels: [],
       repoUrl: `https://github.com/${row.repo}`,
-      status: row.status as "pending" | "assigned" | "blocked",
+      status: row.status as TaskStatus,
       depsLoaded: true,
     });
     if (row.workerId) tq.assignTask(row.taskId, row.workerId);

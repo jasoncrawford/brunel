@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { fmtEvent } from "./display.js";
+import type { TaskStatus } from "./types.js";
 
 // ── Input types ────────────────────────────────────────────────────────────────
 
@@ -275,7 +276,7 @@ export interface TaskRow {
   issueNumber: number;
   repo: string;
   title: string;
-  status: "pending" | "assigned" | "complete" | "blocked";
+  status: TaskStatus;
   workerId: string | null;
   prNumber: number | null;
   branch: string | null;
@@ -313,7 +314,7 @@ export function createTaskStore(supabase: SupabaseClient): TaskStore {
       issueNumber: row.issue_number as number,
       repo: row.repo as string,
       title: row.title as string,
-      status: row.status as "pending" | "assigned" | "complete" | "blocked",
+      status: row.status as TaskStatus,
       workerId: (row.worker_id as string | null) ?? null,
       prNumber: (row.pr_number as number | null) ?? null,
       branch: (row.branch as string | null) ?? null,

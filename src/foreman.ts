@@ -6,7 +6,7 @@ import { getRequestListener } from "@hono/node-server";
 import { WebSocketServer, WebSocket } from "ws";
 import type { WebSocket as WsSocket } from "ws";
 import { EventEmitter } from "events";
-import type { WorkerMessage, ForemanMessage, GitHubEvent, TaskIssue, LabeledIssueState } from "./types.js";
+import type { WorkerMessage, ForemanMessage, GitHubEvent, TaskIssue, LabeledIssueState, TaskStatus } from "./types.js";
 import { fmtTimestamp, fmtEvent, setVerbose } from "./display.js";
 import { loadConfig } from "./config.js";
 import { isBlocked, setBlockers, fetchBlockers } from "./dependencies.js";
@@ -132,7 +132,7 @@ interface Task {
   body: string;
   labels: string[];
   repoUrl: string;
-  status: "pending" | "assigned" | "complete" | "blocked";
+  status: TaskStatus;
   assignedWorkerId?: string;
   prNumber?: number;
   eventQueue: GitHubEvent[];
@@ -1236,7 +1236,7 @@ if (isMain) {
         body: "",
         labels: [],
         repoUrl: `https://github.com/${row.repo}`,
-        status: row.status as "pending" | "assigned" | "blocked",
+        status: row.status as TaskStatus,
         depsLoaded: true,
       });
       if (row.workerId) taskQueue.assignTask(row.taskId, row.workerId);

@@ -1,3 +1,5 @@
+export type TaskStatus = "pending" | "assigned" | "complete" | "blocked";
+
 export interface BlockerInfo {
   issueNumber: number;
   isOpen: boolean;
@@ -7,7 +9,7 @@ export interface TaskSnapshot {
   taskId: string;
   issueNumber: number;
   title: string;
-  status: "pending" | "assigned" | "complete" | "blocked";
+  status: TaskStatus;
   assignedWorkerId?: string;
   prNumber?: number;
   prUrl?: string;
@@ -39,7 +41,7 @@ export interface TaskRow {
   issueNumber: number;
   repo: string;
   title: string;
-  status: "pending" | "assigned" | "complete" | "blocked";
+  status: TaskStatus;
   workerId: string | null;
   prNumber: number | null;
   branch: string | null;
