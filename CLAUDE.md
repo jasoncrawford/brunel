@@ -72,7 +72,7 @@ Every `worker_hello` is immediately answered by a `hello_ack` before any `task_a
 
 - `"idle"` — worker is free; foreman may now send `task_assigned`
 - `"busy"` — worker's reconnection claim was accepted; worker may resume the task
-- `"cancelled"` — worker's claimed task was taken by another worker; worker should abandon it, reset the workspace, and become idle
+- `"cancelled"` — worker's claimed task was taken by another worker, or the task is already complete (issue closed); worker should abandon it, reset the workspace, and become idle
 
 Workers buffer any `task_complete` messages sent during the `hello_sent` state and flush them only after receiving an `idle` or `busy` ack. On `cancelled` the buffer is discarded.
 
@@ -81,7 +81,7 @@ Workers buffer any `task_complete` messages sent during the `hello_sent` state a
 A task moves through states: **pending → assigned → complete**.
 
 - `TaskQueue` is in-memory state; `taskStore` (Supabase) is the persistent record.
-- When a GitHub issue is closed while a worker is still active, the foreman marks the task `complete` **in-memory only** (so the dashboard shows "done") but does NOT update the DB. The worker will call `task_complete` to finalize and release itself — that is when the DB assignment is deleted.
+- When a GitHub issue is closed while a worker is still active, the foreman marks the task `complete` in both memory and the DB immediately. The worker stays assigned and will call `task_complete` to release itself when done.
 - On foreman restart, `loadIssuesToQueue` fetches only **open** GitHub issues. Tasks whose issues were closed mid-task are restored from `taskStore` (status=`assigned`) so their workers can reconnect and complete normally.
 - `reconcile()` only removes **pending** tasks that are no longer in `labeledIssues`. Assigned and complete tasks are never removed by reconcile.
 

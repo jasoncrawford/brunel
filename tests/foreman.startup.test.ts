@@ -505,7 +505,7 @@ describe("startup — blocked status reconciliation after graph rebuild", () => 
 });
 
 describe("startup reconnect — worker reconnects to complete task", () => {
-  it("busy worker reconnect to complete task is reclaimed (not re-idled)", async () => {
+  it("busy worker reconnect to complete task is cancelled (not reclaimed)", async () => {
     // Simulate: issue was closed while worker was active, so the foreman marked
     // the task complete in-memory. Worker briefly disconnects and reconnects.
     taskQueue.addTask(baseTask);
@@ -521,8 +521,8 @@ describe("startup reconnect — worker reconnects to complete task", () => {
     await connect({ type: "worker_hello", workerId: "w1", status: "busy", taskId: "42" });
 
     await waitUntil(() => registry.get("w1") !== undefined);
-    // Worker should be registered as busy, not idle
-    expect(registry.get("w1")?.status).toBe("busy");
+    // Worker should be cancelled (registered as idle), not reclaimed as busy
+    expect(registry.get("w1")?.status).toBe("idle");
     // Task should stay complete
     expect(taskQueue.get("42")?.status).toBe("complete");
   });

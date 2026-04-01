@@ -339,7 +339,7 @@ describe("foreman WebSocket protocol", () => {
     expect(queue.get("1")?.status).toBe("complete");
   });
 
-  it("worker reconnects as busy with its own completed taskId is registered busy (issue closed while active)", async () => {
+  it("worker reconnects as busy with its own completed taskId is registered idle and cancelled (issue closed)", async () => {
     queue.addTask(makeTask(1));
     // Simulate: issue was closed, foreman marked task complete, worker briefly disconnects
     queue.assignTask("1", "w1");
@@ -348,9 +348,9 @@ describe("foreman WebSocket protocol", () => {
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "w1", taskId: "1", status: "busy" });
     await waitUntil(() => registry.get("w1") !== undefined);
-    // Worker stays busy so it can call task_complete to release itself
-    expect(registry.get("w1")?.status).toBe("busy");
-    expect(registry.get("w1")?.currentTaskId).toBe("1");
+    // Worker is cancelled — it should not resume work on a closed issue
+    expect(registry.get("w1")?.status).toBe("idle");
+    expect(registry.get("w1")?.currentTaskId).toBeUndefined();
   });
 
   it("events are routed to the correct worker when multiple workers have different tasks", async () => {
@@ -467,7 +467,7 @@ describe("hello_ack handshake", () => {
     expect(msg.event.name).toBe("issue_comment");
   });
 
-  it("sends hello_ack with status busy when worker's task is complete (issue closed, worker finishing)", async () => {
+  it("sends hello_ack with status cancelled when worker's task is complete (issue closed)", async () => {
     queue.addTask(makeTask(1));
     queue.assignTask("1", "w1");
     queue.completeTask("1");
@@ -476,7 +476,8 @@ describe("hello_ack handshake", () => {
     const ackPromise = nextMsg(ws);
     send(ws, { type: "worker_hello", workerId: "w1", taskId: "1", status: "busy" });
     const ack = await ackPromise;
-    expect(ack).toEqual({ type: "hello_ack", workerId: "w1", status: "busy" });
+    expect(ack).toEqual({ type: "hello_ack", workerId: "w1", status: "cancelled" });
+    expect(registry.get("w1")?.status).toBe("idle");
   });
 
   it("queued events are sent after hello_ack on reclaim", async () => {
@@ -1071,6 +1072,88 @@ describe("worker_goodbye — DB persistence", () => {
     await waitUntil(() => r.get("w1") === undefined);
 
     expect(taskStore.markPending).not.toHaveBeenCalled();
+
+    ws.close();
+    await new Promise<void>((resolve) => ws.once("close", resolve));
+    await new Promise<void>((resolve) => testWss.close(() => srv.close(resolve)));
+  });
+});
+
+// ── issues/closed — DB persistence ───────────────────────────────────────────
+
+describe("issues/closed — DB persistence", () => {
+  it("calls markComplete immediately when an issue is closed while a worker is active", async () => {
+    const taskStore: TaskStore = {
+      upsertTask: vi.fn().mockResolvedValue(undefined),
+      markAssigned: vi.fn().mockResolvedValue(undefined),
+      markComplete: vi.fn().mockResolvedValue(undefined),
+      markPending: vi.fn().mockResolvedValue(undefined),
+      markBlocked: vi.fn().mockResolvedValue(undefined),
+      updateTaskPr: vi.fn().mockResolvedValue(undefined),
+      listTasks: vi.fn().mockResolvedValue([]),
+    };
+
+    const q = new TaskQueue();
+    const r = new WorkerRegistry();
+    const srv = http.createServer();
+    const { wss: testWss, routeEvent: testRouteEvent } = createForemanWss(q, r, srv, {
+      taskLabel: defaultCfg.taskLabel,
+      reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs,
+      taskStore,
+    });
+
+    q.addTask({ taskId: "1", issueNumber: 1, title: "T", body: "b", labels: [], repoUrl: "r" });
+    q.assignTask("1", "w1");
+
+    testRouteEvent("evt-1", "issues", { action: "closed", issue: { number: 1, title: "T", body: "", labels: [] } });
+
+    expect(taskStore.markComplete).toHaveBeenCalledWith("1");
+
+    await new Promise<void>((resolve) => testWss.close(() => srv.close(resolve)));
+  });
+});
+
+// ── worker_hello — DB persistence ────────────────────────────────────────────
+
+describe("worker_hello — DB persistence", () => {
+  it("calls markComplete when cancelling a worker whose task is already complete (issue closed)", async () => {
+    const taskStore: TaskStore = {
+      upsertTask: vi.fn().mockResolvedValue(undefined),
+      markAssigned: vi.fn().mockResolvedValue(undefined),
+      markComplete: vi.fn().mockResolvedValue(undefined),
+      markPending: vi.fn().mockResolvedValue(undefined),
+      markBlocked: vi.fn().mockResolvedValue(undefined),
+      updateTaskPr: vi.fn().mockResolvedValue(undefined),
+      listTasks: vi.fn().mockResolvedValue([]),
+    };
+
+    const q = new TaskQueue();
+    const r = new WorkerRegistry();
+    const srv = http.createServer();
+    const { wss: testWss } = createForemanWss(q, r, srv, {
+      taskLabel: defaultCfg.taskLabel,
+      reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs,
+      taskStore,
+    });
+
+    q.addTask({ taskId: "1", issueNumber: 1, title: "T", body: "b", labels: [], repoUrl: "r" });
+    q.assignTask("1", "w1");
+    q.completeTask("1");
+
+    await new Promise<void>((resolve) => srv.listen(0, resolve));
+    const testPort = (srv.address() as AddressInfo).port;
+
+    const ws = new WebSocket(`ws://localhost:${testPort}/worker`);
+    await new Promise<void>((resolve, reject) => {
+      ws.once("open", resolve);
+      ws.once("error", reject);
+    });
+
+    const ackPromise = nextMsg(ws);
+    send(ws, { type: "worker_hello", workerId: "w1", taskId: "1", status: "busy" });
+    const ack = await ackPromise;
+    expect(ack).toEqual({ type: "hello_ack", workerId: "w1", status: "cancelled" });
+    expect(taskStore.markComplete).toHaveBeenCalledWith("1");
 
     ws.close();
     await new Promise<void>((resolve) => ws.once("close", resolve));

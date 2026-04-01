@@ -785,11 +785,13 @@ export function createForemanWss(
           }
         }
 
-        // Mark the task done in the dashboard while the worker finishes up.
-        // We don't persist to DB here — the worker will call task_complete to
-        // finalize and release itself.
+        // Mark the task done — in memory and in the DB. The worker stays
+        // assigned and will call task_complete to release itself when done.
         if (task && task.status === "assigned") {
           taskQueue.completeTask(task.taskId);
+          taskStore.markComplete(task.taskId).catch(err =>
+            flog(`ERROR Failed to mark task #${task.taskId} complete on issue close: ${fmtError(err)}`)
+          );
         }
         // Defer reconcile until markPending writes have flushed so that
         // tryAssignWork's markAssigned (which is awaited) always wins the race.
@@ -943,22 +945,22 @@ export function createForemanWss(
         }
       }
 
+      function cancelWorker() {
+        registry.register(workerId, ws, "idle");
+        sendMsg(workerId, { type: "hello_ack", workerId, status: "cancelled" });
+      }
+
+      function reclaimWorker(taskId: string, issueRef: string | number) {
+        registry.register(workerId, ws, "busy", taskId);
+        taskQueue.assignTask(taskId, workerId);
+        sendMsg(workerId, { type: "hello_ack", workerId, status: "busy" });
+        flushQueuedEvents(taskId, issueRef);
+      }
+
       if (msg.status === "busy" && msg.taskId) {
         const existing = taskQueue.get(msg.taskId);
-        if (existing && existing.status !== "complete" && (existing.status !== "assigned" || existing.assignedWorkerId === workerId)) {
-          // Task is pending/assigned to this worker — reclaim.
-          log(workerId, `hello busy task=#${msg.taskId} — reclaimed`);
-          registry.register(workerId, ws, "busy", msg.taskId);
-          taskQueue.assignTask(msg.taskId, workerId);
-          sendMsg(workerId, { type: "hello_ack", workerId, status: "busy" });
-          flushQueuedEvents(msg.taskId, existing.issueNumber);
-        } else if (existing && existing.status === "complete" && existing.assignedWorkerId === workerId) {
-          // Issue was closed (task marked done) but worker is still finishing up.
-          // Let them stay busy so they can call task_complete to release themselves.
-          log(workerId, `hello busy task=#${msg.taskId} — reclaimed (issue closed, worker finishing)`);
-          registry.register(workerId, ws, "busy", msg.taskId);
-          sendMsg(workerId, { type: "hello_ack", workerId, status: "busy" });
-        } else if (!existing) {
+
+        if (!existing) {
           // Task not in queue — label may have been removed while worker was disconnected.
           // Re-add a minimal in-memory entry so GitHub events can still be forwarded.
           // The DB record still exists (written by the reclaim timer via taskStore.markPending);
@@ -967,18 +969,27 @@ export function createForemanWss(
           if (!isNaN(issueNumber)) {
             log(workerId, `hello busy task=#${msg.taskId} — task unlabeled, re-adding for event forwarding`);
             taskQueue.addTask({ taskId: msg.taskId, issueNumber, title: "", body: "", labels: [], repoUrl: "" });
-            taskQueue.assignTask(msg.taskId, workerId);
           } else {
             log(workerId, `hello busy task=#${msg.taskId} — unknown task, respecting busy status`);
           }
-          registry.register(workerId, ws, "busy", msg.taskId);
-          sendMsg(workerId, { type: "hello_ack", workerId, status: "busy" });
-          flushQueuedEvents(msg.taskId, msg.taskId);
-        } else {
-          // Task is complete or assigned to a different worker — register idle
+          reclaimWorker(msg.taskId, msg.taskId);
+        } else if (existing.status === "complete") {
+          // Issue was closed (task marked done in memory). Cancel the worker — resuming work
+          // on a closed issue would be incorrect. Finalize the DB record since the worker's
+          // buffered task_complete will be discarded on cancelled.
+          log(workerId, `hello busy task=#${msg.taskId} — task complete (issue closed), cancelling`);
+          taskStore.markComplete(msg.taskId).catch(err =>
+            flog(`ERROR Failed to mark task #${msg.taskId} complete on hello cancel: ${fmtError(err)}`)
+          );
+          cancelWorker();
+        } else if (existing.assignedWorkerId && existing.assignedWorkerId !== workerId) {
+          // Task is assigned to a different worker — cancel.
           log(workerId, `hello busy task=#${msg.taskId} — task taken by another worker`);
-          registry.register(workerId, ws, "idle");
-          sendMsg(workerId, { type: "hello_ack", workerId, status: "cancelled" });
+          cancelWorker();
+        } else {
+          // Task is pending or assigned to this worker — reclaim.
+          log(workerId, `hello busy task=#${msg.taskId} — reclaimed`);
+          reclaimWorker(msg.taskId, existing.issueNumber);
         }
       } else {
         // If the queue has a task assigned to this worker (from a prior foreman
