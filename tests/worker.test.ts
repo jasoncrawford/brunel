@@ -690,6 +690,66 @@ describe("hello_ack handshake — buffering", () => {
     }
   });
 
+  it("prints cancellation message on hello_ack cancelled", async () => {
+    vi.useFakeTimers();
+    try {
+      const issue = makeIssue();
+      sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+
+      const newWs = reconnectWithNewWs();
+      newWs.emit("open");
+
+      display.print.mockClear();
+      sendMsg(newWs, { type: "hello_ack", workerId: WORKER_ID, status: "cancelled" });
+
+      const printed = display.print.mock.calls.map(args => stripAnsi(String(args[0]))).join("\n");
+      expect(printed).toContain("cancelled");
+      expect(printed).not.toContain("Workspace reset");
+    } finally {
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    }
+  });
+
+  it("calls workspace.reset() on hello_ack cancelled when workspaceCtx is set", async () => {
+    vi.useFakeTimers();
+    try {
+      const workspace = {
+        dir: "/tmp/test-workspace",
+        reset: vi.fn().mockResolvedValue(undefined),
+        destroy: vi.fn().mockResolvedValue(undefined),
+        checkSafety: vi.fn().mockResolvedValue({ uncommittedFiles: [], unpushedCommits: [], noUpstream: false }),
+      } as unknown as import("../src/workspace.js").Workspace;
+
+      const wsA = new FakeWs();
+      const wsB = new FakeWs();
+      let callCount = 0;
+      const wsFactoryWs = vi.fn().mockImplementation(() => callCount++ === 0 ? wsA : wsB);
+
+      const sessionWithWs = new WorkerSession(WORKER_ID, wsFactoryWs, runQuery, display, {
+        workspaceCtx: { workspace, originalCwd: "/original", workspaceDir: "/tmp/workers", repoUrl: "https://github.com/owner/repo", confirm: vi.fn() },
+      });
+      sessionWithWs.start(); // uses wsA
+
+      const issue = makeIssue();
+      sendMsg(wsA, { type: "task_assigned", taskId: "42", issue });
+
+      // Simulate reconnect: wsA closes, wsB is created
+      vi.spyOn(Math, "random").mockReturnValue(0);
+      wsA.emit("close", 1006, Buffer.from(""));
+      vi.advanceTimersByTime(2001);
+      // wsB is now the active connection
+      wsB.emit("open");
+
+      sendMsg(wsB, { type: "hello_ack", workerId: WORKER_ID, status: "cancelled" });
+
+      await vi.waitFor(() => expect(workspace.reset).toHaveBeenCalledOnce());
+    } finally {
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    }
+  });
+
   it("flushes buffered task_complete on hello_ack idle (worker had stale task before reconnect)", async () => {
     vi.useFakeTimers();
     try {
