@@ -610,6 +610,29 @@ describe("SYSTEM_FMT", () => {
       .toBe("hook: my-hook — success");
   });
 
+  it("api_retry → shown in non-verbose mode (not verbose-only)", () => {
+    setVerbose(false);
+    const msg = { subtype: "api_retry", attempt: 1, max_retries: 10, retry_delay_ms: 500 };
+    expect(resolve(SYSTEM_FMT, "api_retry", msg)).not.toBeNull();
+  });
+
+  it("api_retry → amber warning color", () => {
+    const msg = { subtype: "api_retry", attempt: 1, max_retries: 10, retry_delay_ms: 500 };
+    const raw = resolve(SYSTEM_FMT, "api_retry", msg)!;
+    // amber: \x1b[38;5;214m
+    expect(raw).toContain("\x1b[38;5;214m");
+  });
+
+  it("api_retry → 'API failure, retrying in Xs (attempt N/M)'", () => {
+    const msg = { subtype: "api_retry", attempt: 1, max_retries: 10, retry_delay_ms: 545.686 };
+    expect(r(SYSTEM_FMT, "api_retry", msg)).toBe("API failure, retrying in 0.5s (attempt 1/10)");
+  });
+
+  it("api_retry → rounds delay to 1 decimal place", () => {
+    const msg = { subtype: "api_retry", attempt: 3, max_retries: 5, retry_delay_ms: 2000 };
+    expect(r(SYSTEM_FMT, "api_retry", msg)).toBe("API failure, retrying in 2s (attempt 3/5)");
+  });
+
   it("_default, VERBOSE=false → null", () => {
     setVerbose(false);
     expect(resolve(SYSTEM_FMT, "unknown_subtype", { subtype: "unknown_subtype" })).toBeNull();
