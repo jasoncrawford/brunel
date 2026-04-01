@@ -704,7 +704,7 @@ describe("hello_ack handshake — buffering", () => {
 
       const printed = display.print.mock.calls.map(args => stripAnsi(String(args[0]))).join("\n");
       expect(printed).toContain("cancelled");
-      expect(printed).toContain("Workspace reset");
+      expect(printed).not.toContain("Workspace reset");
     } finally {
       vi.restoreAllMocks();
       vi.useRealTimers();
