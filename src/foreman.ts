@@ -14,7 +14,7 @@ import { fetchIssueStates } from "./github.js";
 import type { DependencyGraph } from "./dependencies.js";
 import { type DbLogger, type TaskStore, createDbLogger, createTaskStore, createNullDbLogger, createNullTaskStore } from "./db.js";
 import type { AdminWss, TaskSnapshot, WorkerSnapshot } from "./admin-ws.js";
-import { fmtError } from "./utils.js";
+import { fmtError, shortWorkerId } from "./utils.js";
 
 function flog(msg: string) {
   console.log(`${fmtTimestamp()} ${msg}`);
@@ -584,7 +584,7 @@ export function createForemanWss(
   }
 
   function log(wid: string, line: string) {
-    flog(`[worker ${wid.slice(0, 8)}] ${line}`);
+    flog(`[worker ${shortWorkerId(wid)}] ${line}`);
   }
 
   function broadcastSnapshot() {
@@ -609,13 +609,13 @@ export function createForemanWss(
       const worker = registry.get(task.assignedWorkerId);
       if (worker?.status === "disconnected") {
         taskQueue.queueEvent(task.taskId, evt);
-        flog(`[task ${ref}] ${evt.name} queued (worker ${task.assignedWorkerId.slice(0, 8)} disconnected)`);
+        flog(`[task ${ref}] ${evt.name} queued (worker ${shortWorkerId(task.assignedWorkerId)} disconnected)`);
       } else if (worker) {
         const evtMsg: ForemanMessage = { type: "event_notification", taskId: task.taskId, event: evt };
         sendMsg(task.assignedWorkerId, evtMsg);
         log(task.assignedWorkerId, `→ event_notification ${ref} ${evt.name}`);
       } else {
-        flog(`[task ${ref}] ${evt.name} DROPPED — worker ${task.assignedWorkerId.slice(0, 8)} not in registry (disconnected?)`);
+        flog(`[task ${ref}] ${evt.name} DROPPED — worker ${shortWorkerId(task.assignedWorkerId)} not in registry (disconnected?)`);
       }
     } else if (task.status === "pending") {
       taskQueue.queueEvent(task.taskId, evt);

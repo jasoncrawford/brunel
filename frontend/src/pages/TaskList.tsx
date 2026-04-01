@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useAdminWs } from "../hooks/useAdminWs.ts";
 import type { AdminMessage, TaskRow, TaskStatus } from "../types.ts";
+import { shortWorkerId } from "../types.ts";
 
 export default function TaskList() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -79,7 +80,7 @@ export default function TaskList() {
                 <td style={td}>{t.title}</td>
                 <td style={td}>{t.status}</td>
                 <td style={td}>{t.workerId
-                  ? <Link to={`/workers/${t.workerId}`}>{t.workerId.slice(0, 8)}</Link>
+                  ? <Link to={`/workers/${t.workerId}`}>{shortWorkerId(t.workerId)}</Link>
                   : "—"}</td>
                 <td style={td}>{t.prNumber
                   ? <a href={`https://github.com/${t.repo}/pull/${t.prNumber}`} target="_blank" rel="noreferrer">#{t.prNumber}</a>
