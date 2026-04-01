@@ -3,11 +3,6 @@ import { Link } from "react-router-dom";
 import { useAdminWs } from "../hooks/useAdminWs.ts";
 import type { TaskSnapshot, WorkerSnapshot, LogEntry, AdminMessage } from "../types.ts";
 
-function effectiveStatus(t: TaskSnapshot): string {
-  if (t.status === "pending" && t.blockers?.some((b) => b.isOpen)) return "blocked";
-  return t.status;
-}
-
 export default function Dashboard() {
   const [tasks, setTasks] = useState<TaskSnapshot[]>([]);
   const [workers, setWorkers] = useState<WorkerSnapshot[]>([]);
@@ -26,8 +21,8 @@ export default function Dashboard() {
 
   useAdminWs(handleMessage);
 
-  const blocked = tasks.filter((t) => t.status === "pending" && t.blockers?.some((b) => b.isOpen)).length;
-  const pending = tasks.filter((t) => t.status === "pending" && !t.blockers?.some((b) => b.isOpen)).length;
+  const blocked = tasks.filter((t) => t.status === "blocked").length;
+  const pending = tasks.filter((t) => t.status === "pending").length;
   const assigned = tasks.filter((t) => t.status === "assigned").length;
   const done = tasks.filter((t) => t.status === "complete").length;
 
@@ -53,7 +48,7 @@ export default function Dashboard() {
                 <tr key={t.taskId}>
                   <td style={td}><Link to={`/tasks/${t.taskId}`}>#{t.issueNumber}</Link></td>
                   <td style={td}>{t.title}</td>
-                  <td style={td}>{effectiveStatus(t)}</td>
+                  <td style={td}>{t.status}</td>
                   <td style={td}>{t.assignedWorkerId
                     ? <Link to={`/workers/${t.assignedWorkerId}`}>{t.assignedWorkerId.slice(0, 8)}</Link>
                     : "—"}</td>

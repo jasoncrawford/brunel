@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { fmtEvent } from "./display.js";
+import type { TaskStatus } from "./types.js";
 
 // ── Input types ────────────────────────────────────────────────────────────────
 
@@ -275,7 +276,7 @@ export interface TaskRow {
   issueNumber: number;
   repo: string;
   title: string;
-  status: "pending" | "assigned" | "complete";
+  status: TaskStatus;
   workerId: string | null;
   prNumber: number | null;
   branch: string | null;
@@ -285,7 +286,7 @@ export interface TaskRow {
 }
 
 export interface ListTasksOpts {
-  status?: "pending" | "assigned" | "complete";
+  status?: "pending" | "assigned" | "complete" | "blocked";
   limit?: number;
 }
 
@@ -298,6 +299,8 @@ export interface TaskStore {
   markComplete(taskId: string): Promise<void>;
   /** Revert task to pending, clearing worker_id. */
   markPending(taskId: string): Promise<void>;
+  /** Mark task as blocked (waiting on a dependency). */
+  markBlocked(taskId: string): Promise<void>;
   /** Update PR number and branch for a task. */
   updateTaskPr(taskId: string, prNumber: number, branch: string | null): Promise<void>;
   /** List tasks, optionally filtered by status. */
@@ -311,7 +314,7 @@ export function createTaskStore(supabase: SupabaseClient): TaskStore {
       issueNumber: row.issue_number as number,
       repo: row.repo as string,
       title: row.title as string,
-      status: row.status as "pending" | "assigned" | "complete",
+      status: row.status as TaskStatus,
       workerId: (row.worker_id as string | null) ?? null,
       prNumber: (row.pr_number as number | null) ?? null,
       branch: (row.branch as string | null) ?? null,
@@ -351,6 +354,13 @@ export function createTaskStore(supabase: SupabaseClient): TaskStore {
       if (error) throw error;
     },
 
+    async markBlocked(taskId) {
+      const { error } = await supabase.from("tasks")
+        .update({ status: "blocked", worker_id: null })
+        .eq("task_id", taskId);
+      if (error) throw error;
+    },
+
     async updateTaskPr(taskId, prNumber, branch) {
       const { error } = await supabase.from("tasks")
         .update({ pr_number: prNumber, branch })
@@ -377,7 +387,9 @@ export function createNullTaskStore(): TaskStore {
     async markAssigned() {},
     async markComplete() {},
     async markPending() {},
+    async markBlocked() {},
     async updateTaskPr() {},
     async listTasks() { return []; },
   };
 }
+

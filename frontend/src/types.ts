@@ -1,3 +1,6 @@
+import type { TaskStatus } from "../../shared/types.ts";
+export type { TaskStatus };
+
 export interface BlockerInfo {
   issueNumber: number;
   isOpen: boolean;
@@ -7,7 +10,7 @@ export interface TaskSnapshot {
   taskId: string;
   issueNumber: number;
   title: string;
-  status: "pending" | "assigned" | "complete";
+  status: TaskStatus;
   assignedWorkerId?: string;
   prNumber?: number;
   prUrl?: string;
@@ -39,7 +42,7 @@ export interface TaskRow {
   issueNumber: number;
   repo: string;
   title: string;
-  status: "pending" | "assigned" | "complete";
+  status: TaskStatus;
   workerId: string | null;
   prNumber: number | null;
   branch: string | null;

@@ -1,6 +1,7 @@
 import http from "http";
 import { WebSocketServer } from "ws";
 import type { WebSocket as WsSocket } from "ws";
+import type { TaskStatus } from "./types.js";
 
 export interface LogEntry {
   kind: string;
@@ -20,7 +21,7 @@ export interface TaskSnapshot {
   taskId: string;
   issueNumber: number;
   title: string;
-  status: "pending" | "assigned" | "complete";
+  status: TaskStatus;
   assignedWorkerId?: string;
   prNumber?: number;
   prUrl?: string;

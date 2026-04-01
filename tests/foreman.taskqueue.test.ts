@@ -137,6 +137,78 @@ describe("TaskQueue", () => {
   });
 });
 
+describe("TaskQueue — blocked status", () => {
+  let q: TaskQueue;
+  beforeEach(() => { q = new TaskQueue(); });
+
+  it("addTask with status=blocked creates a blocked task", () => {
+    q.addTask({ ...baseTask, status: "blocked" });
+    expect(q.get("42")?.status).toBe("blocked");
+  });
+
+  it("setBlocked transitions pending → blocked", () => {
+    q.addTask(baseTask);
+    q.setBlocked("42");
+    expect(q.get("42")?.status).toBe("blocked");
+  });
+
+  it("setBlocked is a no-op on non-pending tasks", () => {
+    q.addTask(baseTask);
+    q.assignTask("42", "w1");
+    q.setBlocked("42");
+    expect(q.get("42")?.status).toBe("assigned");
+  });
+
+  it("setUnblocked transitions blocked → pending", () => {
+    q.addTask({ ...baseTask, status: "blocked" });
+    q.setUnblocked("42");
+    expect(q.get("42")?.status).toBe("pending");
+  });
+
+  it("setUnblocked is a no-op on non-blocked tasks", () => {
+    q.addTask(baseTask);
+    q.setUnblocked("42");
+    expect(q.get("42")?.status).toBe("pending"); // unchanged
+  });
+
+  it("nextPending does not return blocked tasks", () => {
+    q.addTask({ ...baseTask, status: "blocked" });
+    expect(q.nextPending()).toBeNull();
+  });
+
+  it("setBlocked emits changed", () => {
+    q.addTask(baseTask);
+    const changed = vi.fn();
+    q.on("changed", changed);
+    q.setBlocked("42");
+    expect(changed).toHaveBeenCalledOnce();
+  });
+
+  it("setUnblocked emits changed", () => {
+    q.addTask({ ...baseTask, status: "blocked" });
+    const changed = vi.fn();
+    q.on("changed", changed);
+    q.setUnblocked("42");
+    expect(changed).toHaveBeenCalledOnce();
+  });
+
+  it("getPendingAndBlockedTasks returns pending and blocked but not assigned/complete", () => {
+    q.addTask({ ...baseTask, taskId: "1", issueNumber: 1 }); // pending
+    q.addTask({ ...baseTask, taskId: "2", issueNumber: 2, status: "blocked" }); // blocked
+    q.addTask({ ...baseTask, taskId: "3", issueNumber: 3 }); // will be assigned
+    q.assignTask("3", "w1");
+    const result = q.getPendingAndBlockedTasks();
+    expect(result.map((t) => t.taskId)).toEqual(expect.arrayContaining(["1", "2"]));
+    expect(result.map((t) => t.taskId)).not.toContain("3");
+  });
+
+  it("getTaskSnapshots includes blocked status", () => {
+    q.addTask({ ...baseTask, status: "blocked" });
+    const snapshots = q.getTaskSnapshots();
+    expect(snapshots[0].status).toBe("blocked");
+  });
+});
+
 describe("removeTask", () => {
   let q: TaskQueue;
   beforeEach(() => { q = new TaskQueue(); });
@@ -147,6 +219,12 @@ describe("removeTask", () => {
     expect(q.get("42")).toBeUndefined();
     expect(q.getTaskForIssue(42)).toBeUndefined();
     expect(q.nextPending()).toBeNull();
+  });
+
+  it("removes a blocked task (label was removed while task was blocked)", () => {
+    q.addTask({ ...baseTask, status: "blocked" });
+    q.removeTask("42");
+    expect(q.get("42")).toBeUndefined();
   });
 
   it("does not remove an assigned task", () => {
