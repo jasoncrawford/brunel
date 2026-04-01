@@ -145,14 +145,24 @@ describe("fmtWorkerStatus", () => {
     expect(result.length).toBe(79); // width - 1 (last-column wrap avoidance)
   });
 
-  it("uses first 8 chars of workerId", () => {
+  it("uses first 8 chars of workerId for legacy bare UUID IDs", () => {
     const result = stripAnsi(display.fmtWorkerStatus({
-      workerId: "abcdefgh-1111-2222-3333-444444444444",
+      workerId: "7c254628-1111-2222-3333-444444444444",
       connectionStatus: "connected",
       width: 80,
     }));
-    expect(result).toContain("worker abcdefgh");
-    expect(result).not.toContain("abcdefgh-1111");
+    expect(result).toContain("worker 7c254628");
+    expect(result).not.toContain("7c254628-1111");
+  });
+
+  it("shows name + first 8 chars of UUID for named worker IDs", () => {
+    const result = stripAnsi(display.fmtWorkerStatus({
+      workerId: "obadiah-7143f5cc-abf3-4b8a-bdb5-86989c54d3b2",
+      connectionStatus: "connected",
+      width: 80,
+    }));
+    expect(result).toContain("worker obadiah-7143f5cc");
+    expect(result).not.toContain("obadiah-7143f5cc-abf3");
   });
 });
 

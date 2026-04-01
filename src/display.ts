@@ -1,4 +1,5 @@
 import type { ForemanMessage, GitHubEvent } from "./types.js";
+import { shortWorkerId } from "../shared/utils.js";
 
 // ── Display width ─────────────────────────────────────────────────────────────
 
@@ -648,7 +649,7 @@ export function fmtWorkerStatus(opts: WorkerStatusOpts): string {
                                           `Disconnected${codeStr}`;
 
   // Left side: worker {id8} ∙ {task info}
-  const parts: string[] = [`worker ${workerId.slice(0, 8)}`];
+  const parts: string[] = [`worker ${shortWorkerId(workerId)}`];
   if (taskNumber != null) parts.push(`task #${taskNumber}`);
   else parts.push("no current task");
   if (prNumber != null) parts.push(`PR #${prNumber}`);
