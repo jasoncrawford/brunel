@@ -1138,10 +1138,16 @@ export function createForemanWss(
       }
     }
 
-    // Step 2: sync depsLoaded from labeledIssues to existing tasks (both directions)
-    for (const [num, { depsLoaded }] of labeledIssues) {
+    // Step 2: sync depsLoaded and body/labels from labeledIssues to existing tasks.
+    // body and labels are not stored in the DB, so tasks restored at startup need
+    // them populated from GitHub data once loadIssuesToQueue has run.
+    for (const [num, { issue, depsLoaded }] of labeledIssues) {
       const t = taskQueue.getTaskForIssue(num);
-      if (t) t.depsLoaded = depsLoaded;
+      if (t) {
+        t.depsLoaded = depsLoaded;
+        t.body = issue.body;
+        t.labels = issue.labels;
+      }
     }
 
     // Step 3: remove pending/blocked tasks whose issue no longer has the label

@@ -65,6 +65,15 @@ describe("reconcile()", () => {
     expect(queue.get("5")?.depsLoaded).toBe(true);
   });
 
+  it("syncs body and labels from labeledIssues to an existing task (startup restore fix)", () => {
+    // Simulates: task restored from DB with empty body/labels, then GitHub data loaded.
+    queue.addTask({ taskId: "42", issueNumber: 42, title: "T", body: "", labels: [], repoUrl: "", depsLoaded: true });
+    labeledIssues.set(42, { issue: { ...makeIssue(42), body: "Real description", labels: ["brunel:ready", "bug"] }, depsLoaded: true });
+    reconcile();
+    expect(queue.get("42")?.body).toBe("Real description");
+    expect(queue.get("42")?.labels).toEqual(["brunel:ready", "bug"]);
+  });
+
   it("does not change depsLoaded on an existing task when labeledIssues also says false", () => {
     queue.addTask({ taskId: "5", issueNumber: 5, title: "T", body: "b", labels: [], repoUrl: "", depsLoaded: false });
     labeledIssues.set(5, { issue: makeIssue(5), depsLoaded: false });
