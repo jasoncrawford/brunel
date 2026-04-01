@@ -1,0 +1,161 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { WorkerStatusModel } from "../src/worker.js";
+import { stripAnsi } from "./helpers.js";
+
+describe("WorkerStatusModel", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("has disconnected as default connection status", () => {
+    const model = new WorkerStatusModel("test-worker-id");
+    expect(model.connectionStatus).toBe("disconnected");
+  });
+
+  it("has undefined task/pr/branch by default", () => {
+    const model = new WorkerStatusModel("test-worker-id");
+    expect(model.taskNumber).toBeUndefined();
+    expect(model.prNumber).toBeUndefined();
+    expect(model.branch).toBe("");
+  });
+
+  it("emits change when connectionStatus is updated", () => {
+    const model = new WorkerStatusModel("test-worker-id");
+    const onChange = vi.fn();
+    model.on("change", onChange);
+    model.update({ connectionStatus: "connected" });
+    expect(onChange).toHaveBeenCalledOnce();
+  });
+
+  it("emits change when taskNumber is updated", () => {
+    const model = new WorkerStatusModel("test-worker-id");
+    const onChange = vi.fn();
+    model.on("change", onChange);
+    model.update({ taskNumber: 42 });
+    expect(onChange).toHaveBeenCalledOnce();
+  });
+
+  it("emits change when prNumber is updated", () => {
+    const model = new WorkerStatusModel("test-worker-id");
+    const onChange = vi.fn();
+    model.on("change", onChange);
+    model.update({ prNumber: 99 });
+    expect(onChange).toHaveBeenCalledOnce();
+  });
+
+  it("emits change when branch is updated", () => {
+    const model = new WorkerStatusModel("test-worker-id");
+    const onChange = vi.fn();
+    model.on("change", onChange);
+    model.update({ branch: "feature-branch" });
+    expect(onChange).toHaveBeenCalledOnce();
+  });
+
+  it("updates connectionStatus", () => {
+    const model = new WorkerStatusModel("test-worker-id");
+    model.update({ connectionStatus: "connected" });
+    expect(model.connectionStatus).toBe("connected");
+  });
+
+  it("sets and clears taskNumber", () => {
+    const model = new WorkerStatusModel("test-worker-id");
+    model.update({ taskNumber: 42 });
+    expect(model.taskNumber).toBe(42);
+    model.update({ taskNumber: undefined });
+    expect(model.taskNumber).toBeUndefined();
+  });
+
+  it("sets and clears prNumber", () => {
+    const model = new WorkerStatusModel("test-worker-id");
+    model.update({ prNumber: 77 });
+    expect(model.prNumber).toBe(77);
+    model.update({ prNumber: undefined });
+    expect(model.prNumber).toBeUndefined();
+  });
+
+  it("sets and clears disconnectCode", () => {
+    const model = new WorkerStatusModel("test-worker-id");
+    model.update({ disconnectCode: 1006 });
+    expect(model.disconnectCode).toBe(1006);
+    model.update({ disconnectCode: undefined });
+    expect(model.disconnectCode).toBeUndefined();
+  });
+
+  it("batches multiple field updates into one change event", () => {
+    const model = new WorkerStatusModel("test-worker-id");
+    const onChange = vi.fn();
+    model.on("change", onChange);
+    model.update({ connectionStatus: "connected", taskNumber: 5, prNumber: 10 });
+    expect(onChange).toHaveBeenCalledOnce();
+  });
+
+  it("starts emitting change every second when reconnectAt is set", () => {
+    vi.useFakeTimers();
+    const model = new WorkerStatusModel("test-worker-id");
+    const onChange = vi.fn();
+    model.on("change", onChange);
+    onChange.mockClear();
+
+    model.update({ reconnectAt: Date.now() + 5000 });
+    expect(onChange).toHaveBeenCalledOnce(); // from the update itself
+    onChange.mockClear();
+
+    vi.advanceTimersByTime(1000);
+    expect(onChange).toHaveBeenCalledOnce(); // timer tick
+
+    vi.advanceTimersByTime(1000);
+    expect(onChange).toHaveBeenCalledTimes(2); // second tick
+  });
+
+  it("stops countdown timer when reconnectAt is cleared", () => {
+    vi.useFakeTimers();
+    const model = new WorkerStatusModel("test-worker-id");
+    const onChange = vi.fn();
+    model.on("change", onChange);
+
+    model.update({ reconnectAt: Date.now() + 5000 });
+    onChange.mockClear();
+
+    model.update({ reconnectAt: undefined });
+    onChange.mockClear(); // clear the update event itself
+
+    vi.advanceTimersByTime(3000);
+    expect(onChange).not.toHaveBeenCalled(); // timer is stopped
+  });
+
+  it("getStatusText includes worker ID prefix", () => {
+    const model = new WorkerStatusModel("abcdef12-rest-of-id");
+    const text = stripAnsi(model.getStatusText());
+    expect(text).toContain("worker abcdef12");
+  });
+
+  it("getStatusText shows connection status", () => {
+    const model = new WorkerStatusModel("test-worker-id");
+    model.update({ connectionStatus: "connected" });
+    expect(stripAnsi(model.getStatusText())).toContain("Connected");
+  });
+
+  it("getStatusText shows task number when set", () => {
+    const model = new WorkerStatusModel("test-worker-id");
+    model.update({ taskNumber: 42 });
+    expect(stripAnsi(model.getStatusText())).toContain("task #42");
+  });
+
+  it("getStatusText shows 'no current task' when task is unset", () => {
+    const model = new WorkerStatusModel("test-worker-id");
+    expect(stripAnsi(model.getStatusText())).toContain("no current task");
+  });
+
+  it("getStatusText shows PR number when set", () => {
+    const model = new WorkerStatusModel("test-worker-id");
+    model.update({ prNumber: 77 });
+    expect(stripAnsi(model.getStatusText())).toContain("PR #77");
+  });
+
+  it("getStatusText shows retry countdown when disconnected with reconnectAt", () => {
+    vi.useFakeTimers();
+    const model = new WorkerStatusModel("test-worker-id");
+    model.update({ connectionStatus: "disconnected", reconnectAt: Date.now() + 4000 });
+    expect(stripAnsi(model.getStatusText())).toContain("Retrying in 4s");
+  });
+});

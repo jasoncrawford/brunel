@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
+import { EventEmitter } from "node:events";
 import os from "node:os";
 import path from "node:path";
 import { WebSocket } from "ws";
@@ -66,6 +67,88 @@ export function debounceMs(events: GitHubEvent[]): number {
   return 3000;
 }
 
+// ── WorkerStatusModel ─────────────────────────────────────────────────────────
+
+export type WorkerConnectionStatus = "connected" | "disconnected" | "reconnecting" | "handshaking";
+
+export type WorkerStatusPatch = {
+  connectionStatus?: WorkerConnectionStatus;
+  disconnectCode?: number | undefined;
+  reconnectAt?: number | undefined;
+  taskNumber?: number | undefined;
+  prNumber?: number | undefined;
+  branch?: string;
+};
+
+/**
+ * Reactive model for worker status bar state. Emits "change" whenever state
+ * changes so the display can subscribe and refresh without manual refresh calls.
+ * When reconnectAt is set the model starts a 1-second interval to emit "change"
+ * (driving the countdown display); the interval stops when reconnectAt is cleared.
+ */
+export class WorkerStatusModel extends EventEmitter {
+  private _connectionStatus: WorkerConnectionStatus = "disconnected";
+  private _disconnectCode: number | undefined;
+  private _reconnectAt: number | undefined;
+  private _taskNumber: number | undefined;
+  private _prNumber: number | undefined;
+  private _branch = "";
+  private _countdownTimer: ReturnType<typeof setInterval> | null = null;
+
+  constructor(public readonly workerId: string) {
+    super();
+  }
+
+  get connectionStatus(): WorkerConnectionStatus { return this._connectionStatus; }
+  get disconnectCode(): number | undefined { return this._disconnectCode; }
+  get reconnectAt(): number | undefined { return this._reconnectAt; }
+  get taskNumber(): number | undefined { return this._taskNumber; }
+  get prNumber(): number | undefined { return this._prNumber; }
+  get branch(): string { return this._branch; }
+
+  /** Apply a partial update and emit "change". Multiple fields in one call = one event. */
+  update(patch: WorkerStatusPatch): void {
+    if ("connectionStatus" in patch) this._connectionStatus = patch.connectionStatus!;
+    if ("disconnectCode" in patch) this._disconnectCode = patch.disconnectCode;
+    if ("reconnectAt" in patch) {
+      this._reconnectAt = patch.reconnectAt;
+      this._syncCountdownTimer();
+    }
+    if ("taskNumber" in patch) this._taskNumber = patch.taskNumber;
+    if ("prNumber" in patch) this._prNumber = patch.prNumber;
+    if ("branch" in patch) this._branch = patch.branch!;
+    this.emit("change");
+  }
+
+  private _syncCountdownTimer(): void {
+    if (this._reconnectAt != null) {
+      if (!this._countdownTimer) {
+        this._countdownTimer = setInterval(() => this.emit("change"), 1000);
+      }
+    } else {
+      if (this._countdownTimer) {
+        clearInterval(this._countdownTimer);
+        this._countdownTimer = null;
+      }
+    }
+  }
+
+  getStatusText(): string {
+    const retryInSeconds = this._reconnectAt != null
+      ? Math.max(0, Math.ceil((this._reconnectAt - Date.now()) / 1000))
+      : undefined;
+    return display.fmtWorkerStatus({
+      workerId: this.workerId,
+      taskNumber: this._taskNumber,
+      prNumber: this._prNumber,
+      branch: this._branch || undefined,
+      connectionStatus: this._connectionStatus,
+      disconnectCode: this._disconnectCode,
+      retryInSeconds,
+    });
+  }
+}
+
 // ── WorkerSession ─────────────────────────────────────────────────────────────
 
 export type WsFactory = (workerId: string, taskId?: string) => WebSocket;
@@ -118,13 +201,9 @@ export class WorkerSession {
   private connectionState: "hello_sent" | "registered" = "registered";
   private bufferedMessages: BufferableMessage[] = [];
 
-  // Status bar state
-  private connectionStatus: "connected" | "disconnected" | "reconnecting" | "handshaking" = "disconnected";
-  private disconnectCode: number | undefined;
-  private reconnectAt: number | undefined;
-  private countdownTimer: ReturnType<typeof setInterval> | null = null;
-  private currentPrNumber: number | undefined;
-  private currentBranch = "";
+  // Reactive status bar model: emits "change" on any state mutation, so the
+  // display subscription in start() automatically refreshes without manual calls.
+  private statusModel: WorkerStatusModel;
 
   constructor(
     private workerId: string,
@@ -132,40 +211,31 @@ export class WorkerSession {
     private runQuery: RunQuery,
     private display: WorkerDisplay,
     private options: WorkerSessionOptions = {},
-  ) {}
+  ) {
+    this.statusModel = new WorkerStatusModel(workerId);
+  }
 
   /** Returns the formatted worker status bar text. Used by startPersistentStatus and tests. */
   getStatusText(): string {
-    const retryInSeconds = this.reconnectAt != null
-      ? Math.max(0, Math.ceil((this.reconnectAt - Date.now()) / 1000))
-      : undefined;
-    return display.fmtWorkerStatus({
-      workerId: this.workerId,
-      taskNumber: this.currentIssue?.number,
-      prNumber: this.currentPrNumber,
-      branch: this.currentBranch || undefined,
-      connectionStatus: this.connectionStatus,
-      disconnectCode: this.disconnectCode,
-      retryInSeconds,
-    });
-  }
-
-  private refreshStatus(): void {
-    this.display.updatePersistentStatus?.();
+    return this.statusModel.getStatusText();
   }
 
   private async refreshBranch(): Promise<void> {
+    let branch = "";
     try {
       const { stdout } = await execAsync("git rev-parse --abbrev-ref HEAD");
-      this.currentBranch = stdout.trim();
+      branch = stdout.trim();
     } catch {
-      this.currentBranch = "";
+      branch = "";
     }
-    this.refreshStatus();
+    this.statusModel.update({ branch });
   }
 
   start(): void {
-    this.display.startPersistentStatus?.(() => this.getStatusText());
+    // Subscribe to model changes — the display refreshes automatically whenever
+    // any status field changes, without needing explicit refreshStatus() calls.
+    this.statusModel.on("change", () => this.display.updatePersistentStatus?.());
+    this.display.startPersistentStatus?.(() => this.statusModel.getStatusText());
     this.display.setOnToolResultCallback?.((toolName) => {
       // Refresh the branch display after each Bash tool completes so the status
       // bar reflects branch changes (e.g. git checkout) without waiting for the
@@ -249,9 +319,7 @@ export class WorkerSession {
         this.currentTaskId = undefined;
         this.currentIssue = undefined;
         this.currentSessionId = undefined;
-        this.currentPrNumber = undefined;
-        this.currentBranch = "";
-        this.refreshStatus();
+        this.statusModel.update({ taskNumber: undefined, prNumber: undefined, branch: "" });
         this.display.print(display.c.sageGreen("Task complete. Waiting for next task..."));
         return "task-complete";
       }
@@ -341,19 +409,14 @@ export class WorkerSession {
   }
 
   private connect(): void {
-    if (this.countdownTimer) { clearInterval(this.countdownTimer); this.countdownTimer = null; }
-    this.reconnectAt = undefined;
-    this.connectionStatus = "reconnecting";
-    this.refreshStatus();
+    // Clearing reconnectAt stops the countdown timer in the model.
+    this.statusModel.update({ connectionStatus: "reconnecting", reconnectAt: undefined });
     const ws = this.wsFactory(this.workerId, this.currentTaskId);
     this.ws = ws;
-    let connectedAt: number | undefined;
 
     ws.on("open", () => {
-      connectedAt = Date.now();
       this.connectionState = "hello_sent";
-      this.connectionStatus = "handshaking";
-      this.refreshStatus();
+      this.statusModel.update({ connectionStatus: "handshaking" });
     });
 
     ws.on("message", (data: Buffer | string) => {
@@ -364,12 +427,13 @@ export class WorkerSession {
 
     ws.on("close", (code: number, _reason: Buffer) => {
       if (ws !== this.ws) return; // stale close from a previous connection
-      this.connectionStatus = "disconnected";
-      this.disconnectCode = code;
-      this.refreshStatus();
       const delay = 2000 + Math.random() * 3000;
-      this.reconnectAt = Date.now() + delay;
-      this.countdownTimer = setInterval(() => this.refreshStatus(), 1000);
+      // Setting reconnectAt starts a 1-second countdown timer in the model.
+      this.statusModel.update({
+        connectionStatus: "disconnected",
+        disconnectCode: code,
+        reconnectAt: Date.now() + delay,
+      });
       setTimeout(() => this.connect(), delay);
     });
 
@@ -384,8 +448,6 @@ export class WorkerSession {
     this.display.printForemanMessage(msg);
 
     if (msg.type === "hello_ack") {
-      this.connectionStatus = "connected";
-      this.disconnectCode = undefined;
       if (msg.status === "cancelled") {
         // Task was reassigned while worker was disconnected — stop and reset.
         this.connectionState = "registered";
@@ -393,13 +455,17 @@ export class WorkerSession {
         this.currentTaskId = undefined;
         this.currentIssue = undefined;
         this.currentSessionId = undefined;
-        this.currentPrNumber = undefined;
-        this.currentBranch = "";
-        this.refreshStatus();
+        this.statusModel.update({
+          connectionStatus: "connected",
+          disconnectCode: undefined,
+          taskNumber: undefined,
+          prNumber: undefined,
+          branch: "",
+        });
       } else {
         // "idle" or "busy": transition to registered and flush buffered messages.
         this.connectionState = "registered";
-        this.refreshStatus();
+        this.statusModel.update({ connectionStatus: "connected", disconnectCode: undefined });
         this.flushBuffer();
       }
       return;
@@ -410,8 +476,7 @@ export class WorkerSession {
       this.currentIssue = msg.issue;
       this.currentSessionId = undefined;
       this.prIsClosed = false;
-      this.currentPrNumber = undefined;
-      this.refreshStatus();
+      this.statusModel.update({ taskNumber: msg.issue.number, prNumber: undefined });
       void this.refreshBranch();
       this.resolveWsInput?.(WS_TASK_ASSIGNED);
       this.resolveWsInput = null;
@@ -426,8 +491,7 @@ export class WorkerSession {
       if (event.name === "pull_request") {
         const pr = event.payload["pull_request"] as { number?: number } | undefined;
         if (pr?.number != null) {
-          this.currentPrNumber = pr.number;
-          this.refreshStatus();
+          this.statusModel.update({ prNumber: pr.number });
         }
       }
 
@@ -479,7 +543,6 @@ export class WorkerSession {
     try {
       const ac = new AbortController();
       this.isRunningQuery = true;
-      this.refreshStatus();
       let queryFailed = false;
       try {
         this.currentSessionId = await this.runQuery(initialPrompt, this.currentSessionId, ac) ?? this.currentSessionId;
@@ -489,7 +552,6 @@ export class WorkerSession {
         queryFailed = true;
       } finally {
         this.isRunningQuery = false;
-        this.refreshStatus();
         void this.refreshBranch();
       }
 
@@ -501,7 +563,6 @@ export class WorkerSession {
         const events = this.pendingEvents.splice(0);
         const prompt = this.buildAndLogEventPrompt(events);
         this.isRunningQuery = true;
-        this.refreshStatus();
         try {
           this.currentSessionId = await this.runQuery(prompt, this.currentSessionId, eventAc) ?? this.currentSessionId;
         } catch (err) {
@@ -510,7 +571,6 @@ export class WorkerSession {
           return;
         } finally {
           this.isRunningQuery = false;
-          this.refreshStatus();
           void this.refreshBranch();
         }
         if (eventAc.signal.aborted) return;
