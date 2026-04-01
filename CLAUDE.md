@@ -85,6 +85,10 @@ A task moves through states: **pending → assigned → complete**.
 - On foreman restart, `loadIssuesToQueue` fetches only **open** GitHub issues. Tasks whose issues were closed mid-task are restored from `taskStore` (status=`assigned`) so their workers can reconnect and complete normally.
 - `reconcile()` only removes **pending** tasks that are no longer in `labeledIssues`. Assigned and complete tasks are never removed by reconcile.
 
+## Design principles
+
+- **Prefer event-based designs for real-time UIs.** Whether it's a terminal status bar (worker side) or a web dashboard (foreman side with WebSocket/React), the cleanest pattern is a model that holds state and emits events on change, with the UI subscribing to refresh automatically. Avoid scattering manual "refresh" calls throughout the code — they drift out of sync as the codebase grows. See `WorkerStatusModel` in `src/worker.ts` for an example: model mutations emit `"change"`, and the display subscribes once in `start()` rather than calling `updatePersistentStatus()` from a dozen places.
+
 ## Key conventions
 
 - TypeScript with ESM (`"type": "module"`). New dependencies must be ESM-compatible.
