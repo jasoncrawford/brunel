@@ -9,7 +9,7 @@ const defaultCfg = await loadDefaultConfig();
 import type { ForemanMessage, LabeledIssueState } from "../src/types.js";
 import { setBlockers } from "../src/dependencies.js";
 import type { DependencyGraph } from "../src/dependencies.js";
-import type { DbLogger } from "../src/db.js";
+import type { DbLogger, TaskStore } from "../src/db.js";
 import { waitUntil } from "./helpers.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -984,6 +984,97 @@ describe("worker_goodbye", () => {
     expect(registry.get("worker-a")).toBeUndefined();
     expect(queue.get("1")?.status).toBe("assigned");
     expect(queue.get("1")?.assignedWorkerId).toBe("worker-b");
+  });
+});
+
+// ── worker_goodbye — DB persistence ──────────────────────────────────────────
+
+describe("worker_goodbye — DB persistence", () => {
+  it("calls markPending when goodbye carries a taskId", async () => {
+    const taskStore: TaskStore = {
+      upsertTask: vi.fn().mockResolvedValue(undefined),
+      markAssigned: vi.fn().mockResolvedValue(undefined),
+      markComplete: vi.fn().mockResolvedValue(undefined),
+      markPending: vi.fn().mockResolvedValue(undefined),
+      markBlocked: vi.fn().mockResolvedValue(undefined),
+      updateTaskPr: vi.fn().mockResolvedValue(undefined),
+      listTasks: vi.fn().mockResolvedValue([]),
+    };
+
+    const q = new TaskQueue();
+    const r = new WorkerRegistry();
+    const srv = http.createServer();
+    const { wss: testWss } = createForemanWss(q, r, srv, {
+      taskLabel: defaultCfg.taskLabel,
+      reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs,
+      taskStore,
+    });
+
+    q.addTask({ taskId: "1", issueNumber: 1, title: "T", body: "b", labels: [], repoUrl: "r" });
+
+    await new Promise<void>((resolve) => srv.listen(0, resolve));
+    const testPort = (srv.address() as AddressInfo).port;
+
+    const ws = new WebSocket(`ws://localhost:${testPort}/worker`);
+    await new Promise<void>((resolve, reject) => {
+      ws.once("open", resolve);
+      ws.once("error", reject);
+    });
+
+    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    // Wait for hello_ack + task_assigned
+    await waitUntil(() => r.get("w1")?.status === "busy");
+
+    send(ws, { type: "worker_goodbye", workerId: "w1", taskId: "1" });
+    await waitUntil(() => r.get("w1") === undefined);
+
+    expect(taskStore.markPending).toHaveBeenCalledWith("1");
+
+    ws.close();
+    await new Promise<void>((resolve) => ws.once("close", resolve));
+    await new Promise<void>((resolve) => testWss.close(() => srv.close(resolve)));
+  });
+
+  it("does not call markPending when goodbye has no taskId", async () => {
+    const taskStore: TaskStore = {
+      upsertTask: vi.fn().mockResolvedValue(undefined),
+      markAssigned: vi.fn().mockResolvedValue(undefined),
+      markComplete: vi.fn().mockResolvedValue(undefined),
+      markPending: vi.fn().mockResolvedValue(undefined),
+      markBlocked: vi.fn().mockResolvedValue(undefined),
+      updateTaskPr: vi.fn().mockResolvedValue(undefined),
+      listTasks: vi.fn().mockResolvedValue([]),
+    };
+
+    const q = new TaskQueue();
+    const r = new WorkerRegistry();
+    const srv = http.createServer();
+    const { wss: testWss } = createForemanWss(q, r, srv, {
+      taskLabel: defaultCfg.taskLabel,
+      reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs,
+      taskStore,
+    });
+
+    await new Promise<void>((resolve) => srv.listen(0, resolve));
+    const testPort = (srv.address() as AddressInfo).port;
+
+    const ws = new WebSocket(`ws://localhost:${testPort}/worker`);
+    await new Promise<void>((resolve, reject) => {
+      ws.once("open", resolve);
+      ws.once("error", reject);
+    });
+
+    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    await waitUntil(() => r.get("w1") !== undefined);
+
+    send(ws, { type: "worker_goodbye", workerId: "w1" });
+    await waitUntil(() => r.get("w1") === undefined);
+
+    expect(taskStore.markPending).not.toHaveBeenCalled();
+
+    ws.close();
+    await new Promise<void>((resolve) => ws.once("close", resolve));
+    await new Promise<void>((resolve) => testWss.close(() => srv.close(resolve)));
   });
 });
 
