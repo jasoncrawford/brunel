@@ -1019,6 +1019,9 @@ export function createForemanWss(
       log(workerId, `worker_goodbye (task=${msg.taskId ?? "none"})`);
       if (msg.taskId) {
         taskQueue.revertTask(msg.taskId);
+        taskStore.markPending(msg.taskId).catch(err =>
+          flog(`ERROR Failed to mark task #${msg.taskId} pending on goodbye: ${fmtError(err)}`)
+        );
       }
       registry.remove(workerId);
     }
@@ -1131,8 +1134,8 @@ export function createForemanWss(
           repoUrl: issue.repoUrl,
           depsLoaded,
         });
-        // Persist task record; on conflict (restart) updates title only, preserves status.
-        taskStore.upsertTask(String(num), num, repo, issue.title).catch(err =>
+        // Persist task record; on re-label of a completed issue, resets to pending.
+        taskStore.upsertTask(String(num), num, repo, issue.title, issue.body, issue.labels).catch(err =>
           flog(`ERROR Failed to persist task #${num}: ${fmtError(err)}`)
         );
       }
@@ -1254,8 +1257,8 @@ if (isMain) {
         taskId: row.taskId,
         issueNumber: row.issueNumber,
         title: row.title,
-        body: "",
-        labels: [],
+        body: row.body,
+        labels: row.labels,
         repoUrl: `https://github.com/${row.repo}`,
         status: row.status as TaskStatus,
         depsLoaded: true,

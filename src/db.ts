@@ -202,73 +202,6 @@ export function createNullDbLogger(): DbLogger {
   };
 }
 
-// ── TaskAssignmentStore ────────────────────────────────────────────────────────
-
-export interface TaskAssignmentRow {
-  taskId: string;
-  workerId: string;
-  prNumber: number | null;
-  branch: string | null;
-}
-
-export interface TaskAssignmentStore {
-  /** Insert or replace the assignment row for this task. */
-  upsertAssignment(taskId: string, workerId: string): Promise<void>;
-  /** Update the assignment row with PR number and branch (called when PR opened). */
-  updatePr(taskId: string, prNumber: number, branch: string | null): Promise<void>;
-  /** Delete the assignment row (task complete, or reverted to pending). */
-  deleteAssignment(taskId: string): Promise<void>;
-  /** Load all persisted assignments at startup. */
-  listAssignments(): Promise<TaskAssignmentRow[]>;
-}
-
-export function createTaskAssignmentStore(supabase: SupabaseClient): TaskAssignmentStore {
-  return {
-    async upsertAssignment(taskId, workerId) {
-      const { error } = await supabase.from("task_assignments").upsert(
-        { task_id: taskId, worker_id: workerId, updated_at: new Date().toISOString() },
-        { onConflict: "task_id" },
-      );
-      if (error) throw error;
-    },
-
-    async updatePr(taskId, prNumber, branch) {
-      const { error } = await supabase.from("task_assignments")
-        .update({ pr_number: prNumber, branch, updated_at: new Date().toISOString() })
-        .eq("task_id", taskId);
-      if (error) throw error;
-    },
-
-    async deleteAssignment(taskId) {
-      const { error } = await supabase.from("task_assignments")
-        .delete()
-        .eq("task_id", taskId);
-      if (error) throw error;
-    },
-
-    async listAssignments() {
-      const { data, error } = await supabase.from("task_assignments")
-        .select("task_id, worker_id, pr_number, branch");
-      if (error) throw error;
-      return ((data ?? []) as Record<string, unknown>[]).map((row) => ({
-        taskId: row.task_id as string,
-        workerId: row.worker_id as string,
-        prNumber: (row.pr_number as number | null) ?? null,
-        branch: (row.branch as string | null) ?? null,
-      }));
-    },
-  };
-}
-
-export function createNullTaskAssignmentStore(): TaskAssignmentStore {
-  return {
-    async upsertAssignment() {},
-    async updatePr() {},
-    async deleteAssignment() {},
-    async listAssignments() { return []; },
-  };
-}
-
 // ── TaskStore ──────────────────────────────────────────────────────────────────
 
 export interface TaskRow {
@@ -276,6 +209,8 @@ export interface TaskRow {
   issueNumber: number;
   repo: string;
   title: string;
+  body: string;
+  labels: string[];
   status: TaskStatus;
   workerId: string | null;
   prNumber: number | null;
@@ -291,8 +226,9 @@ export interface ListTasksOpts {
 }
 
 export interface TaskStore {
-  /** Insert task with status=pending; on conflict (duplicate task_id) do nothing. */
-  upsertTask(taskId: string, issueNumber: number, repo: string, title: string): Promise<void>;
+  /** Upsert task: insert with status=pending, or on re-label reset an existing row back to pending
+   * and refresh title/body/labels/assigned_at/completed_at/worker_id. */
+  upsertTask(taskId: string, issueNumber: number, repo: string, title: string, body: string, labels: string[]): Promise<void>;
   /** Mark task as assigned to a worker. */
   markAssigned(taskId: string, workerId: string): Promise<void>;
   /** Mark task as complete. */
@@ -314,6 +250,8 @@ export function createTaskStore(supabase: SupabaseClient): TaskStore {
       issueNumber: row.issue_number as number,
       repo: row.repo as string,
       title: row.title as string,
+      body: (row.body as string | null) ?? "",
+      labels: (row.labels as string[] | null) ?? [],
       status: row.status as TaskStatus,
       workerId: (row.worker_id as string | null) ?? null,
       prNumber: (row.pr_number as number | null) ?? null,
@@ -325,10 +263,23 @@ export function createTaskStore(supabase: SupabaseClient): TaskStore {
   }
 
   return {
-    async upsertTask(taskId, issueNumber, repo, title) {
+    async upsertTask(taskId, issueNumber, repo, title, body, labels) {
+      // Real upsert: on re-label of a completed issue, reset to pending and
+      // refresh content. Each labeling of an issue acts like a fresh task.
       const { error } = await supabase.from("tasks").upsert(
-        { task_id: taskId, issue_number: issueNumber, repo, title, status: "pending" },
-        { onConflict: "task_id", ignoreDuplicates: true },
+        {
+          task_id: taskId,
+          issue_number: issueNumber,
+          repo,
+          title,
+          body,
+          labels,
+          status: "pending",
+          worker_id: null,
+          assigned_at: null,
+          completed_at: null,
+        },
+        { onConflict: "task_id" },
       );
       if (error) throw error;
     },
@@ -371,7 +322,7 @@ export function createTaskStore(supabase: SupabaseClient): TaskStore {
     async listTasks(opts) {
       const limit = opts?.limit ?? 200;
       let q = supabase.from("tasks").select(
-        "task_id, issue_number, repo, title, status, worker_id, pr_number, branch, created_at, assigned_at, completed_at"
+        "task_id, issue_number, repo, title, body, labels, status, worker_id, pr_number, branch, created_at, assigned_at, completed_at"
       );
       if (opts?.status) q = q.eq("status", opts.status);
       const { data, error } = await q.order("created_at", { ascending: false }).limit(limit);

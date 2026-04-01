@@ -13,6 +13,7 @@ import { waitUntil } from "./helpers.js";
 function makeTaskStore(rows: Partial<TaskRow>[] = []): TaskStore {
   const full: TaskRow[] = rows.map((r) => ({
     taskId: "42", issueNumber: 42, repo: "owner/repo", title: "Test task",
+    body: "", labels: [],
     status: "assigned" as const, workerId: "w1", prNumber: null, branch: null,
     createdAt: "2026-01-01T00:00:00Z", assignedAt: "2026-01-01T01:00:00Z", completedAt: null,
     ...r,
@@ -307,8 +308,8 @@ function restoreTasksFromDb(rows: TaskRow[], tq: TaskQueue): void {
       taskId: row.taskId,
       issueNumber: row.issueNumber,
       title: row.title,
-      body: "",
-      labels: [],
+      body: row.body,
+      labels: row.labels,
       repoUrl: `https://github.com/${row.repo}`,
       status: row.status as TaskStatus,
       depsLoaded: true,
