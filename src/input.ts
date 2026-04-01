@@ -407,6 +407,7 @@ export function ask(
     let totalDrawnRows = 0;
     stash = null; // consume the stash
 
+    if (promptLine) process.stdout.write("\x1b[?25h"); // show cursor when there's a visible prompt
     process.stdout.write(promptStr);
     // If buffer was pre-populated from stash, render it immediately.
     if (buffer) fullRedraw(0, computeMatches());
@@ -473,16 +474,16 @@ export function ask(
       const { row: endRow } = screenPosOf(buffer.length);
 
       // 3. Clear to end of last buffer line, then write suggestion rows.
-      // The buffer-line clear and the first newline are combined into one write
-      // so that no individual write call starts with \r\n.
       const sugLines = renderSuggestions(suggestions);
-      const firstSugLine = sugLines.length > 0 ? sugLines[0] : "";
-      process.stdout.write("\x1b[K\r\n\x1b[K" + firstSugLine);
-      for (let i = 1; i < sugLines.length; i++) {
-        process.stdout.write("\r\n\x1b[K" + sugLines[i]);
+      process.stdout.write("\x1b[K");
+      if (sugLines.length > 0) {
+        process.stdout.write("\r\n\x1b[K" + sugLines[0]);
+        for (let i = 1; i < sugLines.length; i++) {
+          process.stdout.write("\r\n\x1b[K" + sugLines[i]);
+        }
       }
 
-      const sugLastRow = endRow + Math.max(1, sugLines.length);
+      const sugLastRow = endRow + sugLines.length;
 
       // 4. Clear any extra rows left over from a previously longer buffer or
       //    more suggestions
@@ -494,8 +495,14 @@ export function ask(
       }
       totalDrawnRows = sugLastRow;
 
-      // 5. Go from last suggestion row back to prompt row 0
-      process.stdout.write(`\x1b[${sugLastRow}A\r`);
+      // 5. Draw status bars below suggestion rows (if any are active).
+      //    Returns 0 when no bars are active, or 1+n for blank-separator + n bar rows.
+      totalDrawnRows += display.drawStatusBarsRaw();
+
+      // 6. Go from last drawn row back to prompt row 0.
+      // Guard: \x1b[0A is treated as \x1b[1A in most terminals, so skip it when already at row 0.
+      if (totalDrawnRows > 0) process.stdout.write(`\x1b[${totalDrawnRows}A`);
+      process.stdout.write("\r");
 
       // 6. Navigate to current cursor position
       const { row: targetRow, col: targetCol } = screenPosOf(cursor);
@@ -522,20 +529,28 @@ export function ask(
 
       const matches = computeMatches();
       const sugLines = renderSuggestions(matches);
-      const firstSugLine = sugLines.length > 0 ? sugLines[0] : "";
-      process.stdout.write("\x1b[K\r\n\x1b[K" + firstSugLine);
-      for (let i = 1; i < sugLines.length; i++) {
-        process.stdout.write("\r\n\x1b[K" + sugLines[i]);
+      process.stdout.write("\x1b[K");
+      if (sugLines.length > 0) {
+        process.stdout.write("\r\n\x1b[K" + sugLines[0]);
+        for (let i = 1; i < sugLines.length; i++) {
+          process.stdout.write("\r\n\x1b[K" + sugLines[i]);
+        }
       }
 
-      const sugLastRow = endRow + Math.max(1, sugLines.length);
+      const sugLastRow = endRow + sugLines.length;
       totalDrawnRows = sugLastRow;
 
-      process.stdout.write(`\x1b[${sugLastRow}A\r`);
+      // Draw status bars below suggestion rows (if any are active).
+      totalDrawnRows += display.drawStatusBarsRaw();
+
+      // Guard: \x1b[0A is treated as \x1b[1A in most terminals, so skip it when already at row 0.
+      if (totalDrawnRows > 0) process.stdout.write(`\x1b[${totalDrawnRows}A`);
+      process.stdout.write("\r");
 
       const { row: targetRow, col: targetCol } = screenPosOf(cursor);
       if (targetRow > 0) process.stdout.write(`\x1b[${targetRow}B`);
       if (targetCol > 0) process.stdout.write(`\x1b[${targetCol}C`);
+      process.stdout.write("\x1b[?25h"); // ensure cursor is visible at the prompt
     }
 
     // Register the fresh-redraw hook so display.print() can notify us.

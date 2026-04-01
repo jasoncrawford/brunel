@@ -93,6 +93,12 @@ export async function runQuery(
   // and invoke the callback so the prompt redraws once (fixes issue #108).
   const savedInputCallback = display.getInputPrintCallback();
   display.setInputPrintCallback(null);
+  if (savedInputCallback) {
+    // ask() was active when this query started (e.g., debounce-triggered while the
+    // worker prompt was showing). Clear from cursor to end of screen so the prompt
+    // area is wiped and _clearStatus/_drawStatus can track the cursor correctly.
+    process.stdout.write("\r\n\x1b[J");
+  }
 
   const startTime = Date.now();
   // Accumulate stats from stream_event messages to show in the status line.

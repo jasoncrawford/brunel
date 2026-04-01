@@ -74,8 +74,16 @@ describe("ask() - multiline rendering", () => {
       stdin.push("12345678"); // fills row 0 (pending-wrap at cursor=8, row 0)
       writeSpy.mockClear();   // clear setup output
       stdin.push("9");        // prevRow should be 0 → no cursor-up
-      // Must NOT emit \x1b[1A: cursor was on row 0 (pending-wrap), not row 1
-      expect(collectOutput(writeSpy)).not.toContain("\x1b[1A");
+      // Must NOT emit \x1b[1A *before* the prompt text: that would mean screenPosOf(8)
+      // incorrectly returned row=1, causing a premature cursor-up above the prompt.
+      // (A \x1b[1A *after* the prompt is fine — it's the "go back to row 0" navigation.)
+      const output = collectOutput(writeSpy);
+      const promptPos = output.indexOf("> ");
+      const firstCursorUp = output.indexOf("\x1b[1A");
+      expect(promptPos).toBeGreaterThan(-1);
+      if (firstCursorUp !== -1) {
+        expect(firstCursorUp).toBeGreaterThan(promptPos);
+      }
       stdin.push("\r");
       expect(await p).toBe("123456789");
     });

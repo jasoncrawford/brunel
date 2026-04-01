@@ -619,11 +619,74 @@ export const FOREMAN_MESSAGE_FMT: FmtTable = {
   _default:           (m) => c.darkGray(`Unknown foreman message: ${m.type}`),
 };
 
+// ── Worker status bar formatting ──────────────────────────────────────────────
+
+export interface WorkerStatusOpts {
+  workerId: string;
+  taskNumber?: number;
+  prNumber?: number;
+  branch?: string;
+  connectionStatus: "connected" | "disconnected" | "reconnecting" | "handshaking";
+  /** WebSocket close code, shown in verbose mode when disconnected. */
+  disconnectCode?: number;
+  /** Seconds until reconnect attempt, shown when disconnected. */
+  retryInSeconds?: number;
+  width?: number;
+}
+
+export function fmtWorkerStatus(opts: WorkerStatusOpts): string {
+  const { workerId, taskNumber, prNumber, branch, connectionStatus, disconnectCode, retryInSeconds } = opts;
+  const width = (opts.width ?? (process.stdout.columns ?? W)) - 1; // -1 to avoid last-column wrap
+
+  // Right side: connection status
+  const codeStr = verbose && disconnectCode != null ? ` (${disconnectCode})` : "";
+  const rightText =
+    connectionStatus === "connected"    ? "Connected" :
+    connectionStatus === "handshaking"  ? "Handshaking..." :
+    connectionStatus === "reconnecting" ? "Reconnecting..." :
+    retryInSeconds != null              ? `Disconnected${codeStr}. Retrying in ${retryInSeconds}s` :
+                                          `Disconnected${codeStr}`;
+
+  // Left side: worker {id8} ∙ {task info}
+  const parts: string[] = [`worker ${workerId.slice(0, 8)}`];
+  if (taskNumber != null) parts.push(`task #${taskNumber}`);
+  else parts.push("no current task");
+  if (prNumber != null) parts.push(`PR #${prNumber}`);
+  if (branch) parts.push(branch);
+  let leftText = parts.join(" ∙ ");
+
+  // Truncate left side if needed to leave room for right side with a gap of 1
+  const maxLeftLen = Math.max(0, width - rightText.length - 1);
+  if (leftText.length > maxLeftLen) {
+    leftText = leftText.slice(0, Math.max(0, maxLeftLen - 1)) + "…";
+  }
+
+  const gap = Math.max(1, width - leftText.length - rightText.length);
+  // Dim sage-green background + bright-white text. No trailing reset: _drawStatus
+  // appends \x1b[K (fills remaining width with the same background) then \x1b[0m.
+  return `\x1b[48;5;22m\x1b[97m${leftText + " ".repeat(gap) + rightText}`;
+}
+
 // ── Printing engine ───────────────────────────────────────────────────────────
 
 let _statusText = "";
 export let _statusActive = false;
 let _statusInterval: ReturnType<typeof setInterval> | null = null;
+
+// Persistent (worker) status bar — drawn below the primary status line.
+// Unlike the primary status this stays active between queries.
+let _persistentStatusText = "";
+export let _persistentStatusActive = false;
+let _persistentGetText: (() => string) | null = null;
+
+// Callback invoked when a tool_result block is printed, i.e. immediately after
+// a tool has finished running. Used by the worker to refresh the git branch in
+// the status bar after each Bash invocation.
+let _onToolResultCallback: ((toolName: string) => void) | null = null;
+
+export function setOnToolResultCallback(fn: ((toolName: string) => void) | null): void {
+  _onToolResultCallback = fn;
+}
 
 // Callback invoked after print() writes output, so the input layer can redraw
 // the prompt (needed in worker mode when WebSocket messages arrive during ask()).
@@ -636,17 +699,66 @@ export function getInputPrintCallback(): (() => void) | null {
   return _inputPrintCallback;
 }
 
+/** Number of active status lines (primary + persistent). */
+function _lineCount(): number {
+  const n = (_statusActive ? 1 : 0) + (_persistentStatusActive ? 1 : 0);
+  return n === 2 ? 3 : n; // blank separator between the two bars when both are active
+}
+
 function _clearStatus() {
-  if (!_statusActive) return;
-  process.stdout.write("\r\x1b[K\x1b[A\x1b[K");
+  if (_inputPrintCallback) return; // ask() owns the screen; drawFresh handles redraws
+  const n = _lineCount();
+  if (n === 0) return;
+  // Cursor rests on the blank separator row above the status lines.
+  // Move down through each status line erasing it, then return to the
+  // blank separator row and restore the cursor.
+  let seq = "";
+  for (let i = 0; i < n; i++) seq += "\x1b[B\r\x1b[K";
+  seq += `\x1b[${n}A\r`;
+  seq += "\x1b[?25h";  // show cursor
+  process.stdout.write(seq);
 }
 
 function _drawStatus() {
-  if (!_statusActive) return;
-  process.stdout.write("\n\r" + _statusText + "\x1b[K");
+  if (_inputPrintCallback) {
+    // ask() is active — let drawFresh handle the full redraw including status bars.
+    _inputPrintCallback();
+    return;
+  }
+  const n = _lineCount();
+  if (n === 0) return;
+  // Cursor is on the blank separator row. Draw each status line below it,
+  // then return cursor to the blank separator row and hide it.
+  let seq = "";
+  if (_statusActive) seq += `\n\r${_statusText}\x1b[K\x1b[0m`;
+  if (_statusActive && _persistentStatusActive) seq += `\n\r\x1b[K`; // blank line between bars
+  if (_persistentStatusActive) seq += `\n\r${_persistentStatusText}\x1b[K\x1b[0m`;
+  seq += `\x1b[${n}A\r`;
+  seq += "\x1b[?25l";  // hide cursor (only reached when _inputPrintCallback is null)
+  process.stdout.write(seq);
+}
+
+/**
+ * Write the status bar rows starting from the current cursor position (no
+ * leading blank separator — the cursor should already be at the row just above
+ * the desired blank-separator position).  Writes a blank separator row then
+ * the active bar rows.  Returns the total number of extra rows written
+ * (0 if no bars are active), so the caller can account for them in cursor math.
+ * Called by ask() to integrate the status bars into the prompt+suggestion area.
+ */
+export function drawStatusBarsRaw(): number {
+  const n = _lineCount();
+  if (n === 0) return 0;
+  let seq = "\r\n\x1b[K"; // blank separator row
+  if (_statusActive) seq += `\r\n${_statusText}\x1b[K\x1b[0m`;
+  if (_statusActive && _persistentStatusActive) seq += `\r\n\x1b[K`;
+  if (_persistentStatusActive) seq += `\r\n${_persistentStatusText}\x1b[K\x1b[0m`;
+  process.stdout.write(seq);
+  return 1 + n; // blank separator + n bar rows (n already includes blank-between when both active)
 }
 
 export function startStatus(getText: () => string) {
+  _clearStatus();
   _statusActive = true;
   _statusText = getText();
   _drawStatus();
@@ -662,34 +774,63 @@ export function stopStatus() {
   _clearStatus();
   _statusActive = false;
   _statusText = "";
+  // Redraw the persistent line (if any) now that the primary line is gone.
+  _drawStatus();
+}
+
+export function startPersistentStatus(getText: () => string): void {
+  _clearStatus();
+  _persistentStatusActive = true;
+  _persistentGetText = getText;
+  _persistentStatusText = getText();
+  _drawStatus();
+}
+
+export function stopPersistentStatus(): void {
+  _clearStatus();
+  _persistentStatusActive = false;
+  _persistentGetText = null;
+  _persistentStatusText = "";
+  // Redraw primary status if still active.
+  _drawStatus();
+}
+
+/** Refresh the persistent status line text and redraw. */
+export function updatePersistentStatus(): void {
+  if (!_persistentStatusActive || !_persistentGetText) return;
+  _clearStatus();
+  _persistentStatusText = _persistentGetText();
+  _drawStatus();
 }
 
 export function print(line: string | null) {
   if (line === null) return;
+  if (_inputPrintCallback) {
+    // ask() is active: erase from current cursor position to end of screen
+    // (clears the prompt, suggestion row, and status bars), write the new
+    // content line, then let drawFresh redraw the prompt + status bars below.
+    process.stdout.write("\r\x1b[J");
+    if (verbose) {
+      const ts = `\x1b[90m${fmtTime()} \x1b[39m`;
+      const parts = line.split("\n");
+      const openColor = (line.match(/^(\x1b\[[0-9;]*m)+/) ?? [""])[0];
+      console.log(parts.map((p, i) => ts + (i > 0 ? openColor : "") + p).join("\n"));
+    } else {
+      console.log(line);
+    }
+    _inputPrintCallback();
+    return;
+  }
   _clearStatus();
-  // If ask() is waiting with a visible prompt, erase the prompt line before
-  // printing so the message appears on a clean line (not appended to the
-  // prompt). The prompt is then redrawn below via _inputPrintCallback.
-  if (_inputPrintCallback) process.stdout.write("\r\x1b[K");
   if (verbose) {
-    // \x1b[39m resets only the foreground ("pop-color") rather than \x1b[0m
-    // which would reset everything including the content's own color codes.
     const ts = `\x1b[90m${fmtTime()} \x1b[39m`;
     const parts = line.split("\n");
-    // Re-apply any opening ANSI color codes to continuation lines so that
-    // inserting the timestamp prefix doesn't strip color mid-block.
     const openColor = (line.match(/^(\x1b\[[0-9;]*m)+/) ?? [""])[0];
     console.log(parts.map((p, i) => ts + (i > 0 ? openColor : "") + p).join("\n"));
   } else {
     console.log(line);
   }
   _drawStatus();
-  // Only redraw the input prompt when no query is running. During a query the
-  // status bar is active; calling drawFresh() then would interleave the prompt
-  // with query output and corrupt the display (causing double-spacing and
-  // swallowed output). ask() re-registers the callback on each new call, so
-  // prompt-redrawing after background notifications still works between runs.
-  if (!_statusActive) _inputPrintCallback?.();
 }
 
 export function resolve(table: FmtTable, key: string, data: unknown): string | null {
@@ -718,6 +859,8 @@ export function printBlock(b: ContentBlock, role: "assistant" | "user", msg?: Re
     const name = toolUseNames.get(tr.tool_use_id) ?? "";
     const _input = toolUseInputs.get(tr.tool_use_id);
     print(resolve(tr.is_error ? TOOL_ERROR_FMT : TOOL_RESULT_FMT, name, { ...tr, _msg: msg, _input }));
+    // Fire after the tool result is printed — tool has just finished running.
+    _onToolResultCallback?.(name);
     return;
   }
   const blockFmt = role === "assistant" ? ASSISTANT_BLOCK_FMT : USER_BLOCK_FMT;

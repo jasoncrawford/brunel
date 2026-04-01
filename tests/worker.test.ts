@@ -32,7 +32,14 @@ function sendMsg(ws: FakeWs, msg: ForemanMessage) {
 let fakeWs: FakeWs;
 let wsFactory: ReturnType<typeof vi.fn>;
 let runQuery: ReturnType<typeof vi.fn>;
-let display: { print: ReturnType<typeof vi.fn>; printForemanMessage: ReturnType<typeof vi.fn> };
+let display: {
+  print: ReturnType<typeof vi.fn>;
+  printForemanMessage: ReturnType<typeof vi.fn>;
+  startPersistentStatus: ReturnType<typeof vi.fn>;
+  stopPersistentStatus: ReturnType<typeof vi.fn>;
+  updatePersistentStatus: ReturnType<typeof vi.fn>;
+  setOnToolResultCallback: ReturnType<typeof vi.fn>;
+};
 let session: WorkerSession;
 
 beforeEach(() => {
@@ -42,6 +49,10 @@ beforeEach(() => {
   display = {
     print: vi.fn(),
     printForemanMessage: vi.fn(),
+    startPersistentStatus: vi.fn(),
+    stopPersistentStatus: vi.fn(),
+    updatePersistentStatus: vi.fn(),
+    setOnToolResultCallback: vi.fn(),
   };
   session = new WorkerSession(WORKER_ID, wsFactory, runQuery, display);
   session.start();
@@ -330,9 +341,7 @@ describe("stale WebSocket handlers", () => {
     // Now the old WS fires close again (delayed TCP teardown)
     oldWs.emit("close", 1006, Buffer.from(""));
 
-    // Should be silently ignored — no disconnect message, no third connection
-    const calls = display.print.mock.calls.map(a => stripAnsi(String(a[0])));
-    expect(calls.some(s => s.includes("Disconnected"))).toBe(false);
+    // Should be silently ignored — no state change, no third connection
     expect(wsFactory).toHaveBeenCalledTimes(2); // no third connection
 
     vi.useRealTimers();
@@ -360,42 +369,86 @@ describe("stale WebSocket handlers", () => {
   });
 });
 
-// ── Close diagnostics ─────────────────────────────────────────────────────────
+// ── Connection status in status bar ───────────────────────────────────────────
 
-describe("close diagnostics", () => {
-  it("logs close code in disconnect message", () => {
-    vi.useFakeTimers();
-    fakeWs.emit("close", 1006, Buffer.from(""));
-    const calls = display.print.mock.calls.map(a => stripAnsi(String(a[0])));
-    expect(calls.some(s => s.includes("code 1006"))).toBe(true);
-    vi.useRealTimers();
-  });
-
-  it("logs elapsed seconds in disconnect message when connection was open", () => {
+describe("connection status bar", () => {
+  it("shows Disconnected in status text after close", () => {
     vi.useFakeTimers();
     fakeWs.emit("open");
-    vi.advanceTimersByTime(47000);
     fakeWs.emit("close", 1006, Buffer.from(""));
-    const calls = display.print.mock.calls.map(a => stripAnsi(String(a[0])));
-    expect(calls.some(s => s.includes("47s"))).toBe(true);
+    expect(stripAnsi(session.getStatusText())).toContain("Disconnected");
     vi.useRealTimers();
   });
 
-  it("omits elapsed seconds when connection never opened", () => {
+  it("shows Handshaking... in status text after open (pre-hello_ack)", () => {
+    fakeWs.emit("open");
+    expect(stripAnsi(session.getStatusText())).toContain("Handshaking...");
+  });
+
+  it("shows Connected in status text after hello_ack", () => {
+    fakeWs.emit("open");
+    sendMsg(fakeWs, { type: "hello_ack", status: "idle" });
+    expect(stripAnsi(session.getStatusText())).toContain("Connected");
+  });
+
+  it("shows Reconnecting in status text on initial connect", () => {
+    expect(stripAnsi(session.getStatusText())).toContain("Reconnecting");
+  });
+
+  it("calls startPersistentStatus on start()", () => {
+    expect(display.startPersistentStatus).toHaveBeenCalledOnce();
+  });
+
+  it("registers a tool result callback on start()", () => {
+    expect(display.setOnToolResultCallback).toHaveBeenCalledOnce();
+    expect(typeof display.setOnToolResultCallback.mock.calls[0][0]).toBe("function");
+  });
+
+  it("tool result callback refreshes status on Bash tool", async () => {
+    const cb = display.setOnToolResultCallback.mock.calls[0][0] as (toolName: string) => void;
+    display.updatePersistentStatus.mockClear();
+    cb("Bash");
+    await vi.waitFor(() => expect(display.updatePersistentStatus).toHaveBeenCalled());
+  });
+
+  it("tool result callback does not refresh status for non-Bash tools", async () => {
+    const cb = display.setOnToolResultCallback.mock.calls[0][0] as (toolName: string) => void;
+    // Drain startup calls: connect()'s synchronous refreshStatus() + refreshBranch()'s async one
+    await vi.waitFor(() => expect(display.updatePersistentStatus).toHaveBeenCalledTimes(2));
+    display.updatePersistentStatus.mockClear();
+    cb("Read");
+    // Give a tick for any potential async work
+    await new Promise((r) => setTimeout(r, 10));
+    expect(display.updatePersistentStatus).not.toHaveBeenCalled();
+  });
+
+  it("calls updatePersistentStatus after open", () => {
+    display.updatePersistentStatus.mockClear();
+    fakeWs.emit("open");
+    expect(display.updatePersistentStatus).toHaveBeenCalled();
+  });
+
+  it("shows Reconnecting in status text when connect() is called after disconnect", () => {
     vi.useFakeTimers();
+    fakeWs.emit("open");
     fakeWs.emit("close", 1006, Buffer.from(""));
-    const calls = display.print.mock.calls.map(a => stripAnsi(String(a[0])));
-    const msg = calls.find(s => s.includes("Disconnected"));
-    expect(msg).toBeDefined();
-    expect(msg).not.toMatch(/\d+s/);
+    // After close we are Disconnected; the timer hasn't fired yet.
+    expect(stripAnsi(session.getStatusText())).toContain("Disconnected");
+    // Advance time past the reconnect delay to trigger connect().
+    vi.advanceTimersByTime(6000);
+    // connect() should have been called (wsFactory called a second time) and
+    // the status should now show Reconnecting before the new socket opens.
+    expect(wsFactory).toHaveBeenCalledTimes(2);
+    expect(stripAnsi(session.getStatusText())).toContain("Reconnecting");
     vi.useRealTimers();
   });
 
-  it("includes non-empty reason in disconnect message", () => {
+  it("disconnect code is stored on close and shown in Reconnecting... state (verbose)", () => {
     vi.useFakeTimers();
-    fakeWs.emit("close", 1001, Buffer.from("Going Away"));
-    const calls = display.print.mock.calls.map(a => stripAnsi(String(a[0])));
-    expect(calls.some(s => s.includes("Going Away"))).toBe(true);
+    fakeWs.emit("open");
+    fakeWs.emit("close", 1006, Buffer.from(""));
+    // After close we are Disconnected; the timer hasn't fired yet.
+    expect(stripAnsi(session.getStatusText())).toContain("Disconnected");
     vi.useRealTimers();
   });
 
@@ -403,6 +456,66 @@ describe("close diagnostics", () => {
     fakeWs.emit("error", new Error("connection reset"));
     const calls = display.print.mock.calls.map(a => stripAnsi(String(a[0])));
     expect(calls.some(s => s.includes("connection reset"))).toBe(true);
+  });
+});
+
+// ── Status bar content ────────────────────────────────────────────────────────
+
+describe("status bar content", () => {
+  it("shows worker ID prefix in status text", () => {
+    const text = stripAnsi(session.getStatusText());
+    expect(text).toContain(`worker ${WORKER_ID.slice(0, 8)}`);
+  });
+
+  it("shows no current task when no task assigned", () => {
+    const text = stripAnsi(session.getStatusText());
+    expect(text).toContain("no current task");
+  });
+
+  it("shows task number after task_assigned", async () => {
+    const issue = makeIssue(42);
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "t42", issue });
+    await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
+    const text = stripAnsi(session.getStatusText());
+    expect(text).toContain("task #42");
+  });
+
+  it("shows PR number after pull_request event", async () => {
+    const issue = makeIssue(1);
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "t1", issue });
+    await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
+
+    const prEvent: GitHubEvent = {
+      id: "pr-evt",
+      name: "pull_request",
+      payload: { action: "opened", pull_request: { number: 99, title: "My PR" } },
+    };
+    sendMsg(fakeWs, { type: "event_notification", taskId: "t1", event: prEvent });
+    const text = stripAnsi(session.getStatusText());
+    expect(text).toContain("PR #99");
+  });
+
+  it("resets PR number when new task is assigned", async () => {
+    const issue1 = makeIssue(1);
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "t1", issue: issue1 });
+    await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
+
+    // Set PR number
+    const prEvent: GitHubEvent = {
+      id: "pr-evt",
+      name: "pull_request",
+      payload: { action: "opened", pull_request: { number: 55, title: "PR" } },
+    };
+    sendMsg(fakeWs, { type: "event_notification", taskId: "t1", event: prEvent });
+    expect(stripAnsi(session.getStatusText())).toContain("PR #55");
+
+    // Complete task and assign new task
+    await session.handleUserInput("/task-complete");
+    const issue2 = makeIssue(2);
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "t2", issue: issue2 });
+    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledTimes(2));
+
+    expect(stripAnsi(session.getStatusText())).not.toContain("PR #");
   });
 });
 

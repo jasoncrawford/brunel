@@ -1,4 +1,6 @@
 import "dotenv/config";
+import { exec } from "node:child_process";
+import { promisify } from "node:util";
 import os from "node:os";
 import path from "node:path";
 import { WebSocket } from "ws";
@@ -9,6 +11,8 @@ import type { ForemanMessage, GitHubEvent, TaskIssue, WorkerMessage } from "./ty
 import type { PermissionMode } from "@anthropic-ai/claude-agent-sdk";
 import { Workspace, confirmIfUnsafe } from "./workspace.js";
 import { fmtError, generateWorkerId } from "./utils.js";
+
+const execAsync = promisify(exec);
 
 // ── Event classification ───────────────────────────────────────────────────────
 
@@ -69,6 +73,11 @@ export type RunQuery = (prompt: string, sessionId: string | undefined, abortCont
 export type WorkerDisplay = {
   print: (line: string | null) => void;
   printForemanMessage: (msg: ForemanMessage) => void;
+  startPersistentStatus?: (getText: () => string) => void;
+  stopPersistentStatus?: () => void;
+  updatePersistentStatus?: () => void;
+  /** Register a callback fired after each tool result (tool has just finished). */
+  setOnToolResultCallback?: (fn: ((toolName: string) => void) | null) => void;
 };
 
 export type WorkspaceCtx = {
@@ -109,6 +118,14 @@ export class WorkerSession {
   private connectionState: "hello_sent" | "registered" = "registered";
   private bufferedMessages: BufferableMessage[] = [];
 
+  // Status bar state
+  private connectionStatus: "connected" | "disconnected" | "reconnecting" | "handshaking" = "disconnected";
+  private disconnectCode: number | undefined;
+  private reconnectAt: number | undefined;
+  private countdownTimer: ReturnType<typeof setInterval> | null = null;
+  private currentPrNumber: number | undefined;
+  private currentBranch = "";
+
   constructor(
     private workerId: string,
     private wsFactory: WsFactory,
@@ -117,7 +134,45 @@ export class WorkerSession {
     private options: WorkerSessionOptions = {},
   ) {}
 
+  /** Returns the formatted worker status bar text. Used by startPersistentStatus and tests. */
+  getStatusText(): string {
+    const retryInSeconds = this.reconnectAt != null
+      ? Math.max(0, Math.ceil((this.reconnectAt - Date.now()) / 1000))
+      : undefined;
+    return display.fmtWorkerStatus({
+      workerId: this.workerId,
+      taskNumber: this.currentIssue?.number,
+      prNumber: this.currentPrNumber,
+      branch: this.currentBranch || undefined,
+      connectionStatus: this.connectionStatus,
+      disconnectCode: this.disconnectCode,
+      retryInSeconds,
+    });
+  }
+
+  private refreshStatus(): void {
+    this.display.updatePersistentStatus?.();
+  }
+
+  private async refreshBranch(): Promise<void> {
+    try {
+      const { stdout } = await execAsync("git rev-parse --abbrev-ref HEAD");
+      this.currentBranch = stdout.trim();
+    } catch {
+      this.currentBranch = "";
+    }
+    this.refreshStatus();
+  }
+
   start(): void {
+    this.display.startPersistentStatus?.(() => this.getStatusText());
+    this.display.setOnToolResultCallback?.((toolName) => {
+      // Refresh the branch display after each Bash tool completes so the status
+      // bar reflects branch changes (e.g. git checkout) without waiting for the
+      // full query to finish.
+      if (toolName === "Bash") void this.refreshBranch();
+    });
+    void this.refreshBranch();
     this.connect();
   }
 
@@ -194,6 +249,9 @@ export class WorkerSession {
         this.currentTaskId = undefined;
         this.currentIssue = undefined;
         this.currentSessionId = undefined;
+        this.currentPrNumber = undefined;
+        this.currentBranch = "";
+        this.refreshStatus();
         this.display.print(display.c.sageGreen("Task complete. Waiting for next task..."));
         return "task-complete";
       }
@@ -283,6 +341,10 @@ export class WorkerSession {
   }
 
   private connect(): void {
+    if (this.countdownTimer) { clearInterval(this.countdownTimer); this.countdownTimer = null; }
+    this.reconnectAt = undefined;
+    this.connectionStatus = "reconnecting";
+    this.refreshStatus();
     const ws = this.wsFactory(this.workerId, this.currentTaskId);
     this.ws = ws;
     let connectedAt: number | undefined;
@@ -290,7 +352,8 @@ export class WorkerSession {
     ws.on("open", () => {
       connectedAt = Date.now();
       this.connectionState = "hello_sent";
-      this.display.print(display.c.sageGreen("Connected to foreman"));
+      this.connectionStatus = "handshaking";
+      this.refreshStatus();
     });
 
     ws.on("message", (data: Buffer | string) => {
@@ -299,13 +362,15 @@ export class WorkerSession {
       this.handleMessage(msg);
     });
 
-    ws.on("close", (code: number, reason: Buffer) => {
+    ws.on("close", (code: number, _reason: Buffer) => {
       if (ws !== this.ws) return; // stale close from a previous connection
-      const elapsed = connectedAt !== undefined ? Math.round((Date.now() - connectedAt) / 1000) : undefined;
-      const elapsedStr = elapsed !== undefined ? `, ${elapsed}s` : "";
-      const reasonStr = reason?.length > 0 ? `, ${reason.toString()}` : "";
-      this.display.print(display.c.amber(`Disconnected from foreman (code ${code}${reasonStr}${elapsedStr}). Reconnecting...`));
-      setTimeout(() => this.connect(), 2000 + Math.random() * 3000);
+      this.connectionStatus = "disconnected";
+      this.disconnectCode = code;
+      this.refreshStatus();
+      const delay = 2000 + Math.random() * 3000;
+      this.reconnectAt = Date.now() + delay;
+      this.countdownTimer = setInterval(() => this.refreshStatus(), 1000);
+      setTimeout(() => this.connect(), delay);
     });
 
     ws.on("error", (err: Error) => {
@@ -319,6 +384,8 @@ export class WorkerSession {
     this.display.printForemanMessage(msg);
 
     if (msg.type === "hello_ack") {
+      this.connectionStatus = "connected";
+      this.disconnectCode = undefined;
       if (msg.status === "cancelled") {
         // Task was reassigned while worker was disconnected — stop and reset.
         this.connectionState = "registered";
@@ -326,9 +393,13 @@ export class WorkerSession {
         this.currentTaskId = undefined;
         this.currentIssue = undefined;
         this.currentSessionId = undefined;
+        this.currentPrNumber = undefined;
+        this.currentBranch = "";
+        this.refreshStatus();
       } else {
         // "idle" or "busy": transition to registered and flush buffered messages.
         this.connectionState = "registered";
+        this.refreshStatus();
         this.flushBuffer();
       }
       return;
@@ -339,6 +410,9 @@ export class WorkerSession {
       this.currentIssue = msg.issue;
       this.currentSessionId = undefined;
       this.prIsClosed = false;
+      this.currentPrNumber = undefined;
+      this.refreshStatus();
+      void this.refreshBranch();
       this.resolveWsInput?.(WS_TASK_ASSIGNED);
       this.resolveWsInput = null;
       const initialPrompt = buildInitialPrompt(msg.issue, !!this.options.workspaceCtx);
@@ -347,6 +421,15 @@ export class WorkerSession {
     } else if (msg.type === "event_notification") {
       const { event } = msg;
       const action = event.payload["action"] as string | undefined;
+
+      // Track PR number from any pull_request event for the status bar.
+      if (event.name === "pull_request") {
+        const pr = event.payload["pull_request"] as { number?: number } | undefined;
+        if (pr?.number != null) {
+          this.currentPrNumber = pr.number;
+          this.refreshStatus();
+        }
+      }
 
       if (event.name === "pull_request" && action === "closed") {
         this.prIsClosed = true;
@@ -396,10 +479,13 @@ export class WorkerSession {
     try {
       const ac = new AbortController();
       this.isRunningQuery = true;
+      this.refreshStatus();
       try {
         this.currentSessionId = await this.runQuery(initialPrompt, this.currentSessionId, ac) ?? this.currentSessionId;
       } finally {
         this.isRunningQuery = false;
+        this.refreshStatus();
+        void this.refreshBranch();
       }
 
       // If the user interrupted (^C), skip the event drain and foreman notification.
@@ -410,10 +496,13 @@ export class WorkerSession {
         const events = this.pendingEvents.splice(0);
         const prompt = this.buildAndLogEventPrompt(events);
         this.isRunningQuery = true;
+        this.refreshStatus();
         try {
           this.currentSessionId = await this.runQuery(prompt, this.currentSessionId, eventAc) ?? this.currentSessionId;
         } finally {
           this.isRunningQuery = false;
+          this.refreshStatus();
+          void this.refreshBranch();
         }
         if (eventAc.signal.aborted) return;
       }
@@ -502,6 +591,10 @@ export async function workerMain(
   const workerDisplay: WorkerDisplay = {
     print: display.print,
     printForemanMessage: display.printForemanMessage,
+    startPersistentStatus: display.startPersistentStatus,
+    stopPersistentStatus: display.stopPersistentStatus,
+    updatePersistentStatus: display.updatePersistentStatus,
+    setOnToolResultCallback: display.setOnToolResultCallback,
   };
 
   const session = new WorkerSession(workerId, wsFactory, runQueryFn, workerDisplay, {

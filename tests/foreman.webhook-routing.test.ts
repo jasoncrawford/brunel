@@ -402,7 +402,7 @@ describe("PR event forwarding to workers", () => {
     routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Fixes #42\n\nSome description."));
 
     // check_run for that PR should now be forwarded to the worker
-    const reply = nextMsg(ws);
+    const reply = nextMsgWhere(ws, m => m.type === "event_notification" && (m as any).event.name === "check_run");
     routeEvent("evt-cr", "check_run", checkRunPayload(10, "failure"));
 
     const msg = await reply;
@@ -426,7 +426,7 @@ describe("PR event forwarding to workers", () => {
 
     routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Closes #42"));
 
-    const reply = nextMsg(ws);
+    const reply = nextMsgWhere(ws, m => m.type === "event_notification" && (m as any).event.name === "pull_request_review");
     routeEvent("evt-rev", "pull_request_review", prReviewPayload(10));
 
     const msg = await reply;
@@ -450,7 +450,7 @@ describe("PR event forwarding to workers", () => {
 
     routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Resolves #42"));
 
-    const reply = nextMsg(ws);
+    const reply = nextMsgWhere(ws, m => m.type === "event_notification" && (m as any).event.name === "pull_request_review_comment");
     routeEvent("evt-cmt", "pull_request_review_comment", prReviewCommentPayload(10));
 
     const msg = await reply;
@@ -514,7 +514,7 @@ describe("PR event forwarding to workers", () => {
 
     routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Closes #42"));
 
-    const reply = nextMsg(ws);
+    const reply = nextMsgWhere(ws, m => m.type === "event_notification" && (m as any).event.name === "check_suite");
     routeEvent("evt-cs", "check_suite", checkSuitePayload(10, "failure"));
 
     const msg = await reply;
@@ -547,7 +547,7 @@ describe("PR event forwarding to workers", () => {
 
     routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Closes #42", "fix-issue-42"));
 
-    const reply = nextMsg(ws);
+    const reply = nextMsgWhere(ws, m => m.type === "event_notification" && (m as any).event.name === "check_suite");
     routeEvent("evt-cs", "check_suite", checkSuitePayloadByBranch("fix-issue-42", "failure"));
 
     const msg = await reply;
@@ -566,7 +566,7 @@ describe("PR event forwarding to workers", () => {
 
     routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Closes #42", "fix-issue-42"));
 
-    const reply = nextMsg(ws);
+    const reply = nextMsgWhere(ws, m => m.type === "event_notification" && (m as any).event.name === "check_run");
     routeEvent("evt-cr", "check_run", checkRunPayloadByBranch("fix-issue-42", "failure"));
 
     const msg = await reply;
@@ -607,7 +607,7 @@ describe("PR event forwarding to workers", () => {
     routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Closes #42"));
 
     // User posts a top-level comment on PR #10 — issue.number = 10 (the PR number)
-    const reply = nextMsg(ws);
+    const reply = nextMsgWhere(ws, m => m.type === "event_notification" && (m as any).event.name === "issue_comment");
     routeEvent("evt-cmt", "issue_comment", issueCommentPayload(10, "Please address the nit above."));
 
     const msg = await reply;
@@ -630,8 +630,9 @@ describe("foreman event filtering", () => {
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
     await nextMsg(ws); // task_assigned
 
-    // Register PR for the task
+    // Register PR for the task (now also forwarded as event_notification — consume it)
     routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Closes #42"));
+    await nextMsgWhere(ws, m => m.type === "event_notification" && (m as any).event.name === "pull_request");
 
     // synchronize event should be silently dropped
     routeEvent("evt-sync", "pull_request", {
