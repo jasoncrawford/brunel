@@ -428,6 +428,21 @@ describe("connection status bar", () => {
     expect(display.updatePersistentStatus).toHaveBeenCalled();
   });
 
+  it("shows Reconnecting in status text when connect() is called after disconnect", () => {
+    vi.useFakeTimers();
+    fakeWs.emit("open");
+    fakeWs.emit("close", 1006, Buffer.from(""));
+    // After close we are Disconnected; the timer hasn't fired yet.
+    expect(stripAnsi(session.getStatusText())).toContain("Disconnected");
+    // Advance time past the reconnect delay to trigger connect().
+    vi.advanceTimersByTime(6000);
+    // connect() should have been called (wsFactory called a second time) and
+    // the status should now show Reconnecting before the new socket opens.
+    expect(wsFactory).toHaveBeenCalledTimes(2);
+    expect(stripAnsi(session.getStatusText())).toContain("Reconnecting");
+    vi.useRealTimers();
+  });
+
   it("disconnect code is stored on close and shown in Reconnecting... state (verbose)", () => {
     vi.useFakeTimers();
     fakeWs.emit("open");

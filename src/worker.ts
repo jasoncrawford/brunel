@@ -344,6 +344,7 @@ export class WorkerSession {
     if (this.countdownTimer) { clearInterval(this.countdownTimer); this.countdownTimer = null; }
     this.reconnectAt = undefined;
     this.connectionStatus = "reconnecting";
+    this.refreshStatus();
     const ws = this.wsFactory(this.workerId, this.currentTaskId);
     this.ws = ws;
     let connectedAt: number | undefined;
@@ -630,7 +631,7 @@ export async function workerMain(
     // Use an empty prompt string when not ready for interactive input.  An
     // empty promptLine suppresses the drawFresh callback so incoming messages
     // are printed cleanly without a prompt preceding or following them.
-    const promptStr = showPrompt ? "[worker] > " : "";
+    const promptStr = showPrompt ? "\n[worker] > " : "";
     const input = await ask(promptStr, listWorkerCommands, wsAbort);
 
     const isSentinel = input === WS_TASK_ASSIGNED || input === WS_EVENT;
