@@ -937,6 +937,13 @@ export function createForemanWss(
       registry.cancelReclaimTimer(workerId);
 
       if (msg.status === "busy" && msg.taskId) {
+        function flushQueuedEvents(issueRef: string | number) {
+          for (const evt of taskQueue.drainEvents(msg.taskId!)) {
+            sendMsg(workerId, { type: "event_notification", taskId: msg.taskId!, event: evt });
+            log(workerId, `→ event_notification #${issueRef} ${evt.name} (queued)`);
+          }
+        }
+
         const existing = taskQueue.get(msg.taskId);
         if (existing && existing.status !== "complete" && (existing.status !== "assigned" || existing.assignedWorkerId === workerId)) {
           // Task is pending/assigned to this worker — reclaim.
@@ -944,12 +951,7 @@ export function createForemanWss(
           registry.register(workerId, ws, "busy", msg.taskId);
           taskQueue.assignTask(msg.taskId, workerId);
           sendMsg(workerId, { type: "hello_ack", workerId, status: "busy" });
-          const queued = taskQueue.drainEvents(msg.taskId);
-          for (const evt of queued) {
-            const evtMsg: ForemanMessage = { type: "event_notification", taskId: msg.taskId, event: evt };
-            sendMsg(workerId, evtMsg);
-            log(workerId, `→ event_notification #${existing.issueNumber} ${evt.name} (queued)`);
-          }
+          flushQueuedEvents(existing.issueNumber);
         } else if (existing && existing.status === "complete" && existing.assignedWorkerId === workerId) {
           // Issue was closed (task marked done) but worker is still finishing up.
           // Let them stay busy so they can call task_complete to release themselves.
@@ -958,7 +960,9 @@ export function createForemanWss(
           sendMsg(workerId, { type: "hello_ack", workerId, status: "busy" });
         } else if (!existing) {
           // Task not in queue — label may have been removed while worker was disconnected.
-          // Re-add a minimal entry so GitHub events can still be forwarded to this worker.
+          // Re-add a minimal in-memory entry so GitHub events can still be forwarded.
+          // The DB record still exists (written by the reclaim timer via taskStore.markPending);
+          // no new DB write is needed here.
           const issueNumber = parseInt(msg.taskId, 10);
           if (!isNaN(issueNumber)) {
             log(workerId, `hello busy task=#${msg.taskId} — task unlabeled, re-adding for event forwarding`);
@@ -969,12 +973,7 @@ export function createForemanWss(
           }
           registry.register(workerId, ws, "busy", msg.taskId);
           sendMsg(workerId, { type: "hello_ack", workerId, status: "busy" });
-          const queued = taskQueue.drainEvents(msg.taskId);
-          for (const evt of queued) {
-            const evtMsg: ForemanMessage = { type: "event_notification", taskId: msg.taskId, event: evt };
-            sendMsg(workerId, evtMsg);
-            log(workerId, `→ event_notification #${msg.taskId} ${evt.name} (queued)`);
-          }
+          flushQueuedEvents(msg.taskId);
         } else {
           // Task is complete or assigned to a different worker — register idle
           log(workerId, `hello busy task=#${msg.taskId} — task taken by another worker`);
