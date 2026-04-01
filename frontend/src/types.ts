@@ -1,4 +1,5 @@
-export type { TaskStatus } from "../../shared/types.ts";
+import type { TaskStatus } from "../../shared/types.ts";
+export type { TaskStatus };
 
 export interface BlockerInfo {
   issueNumber: number;
