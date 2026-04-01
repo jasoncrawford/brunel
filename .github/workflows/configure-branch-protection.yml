@@ -1,0 +1,27 @@
+name: Configure Branch Protection
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/ci.yml"
+      - ".github/workflows/smoke-test.yml"
+      - ".github/workflows/codeql.yml"
+      - ".github/workflows/configure-branch-protection.yml"
+      - "scripts/configure-branch-protection.sh"
+  workflow_dispatch:
+
+jobs:
+  configure:
+    runs-on: ubuntu-latest
+    permissions:
+      administration: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure branch protection
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/configure-branch-protection.sh
