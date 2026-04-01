@@ -10,6 +10,7 @@ A GitHub-driven autonomous agent. Labels a GitHub issue `brunel:ready` → the f
 - **`src/display.ts`** — Shared display/rendering engine used by both foreman and worker.
 - **`src/types.ts`** — Shared types: `WorkerMessage`, `ForemanMessage`, `TaskIssue`, `GitHubEvent`.
 - **`src/admin-ws.ts`** — Admin GUI WebSocket broadcaster. Attaches a WebSocket server at `/admin/ws` and exposes `broadcastSnapshot` and `broadcastLogEvent` for pushing live state to browser clients.
+- **`shared/`** — Code shared between the Node backend (`src/`) and the Vite frontend (`frontend/src/`). Both `tsconfig.json` (root) and `frontend/tsconfig.json` include this directory. Import using `../shared/utils.js` (backend, `.js` extension for NodeNext) or `../../../shared/utils.ts` (frontend pages, `.ts` extension ok with `allowImportingTsExtensions`). Put utilities here when they're needed in both build contexts.
 
 ## Dev workflow
 
