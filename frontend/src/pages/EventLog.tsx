@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useAdminWs } from "../hooks/useAdminWs.ts";
 import type { LogEntry, AdminMessage } from "../types.ts";
+import { shortWorkerId } from "../../../shared/utils.ts";
 
 export default function EventLog() {
   const [entries, setEntries] = useState<LogEntry[]>([]);
@@ -42,7 +43,7 @@ export default function EventLog() {
                 <td style={td}>{e.kind}</td>
                 <td style={td}>{e.summary}</td>
                 <td style={td}>{e.taskId ? <Link to={`/tasks/${e.taskId}`}>#{e.taskId}</Link> : "—"}</td>
-                <td style={td}>{e.workerId ? <Link to={`/workers/${e.workerId}`}>{e.workerId.slice(0, 8)}</Link> : "—"}</td>
+                <td style={td}>{e.workerId ? <Link to={`/workers/${e.workerId}`}>{shortWorkerId(e.workerId)}</Link> : "—"}</td>
               </tr>
             ))}
           </tbody>

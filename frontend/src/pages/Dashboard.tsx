@@ -2,6 +2,7 @@ import { useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useAdminWs } from "../hooks/useAdminWs.ts";
 import type { TaskSnapshot, WorkerSnapshot, LogEntry, AdminMessage } from "../types.ts";
+import { shortWorkerId } from "../../../shared/utils.ts";
 
 export default function Dashboard() {
   const [tasks, setTasks] = useState<TaskSnapshot[]>([]);
@@ -50,7 +51,7 @@ export default function Dashboard() {
                   <td style={td}>{t.title}</td>
                   <td style={td}>{t.status}</td>
                   <td style={td}>{t.assignedWorkerId
-                    ? <Link to={`/workers/${t.assignedWorkerId}`}>{t.assignedWorkerId.slice(0, 8)}</Link>
+                    ? <Link to={`/workers/${t.assignedWorkerId}`}>{shortWorkerId(t.assignedWorkerId)}</Link>
                     : "—"}</td>
                   <td style={td}>{t.prUrl
                     ? <a href={t.prUrl} target="_blank" rel="noreferrer">#{t.prNumber}</a>
@@ -68,7 +69,7 @@ export default function Dashboard() {
           <ul>
             {workers.map((w) => (
               <li key={w.workerId}>
-                <Link to={`/workers/${w.workerId}`}>{w.workerId.slice(0, 8)}</Link>
+                <Link to={`/workers/${w.workerId}`}>{shortWorkerId(w.workerId)}</Link>
                 {" — "}{w.status}
                 {w.currentTaskId && <> working on <Link to={`/tasks/${w.currentTaskId}`}>#{w.currentTaskId}</Link></>}
               </li>
@@ -106,7 +107,7 @@ function LogTable({ entries }: { entries: LogEntry[] }) {
             <td style={td}>{e.kind}</td>
             <td style={td}>{e.summary}</td>
             <td style={td}>{e.taskId ? <Link to={`/tasks/${e.taskId}`}>#{e.taskId}</Link> : "—"}</td>
-            <td style={td}>{e.workerId ? <Link to={`/workers/${e.workerId}`}>{e.workerId.slice(0, 8)}</Link> : "—"}</td>
+            <td style={td}>{e.workerId ? <Link to={`/workers/${e.workerId}`}>{shortWorkerId(e.workerId)}</Link> : "—"}</td>
           </tr>
         ))}
       </tbody>

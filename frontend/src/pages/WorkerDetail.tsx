@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useAdminWs } from "../hooks/useAdminWs.ts";
 import type { LogEntry, AdminMessage } from "../types.ts";
+import { shortWorkerId } from "../../../shared/utils.ts";
 
 export default function WorkerDetail() {
   const { id } = useParams<{ id: string }>();
@@ -24,7 +25,7 @@ export default function WorkerDetail() {
 
   return (
     <div>
-      <h2>Worker {id?.slice(0, 8)}</h2>
+      <h2>Worker {id ? shortWorkerId(id) : ""}</h2>
       <p><Link to="/">← Dashboard</Link></p>
       {messages.length === 0 ? <p>No messages for this worker.</p> : (
         <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "monospace", fontSize: "0.85em" }}>

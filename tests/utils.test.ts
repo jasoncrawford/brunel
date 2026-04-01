@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { generateWorkerId, PURITAN_NAMES } from "../src/utils.js";
+import { shortWorkerId } from "../shared/utils.js";
 
 describe("generateWorkerId", () => {
   it("returns a string with a Puritan name prefix followed by a UUID", () => {
@@ -34,5 +35,27 @@ describe("generateWorkerId", () => {
 
   it("PURITAN_NAMES contains at least 20 names", () => {
     expect(PURITAN_NAMES.length).toBeGreaterThanOrEqual(20);
+  });
+});
+
+describe("shortWorkerId", () => {
+  it("shows name + first 8 chars of UUID for named worker IDs", () => {
+    expect(shortWorkerId("justice-e706451f-c3bc-4035-a7df-12c7040a196a")).toBe("justice-e706451f");
+  });
+
+  it("shows name + first 8 chars of UUID for another named worker ID", () => {
+    expect(shortWorkerId("nehemiah-375d3d1c-f94c-49bf-a715-f539f1a16ae2")).toBe("nehemiah-375d3d1c");
+  });
+
+  it("falls back to first 8 chars for legacy bare UUID worker IDs", () => {
+    expect(shortWorkerId("7c254628-bc1d-4379-b35e-eb139e008c70")).toBe("7c254628");
+  });
+
+  it("works for generated worker IDs", () => {
+    const id = generateWorkerId();
+    const short = shortWorkerId(id);
+    const namePart = id.split("-")[0];
+    const uuidFirst8 = id.slice(namePart.length + 1, namePart.length + 9);
+    expect(short).toBe(`${namePart}-${uuidFirst8}`);
   });
 });
