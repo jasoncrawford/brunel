@@ -957,9 +957,24 @@ export function createForemanWss(
           registry.register(workerId, ws, "busy", msg.taskId);
           sendMsg(workerId, { type: "hello_ack", workerId, status: "busy" });
         } else if (!existing) {
-          log(workerId, `hello busy task=#${msg.taskId} — unknown task, respecting busy status`);
+          // Task not in queue — label may have been removed while worker was disconnected.
+          // Re-add a minimal entry so GitHub events can still be forwarded to this worker.
+          const issueNumber = parseInt(msg.taskId, 10);
+          if (!isNaN(issueNumber)) {
+            log(workerId, `hello busy task=#${msg.taskId} — task unlabeled, re-adding for event forwarding`);
+            taskQueue.addTask({ taskId: msg.taskId, issueNumber, title: "", body: "", labels: [], repoUrl: "" });
+            taskQueue.assignTask(msg.taskId, workerId);
+          } else {
+            log(workerId, `hello busy task=#${msg.taskId} — unknown task, respecting busy status`);
+          }
           registry.register(workerId, ws, "busy", msg.taskId);
           sendMsg(workerId, { type: "hello_ack", workerId, status: "busy" });
+          const queued = taskQueue.drainEvents(msg.taskId);
+          for (const evt of queued) {
+            const evtMsg: ForemanMessage = { type: "event_notification", taskId: msg.taskId, event: evt };
+            sendMsg(workerId, evtMsg);
+            log(workerId, `→ event_notification #${msg.taskId} ${evt.name} (queued)`);
+          }
         } else {
           // Task is complete or assigned to a different worker — register idle
           log(workerId, `hello busy task=#${msg.taskId} — task taken by another worker`);
