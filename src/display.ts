@@ -699,12 +699,20 @@ export function getInputPrintCallback(): (() => void) | null {
   return _inputPrintCallback;
 }
 
+// Callback invoked by print() BEFORE console.log to clear the prompt area.
+// When the prompt string has a leading \n (blank-line prefix), the clear must
+// also erase that blank line; otherwise it is orphaned above the printed
+// message as a "random" blank line (issue #418).
+let _inputClearCallback: (() => void) | null = null;
+export function setInputClearCallback(fn: (() => void) | null) {
+  _inputClearCallback = fn;
+}
+
 /** Number of active status lines (primary + persistent). */
 function _lineCount(): number {
   const n = (_statusActive ? 1 : 0) + (_persistentStatusActive ? 1 : 0);
   return n === 2 ? 3 : n; // blank separator between the two bars when both are active
 }
-
 function _clearStatus() {
   if (_inputPrintCallback) return; // ask() owns the screen; drawFresh handles redraws
   const n = _lineCount();
@@ -809,7 +817,14 @@ export function print(line: string | null) {
     // ask() is active: erase from current cursor position to end of screen
     // (clears the prompt, suggestion row, and status bars), write the new
     // content line, then let drawFresh redraw the prompt + status bars below.
-    process.stdout.write("\r\x1b[J");
+    // If the prompt has a leading \n prefix (blank line above the prompt),
+    // _inputClearCallback goes up to also erase that blank line first so it
+    // is not orphaned above the printed message (issue #418).
+    if (_inputClearCallback) {
+      _inputClearCallback();
+    } else {
+      process.stdout.write("\r\x1b[J");
+    }
     if (verbose) {
       const ts = `\x1b[90m${fmtTime()} \x1b[39m`;
       const parts = line.split("\n");

@@ -514,6 +514,99 @@ describe("ask() - drawFresh after print()", () => {
   });
 });
 
+describe("ask() - blank line suppression with \\n prefix prompt", () => {
+  it("abort via promise with \\n prefix does NOT write \\r\\n\\x1b[J (no separator line)", async () => {
+    // When ask() is aborted by a WS event the old code called submit() which
+    // always wrote \r\n\x1b[J. That separator line is never consumed (no status
+    // bar runs after a WS-triggered abort) and accumulates as blank lines on
+    // each abort/re-prompt cycle (issue #418).
+    const writeSpy = vi.mocked(process.stdout.write);
+
+    let resolveAbort!: (v: string) => void;
+    const abortP = new Promise<string>((res) => { resolveAbort = res; });
+
+    await withFakeStdin(async (_stdin) => {
+      const p = ask("\n> ", () => [], abortP);
+      writeSpy.mockClear();
+      resolveAbort("WS_EVENT");
+      await p;
+    });
+
+    const writes = writeSpy.mock.calls.map((c) => String(c[0]));
+    expect(writes).not.toContain("\r\n\x1b[J");
+  });
+
+  it("abort via promise with \\n prefix writes cursor-up to clear the blank line", async () => {
+    // The abort cleanup should go up 1 row to erase the blank line that the
+    // \n prefix wrote when ask() was first called, so the next prompt starts
+    // at the same vertical position and blank lines do not accumulate.
+    const writeSpy = vi.mocked(process.stdout.write);
+
+    let resolveAbort!: (v: string) => void;
+    const abortP = new Promise<string>((res) => { resolveAbort = res; });
+
+    await withFakeStdin(async (_stdin) => {
+      const p = ask("\n> ", () => [], abortP);
+      writeSpy.mockClear();
+      resolveAbort("WS_EVENT");
+      await p;
+    });
+
+    const writes = writeSpy.mock.calls.map((c) => String(c[0]));
+    const hasUp = writes.some((w) => w.includes("\x1b[1A"));
+    expect(hasUp).toBe(true);
+  });
+
+  it("print() while ask() with \\n prefix is running goes up before clearing (cursor-up + erase-to-end)", async () => {
+    // When display.print() fires while the prompt is visible, the clearForPrint
+    // callback must go up prefixRows rows before erasing to end of screen so
+    // the blank prefix line is cleared along with the prompt.  Without this,
+    // the blank line is orphaned above the printed message (issue #418).
+    // The distinguishing marker is a cursor-up escape (\x1b[1A) combined with
+    // erase-to-end (\x1b[J) in the same write call — the no-prefix path uses
+    // \r\x1b[J (no cursor-up) and drawFresh's cursor-up is a separate write.
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const writeSpy = vi.mocked(process.stdout.write);
+
+    await withFakeStdin(async (stdin) => {
+      const p = ask("\n> ", () => []);
+      writeSpy.mockClear();
+
+      display.print("notification");
+
+      const writes = writeSpy.mock.calls.map((c) => String(c[0]));
+      // clearForPrint() writes \x1b[1A\r\x1b[J as a single call — check for both
+      const hasPrefixClear = writes.some((w) => /\x1b\[\d+A/.test(w) && w.includes("\x1b[J"));
+      expect(hasPrefixClear).toBe(true);
+
+      stdin.push("\r");
+      await p;
+    });
+  });
+
+  it("print() while ask() WITHOUT \\n prefix does NOT go up before clearing (no cursor-up+erase combo)", async () => {
+    // No-prefix prompts use \r\x1b[J (no cursor-up) — the cursor-up+erase
+    // combination should only appear when there are prefix blank lines to clear.
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const writeSpy = vi.mocked(process.stdout.write);
+
+    await withFakeStdin(async (stdin) => {
+      const p = ask("> ", () => []);
+      writeSpy.mockClear();
+
+      display.print("notification");
+
+      const writes = writeSpy.mock.calls.map((c) => String(c[0]));
+      // Should NOT have cursor-up combined with \x1b[J in any single write
+      const hasPrefixClear = writes.some((w) => /\x1b\[\d+A/.test(w) && w.includes("\x1b[J"));
+      expect(hasPrefixClear).toBe(false);
+
+      stdin.push("\r");
+      await p;
+    });
+  });
+});
+
 describe("promptLine()", () => {
   it("resolves with typed text on Enter", async () => {
     await withFakeStdin(async (stdin) => {

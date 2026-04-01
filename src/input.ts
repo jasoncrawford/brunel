@@ -399,6 +399,8 @@ export function ask(
     const promptVisualLen = promptStr.slice(promptStr.lastIndexOf("\n") + 1).length;
     // Visual part of prompt string used when redrawing
     const promptLine = promptStr.slice(promptStr.lastIndexOf("\n") + 1);
+    // Number of blank rows written above the prompt (from leading \n chars in promptStr)
+    const prefixRows = promptStr.match(/^\n+/)?.[0]?.length ?? 0;
     let commands: CommandSuggestion[] = [];
     try { commands = getCommands(); } catch { /* graceful: use empty */ }
 
@@ -553,24 +555,62 @@ export function ask(
       process.stdout.write("\x1b[?25h"); // ensure cursor is visible at the prompt
     }
 
+    // ── Pre-clear callback ────────────────────────────────────────────────────
+    //
+    // Called by display.print() BEFORE console.log to clear the prompt area.
+    // When the prompt has a leading \n (blank line prefix), we must also clear
+    // that blank line — otherwise it is orphaned above the printed message.
+
+    function clearForPrint() {
+      if (prefixRows > 0) {
+        // Go up to the first prefix row and erase from there to end of screen.
+        // This clears the blank prefix, the prompt line, suggestion rows, and
+        // status bars in one shot.  Cursor ends up at the blank-prefix row so
+        // console.log prints the message where the blank was (no orphaned line).
+        process.stdout.write(`\x1b[${prefixRows}A\r\x1b[J`);
+      } else {
+        // No prefix — clear from prompt line to end of screen (same as the
+        // default \r\x1b[J that print() uses when no clear callback is set).
+        process.stdout.write("\r\x1b[J");
+      }
+    }
+
     // Register the fresh-redraw hook so display.print() can notify us.
     // Only register when there is a visible prompt to redraw — an empty prompt
     // string means the caller doesn't want any prompt shown (e.g. worker
     // standby mode), so no redraw is needed and no line-clear should fire.
-    if (promptLine) display.setInputPrintCallback(drawFresh);
+    if (promptLine) {
+      display.setInputClearCallback(clearForPrint);
+      display.setInputPrintCallback(drawFresh);
+    }
 
     if (abort) {
       void abort.then((value) => {
         if (!done) {
-          // Clear current line and submit the abort value
-          process.stdout.write("\r\x1b[K");
-          submit(value);
+          // Navigate to the end of the buffer, then erase from the top of the
+          // prefix block down to the end of the screen.  Unlike submit(), we
+          // do NOT write \r\n\x1b[J (which creates a separator line for
+          // _clearStatus() to consume later).  A WS-triggered abort is never
+          // followed by a status-bar query, so that separator is never
+          // consumed and accumulates as blank lines on each cycle (issue #418).
+          const { row: curRow } = screenPosOf(cursor);
+          const { row: endRow } = screenPosOf(buffer.length);
+          const rowDiff = endRow - curRow;
+          if (rowDiff > 0) process.stdout.write(`\x1b[${rowDiff}B`);
+          else if (rowDiff < 0) process.stdout.write(`\x1b[${-rowDiff}A`);
+          const totalUp = endRow + prefixRows;
+          if (totalUp > 0) process.stdout.write(`\x1b[${totalUp}A`);
+          process.stdout.write("\r\x1b[J");
+          cleanup();
+          done = true;
+          resolve(value.trim());
         }
       });
     }
 
     function cleanup() {
       display.setInputPrintCallback(null);
+      display.setInputClearCallback(null);
       process.stdin.removeListener("data", onData);
     }
 
