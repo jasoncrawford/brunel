@@ -582,6 +582,12 @@ function fmtRateLimitInfo(info: { status?: string; utilization?: number; rateLim
   return parts.join(", ");
 }
 
+function fmtApiRetryDetail(m: { error_status?: number | null; error?: string }): string {
+  if (m.error_status != null) return ` (${m.error_status})`;
+  if (m.error && m.error !== "unknown") return ` (${m.error})`;
+  return "";
+}
+
 export const SYSTEM_FMT: FmtTable = {
   init:              { verbose: (m) => c.darkGray(`init: session ${m.session_id}`) },
   task_started:      (m) => c.lavender(`  ▶ agent started: ${m.description}`),
@@ -589,7 +595,7 @@ export const SYSTEM_FMT: FmtTable = {
   task_notification: (m) => c.lavender(`  ◀︎ ${m.status}: ${m.summary}`),
   compact_boundary:  (m) => c.darkGray(`↩ Context compacted (${fmtCompactionDetail(m.compact_metadata)})`),
   status:            (m) => m.status === "compacting" ? c.darkGray("Compacting context...") : null,
-  api_retry:         (m) => c.amber(`API failure, retrying in ${(m.retry_delay_ms / 1000).toFixed(1).replace(/\.0$/, "")}s (attempt ${m.attempt}/${m.max_retries})`),
+  api_retry:         (m) => c.amber(`API failure${fmtApiRetryDetail(m)}, retrying in ${(m.retry_delay_ms / 1000).toFixed(1).replace(/\.0$/, "")}s (attempt ${m.attempt}/${m.max_retries})`),
   hook_started:      { verbose: (m) => c.darkGray(`hook: ${m.hook_name} (${m.hook_event})`) },
   hook_response:     { verbose: (m) => c.darkGray(`hook: ${m.hook_name} — ${m.outcome}${fmtHookExitCode(m.exit_code)}`) },
   _default:          { verbose: (m) => c.darkGray(`system/${m.subtype}`) },

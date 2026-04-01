@@ -633,6 +633,26 @@ describe("SYSTEM_FMT", () => {
     expect(r(SYSTEM_FMT, "api_retry", msg)).toBe("API failure, retrying in 2s (attempt 3/5)");
   });
 
+  it("api_retry with error_status → includes status code in message", () => {
+    const msg = { subtype: "api_retry", attempt: 1, max_retries: 10, retry_delay_ms: 500, error_status: 429, error: "rate_limit" };
+    expect(r(SYSTEM_FMT, "api_retry", msg)).toBe("API failure (429), retrying in 0.5s (attempt 1/10)");
+  });
+
+  it("api_retry with error_status null and named error → includes error name", () => {
+    const msg = { subtype: "api_retry", attempt: 2, max_retries: 5, retry_delay_ms: 1000, error_status: null, error: "server_error" };
+    expect(r(SYSTEM_FMT, "api_retry", msg)).toBe("API failure (server_error), retrying in 1s (attempt 2/5)");
+  });
+
+  it("api_retry with error_status null and error 'unknown' → no detail appended", () => {
+    const msg = { subtype: "api_retry", attempt: 1, max_retries: 3, retry_delay_ms: 500, error_status: null, error: "unknown" };
+    expect(r(SYSTEM_FMT, "api_retry", msg)).toBe("API failure, retrying in 0.5s (attempt 1/3)");
+  });
+
+  it("api_retry with error_status present and error 'unknown' → shows status code not error string", () => {
+    const msg = { subtype: "api_retry", attempt: 1, max_retries: 3, retry_delay_ms: 500, error_status: 503, error: "unknown" };
+    expect(r(SYSTEM_FMT, "api_retry", msg)).toBe("API failure (503), retrying in 0.5s (attempt 1/3)");
+  });
+
   it("_default, VERBOSE=false → null", () => {
     setVerbose(false);
     expect(resolve(SYSTEM_FMT, "unknown_subtype", { subtype: "unknown_subtype" })).toBeNull();
