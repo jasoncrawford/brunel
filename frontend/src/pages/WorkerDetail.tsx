@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useAdminWs } from "../hooks/useAdminWs.ts";
 import type { LogEntry, AdminMessage } from "../types.ts";
-import { shortWorkerId } from "../../shared/utils.ts";
+import { shortWorkerId } from "../../../shared/utils.ts";
 
 export default function WorkerDetail() {
   const { id } = useParams<{ id: string }>();

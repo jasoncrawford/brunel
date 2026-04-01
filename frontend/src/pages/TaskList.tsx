@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useAdminWs } from "../hooks/useAdminWs.ts";
 import type { AdminMessage, TaskRow, TaskStatus } from "../types.ts";
-import { shortWorkerId } from "../../shared/utils.ts";
+import { shortWorkerId } from "../../../shared/utils.ts";
 
 export default function TaskList() {
   const [searchParams, setSearchParams] = useSearchParams();
