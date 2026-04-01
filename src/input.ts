@@ -499,8 +499,10 @@ export function ask(
       //    Returns 0 when no bars are active, or 1+n for blank-separator + n bar rows.
       totalDrawnRows += display.drawStatusBarsRaw();
 
-      // 6. Go from last drawn row back to prompt row 0
-      process.stdout.write(`\x1b[${totalDrawnRows}A\r`);
+      // 6. Go from last drawn row back to prompt row 0.
+      // Guard: \x1b[0A is treated as \x1b[1A in most terminals, so skip it when already at row 0.
+      if (totalDrawnRows > 0) process.stdout.write(`\x1b[${totalDrawnRows}A`);
+      process.stdout.write("\r");
 
       // 6. Navigate to current cursor position
       const { row: targetRow, col: targetCol } = screenPosOf(cursor);
@@ -541,7 +543,9 @@ export function ask(
       // Draw status bars below suggestion rows (if any are active).
       totalDrawnRows += display.drawStatusBarsRaw();
 
-      process.stdout.write(`\x1b[${totalDrawnRows}A\r`);
+      // Guard: \x1b[0A is treated as \x1b[1A in most terminals, so skip it when already at row 0.
+      if (totalDrawnRows > 0) process.stdout.write(`\x1b[${totalDrawnRows}A`);
+      process.stdout.write("\r");
 
       const { row: targetRow, col: targetCol } = screenPosOf(cursor);
       if (targetRow > 0) process.stdout.write(`\x1b[${targetRow}B`);
