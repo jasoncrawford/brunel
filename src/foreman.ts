@@ -785,11 +785,13 @@ export function createForemanWss(
           }
         }
 
-        // Mark the task done in the dashboard while the worker finishes up.
-        // We don't persist to DB here — the worker will call task_complete to
-        // finalize and release itself.
+        // Mark the task done — in memory and in the DB. The worker stays
+        // assigned and will call task_complete to release itself when done.
         if (task && task.status === "assigned") {
           taskQueue.completeTask(task.taskId);
+          taskStore.markComplete(task.taskId).catch(err =>
+            flog(`ERROR Failed to mark task #${task.taskId} complete on issue close: ${fmtError(err)}`)
+          );
         }
         // Defer reconcile until markPending writes have flushed so that
         // tryAssignWork's markAssigned (which is awaited) always wins the race.

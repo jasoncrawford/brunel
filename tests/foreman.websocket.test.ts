@@ -1079,6 +1079,40 @@ describe("worker_goodbye — DB persistence", () => {
   });
 });
 
+// ── issues/closed — DB persistence ───────────────────────────────────────────
+
+describe("issues/closed — DB persistence", () => {
+  it("calls markComplete immediately when an issue is closed while a worker is active", async () => {
+    const taskStore: TaskStore = {
+      upsertTask: vi.fn().mockResolvedValue(undefined),
+      markAssigned: vi.fn().mockResolvedValue(undefined),
+      markComplete: vi.fn().mockResolvedValue(undefined),
+      markPending: vi.fn().mockResolvedValue(undefined),
+      markBlocked: vi.fn().mockResolvedValue(undefined),
+      updateTaskPr: vi.fn().mockResolvedValue(undefined),
+      listTasks: vi.fn().mockResolvedValue([]),
+    };
+
+    const q = new TaskQueue();
+    const r = new WorkerRegistry();
+    const srv = http.createServer();
+    const { wss: testWss, routeEvent: testRouteEvent } = createForemanWss(q, r, srv, {
+      taskLabel: defaultCfg.taskLabel,
+      reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs,
+      taskStore,
+    });
+
+    q.addTask({ taskId: "1", issueNumber: 1, title: "T", body: "b", labels: [], repoUrl: "r" });
+    q.assignTask("1", "w1");
+
+    testRouteEvent("evt-1", "issues", { action: "closed", issue: { number: 1, title: "T", body: "", labels: [] } });
+
+    expect(taskStore.markComplete).toHaveBeenCalledWith("1");
+
+    await new Promise<void>((resolve) => testWss.close(() => srv.close(resolve)));
+  });
+});
+
 // ── worker_hello — DB persistence ────────────────────────────────────────────
 
 describe("worker_hello — DB persistence", () => {
