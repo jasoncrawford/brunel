@@ -449,6 +449,24 @@ describe("hello_ack handshake", () => {
     expect(ack).toEqual({ type: "hello_ack", workerId: "w1", status: "busy" });
   });
 
+  it("worker reconnecting busy with unlabeled taskId still receives event notifications for that issue", async () => {
+    // Simulate: worker was working on issue 42, label was removed (task no longer in queue),
+    // worker disconnects and reconnects claiming busy for taskId "42"
+    const ws = await connect();
+    const q = makeQueue(ws);
+    send(ws, { type: "worker_hello", workerId: "w1", taskId: "42", status: "busy" });
+    const ack = await q.next();
+    expect(ack).toEqual({ type: "hello_ack", workerId: "w1", status: "busy" });
+
+    // A webhook event arrives for that issue — foreman must forward it to the worker
+    routeEvent("evt-1", "issue_comment", { issue: { number: 42 }, comment: { body: "review" } });
+
+    const msg = await q.next();
+    assert(msg.type === "event_notification");
+    expect(msg.taskId).toBe("42");
+    expect(msg.event.name).toBe("issue_comment");
+  });
+
   it("sends hello_ack with status busy when worker's task is complete (issue closed, worker finishing)", async () => {
     queue.addTask(makeTask(1));
     queue.assignTask("1", "w1");
