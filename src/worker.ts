@@ -462,6 +462,15 @@ export class WorkerSession {
           prNumber: undefined,
           branch: "",
         });
+        this.display.print(display.c.amber("Task cancelled (reassigned to another worker)."));
+        const ctx = this.options.workspaceCtx;
+        if (ctx) {
+          void ctx.workspace.reset().then(() => {
+            this.display.print(display.c.amber("Workspace reset."));
+          }).catch((err: unknown) => {
+            this.display.print(display.c.boldRed(`Workspace reset failed: ${err instanceof Error ? err.message : String(err)}`));
+          });
+        }
       } else {
         // "idle" or "busy": transition to registered and flush buffered messages.
         this.connectionState = "registered";
