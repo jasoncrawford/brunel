@@ -149,6 +149,62 @@ describe("workerMain exit behavior", () => {
     expect(fakeWorkspace.destroy).toHaveBeenCalledOnce();
   });
 
+  it("does not call workspace.destroy when SIGINT fires while a query is running", async () => {
+    const fakeWorkspace = {
+      dir: "/fake/workers/test-worker",
+      destroy: vi.fn().mockResolvedValue(undefined),
+      checkSafety: vi.fn().mockResolvedValue({ uncommittedFiles: [], unpushedCommits: [], noUpstream: false }),
+      reset: vi.fn().mockResolvedValue(undefined),
+    };
+    vi.mocked(Workspace.create).mockResolvedValue(fakeWorkspace as any);
+
+    // runQuery blocks until resolved — simulates a running query
+    let resolveQuery!: (value: string | undefined) => void;
+    const runQueryFn = vi.fn().mockImplementation(
+      () => new Promise<string | undefined>((resolve) => { resolveQuery = resolve; }),
+    );
+
+    // ask: first call returns a user query to trigger runQuery, second call blocks
+    let resolveSecondAsk!: (value: string) => void;
+    let askCallCount = 0;
+    vi.mocked(inputModule.ask).mockImplementation(() => {
+      askCallCount++;
+      if (askCallCount === 1) return Promise.resolve("do some work");
+      return new Promise<string>((resolve) => { resolveSecondAsk = resolve; });
+    });
+
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation((code?: number | string) => {
+      throw new Error("__process_exit__");
+    }) as unknown as ReturnType<typeof vi.spyOn>;
+
+    const chdirSpy = vi.spyOn(process, "chdir").mockImplementation(() => {});
+
+    let workerDone = false;
+    const workerPromise = workerMain(runQueryFn, WORKER_CONFIG).then(
+      () => { workerDone = true; },
+      () => { workerDone = true; },
+    );
+
+    // Wait for runQuery to be called (query is now running)
+    await vi.waitFor(() => expect(runQueryFn).toHaveBeenCalled());
+
+    // Emit SIGINT while query is running — should NOT destroy workspace
+    process.emit("SIGINT");
+    await new Promise<void>((r) => setTimeout(r, 10));
+    expect(fakeWorkspace.destroy).not.toHaveBeenCalled();
+
+    // Clean up: resolve the query and unblock ask so workerMain can exit
+    resolveQuery(undefined);
+    await vi.waitFor(() => expect(resolveSecondAsk).toBeDefined());
+    resolveSecondAsk("__eof__");
+
+    await workerPromise;
+    expect(workerDone).toBe(true);
+
+    exitSpy.mockRestore();
+    chdirSpy.mockRestore();
+  });
+
   it("does not call workspace.destroy a second time if SIGINT fires after loop exits", async () => {
     const fakeWorkspace = {
       dir: "/fake/workers/test-worker",

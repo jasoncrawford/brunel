@@ -111,8 +111,8 @@ export function fmtTime(): string {
   const d = new Date();
   const h = String(d.getHours()).padStart(2, "0");
   const m = String(d.getMinutes()).padStart(2, "0");
-  const s = String(d.getSeconds()).padStart(2, "0");
-  return `${h}:${m}:${s}`;
+  const sec = String(d.getSeconds()).padStart(2, "0");
+  return `${h}:${m}:${sec}`;
 }
 
 interface CheckRun { name: string; conclusion: string | null; status: string }
@@ -376,7 +376,12 @@ function wrapTextAnsi(text: string, width: number): string[] {
     const wl = visLen(word);
     if (currentLen === 0) {
       if (wl > width) {
-        // Can't safely split ANSI strings mid-character; push as-is.
+        // Unlike wrapText, we don't force-split overlong words here because
+        // splitting an ANSI-escaped string at a byte offset can cut mid-escape-
+        // sequence and corrupt terminal output. The word is pushed unsplit and
+        // will visually overflow its column. In practice this is rare: table
+        // cells containing very long ANSI-styled words (e.g. a coloured URL
+        // with no spaces) will be wider than their allocated column width.
         lines.push(word);
       } else {
         current = word;
@@ -401,7 +406,7 @@ function wrapTextAnsi(text: string, width: number): string[] {
   return lines.length > 0 ? lines : [""];
 }
 
-function distributeWidths(naturalWidths: number[], available: number): number[] {
+export function distributeWidths(naturalWidths: number[], available: number): number[] {
   const N = naturalWidths.length;
   if (N === 0) return [];
   const total = naturalWidths.reduce((a, b) => a + b, 0);
@@ -416,8 +421,12 @@ function distributeWidths(naturalWidths: number[], available: number): number[] 
       allocated[i] = naturalWidths[i];
       remaining -= naturalWidths[i];
     } else {
+      // Distribute remaining space evenly, giving +1 to the first `extra`
+      // columns so no space is lost to integer rounding.
+      const base = Math.floor(remaining / (N - k));
+      const extra = remaining % (N - k);
       for (let j = k; j < N; j++) {
-        allocated[order[j]] = Math.floor(remaining / (N - k));
+        allocated[order[j]] = base + (j - k < extra ? 1 : 0);
       }
       break;
     }
@@ -787,6 +796,11 @@ export function stopStatus() {
   _drawStatus();
 }
 
+// Shows a status bar that redraws only when updatePersistentStatus() is called.
+// Used for state that changes on discrete events (e.g. task assigned, PR
+// opened, connection status changed) rather than continuously over time.
+// Contrast with startStatus(), which polls getText() every 500ms — appropriate
+// for the query status line where elapsed time advances even without events.
 export function startPersistentStatus(getText: () => string): void {
   _clearStatus();
   _persistentStatusActive = true;
@@ -812,6 +826,17 @@ export function updatePersistentStatus(): void {
   _drawStatus();
 }
 
+function printLine(line: string): void {
+  if (verbose) {
+    const ts = `\x1b[90m${fmtTime()} \x1b[39m`;
+    const parts = line.split("\n");
+    const openColor = (line.match(/^(\x1b\[[0-9;]*m)+/) ?? [""])[0];
+    console.log(parts.map((p, i) => ts + (i > 0 ? openColor : "") + p).join("\n"));
+  } else {
+    console.log(line);
+  }
+}
+
 export function print(line: string | null) {
   if (line === null) return;
   if (_inputPrintCallback) {
@@ -826,26 +851,12 @@ export function print(line: string | null) {
     } else {
       process.stdout.write("\r\x1b[J");
     }
-    if (verbose) {
-      const ts = `\x1b[90m${fmtTime()} \x1b[39m`;
-      const parts = line.split("\n");
-      const openColor = (line.match(/^(\x1b\[[0-9;]*m)+/) ?? [""])[0];
-      console.log(parts.map((p, i) => ts + (i > 0 ? openColor : "") + p).join("\n"));
-    } else {
-      console.log(line);
-    }
+    printLine(line);
     _inputPrintCallback();
     return;
   }
   _clearStatus();
-  if (verbose) {
-    const ts = `\x1b[90m${fmtTime()} \x1b[39m`;
-    const parts = line.split("\n");
-    const openColor = (line.match(/^(\x1b\[[0-9;]*m)+/) ?? [""])[0];
-    console.log(parts.map((p, i) => ts + (i > 0 ? openColor : "") + p).join("\n"));
-  } else {
-    console.log(line);
-  }
+  printLine(line);
   _drawStatus();
 }
 

@@ -1512,3 +1512,48 @@ describe("sendGoodbye", () => {
     expect(fakeWs.send).not.toHaveBeenCalled();
   });
 });
+
+// ── interrupt() ───────────────────────────────────────────────────────────────
+
+describe("interrupt()", () => {
+  it("returns false when no query is running", () => {
+    expect(session.interrupt()).toBe(false);
+  });
+
+  it("returns true and aborts the AbortController when a query is running", async () => {
+    let capturedAc: AbortController | undefined;
+    let resolveQuery!: (value: string | undefined) => void;
+    runQuery.mockImplementation(
+      (_prompt: string, _sid: string | undefined, ac: AbortController) => {
+        capturedAc = ac;
+        return new Promise<string | undefined>((resolve) => { resolveQuery = resolve; });
+      },
+    );
+
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
+    await vi.waitFor(() => expect(capturedAc).toBeDefined());
+
+    const result = session.interrupt();
+    expect(result).toBe(true);
+    expect(capturedAc?.signal.aborted).toBe(true);
+
+    // Clean up: resolve the query so runQueryLoop can exit
+    resolveQuery(undefined);
+    await session.waitUntilIdle();
+  });
+
+  it("returns false after the query finishes", async () => {
+    let resolveQuery!: (value: string | undefined) => void;
+    runQuery.mockImplementation(
+      () => new Promise<string | undefined>((resolve) => { resolveQuery = resolve; }),
+    );
+
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
+    await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
+
+    resolveQuery(undefined);
+    await session.waitUntilIdle();
+
+    expect(session.interrupt()).toBe(false);
+  });
+});
