@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { TaskQueue, WorkerRegistry, createForemanWss } from "../src/foreman.js";
 import { isBlocked } from "../src/dependencies.js";
 import type { TaskStore, TaskRow } from "../src/db.js";
-import type { TaskStatus } from "../src/types.js";
+import type { LabeledIssueState, TaskStatus } from "../src/types.js";
 import WebSocket, { WebSocketServer } from "ws";
 import http from "http";
 import type { AddressInfo } from "net";
@@ -394,6 +394,57 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
     restoreTasksFromDb(activeTasks, taskQueue);
 
     expect(taskQueue.get("42")).toBeUndefined();
+  });
+
+  it("body and labels are included in task_assigned after startup restore + reconcile", async () => {
+    // Simulates the full startup sequence:
+    // 1. Task is restored from DB with empty body/labels
+    // 2. GitHub data is loaded into labeledIssues (via loadIssuesToQueue)
+    // 3. reconcile() is called to sync labeledIssues → taskQueue
+    // 4. Worker connects and must receive the real body/labels in task_assigned
+    const taskStore = makeTaskStore([{ taskId: "42", workerId: null, status: "pending" }]);
+    const labeledIssues = new Map<number, LabeledIssueState>();
+
+    const { wss: fwss, reconcile } = createForemanWss(taskQueue, registry, httpServer, {
+      taskLabel: "brunel:ready",
+      taskStore,
+      labeledIssues,
+      reclaimTimeoutMs: 1000,
+    });
+    wss = fwss;
+
+    port = await startServer();
+
+    // Step 1: restore from DB (empty body/labels, as in startup)
+    const activeTasks = await taskStore.listTasks();
+    restoreTasksFromDb(activeTasks, taskQueue);
+    expect(taskQueue.get("42")?.body).toBe("");
+    expect(taskQueue.get("42")?.labels).toEqual([]);
+
+    // Step 2: GitHub data loaded into labeledIssues
+    labeledIssues.set(42, {
+      issue: {
+        number: 42,
+        title: "Test task",
+        body: "Real issue description",
+        labels: ["brunel:ready", "bug"],
+        repoUrl: "https://github.com/owner/repo",
+      },
+      depsLoaded: true,
+    });
+
+    // Step 3: reconcile syncs labeledIssues → taskQueue
+    reconcile();
+
+    // Step 4: worker connects and receives task_assigned with real body/labels
+    const ws = await connect({ type: "worker_hello", workerId: "w1", status: "idle" });
+    const q = makeQueue(ws);
+    await q.next(); // hello_ack
+    const msg = await q.next() as { type: string; issue: { body: string; labels: string[] } };
+
+    expect(msg.type).toBe("task_assigned");
+    expect(msg.issue.body).toBe("Real issue description");
+    expect(msg.issue.labels).toEqual(["brunel:ready", "bug"]);
   });
 });
 
