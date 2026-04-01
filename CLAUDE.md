@@ -72,7 +72,7 @@ Every `worker_hello` is immediately answered by a `hello_ack` before any `task_a
 
 - `"idle"` — worker is free; foreman may now send `task_assigned`
 - `"busy"` — worker's reconnection claim was accepted; worker may resume the task
-- `"cancelled"` — worker's claimed task was taken by another worker; worker should abandon it and become idle
+- `"cancelled"` — worker's claimed task was taken by another worker; worker should abandon it, reset the workspace, and become idle
 
 Workers buffer any `task_complete` messages sent during the `hello_sent` state and flush them only after receiving an `idle` or `busy` ack. On `cancelled` the buffer is discarded.
 
