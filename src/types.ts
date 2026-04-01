@@ -1,6 +1,6 @@
 // ── Shared types for foreman/worker protocol ──────────────────────────────────
 
-export type TaskStatus = "pending" | "assigned" | "complete" | "blocked";
+export type { TaskStatus } from "../shared/types.js";
 
 export interface GitHubEvent {
   id: string;           // x-github-delivery header value

@@ -1,4 +1,4 @@
-export type TaskStatus = "pending" | "assigned" | "complete" | "blocked";
+export type { TaskStatus } from "../../shared/types.ts";
 
 export interface BlockerInfo {
   issueNumber: number;
