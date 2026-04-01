@@ -80,9 +80,12 @@ Workers buffer any `task_complete` messages sent during the `hello_sent` state a
 
 A task moves through states: **pending → assigned → complete**.
 
-- `TaskQueue` is in-memory state; `taskStore` (Supabase) is the persistent record.
+- `TaskQueue` is in-memory state; `taskStore` (Supabase) is the persistent record. **The DB is the authoritative source of truth; in-memory state is a derived cache.**
+- The `tasks` table stores `task_id`, `issue_number` (unique), `repo`, `title`, `body`, `labels`, `status`, `worker_id`, `assigned_at`, `completed_at`. There is no separate `task_assignments` table.
+- `upsertTask` conflicts on `task_id`. If an issue is re-labeled `brunel:ready` (e.g. after completing), it resets `status` back to `pending` and refreshes `title`, `body`, `labels` — it does **not** ignore duplicates.
+- When a worker sends `worker_goodbye`, the foreman calls `taskStore.markPending()` to reset the DB row, not just in-memory state.
 - When a GitHub issue is closed while a worker is still active, the foreman marks the task `complete` in both memory and the DB immediately. The worker stays assigned and will call `task_complete` to release itself when done.
-- On foreman restart, `loadIssuesToQueue` fetches only **open** GitHub issues. Tasks whose issues were closed mid-task are restored from `taskStore` (status=`assigned`) so their workers can reconnect and complete normally.
+- On foreman restart, `loadIssuesToQueue` fetches only **open** GitHub issues. Tasks whose issues were closed mid-task are restored from `taskStore` (status=`assigned`) so their workers can reconnect and complete normally. Restored tasks use `row.body` and `row.labels` from the DB (not hardcoded empty values).
 - `reconcile()` only removes **pending** tasks that are no longer in `labeledIssues`. Assigned and complete tasks are never removed by reconcile.
 
 ## Design principles
