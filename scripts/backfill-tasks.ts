@@ -20,7 +20,7 @@ import { createTaskStore } from "../src/db.js";
 
 const dryRun = process.argv.includes("--dry-run");
 
-const config = loadConfig(process.argv.slice(2).filter(a => a !== "--dry-run"));
+const config = await loadConfig(process.argv.slice(2).filter(a => a !== "--dry-run"));
 const { githubRepo: repo, githubToken: token, supabaseUrl, supabaseSecretKey } = config;
 
 if (!supabaseUrl || !supabaseSecretKey) {
