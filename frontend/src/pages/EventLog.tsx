@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useAdminWs } from "../hooks/useAdminWs.ts";
 import type { LogEntry, AdminMessage } from "../types.ts";
-import { shortWorkerId } from "../types.ts";
+import { shortWorkerId } from "../../shared/utils.ts";
 
 export default function EventLog() {
   const [entries, setEntries] = useState<LogEntry[]>([]);

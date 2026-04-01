@@ -14,7 +14,8 @@ import { fetchIssueStates } from "./github.js";
 import type { DependencyGraph } from "./dependencies.js";
 import { type DbLogger, type TaskStore, createDbLogger, createTaskStore, createNullDbLogger, createNullTaskStore } from "./db.js";
 import type { AdminWss, TaskSnapshot, WorkerSnapshot } from "./admin-ws.js";
-import { fmtError, shortWorkerId } from "./utils.js";
+import { fmtError } from "./utils.js";
+import { shortWorkerId } from "../shared/utils.js";
 
 function flog(msg: string) {
   console.log(`${fmtTimestamp()} ${msg}`);

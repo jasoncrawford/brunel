@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { generateWorkerId, PURITAN_NAMES, shortWorkerId } from "../src/utils.js";
+import { generateWorkerId, PURITAN_NAMES } from "../src/utils.js";
+import { shortWorkerId } from "../shared/utils.js";
 
 describe("generateWorkerId", () => {
   it("returns a string with a Puritan name prefix followed by a UUID", () => {

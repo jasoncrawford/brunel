@@ -40,8 +40,6 @@ export function generateWorkerId(): string {
   return `${name}-${crypto.randomUUID()}`;
 }
 
-export { shortWorkerId } from "../shared/utils.js";
-
 /** Serialize an unknown thrown value to a human-readable string.
  * Handles native Error, Supabase PostgrestError (plain object with `message`), strings, and fallback JSON. */
 export function fmtError(err: unknown): string {
