@@ -40,11 +40,17 @@ export async function setup(): Promise<void> {
 
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!key) {
-    throw new Error(
-      "SUPABASE_SERVICE_ROLE_KEY is not set and could not be read from `supabase status`.\n" +
-        "Make sure `supabase start` is running and the supabase CLI is installed.\n" +
-        "Alternatively, set SUPABASE_SERVICE_ROLE_KEY manually before running npm test.",
+    // No key available — Supabase is not running locally.  Unit tests (repl,
+    // display, foreman, worker) do not need a DB and will pass fine.  DB tests
+    // (db.*.test.ts, pipeline.test.ts) will fail with a clear message when they
+    // call createTestSupabase().  We set a flag so that helper can surface a
+    // readable error rather than confusing auth failures.
+    process.env.SUPABASE_UNAVAILABLE = "true";
+    console.warn(
+      "\n⚠  Supabase not available — DB tests will be skipped.\n" +
+        "   Run `supabase start` (or set SUPABASE_SERVICE_ROLE_KEY) to enable them.\n",
     );
+    return;
   }
 
   // Verify the local Supabase instance is reachable and the schema is intact.

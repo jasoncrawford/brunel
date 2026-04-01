@@ -51,14 +51,14 @@ npm run test:browser
 
 The browser tests start a real foreman on port 14567 via `playwright.config.ts` `webServer`. State is seeded through real `POST /webhook` calls; test-only helpers (`/test/connect-worker`, `/test/workers/:id`) live in `tests/browser/server.ts` and are added by intercepting `rawListeners("request")` so the production `createHttpServer` is never modified.
 
-DB tests require a running local Supabase instance:
+Most tests run without any external services. Only the four DB test files (`db.*.test.ts`, `pipeline.test.ts`) require a running Supabase instance. Without Supabase, those tests fail with a clear message and the rest pass normally:
 
 ```
 supabase start   # first time takes a few minutes to pull Docker images
 npm test
 ```
 
-`tests/globalSetup.ts` runs once before the test suite. It reads the service-role key from `supabase status` (or from `SUPABASE_SERVICE_ROLE_KEY` if already set) and injects it into `process.env` so all Vitest worker threads inherit it. CI starts Supabase automatically via `supabase/setup-cli@v1` + `supabase start`.
+`tests/globalSetup.ts` runs once before the test suite. It reads the service-role key from `supabase status` (or from `SUPABASE_SERVICE_ROLE_KEY` if already set) and injects it into `process.env` so all Vitest worker threads inherit it. If Supabase is unavailable it sets `SUPABASE_UNAVAILABLE=true`; `createTestSupabase()` then throws with a helpful message so only DB tests fail. CI starts Supabase automatically via `supabase/setup-cli@v1` + `supabase start`.
 
 ## Database
 
