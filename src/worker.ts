@@ -480,16 +480,21 @@ export class WorkerSession {
       const ac = new AbortController();
       this.isRunningQuery = true;
       this.refreshStatus();
+      let queryFailed = false;
       try {
         this.currentSessionId = await this.runQuery(initialPrompt, this.currentSessionId, ac) ?? this.currentSessionId;
+      } catch (err) {
+        if (err instanceof Error && /aborted by user/i.test(err.message)) return;
+        this.display.print(display.c.boldRed(`\nERROR: ${fmtError(err)}`));
+        queryFailed = true;
       } finally {
         this.isRunningQuery = false;
         this.refreshStatus();
         void this.refreshBranch();
       }
 
-      // If the user interrupted (^C), skip the event drain and foreman notification.
-      if (ac.signal.aborted) return;
+      // If the user interrupted (^C) or the query failed, skip the event drain.
+      if (ac.signal.aborted || queryFailed) return;
 
       while (this.pendingEvents.length > 0 && this.currentTaskId && this.currentIssue) {
         const eventAc = new AbortController();
@@ -499,6 +504,10 @@ export class WorkerSession {
         this.refreshStatus();
         try {
           this.currentSessionId = await this.runQuery(prompt, this.currentSessionId, eventAc) ?? this.currentSessionId;
+        } catch (err) {
+          if (err instanceof Error && /aborted by user/i.test(err.message)) return;
+          this.display.print(display.c.boldRed(`\nERROR: ${fmtError(err)}`));
+          return;
         } finally {
           this.isRunningQuery = false;
           this.refreshStatus();

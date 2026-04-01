@@ -1350,6 +1350,76 @@ describe("afterTask callback on /task-complete", () => {
   });
 });
 
+// ── API error handling ────────────────────────────────────────────────────────
+
+describe("runQuery error handling", () => {
+  it("prints error and remains functional when runQuery throws during task_assigned", async () => {
+    const issue = makeIssue();
+    runQuery.mockRejectedValueOnce(new Error("You're out of extra usage · resets 9am (Etc/Unknown)"));
+
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+
+    // waitUntilIdle should resolve (not hang) after the error
+    const result = await Promise.race([
+      session.waitUntilIdle().then(() => "idle"),
+      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 200)),
+    ]);
+    expect(result).toBe("idle");
+
+    // Error message should be printed
+    const printCalls = display.print.mock.calls.map(args => stripAnsi(String(args[0])));
+    expect(printCalls.some(s => s.includes("out of extra usage"))).toBe(true);
+  });
+
+  it("prints error and remains functional when runQuery throws during event processing", async () => {
+    const issue = makeIssue();
+    let resolveFirst!: (v: string | undefined) => void;
+    runQuery.mockReturnValueOnce(new Promise<string | undefined>((r) => { resolveFirst = r; }));
+    runQuery.mockRejectedValueOnce(new Error("Claude Code returned an error result: out of tokens"));
+
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+
+    // Queue an event while query is running
+    sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
+
+    // Finish the first query → event processing starts and throws
+    resolveFirst("session-1");
+    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledTimes(2));
+
+    // waitUntilIdle should resolve (not hang) after the error
+    const result = await Promise.race([
+      session.waitUntilIdle().then(() => "idle"),
+      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 200)),
+    ]);
+    expect(result).toBe("idle");
+
+    // Error message should be printed
+    const printCalls = display.print.mock.calls.map(args => stripAnsi(String(args[0])));
+    expect(printCalls.some(s => s.includes("out of tokens"))).toBe(true);
+  });
+
+  it("does not print error for abort (^C interrupt) — that is a clean interrupt", async () => {
+    const issue = makeIssue();
+    let rejectQuery!: (e: Error) => void;
+    runQuery.mockReturnValueOnce(new Promise<string | undefined>((_r, reject) => { rejectQuery = reject; }));
+
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+
+    display.print.mockClear();
+    // runQuery (in repl.ts) swallows AbortError and resolves undefined — but
+    // here we simulate a raw abort thrown by the mock (edge case)
+    rejectQuery(new Error("Operation aborted by user"));
+
+    await vi.waitFor(() => session.waitUntilIdle());
+
+    const printCalls = display.print.mock.calls.map(args => stripAnsi(String(args[0])));
+    expect(printCalls.some(s => s.toLowerCase().includes("error"))).toBe(false);
+  });
+});
+
 describe("sendGoodbye", () => {
   it("sends worker_goodbye with workerId and taskId when ws is open and task is active", async () => {
     const issue = makeIssue();
