@@ -796,11 +796,11 @@ export function stopStatus() {
   _drawStatus();
 }
 
-// Note on refresh asymmetry: startStatus (primary bar) re-calls getText() on
-// every 500ms tick, so it auto-refreshes. startPersistentStatus (worker bar)
-// is intentionally event-driven: it only redraws when updatePersistentStatus()
-// is called explicitly. This avoids unnecessary redraws between events while
-// still allowing callers to refresh on demand (e.g. after a tool completes).
+// Note on refresh asymmetry: startStatus re-calls getText() on every 500ms
+// tick, so it auto-refreshes. startPersistentStatus is intentionally
+// event-driven: it only redraws when updatePersistentStatus() is called
+// explicitly. This avoids unnecessary redraws between events while still
+// allowing callers to refresh on demand (e.g. after a tool completes).
 export function startPersistentStatus(getText: () => string): void {
   _clearStatus();
   _persistentStatusActive = true;
