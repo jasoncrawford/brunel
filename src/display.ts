@@ -796,11 +796,11 @@ export function stopStatus() {
   _drawStatus();
 }
 
-// Note on refresh asymmetry: startStatus re-calls getText() on every 500ms
-// tick, so it auto-refreshes. startPersistentStatus is intentionally
-// event-driven: it only redraws when updatePersistentStatus() is called
-// explicitly. This avoids unnecessary redraws between events while still
-// allowing callers to refresh on demand (e.g. after a tool completes).
+// Shows a status bar that redraws only when updatePersistentStatus() is called.
+// Used for state that changes on discrete events (e.g. task assigned, PR
+// opened, connection status changed) rather than continuously over time.
+// Contrast with startStatus(), which polls getText() every 500ms — appropriate
+// for the query status line where elapsed time advances even without events.
 export function startPersistentStatus(getText: () => string): void {
   _clearStatus();
   _persistentStatusActive = true;
