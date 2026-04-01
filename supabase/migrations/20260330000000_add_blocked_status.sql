@@ -1,3 +1,0 @@
--- Add blocked as a valid task status.
--- Postgres does not enforce text-column enums, so no constraint change is needed.
--- (The status column is plain text; application code is the constraint.)
