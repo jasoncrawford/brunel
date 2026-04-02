@@ -300,6 +300,76 @@ export class TaskQueue extends EventEmitter {
 }
 
 
+// ── TaskModel ─────────────────────────────────────────────────────────────────
+// Encapsulates paired in-memory (TaskQueue) + persistent (TaskStore) updates so
+// every state transition touches both stores atomically.
+
+export class TaskModel {
+  constructor(
+    readonly queue: TaskQueue,
+    private store: TaskStore,
+    private logError: (msg: string) => void,
+  ) {}
+
+  complete(taskId: string): void {
+    this.queue.completeTask(taskId);
+    this.store.markComplete(taskId).catch((err: unknown) =>
+      this.logError(`ERROR Failed to mark task #${taskId} complete: ${fmtError(err)}`)
+    );
+  }
+
+  revert(taskId: string): void {
+    this.queue.revertTask(taskId);
+    this.store.markPending(taskId).catch((err: unknown) =>
+      this.logError(`ERROR Failed to revert task #${taskId} to pending: ${fmtError(err)}`)
+    );
+  }
+
+  block(taskId: string): void {
+    this.queue.setBlocked(taskId);
+    this.store.markBlocked(taskId).catch((err: unknown) =>
+      this.logError(`ERROR Failed to mark task #${taskId} blocked: ${fmtError(err)}`)
+    );
+  }
+
+  /** Unblocks a task and awaits the DB write — callers must await this to avoid
+   *  a race where markAssigned (also awaited) lands before markPending in the DB. */
+  async unblock(taskId: string): Promise<void> {
+    this.queue.setUnblocked(taskId);
+    await this.store.markPending(taskId);
+  }
+
+  register(
+    taskId: string,
+    issueNumber: number,
+    repoSlug: string,
+    title: string,
+    body: string,
+    labels: string[],
+    repoUrl: string,
+    depsLoaded?: boolean,
+  ): void {
+    this.queue.addTask({ taskId, issueNumber, title, body, labels, repoUrl, depsLoaded });
+    this.store.upsertTask(taskId, issueNumber, repoSlug, title, body, labels).catch((err: unknown) =>
+      this.logError(`ERROR Failed to persist task #${taskId}: ${fmtError(err)}`)
+    );
+  }
+
+  /** Assigns a task to a worker. Awaits the DB write; reverts memory and returns
+   *  false if the write fails so the caller can release the worker. */
+  async assign(taskId: string, workerId: string): Promise<boolean> {
+    this.queue.assignTask(taskId, workerId);
+    try {
+      await this.store.markAssigned(taskId, workerId);
+      return true;
+    } catch {
+      this.queue.revertTask(taskId);
+      return false;
+    }
+  }
+}
+
+
 function debounce(fn: () => void, delayMs: number): () => void {
   let timer: ReturnType<typeof setTimeout> | null = null;
   return () => {
@@ -544,6 +614,7 @@ export function createForemanWss(
   const workerSecret = options.workerSecret;
   const taskStore: TaskStore = options.taskStore ?? createNullTaskStore();
   const reclaimTimeoutMs = options.reclaimTimeoutMs;
+  const taskModel = new TaskModel(taskQueue, taskStore, flog);
 
   // Incrementing counter for unique broadcast IDs (React uses these as keys).
   let nextBroadcastId = 1;
@@ -768,16 +839,15 @@ export function createForemanWss(
         // Collect markPending promises so we can await them before calling
         // reconcile() — otherwise markPending races with markAssigned (which
         // tryAssignWork awaits) and the DB can end up stuck at "pending".
-        const markPendingPromises: Promise<void>[] = [];
+        const unblockPromises: Promise<void>[] = [];
         for (const [depIssueNum, blockers] of graph) {
           if (blockers.has(issueNumber)) {
             const blockedTask = taskQueue.getTaskForIssue(depIssueNum);
             if (blockedTask && blockedTask.status === "blocked") {
               if (!isBlocked(depIssueNum, graph, openIssues)) {
-                taskQueue.setUnblocked(blockedTask.taskId);
-                markPendingPromises.push(
-                  taskStore.markPending(blockedTask.taskId).catch((err) =>
-                    flog(`ERROR Failed to mark task #${blockedTask.taskId} pending: ${fmtError(err)}`)
+                unblockPromises.push(
+                  taskModel.unblock(blockedTask.taskId).catch((err: unknown) =>
+                    flog(`ERROR Failed to unblock task #${blockedTask.taskId}: ${fmtError(err)}`)
                   )
                 );
               }
@@ -788,15 +858,12 @@ export function createForemanWss(
         // Mark the task done — in memory and in the DB. The worker stays
         // assigned and will call task_complete to release itself when done.
         if (task && task.status === "assigned") {
-          taskQueue.completeTask(task.taskId);
-          taskStore.markComplete(task.taskId).catch(err =>
-            flog(`ERROR Failed to mark task #${task.taskId} complete on issue close: ${fmtError(err)}`)
-          );
+          taskModel.complete(task.taskId);
         }
-        // Defer reconcile until markPending writes have flushed so that
+        // Defer reconcile until unblock DB writes have flushed so that
         // tryAssignWork's markAssigned (which is awaited) always wins the race.
-        if (markPendingPromises.length > 0) {
-          Promise.all(markPendingPromises).then(() => reconcile()).catch(() => reconcile());
+        if (unblockPromises.length > 0) {
+          Promise.all(unblockPromises).then(() => reconcile()).catch(() => reconcile());
         } else {
           reconcile();
         }
@@ -875,16 +942,11 @@ export function createForemanWss(
     );
     if (task) {
       // Reserve in memory first to prevent concurrent double-assignment in the reconcile loop.
-      taskQueue.assignTask(task.taskId, workerId);
       registry.assignTask(workerId, task.taskId);
-
-      // Persist to DB before sending task_assigned to the worker.
-      try {
-        await taskStore.markAssigned(task.taskId, workerId);
-      } catch (err) {
-        flog(`ERROR Failed to persist assignment for task #${task.taskId}: ${fmtError(err)}`);
+      const ok = await taskModel.assign(task.taskId, workerId);
+      if (!ok) {
+        flog(`ERROR Failed to persist assignment for task #${task.taskId}`);
         // Revert in-memory state — worker returns to idle.
-        taskQueue.revertTask(task.taskId);
         registry.releaseWorker(workerId);
         log(workerId, "→ idle (DB write failed)");
         return;
@@ -978,9 +1040,7 @@ export function createForemanWss(
           // on a closed issue would be incorrect. Finalize the DB record since the worker's
           // buffered task_complete will be discarded on cancelled.
           log(workerId, `hello busy task=#${msg.taskId} — task complete (issue closed), cancelling`);
-          taskStore.markComplete(msg.taskId).catch(err =>
-            flog(`ERROR Failed to mark task #${msg.taskId} complete on hello cancel: ${fmtError(err)}`)
-          );
+          taskModel.complete(msg.taskId);
           cancelWorker();
         } else if (existing.assignedWorkerId && existing.assignedWorkerId !== workerId) {
           // Task is assigned to a different worker — cancel.
@@ -996,10 +1056,7 @@ export function createForemanWss(
         // session loaded from DB, or a disconnect during this session), revert it.
         const priorTask = taskQueue.getAssignedTaskForWorker(workerId);
         if (priorTask) {
-          taskQueue.revertTask(priorTask.taskId);
-          taskStore.markPending(priorTask.taskId).catch(err =>
-            flog(`ERROR Failed to mark task #${priorTask.taskId} pending: ${fmtError(err)}`)
-          );
+          taskModel.revert(priorTask.taskId);
           log(workerId, `hello idle (had task #${priorTask.taskId}) — reverting task to pending`);
         } else {
           log(workerId, "hello idle");
@@ -1018,10 +1075,7 @@ export function createForemanWss(
         return;
       }
       if (task) {
-        taskQueue.completeTask(msg.taskId);
-        taskStore.markComplete(msg.taskId).catch(err =>
-          flog(`ERROR Failed to mark task #${msg.taskId} complete: ${fmtError(err)}`)
-        );
+        taskModel.complete(msg.taskId);
       }
       registry.releaseWorker(workerId);
     }
@@ -1029,10 +1083,7 @@ export function createForemanWss(
     function handleWorkerGoodbye(msg: Extract<WorkerMessage, { type: "worker_goodbye" }>) {
       log(workerId, `worker_goodbye (task=${msg.taskId ?? "none"})`);
       if (msg.taskId) {
-        taskQueue.revertTask(msg.taskId);
-        taskStore.markPending(msg.taskId).catch(err =>
-          flog(`ERROR Failed to mark task #${msg.taskId} pending on goodbye: ${fmtError(err)}`)
-        );
+        taskModel.revert(msg.taskId);
       }
       registry.remove(workerId);
     }
@@ -1083,10 +1134,7 @@ export function createForemanWss(
             const w = registry.get(workerId);
             if (!w || w.status !== "disconnected") return;
             log(workerId, `reclaim timer fired — reverting task #${taskId} to pending`);
-            taskQueue.revertTask(taskId);
-            taskStore.markPending(taskId).catch(err =>
-              flog(`ERROR Failed to mark task #${taskId} pending: ${fmtError(err)}`)
-            );
+            taskModel.revert(taskId);
             registry.remove(workerId);
             assignIdleWorkers();
           });
@@ -1122,10 +1170,7 @@ export function createForemanWss(
         // If the task is currently pending and is now blocked, persist blocked status.
         const task = taskQueue.getTaskForIssue(issueNumber);
         if (task && task.status === "pending" && isBlocked(issueNumber, graph, openIssues)) {
-          taskQueue.setBlocked(task.taskId);
-          taskStore.markBlocked(task.taskId).catch((err) =>
-            flog(`ERROR Failed to mark task #${task.taskId} blocked: ${fmtError(err)}`)
-          );
+          taskModel.block(task.taskId);
         }
         reconcile();
       })
@@ -1136,19 +1181,8 @@ export function createForemanWss(
     // Step 1: materialise tasks for new labeledIssues entries
     for (const [num, { issue, depsLoaded }] of labeledIssues) {
       if (!taskQueue.getTaskForIssue(num)) {
-        taskQueue.addTask({
-          taskId: String(num),
-          issueNumber: num,
-          title: issue.title,
-          body: issue.body,
-          labels: issue.labels,
-          repoUrl: issue.repoUrl,
-          depsLoaded,
-        });
         // Persist task record; on re-label of a completed issue, resets to pending.
-        taskStore.upsertTask(String(num), num, repo, issue.title, issue.body, issue.labels).catch(err =>
-          flog(`ERROR Failed to persist task #${num}: ${fmtError(err)}`)
-        );
+        taskModel.register(String(num), num, repo, issue.title, issue.body, issue.labels, issue.repoUrl, depsLoaded);
       }
     }
 
