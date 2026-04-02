@@ -83,7 +83,6 @@ export async function runQuery(
   prompt: string,
   sessionId: string | undefined,
   abortController?: AbortController,
-  cwd?: string,
 ): Promise<string | undefined> {
   logFull("QUERY", { prompt, sessionId });
   // Save and clear the input print callback while the query runs. In worker
@@ -128,7 +127,7 @@ export async function runQuery(
   const iterable = query({
     prompt,
     options: {
-      cwd: cwd ?? process.cwd(),
+      cwd: process.cwd(),
       systemPrompt: { type: "preset", preset: "claude_code" },
       settingSources: ["user", "project"],
       permissionMode: permConfig.permissionMode,
@@ -295,6 +294,7 @@ async function main(
 
   let sessionId: string | undefined;
   const sessionId_ = crypto.randomUUID();
+  const originalCwd = process.cwd();
   let workspace: Workspace | undefined = undefined;
 
   const confirm = async (msg: string): Promise<boolean> => {
@@ -362,17 +362,27 @@ async function main(
       action.type === "remove-workspace" ||
       action.type === "prune"
     ) {
+      const prevWorkspace = workspace;
       workspace = await handleWorkspaceAction(action.type, {
         workspaceCfg, workspace, sessionId_, confirm,
         print: display.print,
       });
+      if (action.type === "create-workspace" && workspace && !prevWorkspace) {
+        process.chdir(workspace.dir);
+        sessionId = undefined;
+        display.print(display.c.amber("Note: conversation context has been cleared for the new workspace."));
+      }
+      if (action.type === "remove-workspace" && !workspace && prevWorkspace) {
+        process.chdir(originalCwd);
+        display.print(display.c.sageGreen(`Now in: ${originalCwd}`));
+      }
       continue;
     }
 
     if (action.type !== "query") continue;
 
     try {
-      sessionId = await runQuery(permConfig, action.prompt, sessionId, undefined, workspace?.dir);
+      sessionId = await runQuery(permConfig, action.prompt, sessionId);
     } catch (err) {
       console.error(display.c.boldRed(`\nERROR: ${fmtError(err)}`));
       logFull("ERROR", err instanceof Error ? { message: err.message, stack: err.stack } : err);

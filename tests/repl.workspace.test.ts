@@ -70,12 +70,10 @@ describe("handleWorkspaceAction — create-workspace", () => {
     expect(Workspace.create).not.toHaveBeenCalled();
   });
 
-  it("creates workspace, does NOT change process cwd, and returns new workspace", async () => {
+  it("creates workspace and returns it (chdir and session clearing handled by caller)", async () => {
     const params = makeParams();
-    const cwdBefore = process.cwd();
     const result = await handleWorkspaceAction("create-workspace", params);
     expect(Workspace.create).toHaveBeenCalledWith(cfg.workspaceDir, SESSION_ID, cfg.repoUrl);
-    expect(process.cwd()).toBe(cwdBefore); // process cwd must NOT change
     expect(stripAnsi(vi.mocked(params.print).mock.calls[0][0])).toContain("Workspace created");
     expect(result).toBeTruthy();
     expect(result!.dir).toBe("/fake/workspace");
@@ -122,14 +120,12 @@ describe("handleWorkspaceAction — remove-workspace", () => {
     expect(result).toBeUndefined();
   });
 
-  it("destroys workspace, does NOT change process cwd, and returns undefined", async () => {
+  it("destroys workspace and returns undefined (chdir handled by caller)", async () => {
     const ws = { dir: "/ws", reset: vi.fn(), destroy: vi.fn().mockResolvedValue(undefined), checkSafety: vi.fn() } as any;
     const params = makeParams({ workspace: ws });
-    const cwdBefore = process.cwd();
     const result = await handleWorkspaceAction("remove-workspace", params);
     expect(confirmIfUnsafe).toHaveBeenCalledWith(ws, params.confirm);
     expect(ws.destroy).toHaveBeenCalled();
-    expect(process.cwd()).toBe(cwdBefore); // process cwd must NOT change
     expect(stripAnsi(vi.mocked(params.print).mock.calls[0][0])).toContain("Workspace removed");
     expect(result).toBeUndefined();
   });

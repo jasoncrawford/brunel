@@ -263,36 +263,6 @@ describe("runQuery - error handling", () => {
   });
 });
 
-describe("runQuery - cwd option", () => {
-  it("runQuery with no explicit cwd → query called with process.cwd()", async () => {
-    mockQueryMessages([
-      { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } },
-    ]);
-    const cap = captureConsole();
-    try {
-      await runQuery(defaultPermConfig, "hello", undefined);
-    } finally {
-      cap.restore();
-    }
-    const callArg = (query as any).mock.calls[0][0];
-    expect(callArg.options.cwd).toBe(process.cwd());
-  });
-
-  it("runQuery with explicit cwd → query called with that cwd (not process.cwd())", async () => {
-    mockQueryMessages([
-      { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } },
-    ]);
-    const cap = captureConsole();
-    try {
-      await runQuery(defaultPermConfig, "hello", undefined, undefined, "/custom/workspace/dir");
-    } finally {
-      cap.restore();
-    }
-    const callArg = (query as any).mock.calls[0][0];
-    expect(callArg.options.cwd).toBe("/custom/workspace/dir");
-  });
-});
-
 describe("runQuery - canUseTool callback registration", () => {
   it("query() is called with a canUseTool callback defined", async () => {
     mockQueryMessages([
