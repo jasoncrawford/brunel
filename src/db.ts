@@ -252,6 +252,8 @@ export interface TaskStore {
   markPending(taskId: string): Promise<void>;
   /** Mark task as blocked (waiting on a dependency). */
   markBlocked(taskId: string): Promise<void>;
+  /** Delete the task row entirely (e.g. when brunel:ready label is removed). */
+  deleteTask(taskId: string): Promise<void>;
   /** Update PR number and branch for a task. */
   updateTaskPr(taskId: string, prNumber: number, branch: string | null): Promise<void>;
   /** List tasks, optionally filtered by status. */
@@ -327,6 +329,13 @@ export function createTaskStore(supabase: SupabaseClient): TaskStore {
       if (error) throw error;
     },
 
+    async deleteTask(taskId) {
+      const { error } = await supabase.from("tasks")
+        .delete()
+        .eq("task_id", taskId);
+      if (error) throw error;
+    },
+
     async updateTaskPr(taskId, prNumber, branch) {
       const { error } = await supabase.from("tasks")
         .update({ pr_number: prNumber, branch })
@@ -354,6 +363,7 @@ export function createNullTaskStore(): TaskStore {
     async markComplete() {},
     async markPending() {},
     async markBlocked() {},
+    async deleteTask() {},
     async updateTaskPr() {},
     async listTasks() { return []; },
   };

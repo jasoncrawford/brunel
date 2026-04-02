@@ -355,6 +355,13 @@ export class TaskModel {
     );
   }
 
+  cancel(taskId: string): void {
+    this.queue.removeTask(taskId);
+    this.store.deleteTask(taskId).catch((err: unknown) =>
+      this.logError(`ERROR Failed to delete task #${taskId} from DB: ${fmtError(err)}`)
+    );
+  }
+
   /** Assigns a task to a worker. Awaits the DB write; reverts memory and returns
    *  false if the write fails so the caller can release the worker. */
   async assign(taskId: string, workerId: string): Promise<boolean> {
@@ -1193,7 +1200,7 @@ export function createForemanWss(
     // Step 3: remove pending/blocked tasks whose issue no longer has the label
     for (const t of taskQueue.getPendingAndBlockedTasks()) {
       if (!labeledIssues.has(t.issueNumber)) {
-        taskQueue.removeTask(t.taskId);
+        taskModel.cancel(t.taskId);
       }
     }
 

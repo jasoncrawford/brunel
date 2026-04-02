@@ -4,6 +4,7 @@ import { TaskQueue, WorkerRegistry, createForemanWss } from "../src/foreman.js";
 import { loadDefaultConfig } from "../src/config.js";
 const defaultCfg = await loadDefaultConfig();
 import type { LabeledIssueState } from "../src/types.js";
+import type { TaskStore } from "../src/db.js";
 
 const TASK_LABEL = "brunel:ready";
 
@@ -111,6 +112,37 @@ describe("reconcile()", () => {
     // labeledIssues is empty — issue 9 has no label
     reconcile();
     expect(queue.get("9")).toBeUndefined();
+  });
+
+  it("calls store.deleteTask when reconcile removes a pending task whose label was removed", async () => {
+    const deleteTask = vi.fn().mockResolvedValue(undefined);
+    const mockStore: TaskStore = {
+      upsertTask: vi.fn().mockResolvedValue(undefined),
+      markAssigned: vi.fn().mockResolvedValue(undefined),
+      markComplete: vi.fn().mockResolvedValue(undefined),
+      markPending: vi.fn().mockResolvedValue(undefined),
+      markBlocked: vi.fn().mockResolvedValue(undefined),
+      deleteTask,
+      updateTaskPr: vi.fn().mockResolvedValue(undefined),
+      listTasks: vi.fn().mockResolvedValue([]),
+    };
+    const spyQueue = new TaskQueue();
+    const spyRegistry = new WorkerRegistry();
+    const spyLabeledIssues = new Map<number, LabeledIssueState>();
+    const spyServer = http.createServer();
+    const { reconcile: spyReconcile } = createForemanWss(spyQueue, spyRegistry, spyServer, {
+      taskLabel: TASK_LABEL,
+      reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs,
+      labeledIssues: spyLabeledIssues,
+      taskStore: mockStore,
+    });
+
+    spyQueue.addTask({ taskId: "9", issueNumber: 9, title: "T", body: "b", labels: [], repoUrl: "" });
+    spyReconcile();
+
+    expect(spyQueue.get("9")).toBeUndefined();
+    await Promise.resolve();
+    expect(deleteTask).toHaveBeenCalledWith("9");
   });
 
   it("does NOT remove an assigned task even if its issue is not in labeledIssues", () => {
