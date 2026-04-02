@@ -631,7 +631,7 @@ export function createForemanWss(
       const taskId = payload.taskId ? ` task=#${payload.taskId}` : "";
       summary = `${data.direction} worker_hello — ${status}${taskId}`;
     } else if (data.msgType === "hello_ack") {
-      const status = String(payload.status ?? "");
+      const status = String(payload.status ?? ""); // "idle" | "busy" | "cancelled"
       const taskId = payload.taskId ? ` task=#${payload.taskId}` : "";
       summary = `${data.direction} hello_ack — ${status}${taskId}`;
     } else if (data.msgType === "event_notification") {
