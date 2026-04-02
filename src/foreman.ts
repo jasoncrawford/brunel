@@ -575,6 +575,7 @@ export function createHttpServer(
 
 export interface ForemanWss {
   wss: WebSocketServer;
+  taskModel: TaskModel;
   routeEvent(id: string, name: string, payload: unknown): void;
   reconcile(): void;
   /** Close all connected worker clients with code 1001 and wait for their close events to fire. */
@@ -1205,7 +1206,7 @@ export function createForemanWss(
     });
   }
 
-  return { wss, routeEvent, reconcile, shutdown };
+  return { wss, taskModel, routeEvent, reconcile, shutdown };
 }
 
 // Only start listening when run directly (not when imported by tests)
@@ -1321,15 +1322,11 @@ if (isMain) {
     for (const t of taskQueue.getPendingAndBlockedTasks()) {
       const shouldBeBlocked = isBlocked(t.issueNumber, graph, openIssues);
       if (t.status === "blocked" && !shouldBeBlocked) {
-        taskQueue.setUnblocked(t.taskId);
-        taskStore.markPending(t.taskId).catch((err) =>
+        foremanWss.taskModel.unblock(t.taskId).catch((err) =>
           flog(`ERROR Failed to mark task #${t.taskId} pending on startup: ${fmtError(err)}`)
         );
       } else if (t.status === "pending" && shouldBeBlocked) {
-        taskQueue.setBlocked(t.taskId);
-        taskStore.markBlocked(t.taskId).catch((err) =>
-          flog(`ERROR Failed to mark task #${t.taskId} blocked on startup: ${fmtError(err)}`)
-        );
+        foremanWss.taskModel.block(t.taskId);
       }
     }
 
