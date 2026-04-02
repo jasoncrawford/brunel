@@ -464,14 +464,19 @@ describe("startup — blocked status reconciliation after graph rebuild", () => 
     const graph = new Map([[42, new Set([5])]]);
     const openIssues = new Set<number>(); // issue 5 is closed — not in openIssues
 
-    // Simulate the startup reconciliation loop
+    // Use taskModel from foremanWss (mirrors what main() does after the fix)
+    const { wss: fwss, taskModel } = createForemanWss(taskQueue, registry, httpServer, {
+      taskLabel: "brunel:ready",
+      taskStore,
+      reclaimTimeoutMs: 1000,
+    });
+    wss = fwss;
+
     for (const t of taskQueue.getPendingAndBlockedTasks()) {
       if (t.status === "blocked" && !isBlocked(t.issueNumber, graph, openIssues)) {
-        taskQueue.setUnblocked(t.taskId);
-        taskStore.markPending(t.taskId).catch(() => {});
+        taskModel.unblock(t.taskId).catch(() => {});
       } else if (t.status === "pending" && isBlocked(t.issueNumber, graph, openIssues)) {
-        taskQueue.setBlocked(t.taskId);
-        taskStore.markBlocked(t.taskId).catch(() => {});
+        taskModel.block(t.taskId);
       }
     }
 
@@ -489,13 +494,19 @@ describe("startup — blocked status reconciliation after graph rebuild", () => 
     const graph = new Map([[42, new Set([5])]]);
     const openIssues = new Set([5]);
 
+    // Use taskModel from foremanWss (mirrors what main() does after the fix)
+    const { wss: fwss, taskModel } = createForemanWss(taskQueue, registry, httpServer, {
+      taskLabel: "brunel:ready",
+      taskStore,
+      reclaimTimeoutMs: 1000,
+    });
+    wss = fwss;
+
     for (const t of taskQueue.getPendingAndBlockedTasks()) {
       if (t.status === "blocked" && !isBlocked(t.issueNumber, graph, openIssues)) {
-        taskQueue.setUnblocked(t.taskId);
-        taskStore.markPending(t.taskId).catch(() => {});
+        taskModel.unblock(t.taskId).catch(() => {});
       } else if (t.status === "pending" && isBlocked(t.issueNumber, graph, openIssues)) {
-        taskQueue.setBlocked(t.taskId);
-        taskStore.markBlocked(t.taskId).catch(() => {});
+        taskModel.block(t.taskId);
       }
     }
 
