@@ -630,6 +630,10 @@ export function createForemanWss(
       const status = String(payload.status ?? "");
       const taskId = payload.taskId ? ` task=#${payload.taskId}` : "";
       summary = `${data.direction} worker_hello — ${status}${taskId}`;
+    } else if (data.msgType === "hello_ack") {
+      const status = String(payload.status ?? "");
+      const taskId = payload.taskId ? ` task=#${payload.taskId}` : "";
+      summary = `${data.direction} hello_ack — ${status}${taskId}`;
     } else if (data.msgType === "event_notification") {
       const event = (payload.event ?? {}) as Record<string, unknown>;
       const eventName = event.name ? ` — ${event.name}` : "";
@@ -648,7 +652,7 @@ export function createForemanWss(
   }
 
   function sendMsg(workerId: string, msg: ForemanMessage): void {
-    const taskId = "taskId" in msg ? msg.taskId : null;
+    const taskId = ("taskId" in msg ? msg.taskId : null) ?? null;
     registry.send(workerId, msg);
     const msgPayload = msg as unknown as Record<string, unknown>;
     dbLogger?.logForemanMessage({ direction: "sent", workerId, taskId, msgType: msg.type, payload: msgPayload });
@@ -1007,15 +1011,15 @@ export function createForemanWss(
         }
       }
 
-      function cancelWorker() {
+      function cancelWorker(taskId?: string) {
         registry.register(workerId, ws, "idle");
-        sendMsg(workerId, { type: "hello_ack", workerId, status: "cancelled" });
+        sendMsg(workerId, { type: "hello_ack", workerId, status: "cancelled", taskId });
       }
 
       function reclaimWorker(taskId: string, issueRef: string | number) {
         registry.register(workerId, ws, "busy", taskId);
         taskQueue.assignTask(taskId, workerId);
-        sendMsg(workerId, { type: "hello_ack", workerId, status: "busy" });
+        sendMsg(workerId, { type: "hello_ack", workerId, status: "busy", taskId });
         flushQueuedEvents(taskId, issueRef);
       }
 
@@ -1041,11 +1045,11 @@ export function createForemanWss(
           // buffered task_complete will be discarded on cancelled.
           log(workerId, `hello busy task=#${msg.taskId} — task complete (issue closed), cancelling`);
           taskModel.complete(msg.taskId);
-          cancelWorker();
+          cancelWorker(msg.taskId);
         } else if (existing.assignedWorkerId && existing.assignedWorkerId !== workerId) {
           // Task is assigned to a different worker — cancel.
           log(workerId, `hello busy task=#${msg.taskId} — task taken by another worker`);
-          cancelWorker();
+          cancelWorker(msg.taskId);
         } else {
           // Task is pending or assigned to this worker — reclaim.
           log(workerId, `hello busy task=#${msg.taskId} — reclaimed`);

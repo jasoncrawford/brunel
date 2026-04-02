@@ -87,6 +87,10 @@ export function createDbLogger(supabase: SupabaseClient): DbLogger {
       const status = String(payload.status ?? "");
       const taskId = payload.taskId ? ` task=#${payload.taskId}` : "";
       summary = `${row.direction} worker_hello — ${status}${taskId}`;
+    } else if (row.msg_type === "hello_ack") {
+      const status = String(payload.status ?? "");
+      const taskId = payload.taskId ? ` task=#${payload.taskId}` : "";
+      summary = `${row.direction} hello_ack — ${status}${taskId}`;
     } else if (row.msg_type === "event_notification") {
       const event = (payload.event ?? {}) as Record<string, unknown>;
       const eventName = event.name ? ` — ${event.name}` : "";
