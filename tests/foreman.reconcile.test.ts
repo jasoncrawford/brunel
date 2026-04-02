@@ -205,9 +205,10 @@ describe("issues/closed — task lifecycle", () => {
     expect(queue.get("42")?.status).toBe("complete");
   });
 
-  it("does not affect a pending task when its issue is closed", () => {
-    // A pending task's issue being closed should not mark it complete —
-    // reconcile() will remove it if the label is also gone.
+  it("removes a pending task from the task list when its issue is closed", () => {
+    // Bug #385: closing a pending issue should remove it from the task list.
+    // Previously, issues/closed did not remove the issue from labeledIssues,
+    // so reconcile() never removed the pending task.
     labeledIssues.set(42, { issue: makeIssue(42), depsLoaded: true });
     queue.addTask({ taskId: "42", issueNumber: 42, title: "T", body: "b", labels: [], repoUrl: "" });
 
@@ -216,7 +217,21 @@ describe("issues/closed — task lifecycle", () => {
       issue: { number: 42, title: "T", body: "", labels: [] },
     });
 
-    expect(queue.get("42")?.status).toBe("pending");
+    expect(queue.get("42")).toBeUndefined();
+  });
+
+  it("does not mark a pending task complete (just removes it) when its issue is closed", () => {
+    // Closing should trigger removal via reconcile, not a status change to complete.
+    labeledIssues.set(42, { issue: makeIssue(42), depsLoaded: true });
+    queue.addTask({ taskId: "42", issueNumber: 42, title: "T", body: "b", labels: [], repoUrl: "" });
+
+    routeEvent("evt-1", "issues", {
+      action: "closed",
+      issue: { number: 42, title: "T", body: "", labels: [] },
+    });
+
+    // Task should be gone entirely, not stuck at "pending" and not bumped to "complete"
+    expect(queue.get("42")).toBeUndefined();
   });
 });
 
