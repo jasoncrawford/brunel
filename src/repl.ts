@@ -83,6 +83,7 @@ export async function runQuery(
   prompt: string,
   sessionId: string | undefined,
   abortController?: AbortController,
+  cwd?: string,
 ): Promise<string | undefined> {
   logFull("QUERY", { prompt, sessionId });
   // Save and clear the input print callback while the query runs. In worker
@@ -127,7 +128,7 @@ export async function runQuery(
   const iterable = query({
     prompt,
     options: {
-      cwd: process.cwd(),
+      cwd: cwd ?? process.cwd(),
       systemPrompt: { type: "preset", preset: "claude_code" },
       settingSources: ["user", "project"],
       permissionMode: permConfig.permissionMode,
@@ -213,10 +214,8 @@ export interface WorkspaceActionParams {
   workspaceCfg: { workspaceDir: string; repoUrl: string } | undefined;
   workspace: Workspace | undefined;
   sessionId_: string;
-  originalCwd: string;
   confirm: (msg: string) => Promise<boolean>;
   print: (msg: string) => void;
-  chdir: (dir: string) => void;
 }
 
 /**
@@ -228,7 +227,7 @@ export async function handleWorkspaceAction(
   type: WorkspaceActionType,
   params: WorkspaceActionParams,
 ): Promise<Workspace | undefined> {
-  const { workspaceCfg, workspace, sessionId_, originalCwd, confirm, print, chdir } = params;
+  const { workspaceCfg, workspace, sessionId_, confirm, print } = params;
 
   if (type === "create-workspace") {
     if (!workspaceCfg) {
@@ -240,7 +239,6 @@ export async function handleWorkspaceAction(
       return workspace;
     }
     const ws = await Workspace.create(workspaceCfg.workspaceDir, sessionId_, workspaceCfg.repoUrl);
-    chdir(ws.dir);
     print(display.c.sageGreen(`Workspace created: ${ws.dir}`));
     return ws;
   }
@@ -265,8 +263,7 @@ export async function handleWorkspaceAction(
     const ok = await confirmIfUnsafe(workspace, confirm);
     if (!ok) return workspace;
     await workspace.destroy();
-    chdir(originalCwd);
-    print(display.c.sageGreen(`Workspace removed. Now in: ${originalCwd}`));
+    print(display.c.sageGreen(`Workspace removed.`));
     return undefined;
   }
 
@@ -298,7 +295,6 @@ async function main(
 
   let sessionId: string | undefined;
   const sessionId_ = crypto.randomUUID();
-  const originalCwd = process.cwd();
   let workspace: Workspace | undefined = undefined;
 
   const confirm = async (msg: string): Promise<boolean> => {
@@ -367,9 +363,8 @@ async function main(
       action.type === "prune"
     ) {
       workspace = await handleWorkspaceAction(action.type, {
-        workspaceCfg, workspace, sessionId_, originalCwd, confirm,
+        workspaceCfg, workspace, sessionId_, confirm,
         print: display.print,
-        chdir: (dir) => process.chdir(dir),
       });
       continue;
     }
@@ -377,7 +372,7 @@ async function main(
     if (action.type !== "query") continue;
 
     try {
-      sessionId = await runQuery(permConfig, action.prompt, sessionId);
+      sessionId = await runQuery(permConfig, action.prompt, sessionId, undefined, workspace?.dir);
     } catch (err) {
       console.error(display.c.boldRed(`\nERROR: ${fmtError(err)}`));
       logFull("ERROR", err instanceof Error ? { message: err.message, stack: err.stack } : err);
