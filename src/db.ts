@@ -330,9 +330,13 @@ export function createTaskStore(supabase: SupabaseClient): TaskStore {
     },
 
     async deleteTask(taskId) {
+      // Only delete rows that were never assigned — tasks that had a previous worker
+      // (assigned_at IS NOT NULL) retain their history. markPending() leaves assigned_at
+      // intact when reverting a worker_goodbye, so this guard is reliable.
       const { error } = await supabase.from("tasks")
         .delete()
-        .eq("task_id", taskId);
+        .eq("task_id", taskId)
+        .is("assigned_at", null);
       if (error) throw error;
     },
 
