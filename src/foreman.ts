@@ -339,6 +339,12 @@ export class TaskModel {
     await this.store.markPending(taskId);
   }
 
+  refreshContent(taskId: string, title: string, body: string, labels: string[]): void {
+    this.store.updateTaskContent(taskId, title, body, labels).catch((err: unknown) =>
+      this.logError(`ERROR Failed to refresh content for task #${taskId}: ${fmtError(err)}`)
+    );
+  }
+
   register(
     taskId: string,
     issueNumber: number,
@@ -1186,15 +1192,17 @@ export function createForemanWss(
       }
     }
 
-    // Step 2: sync depsLoaded and body/labels from labeledIssues to existing tasks.
-    // body and labels are not stored in the DB, so tasks restored at startup need
-    // them populated from GitHub data once loadIssuesToQueue has run.
+    // Step 2: sync title/body/labels/depsLoaded from labeledIssues to existing tasks.
+    // Tasks restored from the DB at startup need their content refreshed from GitHub
+    // data once loadIssuesToQueue has run.
     for (const [num, { issue, depsLoaded }] of labeledIssues) {
       const t = taskQueue.getTaskForIssue(num);
       if (t) {
         t.depsLoaded = depsLoaded;
+        t.title = issue.title;
         t.body = issue.body;
         t.labels = issue.labels;
+        taskModel.refreshContent(t.taskId, issue.title, issue.body, issue.labels);
       }
     }
 

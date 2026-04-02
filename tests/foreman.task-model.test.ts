@@ -7,6 +7,7 @@ import type { TaskStore } from "../src/db.js";
 function makeStore(): TaskStore {
   return {
     upsertTask: vi.fn().mockResolvedValue(undefined),
+    updateTaskContent: vi.fn().mockResolvedValue(undefined),
     markAssigned: vi.fn().mockResolvedValue(undefined),
     markComplete: vi.fn().mockResolvedValue(undefined),
     markPending: vi.fn().mockResolvedValue(undefined),

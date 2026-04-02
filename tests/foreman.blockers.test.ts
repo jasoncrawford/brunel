@@ -15,6 +15,7 @@ function makeLabeledIssues(issueNumber: number): Map<number, LabeledIssueState> 
 function makeTaskStore(overrides: Partial<TaskStore> = {}): TaskStore {
   return {
     upsertTask: vi.fn().mockResolvedValue(undefined),
+    updateTaskContent: vi.fn().mockResolvedValue(undefined),
     markAssigned: vi.fn().mockResolvedValue(undefined),
     markComplete: vi.fn().mockResolvedValue(undefined),
     markPending: vi.fn().mockResolvedValue(undefined),
