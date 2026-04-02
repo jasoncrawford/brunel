@@ -750,6 +750,43 @@ describe("hello_ack handshake — buffering", () => {
     }
   });
 
+  it("aborts running query when hello_ack cancelled is received", async () => {
+    vi.useFakeTimers();
+    try {
+      let capturedAc: AbortController | undefined;
+      let resolveQuery!: (v: string) => void;
+      const pendingQuery = new Promise<string>((resolve) => { resolveQuery = resolve; });
+
+      runQuery.mockImplementationOnce(async (
+        _prompt: string,
+        _sessionId: string | undefined,
+        ac: AbortController,
+      ) => {
+        capturedAc = ac;
+        return pendingQuery;
+      });
+
+      // Assign task — starts runQuery (which is now pending)
+      const issue = makeIssue();
+      sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+      await vi.waitFor(() => expect(capturedAc).toBeDefined());
+
+      // Simulate reconnect and receive cancelled ack while query is still running
+      const newWs = reconnectWithNewWs();
+      newWs.emit("open");
+      sendMsg(newWs, { type: "hello_ack", workerId: WORKER_ID, status: "cancelled" });
+
+      // The running query's AbortController must be aborted
+      expect(capturedAc?.signal.aborted).toBe(true);
+
+      // Clean up: resolve the pending promise so the async loop can exit
+      resolveQuery("session-1");
+    } finally {
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    }
+  });
+
   it("flushes buffered task_complete on hello_ack idle (worker had stale task before reconnect)", async () => {
     vi.useFakeTimers();
     try {

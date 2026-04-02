@@ -1100,9 +1100,15 @@ export function createForemanWss(
 
     ws.on("close", (code, reason) => {
       if (workerId) {
+        // Guard against stale close events from a previous connection. If the worker
+        // has already reconnected with a new WebSocket, the old socket's close event
+        // fires after the registry was updated to the new socket — ignore it.
+        const currentState = registry.get(workerId);
+        if (currentState && currentState.ws !== ws) return;
+
         const reasonStr = reason?.length ? `: ${reason}` : "";
         log(workerId, `disconnected (code ${code}${reasonStr})`);
-        const taskId = registry.get(workerId)?.currentTaskId ?? null;
+        const taskId = currentState?.currentTaskId ?? null;
         const disconnPayload = { code, reason: reason?.toString() ?? null };
         dbLogger?.logForemanMessage({
           direction: "received",

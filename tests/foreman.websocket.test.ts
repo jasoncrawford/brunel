@@ -1353,6 +1353,43 @@ describe("reclaim timer (fake timers)", () => {
     await new Promise<void>((r) => wsA2.once("close", r));
     await new Promise<void>((r) => testWss.close(() => srv.close(r)));
   });
+
+  it("stale close from old connection does not corrupt registry when worker has already reconnected", async () => {
+    // Bug: if ws1's close event fires AFTER ws2 has already reconnected and registered,
+    // the foreman was incorrectly marking ws2's registry entry as "disconnected" and
+    // starting a reclaim timer. This would eventually cancel a legitimately working worker.
+
+    // Connect wsA and get a task
+    const wsA = await connect();
+    queue.addTask(makeTask(1));
+    const qA = makeQueue(wsA);
+    send(wsA, { type: "worker_hello", workerId: "worker-a", status: "idle" });
+    await qA.next(); // hello_ack
+    await qA.next(); // task_assigned
+    await waitUntil(() => registry.get("worker-a")?.status === "busy");
+
+    // Worker reconnects with a NEW connection (wsA2) claiming the task,
+    // BEFORE wsA's close event fires on the server.
+    const wsA2 = await connect();
+    const qA2 = makeQueue(wsA2);
+    send(wsA2, { type: "worker_hello", workerId: "worker-a", taskId: "1", status: "busy" });
+    const busyAck = await qA2.next(); // hello_ack busy
+    expect(busyAck).toMatchObject({ type: "hello_ack", status: "busy" });
+    // wsA2's hello has been processed — registry now points to wsA2's server socket
+
+    // Simulate stale close: wsA closes AFTER wsA2 has registered
+    wsA.close();
+    await new Promise<void>((r) => wsA.once("close", r));
+    // Give server a few event-loop ticks to process the close
+    for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));
+
+    // The stale close must be ignored — registry stays "busy", no reclaim timer
+    expect(registry.get("worker-a")?.status).toBe("busy");
+    expect(registry.get("worker-a")?.currentTaskId).toBe("1");
+
+    wsA2.close();
+    await new Promise<void>((r) => wsA2.once("close", r));
+  });
 });
 
 // ── Graceful shutdown ──────────────────────────────────────────────────────────

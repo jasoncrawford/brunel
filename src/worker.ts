@@ -465,6 +465,7 @@ export class WorkerSession {
     if (msg.type === "hello_ack") {
       if (msg.status === "cancelled") {
         // Task was reassigned while worker was disconnected — stop and reset.
+        this.currentAc?.abort(); // abort any running query immediately
         this.connectionState = "registered";
         this.bufferedMessages = [];
         this.currentTaskId = undefined;
