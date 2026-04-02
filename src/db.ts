@@ -53,6 +53,34 @@ export interface DbLogger {
   queryWorkerMessages(workerId: string): Promise<LogEntry[]>;
 }
 
+// ── Shared summary builder (used by both db.ts and foreman.ts) ─────────────────
+
+export function buildMessageSummary(
+  direction: string,
+  msgType: string,
+  taskId: string | null,
+  payload: Record<string, unknown>,
+): string {
+  if (msgType === "worker_disconnected") {
+    const reason = payload.reason ? `: ${payload.reason}` : "";
+    return `disconnected (code ${payload.code}${reason})`;
+  } else if (msgType === "worker_hello") {
+    const status = String(payload.status ?? "");
+    const taskIdStr = taskId ? ` task=#${taskId}` : "";
+    return `${direction} worker_hello — ${status}${taskIdStr}`;
+  } else if (msgType === "hello_ack") {
+    const status = String(payload.status ?? "");
+    const taskIdStr = taskId ? ` task=#${taskId}` : "";
+    return `${direction} hello_ack — ${status}${taskIdStr}`;
+  } else if (msgType === "event_notification") {
+    const event = (payload.event ?? {}) as Record<string, unknown>;
+    const eventName = event.name ? ` — ${event.name}` : "";
+    return `${direction} event_notification${eventName}`;
+  } else {
+    return `${direction} ${msgType}`;
+  }
+}
+
 // ── Real implementation ────────────────────────────────────────────────────────
 
 export function createDbLogger(supabase: SupabaseClient): DbLogger {
@@ -79,21 +107,8 @@ export function createDbLogger(supabase: SupabaseClient): DbLogger {
 
   function messageToEntry(row: Record<string, unknown>): LogEntry {
     const payload = (row.payload ?? {}) as Record<string, unknown>;
-    let summary: string;
-    if (row.msg_type === "worker_disconnected") {
-      const reason = payload.reason ? `: ${payload.reason}` : "";
-      summary = `disconnected (code ${payload.code}${reason})`;
-    } else if (row.msg_type === "worker_hello") {
-      const status = String(payload.status ?? "");
-      const taskId = payload.taskId ? ` task=#${payload.taskId}` : "";
-      summary = `${row.direction} worker_hello — ${status}${taskId}`;
-    } else if (row.msg_type === "event_notification") {
-      const event = (payload.event ?? {}) as Record<string, unknown>;
-      const eventName = event.name ? ` — ${event.name}` : "";
-      summary = `${row.direction} event_notification${eventName}`;
-    } else {
-      summary = `${row.direction} ${row.msg_type}`;
-    }
+    const taskId = (row.task_id as string | null) ?? null;
+    const summary = buildMessageSummary(String(row.direction), String(row.msg_type), taskId, payload);
     return {
       kind: "message",
       id: row.id as number,

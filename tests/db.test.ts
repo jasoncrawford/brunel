@@ -469,6 +469,50 @@ describe("messageToEntry richer summaries", () => {
     const entries = await logger.queryWorkerMessages("w1");
     expect(entries[0].summary).toContain("check_run");
   });
+
+  it("includes 'idle' status for hello_ack when idle", async () => {
+    const logger = createDbLogger(supabase);
+    logger.logForemanMessage({
+      direction: "sent", workerId: "w1", taskId: null,
+      msgType: "hello_ack",
+      payload: { type: "hello_ack", workerId: "w1", status: "idle" },
+    });
+    await new Promise((r) => setTimeout(r, 50));
+
+    const entries = await logger.queryWorkerMessages("w1");
+    expect(entries[0].summary).toContain("hello_ack");
+    expect(entries[0].summary).toContain("idle");
+  });
+
+  it("includes 'busy' status and taskId for hello_ack when busy", async () => {
+    const logger = createDbLogger(supabase);
+    logger.logForemanMessage({
+      direction: "sent", workerId: "w1", taskId: "42",
+      msgType: "hello_ack",
+      payload: { type: "hello_ack", workerId: "w1", status: "busy" },
+    });
+    await new Promise((r) => setTimeout(r, 50));
+
+    const entries = await logger.queryWorkerMessages("w1");
+    expect(entries[0].summary).toContain("hello_ack");
+    expect(entries[0].summary).toContain("busy");
+    expect(entries[0].summary).toContain("42");
+  });
+
+  it("includes 'cancelled' status and taskId for hello_ack when cancelled", async () => {
+    const logger = createDbLogger(supabase);
+    logger.logForemanMessage({
+      direction: "sent", workerId: "w1", taskId: "42",
+      msgType: "hello_ack",
+      payload: { type: "hello_ack", workerId: "w1", status: "cancelled" },
+    });
+    await new Promise((r) => setTimeout(r, 50));
+
+    const entries = await logger.queryWorkerMessages("w1");
+    expect(entries[0].summary).toContain("hello_ack");
+    expect(entries[0].summary).toContain("cancelled");
+    expect(entries[0].summary).toContain("42");
+  });
 });
 
 describe("createNullDbLogger", () => {

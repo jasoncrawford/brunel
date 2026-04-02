@@ -19,7 +19,7 @@ import type { AddressInfo } from "net";
 import { TaskQueue, WorkerRegistry, createForemanWss } from "../src/foreman.js";
 import { loadDefaultConfig } from "../src/config.js";
 const defaultCfg = await loadDefaultConfig();
-import type { AdminWss, AdminSnapshot } from "../src/admin-ws.js";
+import type { AdminWss, AdminSnapshot, LogEntry } from "../src/admin-ws.js";
 import { waitUntil } from "./helpers.js";
 
 // ── Mock AdminWss ─────────────────────────────────────────────────────────────
@@ -155,5 +155,50 @@ describe("foreman admin broadcast — reactive snapshot pipeline", () => {
     // All three addTask calls are within the same tick, so debounce collapses them
     expect(snapshots.length).toBe(1);
     expect(snapshots[0].tasks).toHaveLength(3);
+  });
+});
+
+describe("foreman admin broadcast — hello_ack log event summary", () => {
+  it("hello_ack idle includes status in summary", async () => {
+    const logEntries: LogEntry[] = [];
+    adminWss.broadcastLogEvent = (entry) => logEntries.push(entry);
+
+    const ws = await connect();
+    send(ws, { type: "worker_hello", workerId: "worker-abc", status: "idle" });
+    await waitUntil(() => logEntries.some((e) => e.summary.includes("hello_ack")));
+
+    const entry = logEntries.find((e) => e.summary.includes("hello_ack"));
+    expect(entry?.summary).toContain("idle");
+  });
+
+  it("hello_ack busy includes status and taskId in summary", async () => {
+    queue.addTask({ taskId: "42", issueNumber: 42, title: "Fix the bug", body: "", labels: [], repoUrl: "https://github.com/owner/repo" });
+
+    const logEntries: LogEntry[] = [];
+    adminWss.broadcastLogEvent = (entry) => logEntries.push(entry);
+
+    const ws = await connect();
+    send(ws, { type: "worker_hello", workerId: "worker-abc", status: "busy", taskId: "42" });
+    await waitUntil(() => logEntries.some((e) => e.summary.includes("hello_ack")));
+
+    const entry = logEntries.find((e) => e.summary.includes("hello_ack"));
+    expect(entry?.summary).toContain("busy");
+    expect(entry?.summary).toContain("42");
+  });
+
+  it("hello_ack cancelled includes status and taskId in summary", async () => {
+    queue.addTask({ taskId: "42", issueNumber: 42, title: "Fix the bug", body: "", labels: [], repoUrl: "https://github.com/owner/repo" });
+    queue.completeTask("42");
+
+    const logEntries: LogEntry[] = [];
+    adminWss.broadcastLogEvent = (entry) => logEntries.push(entry);
+
+    const ws = await connect();
+    send(ws, { type: "worker_hello", workerId: "worker-abc", status: "busy", taskId: "42" });
+    await waitUntil(() => logEntries.some((e) => e.summary.includes("hello_ack")));
+
+    const entry = logEntries.find((e) => e.summary.includes("hello_ack"));
+    expect(entry?.summary).toContain("cancelled");
+    expect(entry?.summary).toContain("42");
   });
 });

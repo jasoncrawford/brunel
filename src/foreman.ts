@@ -12,7 +12,7 @@ import { loadConfig } from "./config.js";
 import { isBlocked, setBlockers, fetchBlockers } from "./dependencies.js";
 import { fetchIssueStates } from "./github.js";
 import type { DependencyGraph } from "./dependencies.js";
-import { type DbLogger, type TaskStore, createDbLogger, createTaskStore, createNullDbLogger, createNullTaskStore } from "./db.js";
+import { type DbLogger, type TaskStore, createDbLogger, createTaskStore, createNullDbLogger, createNullTaskStore, buildMessageSummary } from "./db.js";
 import type { AdminWss, TaskSnapshot, WorkerSnapshot } from "./admin-ws.js";
 import { fmtError } from "./utils.js";
 import { shortWorkerId } from "../shared/utils.js";
@@ -621,22 +621,7 @@ export function createForemanWss(
 
   function broadcastMessageEvent(data: { direction: string; workerId: string | null; taskId: string | null; msgType: string; payload?: Record<string, unknown> }) {
     if (!adminWss) return;
-    const payload = data.payload ?? {};
-    let summary: string;
-    if (data.msgType === "worker_disconnected") {
-      const reason = payload.reason ? `: ${payload.reason}` : "";
-      summary = `disconnected (code ${payload.code}${reason})`;
-    } else if (data.msgType === "worker_hello") {
-      const status = String(payload.status ?? "");
-      const taskId = payload.taskId ? ` task=#${payload.taskId}` : "";
-      summary = `${data.direction} worker_hello — ${status}${taskId}`;
-    } else if (data.msgType === "event_notification") {
-      const event = (payload.event ?? {}) as Record<string, unknown>;
-      const eventName = event.name ? ` — ${event.name}` : "";
-      summary = `${data.direction} event_notification${eventName}`;
-    } else {
-      summary = `${data.direction} ${data.msgType}`;
-    }
+    const summary = buildMessageSummary(data.direction, data.msgType, data.taskId, data.payload ?? {});
     adminWss.broadcastLogEvent({
       kind: "message",
       id: nextBroadcastId++,
@@ -647,8 +632,8 @@ export function createForemanWss(
     });
   }
 
-  function sendMsg(workerId: string, msg: ForemanMessage): void {
-    const taskId = "taskId" in msg ? msg.taskId : null;
+  function sendMsg(workerId: string, msg: ForemanMessage, logTaskId?: string): void {
+    const taskId = logTaskId ?? (("taskId" in msg ? msg.taskId : null) ?? null);
     registry.send(workerId, msg);
     const msgPayload = msg as unknown as Record<string, unknown>;
     dbLogger?.logForemanMessage({ direction: "sent", workerId, taskId, msgType: msg.type, payload: msgPayload });
@@ -1007,15 +992,15 @@ export function createForemanWss(
         }
       }
 
-      function cancelWorker() {
+      function cancelWorker(taskId?: string) {
         registry.register(workerId, ws, "idle");
-        sendMsg(workerId, { type: "hello_ack", workerId, status: "cancelled" });
+        sendMsg(workerId, { type: "hello_ack", workerId, status: "cancelled" }, taskId);
       }
 
       function reclaimWorker(taskId: string, issueRef: string | number) {
         registry.register(workerId, ws, "busy", taskId);
         taskQueue.assignTask(taskId, workerId);
-        sendMsg(workerId, { type: "hello_ack", workerId, status: "busy" });
+        sendMsg(workerId, { type: "hello_ack", workerId, status: "busy" }, taskId);
         flushQueuedEvents(taskId, issueRef);
       }
 
@@ -1041,11 +1026,11 @@ export function createForemanWss(
           // buffered task_complete will be discarded on cancelled.
           log(workerId, `hello busy task=#${msg.taskId} — task complete (issue closed), cancelling`);
           taskModel.complete(msg.taskId);
-          cancelWorker();
+          cancelWorker(msg.taskId);
         } else if (existing.assignedWorkerId && existing.assignedWorkerId !== workerId) {
           // Task is assigned to a different worker — cancel.
           log(workerId, `hello busy task=#${msg.taskId} — task taken by another worker`);
-          cancelWorker();
+          cancelWorker(msg.taskId);
         } else {
           // Task is pending or assigned to this worker — reclaim.
           log(workerId, `hello busy task=#${msg.taskId} — reclaimed`);
