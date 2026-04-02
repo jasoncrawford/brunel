@@ -421,7 +421,7 @@ describe("hello_ack handshake", () => {
     const ackPromise = nextMsg(ws2);
     send(ws2, { type: "worker_hello", workerId: "w1", taskId: "1", status: "busy" });
     const ack = await ackPromise;
-    expect(ack).toEqual({ type: "hello_ack", workerId: "w1", status: "busy", taskId: "1" });
+    expect(ack).toEqual({ type: "hello_ack", workerId: "w1", status: "busy" });
   });
 
   it("sends hello_ack with status cancelled when task was taken by another worker", async () => {
@@ -437,7 +437,7 @@ describe("hello_ack handshake", () => {
     const ackPromise = nextMsg(wsB);
     send(wsB, { type: "worker_hello", workerId: "worker-b", taskId: "1", status: "busy" });
     const ack = await ackPromise;
-    expect(ack).toEqual({ type: "hello_ack", workerId: "worker-b", status: "cancelled", taskId: "1" });
+    expect(ack).toEqual({ type: "hello_ack", workerId: "worker-b", status: "cancelled" });
     expect(registry.get("worker-b")?.status).toBe("idle");
   });
 
@@ -446,7 +446,7 @@ describe("hello_ack handshake", () => {
     const ackPromise = nextMsg(ws);
     send(ws, { type: "worker_hello", workerId: "w1", taskId: "nonexistent", status: "busy" });
     const ack = await ackPromise;
-    expect(ack).toEqual({ type: "hello_ack", workerId: "w1", status: "busy", taskId: "nonexistent" });
+    expect(ack).toEqual({ type: "hello_ack", workerId: "w1", status: "busy" });
   });
 
   it("worker reconnecting busy with unlabeled taskId still receives event notifications for that issue", async () => {
@@ -456,7 +456,7 @@ describe("hello_ack handshake", () => {
     const q = makeQueue(ws);
     send(ws, { type: "worker_hello", workerId: "w1", taskId: "42", status: "busy" });
     const ack = await q.next();
-    expect(ack).toEqual({ type: "hello_ack", workerId: "w1", status: "busy", taskId: "42" });
+    expect(ack).toEqual({ type: "hello_ack", workerId: "w1", status: "busy" });
 
     // A webhook event arrives for that issue — foreman must forward it to the worker
     routeEvent("evt-1", "issue_comment", { issue: { number: 42 }, comment: { body: "review" } });
@@ -476,7 +476,7 @@ describe("hello_ack handshake", () => {
     const ackPromise = nextMsg(ws);
     send(ws, { type: "worker_hello", workerId: "w1", taskId: "1", status: "busy" });
     const ack = await ackPromise;
-    expect(ack).toEqual({ type: "hello_ack", workerId: "w1", status: "cancelled", taskId: "1" });
+    expect(ack).toEqual({ type: "hello_ack", workerId: "w1", status: "cancelled" });
     expect(registry.get("w1")?.status).toBe("idle");
   });
 
@@ -1152,7 +1152,7 @@ describe("worker_hello — DB persistence", () => {
     const ackPromise = nextMsg(ws);
     send(ws, { type: "worker_hello", workerId: "w1", taskId: "1", status: "busy" });
     const ack = await ackPromise;
-    expect(ack).toEqual({ type: "hello_ack", workerId: "w1", status: "cancelled", taskId: "1" });
+    expect(ack).toEqual({ type: "hello_ack", workerId: "w1", status: "cancelled" });
     expect(taskStore.markComplete).toHaveBeenCalledWith("1");
 
     ws.close();

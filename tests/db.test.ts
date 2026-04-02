@@ -489,7 +489,7 @@ describe("messageToEntry richer summaries", () => {
     logger.logForemanMessage({
       direction: "sent", workerId: "w1", taskId: "42",
       msgType: "hello_ack",
-      payload: { type: "hello_ack", workerId: "w1", status: "busy", taskId: "42" },
+      payload: { type: "hello_ack", workerId: "w1", status: "busy" },
     });
     await new Promise((r) => setTimeout(r, 50));
 
@@ -504,7 +504,7 @@ describe("messageToEntry richer summaries", () => {
     logger.logForemanMessage({
       direction: "sent", workerId: "w1", taskId: "42",
       msgType: "hello_ack",
-      payload: { type: "hello_ack", workerId: "w1", status: "cancelled", taskId: "42" },
+      payload: { type: "hello_ack", workerId: "w1", status: "cancelled" },
     });
     await new Promise((r) => setTimeout(r, 50));
 
