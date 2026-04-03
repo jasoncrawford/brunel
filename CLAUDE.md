@@ -60,6 +60,8 @@ npm test
 
 `tests/globalSetup.ts` runs once before the test suite. It reads the service-role key from `supabase status` (or from `SUPABASE_SERVICE_ROLE_KEY` if already set) and injects it into `process.env` so all Vitest worker threads inherit it. If Supabase is unavailable it sets `SUPABASE_UNAVAILABLE=true`; `createTestSupabase()` then throws with a helpful message so only DB tests fail. CI starts Supabase automatically via `supabase/setup-cli@v1` + `supabase start`.
 
+`pipeline.test.ts` is occasionally flaky in CI — timing-sensitive `pollUntil` calls can time out on slow runners. If it fails with `pollUntil timed out after 10000ms`, push an empty commit to retrigger CI: `git commit --allow-empty -m "ci: retrigger CI (pipeline.test.ts flaky timeout)"`. See issue #502.
+
 ## Database
 
 Supabase (hosted Postgres). Migrations live in `supabase/migrations/`. The GitHub Actions workflow at `.github/workflows/migrate.yml` runs `supabase db push` automatically on push to `main` when migration files change, and can also be triggered manually via `workflow_dispatch`.
