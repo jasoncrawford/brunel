@@ -177,6 +177,9 @@ export type WorkspaceCtx = {
 export type WorkerSessionOptions = {
   afterTask?: () => Promise<void>;
   workspaceCtx?: WorkspaceCtx;
+  /** Interval in ms between worker-sent pings. Dead connections are detected after
+   * one interval with no pong. Defaults to 30 000 ms. */
+  pingIntervalMs?: number;
 };
 
 // Sentinels used to signal WebSocket events through ask()'s abort param
@@ -463,9 +466,32 @@ export class WorkerSession {
     const ws = this.wsFactory(this.workerId, this.currentTaskId);
     this.ws = ws;
 
+    const pingIntervalMs = this.options.pingIntervalMs ?? 30_000;
+    let isAlive = false;
+    let pingTimer: ReturnType<typeof setInterval> | null = null;
+
+    const clearPingTimer = () => {
+      if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
+    };
+
     ws.on("open", () => {
       this.connectionState = "hello_sent";
       this.statusModel.update({ connectionStatus: "handshaking" });
+
+      // Heartbeat: detect silent connection drops (network loss, laptop sleep, etc.)
+      // The first tick sends the initial ping. If no pong arrives before the next
+      // tick, the connection is terminated so the status bar updates and reconnect runs.
+      isAlive = true;
+      ws.on("pong", () => { isAlive = true; });
+      pingTimer = setInterval(() => {
+        if (!isAlive) {
+          clearPingTimer();
+          ws.terminate();
+          return;
+        }
+        isAlive = false;
+        ws.ping();
+      }, pingIntervalMs);
     });
 
     ws.on("message", (data: Buffer | string) => {
@@ -475,6 +501,7 @@ export class WorkerSession {
     });
 
     ws.on("close", (code: number, _reason: Buffer) => {
+      clearPingTimer(); // always clean up the ping timer when this socket closes
       if (ws !== this.ws) return; // stale close from a previous connection
       const delay = 2000 + Math.random() * 3000;
       // Setting reconnectAt starts a 1-second countdown timer in the model.
@@ -489,7 +516,9 @@ export class WorkerSession {
     ws.on("error", (err: Error) => {
       if (ws !== this.ws) return; // stale error from a previous connection
       this.display.print(display.c.amber(`WebSocket error: ${err.message}`));
-      /* close will fire */
+      // Ensure close fires even for errors that don't automatically close the socket
+      // (e.g. some TLS negotiation failures on older Node.js / ws versions).
+      ws.terminate();
     });
   }
 
