@@ -517,6 +517,53 @@ describe("status bar content", () => {
 
     expect(stripAnsi(session.getStatusText())).not.toContain("PR #");
   });
+
+  it("clears PR number from status bar when pull_request/closed without merging is received", async () => {
+    const issue = makeIssue(1);
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "t1", issue });
+    await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
+
+    // First set the PR number via opened event
+    const prOpenedEvent: GitHubEvent = {
+      id: "pr-opened",
+      name: "pull_request",
+      payload: { action: "opened", pull_request: { number: 77, merged: false } },
+    };
+    sendMsg(fakeWs, { type: "event_notification", taskId: "t1", event: prOpenedEvent });
+    expect(stripAnsi(session.getStatusText())).toContain("PR #77");
+
+    // Now close the PR without merging
+    const prClosedEvent: GitHubEvent = {
+      id: "pr-closed",
+      name: "pull_request",
+      payload: { action: "closed", pull_request: { number: 77, merged: false } },
+    };
+    sendMsg(fakeWs, { type: "event_notification", taskId: "t1", event: prClosedEvent });
+    expect(stripAnsi(session.getStatusText())).not.toContain("PR #");
+  });
+
+  it("keeps PR number in status bar when pull_request/closed with merge is received", async () => {
+    const issue = makeIssue(1);
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "t1", issue });
+    await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
+
+    const prOpenedEvent: GitHubEvent = {
+      id: "pr-opened",
+      name: "pull_request",
+      payload: { action: "opened", pull_request: { number: 88, merged: false } },
+    };
+    sendMsg(fakeWs, { type: "event_notification", taskId: "t1", event: prOpenedEvent });
+    expect(stripAnsi(session.getStatusText())).toContain("PR #88");
+
+    // Close via merge — PR should stay shown until task completes
+    const prMergedEvent: GitHubEvent = {
+      id: "pr-merged",
+      name: "pull_request",
+      payload: { action: "closed", pull_request: { number: 88, merged: true } },
+    };
+    sendMsg(fakeWs, { type: "event_notification", taskId: "t1", event: prMergedEvent });
+    expect(stripAnsi(session.getStatusText())).toContain("PR #88");
+  });
 });
 
 // ── createWsInputPromise ──────────────────────────────────────────────────────

@@ -325,6 +325,33 @@ describe("TaskQueue changed events", () => {
     expect(changed).toHaveBeenCalledOnce();
   });
 
+  it("unregisterPr clears prNumber from the task", () => {
+    q.addTask(baseTask);
+    q.registerPr(10, "42");
+    q.unregisterPr(10);
+    expect(q.get("42")?.prNumber).toBeUndefined();
+  });
+
+  it("unregisterPr removes PR from routing so getTaskForPr returns undefined", () => {
+    q.addTask(baseTask);
+    q.registerPr(10, "42");
+    q.unregisterPr(10);
+    expect(q.getTaskForPr(10)).toBeUndefined();
+  });
+
+  it("unregisterPr emits changed", () => {
+    q.addTask(baseTask);
+    q.registerPr(10, "42");
+    const changed = vi.fn();
+    q.on("changed", changed);
+    q.unregisterPr(10);
+    expect(changed).toHaveBeenCalledOnce();
+  });
+
+  it("unregisterPr is a no-op for unknown PR number", () => {
+    expect(() => q.unregisterPr(999)).not.toThrow();
+  });
+
   it("markDepsLoaded emits changed", () => {
     q.addTask({ ...baseTask, depsLoaded: false });
     const changed = vi.fn();
