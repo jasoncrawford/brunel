@@ -460,6 +460,23 @@ export class TaskModel {
     );
   }
 
+  registerPr(taskId: string, prNumber: number, branch: string | null): void {
+    this.queue.registerPr(prNumber, taskId);
+    this.store.updateTaskPr(taskId, prNumber, branch).catch((err: unknown) =>
+      this.logError(`ERROR Failed to update task PR for #${taskId}: ${fmtError(err)}`)
+    );
+  }
+
+  unregisterPr(prNumber: number): void {
+    const task = this.queue.getTaskForPr(prNumber);
+    this.queue.unregisterPr(prNumber);
+    if (task) {
+      this.store.updateTaskPr(task.taskId, null, null).catch((err: unknown) =>
+        this.logError(`ERROR Failed to clear task PR for #${task.taskId}: ${fmtError(err)}`)
+      );
+    }
+  }
+
   /** Assigns a task to a worker. Awaits the DB write; reverts memory and returns
    *  false if the write fails so the caller can release the worker. */
   async assign(taskId: string, workerId: string): Promise<boolean> {
@@ -817,13 +834,9 @@ export function createForemanWss(
         if (linkedIssue !== null) {
           const linkedTask = taskQueue.getTaskForIssue(linkedIssue);
           if (linkedTask) {
-            taskQueue.registerPr(prNumber, linkedTask.taskId);
             const branch = strProp(pr.head, "ref");
             if (branch) taskQueue.registerBranch(branch, linkedTask.taskId);
-            // Persist PR number and branch so routing survives a foreman restart.
-            taskStore.updateTaskPr(linkedTask.taskId, prNumber, branch ?? null).catch(err =>
-              flog(`ERROR Failed to update task PR for #${linkedTask.taskId}: ${fmtError(err)}`)
-            );
+            taskModel.registerPr(linkedTask.taskId, prNumber, branch ?? null);
             flog(`[task #${linkedIssue}] PR #${prNumber} registered`);
             // Fall through to forward the event to the worker
           }
@@ -836,11 +849,8 @@ export function createForemanWss(
       if (p.action === "closed" && pr && !pr.merged) {
         const task = taskQueue.getTaskForPr(prNumber);
         if (task) {
-          taskQueue.unregisterPr(prNumber);
-          taskStore.updateTaskPr(task.taskId, null, null).catch(err =>
-            flog(`ERROR Failed to clear task PR for #${task.taskId}: ${fmtError(err)}`)
-          );
           flog(`[task #${task.issueNumber}] PR #${prNumber} unregistered (closed without merging)`);
+          taskModel.unregisterPr(prNumber);
           forwardEvent(task, evt, `PR #${prNumber}`);
           return result(task);
         }
