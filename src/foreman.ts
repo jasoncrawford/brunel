@@ -353,12 +353,14 @@ export class TaskModel {
     this._openIssues.delete(issueNumber);
   }
 
-  /** Called when issues/closed fires: stop tracking and mark any assigned task complete. */
+  /** Called when issues/closed fires: stop tracking and mark any active task complete.
+   *  Handles pending and blocked tasks too — not just assigned ones — so that DB rows
+   *  are always finalised regardless of whether a worker was active. (Bug #489) */
   closeIssue(issueNumber: number): void {
     this._labeledIssues.delete(issueNumber);
     this._openIssues.delete(issueNumber);
     const task = this.queue.getTaskForIssue(issueNumber);
-    if (task?.status === "assigned") {
+    if (task && task.status !== "complete") {
       this.complete(task.taskId);
     }
   }
@@ -878,6 +880,15 @@ export function createForemanWss(
         (issue.labels as Array<{ name: string }> | undefined)?.some((l) => l.name === taskLabel);
 
       if (labeledNow || openedWithLabel) {
+        // Bug #489: delayed/retried webhooks for closed issues must not create tasks.
+        // A closed issue re-labeled brunel:ready would otherwise upsert the DB row,
+        // resetting status to pending and potentially overwriting title with a blank.
+        const issueState = String(issue.state ?? "open");
+        if (issueState === "closed") {
+          flog(`[task #${issueNumber}] issues/${action}: ignoring — issue is closed (title: ${JSON.stringify(String(issue.title ?? ""))})`);
+          return result(null);
+        }
+
         const repoUrl = strProp(p.repository, "html_url") ?? "";
         const labels =
           (issue.labels as Array<{ name: string }> | undefined)?.map((l) => l.name) ?? [];
@@ -1261,6 +1272,7 @@ export function createForemanWss(
     for (const [num, { issue, depsLoaded }] of labeledIssues) {
       if (!taskQueue.getTaskForIssue(num)) {
         // Persist task record; on re-label of a completed issue, resets to pending.
+        flog(`[task #${num}] reconcile: creating task (title: ${JSON.stringify(issue.title)})`);
         taskModel.register(String(num), num, repo, issue.title, issue.body, issue.labels, issue.repoUrl, depsLoaded);
       }
     }

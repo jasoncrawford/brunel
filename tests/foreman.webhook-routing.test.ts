@@ -699,4 +699,24 @@ describe("foreman event filtering", () => {
 
     expect(queue.getTaskForIssue(42)).toBeDefined();
   });
+
+  it("issues/labeled with task label does not enqueue if issue is closed", () => {
+    // Bug #489: delayed/retried webhooks for closed issues should not create tasks.
+    // A closed issue re-labeled brunel:ready would otherwise upsert the DB row,
+    // resetting status to pending and potentially overwriting title with a blank.
+    routeEvent("evt-1", "issues", {
+      action: "labeled",
+      label: { name: "brunel:ready" },
+      issue: {
+        number: 42,
+        title: "Issue 42",
+        body: "Body",
+        state: "closed",
+        labels: [{ name: "brunel:ready" }],
+      },
+      repository: { html_url: "https://github.com/owner/repo" },
+    });
+
+    expect(queue.getTaskForIssue(42)).toBeUndefined();
+  });
 });
