@@ -585,9 +585,36 @@ function fmtHookExitCode(exitCode: number | undefined): string {
   return exitCode != null && exitCode !== 0 ? ` [exit ${exitCode}]` : "";
 }
 
+const RATE_LIMIT_TYPE_LABELS: Record<string, string> = {
+  five_hour:       "five-hour",
+  seven_day:       "seven-day",
+  seven_day_opus:  "seven-day Opus",
+  seven_day_sonnet: "seven-day Sonnet",
+  overage:         "overage",
+};
+
 function fmtRateLimitInfo(info: { status?: string; utilization?: number; rateLimitType?: string }): string {
-  const parts: string[] = [`rate limit: ${info.status}`];
-  if (info.rateLimitType) parts.push(info.rateLimitType);
+  const typeLabel = info.rateLimitType ? (RATE_LIMIT_TYPE_LABELS[info.rateLimitType] ?? info.rateLimitType) : null;
+
+  if (info.status === "allowed_warning") {
+    if (info.utilization != null && typeLabel) {
+      return `Usage warning: ${Math.round(info.utilization * 100)}% of ${typeLabel} usage limit`;
+    } else if (info.utilization != null) {
+      return `Usage warning: ${Math.round(info.utilization * 100)}% used`;
+    } else if (typeLabel) {
+      return `Usage warning: ${typeLabel} usage limit`;
+    }
+    return "Usage warning";
+  }
+
+  if (info.status === "rejected") {
+    if (typeLabel) return `Usage limit reached: ${typeLabel} usage limit`;
+    return "Usage limit reached";
+  }
+
+  // Fallback for unknown statuses
+  const parts: string[] = [`Usage: ${info.status}`];
+  if (typeLabel) parts.push(typeLabel);
   if (info.utilization != null) parts.push(`${Math.round(info.utilization * 100)}% used`);
   return parts.join(", ");
 }
@@ -614,11 +641,11 @@ export const SYSTEM_FMT: FmtTable = {
 export const MESSAGE_FMT: FmtTable = {
   _empty:           (m) => c.darkGray(`[${m.type} — empty]`),
   result:           (m) => c.darkGray(`\n${fmtStats(Math.round(m.duration_ms / 1000), m.num_turns, m.usage.output_tokens, m.usage.input_tokens)}`),
-  rate_limit_event: { verbose: (m) => {
+  rate_limit_event: (m) => {
     const info = m.rate_limit_info;
     if (!info || info.status === "allowed") return null;
     return c.amber(fmtRateLimitInfo(info));
-  }},
+  },
   _default:         (m) => c.darkGray(`msg: ${m.type}`),
 };
 
