@@ -250,6 +250,89 @@ describe("ask() - up/down arrow navigation", () => {
   });
 });
 
+// ── Status update callback (issue #486: paste + status bar) ──────────────────
+//
+// When the persistent status bar changes while ask() has a multiline buffer
+// displayed (e.g. from a large paste), the old code called drawFresh() via
+// _inputPrintCallback.  drawFresh() assumes the cursor is at a fresh new line
+// (after display.print()); when called with the cursor in the buffer area it
+// writes the prompt at the wrong row, leaving status-bar text interleaved with
+// the buffer content.
+//
+// The fix: ask() registers _inputStatusCallback = redrawFromCurrent(), which
+// calls fullRedraw(cursorRow, ...).  fullRedraw() navigates back to the prompt
+// line before redrawing, so the status bars always land below the buffer.
+
+describe("ask() - status update during multiline input (issue #486)", () => {
+  it("status update while cursor is on row 1 navigates up to prompt before redrawing", async () => {
+    // cols=10, prompt="> " (2 chars), buffer=9 chars → cursor on row 1.
+    // When updatePersistentStatus fires, the first write should be \x1b[1A
+    // (cursor-up to row 0) so the prompt is redrawn from the top, not from
+    // row 1 where the buffer cursor sits.
+    setColumns(10);
+    const writeSpy = vi.mocked(process.stdout.write);
+
+    display.startPersistentStatus(() => "status");
+
+    await withFakeStdin(async (stdin) => {
+      const p = ask("> ", () => []);
+      stdin.push("123456789"); // cursor on row 1 (9 chars + 2-char prompt wraps)
+      writeSpy.mockClear();
+
+      // Simulate a status update (e.g. branch refresh, WS reconnect) while
+      // the cursor is sitting on row 1 of the multiline buffer.
+      display.updatePersistentStatus();
+
+      // The redraw must start by going up 1 row (\x1b[1A) to reach the prompt
+      // line (row 0), then write the prompt "> ".  Without the fix, drawFresh()
+      // would write the prompt at the current cursor row (row 1), so "\x1b[1A"
+      // would appear only AFTER the prompt text — indicating wrong behaviour.
+      const output = collectOutput(writeSpy);
+      const cursorUp   = output.indexOf("\x1b[1A");
+      const promptPos  = output.indexOf("> ");
+      expect(cursorUp).toBeGreaterThan(-1);   // cursor-up must appear
+      expect(promptPos).toBeGreaterThan(-1);  // prompt must appear
+      // cursor-up must come BEFORE the prompt (navigate back, then draw)
+      expect(cursorUp).toBeLessThan(promptPos);
+
+      stdin.push("\r");
+      expect(await p).toBe("123456789");
+    });
+
+    display.stopPersistentStatus();
+  });
+
+  it("status update while cursor is on row 0 does not emit spurious cursor-up", async () => {
+    // cols=10, prompt="> " (2 chars), buffer=5 chars — all fits on row 0.
+    // No cursor-up should be needed: the prompt is already at the top.
+    setColumns(10);
+    const writeSpy = vi.mocked(process.stdout.write);
+
+    display.startPersistentStatus(() => "status");
+
+    await withFakeStdin(async (stdin) => {
+      const p = ask("> ", () => []);
+      stdin.push("hello"); // 5 chars, stays on row 0
+      writeSpy.mockClear();
+
+      display.updatePersistentStatus();
+
+      const output = collectOutput(writeSpy);
+      // A \x1b[0A is a no-op (guard in fullRedraw), so we just verify the
+      // prompt appears and the output doesn't start with a cursor-up.
+      expect(output).toContain("> ");
+      // First non-trivial write must be \r (go to col 0), not \x1b[NA.
+      const firstWrite = String(writeSpy.mock.calls[0]?.[0] ?? "");
+      expect(firstWrite).not.toMatch(/^\x1b\[\d+A/); // no leading cursor-up
+
+      stdin.push("\r");
+      expect(await p).toBe("hello");
+    });
+
+    display.stopPersistentStatus();
+  });
+});
+
 // ── Print callback (worker mode cursor fix) ────────────────────────────────────
 
 describe("display.print() callback for ask() redraw", () => {
