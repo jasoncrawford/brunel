@@ -62,7 +62,7 @@ describe("reconcile()", () => {
   it("syncs title from labeledIssues to an existing in-memory task", () => {
     // Simulates: task restored from DB with empty/stale title, then GitHub data loaded.
     queue.addTask({ taskId: "42", issueNumber: 42, title: "", body: "b", labels: [], repoUrl: "", depsLoaded: true });
-    labeledIssues.set(42, { issue: { ...makeIssue(42), title: "Real Title" }, depsLoaded: true });
+    taskModel.trackIssue(42, { ...makeIssue(42), title: "Real Title" }, true);
     reconcile();
     expect(queue.get("42")?.title).toBe("Real Title");
   });
@@ -79,16 +79,15 @@ describe("reconcile()", () => {
       listTasks: vi.fn().mockResolvedValue([]),
     };
     const server2 = http.createServer();
-    const { reconcile: rec2 } = createForemanWss(queue, registry, server2, {
+    const { reconcile: rec2, taskModel: taskModel2 } = createForemanWss(queue, registry, server2, {
       taskLabel: TASK_LABEL,
       reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs,
-      labeledIssues,
       taskStore: mockStore as any,
     });
 
     // Existing task in queue
     queue.addTask({ taskId: "42", issueNumber: 42, title: "Old Title", body: "old", labels: [], repoUrl: "", depsLoaded: true });
-    labeledIssues.set(42, { issue: { ...makeIssue(42), title: "New Title", body: "new body", labels: ["brunel:ready", "bug"] }, depsLoaded: true });
+    taskModel2.trackIssue(42, { ...makeIssue(42), title: "New Title", body: "new body", labels: ["brunel:ready", "bug"] }, true);
 
     rec2();
     await new Promise((r) => setImmediate(r));
