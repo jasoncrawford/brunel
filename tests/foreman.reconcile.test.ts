@@ -242,10 +242,11 @@ describe("issues/closed — task lifecycle", () => {
     expect(queue.get("42")?.status).toBe("complete");
   });
 
-  it("removes a pending task from the task list when its issue is closed", () => {
-    // Bug #385: closing a pending issue should remove it from the task list.
-    // Previously, issues/closed did not remove the issue from labeledIssues,
-    // so reconcile() never removed the pending task.
+  it("marks a pending task complete when its issue is closed", () => {
+    // Bug #489: closing an issue with a pending task should mark it complete in DB.
+    // Previously, only assigned tasks were marked complete; pending tasks were cancelled
+    // via reconcile, but deleteTask silently skips rows where assigned_at IS NOT NULL
+    // (tasks that previously had a worker), leaving stale pending rows in the DB.
     taskModel.trackIssue(42, makeIssue(42), true);
     queue.addTask({ taskId: "42", issueNumber: 42, title: "T", body: "b", labels: [], repoUrl: "" });
 
@@ -254,21 +255,53 @@ describe("issues/closed — task lifecycle", () => {
       issue: { number: 42, title: "T", body: "", labels: [] },
     });
 
-    expect(queue.get("42")).toBeUndefined();
+    expect(queue.get("42")?.status).toBe("complete");
   });
 
-  it("does not mark a pending task complete (just removes it) when its issue is closed", () => {
-    // Closing should trigger removal via reconcile, not a status change to complete.
+  it("marks a blocked task complete when its issue is closed", () => {
     taskModel.trackIssue(42, makeIssue(42), true);
-    queue.addTask({ taskId: "42", issueNumber: 42, title: "T", body: "b", labels: [], repoUrl: "" });
+    queue.addTask({ taskId: "42", issueNumber: 42, title: "T", body: "b", labels: [], repoUrl: "", status: "blocked" });
 
     routeEvent("evt-1", "issues", {
       action: "closed",
       issue: { number: 42, title: "T", body: "", labels: [] },
     });
 
-    // Task should be gone entirely, not stuck at "pending" and not bumped to "complete"
-    expect(queue.get("42")).toBeUndefined();
+    expect(queue.get("42")?.status).toBe("complete");
+  });
+
+  it("calls store.markComplete for a pending task when its issue is closed", async () => {
+    const mockStore = {
+      upsertTask: vi.fn().mockResolvedValue(undefined),
+      markAssigned: vi.fn().mockResolvedValue(undefined),
+      markComplete: vi.fn().mockResolvedValue(undefined),
+      markPending: vi.fn().mockResolvedValue(undefined),
+      markBlocked: vi.fn().mockResolvedValue(undefined),
+      deleteTask: vi.fn().mockResolvedValue(undefined),
+      updateTaskContent: vi.fn().mockResolvedValue(undefined),
+      updateTaskPr: vi.fn().mockResolvedValue(undefined),
+      listTasks: vi.fn().mockResolvedValue([]),
+    };
+    const q2 = new TaskQueue();
+    const r2 = new WorkerRegistry();
+    const s2 = http.createServer();
+    const { routeEvent: re2, taskModel: tm2 } = createForemanWss(q2, r2, s2, {
+      taskLabel: TASK_LABEL,
+      reclaimTimeoutMs: 30000,
+      taskStore: mockStore as any,
+    });
+
+    tm2.trackIssue(42, makeIssue(42), true);
+    q2.addTask({ taskId: "42", issueNumber: 42, title: "T", body: "b", labels: [], repoUrl: "" });
+
+    re2("evt-1", "issues", {
+      action: "closed",
+      issue: { number: 42, title: "T", body: "", labels: [] },
+    });
+
+    await new Promise((r) => setImmediate(r));
+    expect(mockStore.markComplete).toHaveBeenCalledWith("42");
+    expect(mockStore.deleteTask).not.toHaveBeenCalled();
   });
 });
 
