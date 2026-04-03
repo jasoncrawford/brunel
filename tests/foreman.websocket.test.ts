@@ -3,10 +3,10 @@ import assert from "node:assert";
 import http from "http";
 import { WebSocket, WebSocketServer } from "ws";
 import type { AddressInfo } from "net";
-import { TaskQueue, WorkerRegistry, createForemanWss } from "../src/foreman.js";
+import { TaskQueue, WorkerRegistry, TaskModel, createForemanWss } from "../src/foreman.js";
 import { loadDefaultConfig } from "../src/config.js";
 const defaultCfg = await loadDefaultConfig();
-import type { ForemanMessage, LabeledIssueState } from "../src/types.js";
+import type { ForemanMessage } from "../src/types.js";
 import { setBlockers } from "../src/dependencies.js";
 import type { DependencyGraph } from "../src/dependencies.js";
 import type { DbLogger, TaskStore } from "../src/db.js";
@@ -73,14 +73,13 @@ function closeClient(ws: WebSocket): Promise<void> {
 
 let queue: TaskQueue;
 let registry: WorkerRegistry;
+let taskModel: TaskModel;
 let httpServer: http.Server;
 let wss: WebSocketServer;
 let routeEvent: (id: string, name: string, payload: unknown) => void;
 let shutdown: () => Promise<void>;
 let port: number;
 let graph: DependencyGraph;
-let openIssues: Set<number>;
-let labeledIssues: Map<number, LabeledIssueState>;
 const openClients: WebSocket[] = [];
 
 function connect(): Promise<WebSocket> {
@@ -91,10 +90,8 @@ beforeEach(() => {
   queue = new TaskQueue();
   registry = new WorkerRegistry();
   graph = new Map();
-  openIssues = new Set();
-  labeledIssues = new Map();
   httpServer = http.createServer();
-  ({ wss, routeEvent, shutdown } = createForemanWss(queue, registry, httpServer, { taskLabel: defaultCfg.taskLabel, reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs, graph, openIssues, labeledIssues }));
+  ({ wss, taskModel, routeEvent, shutdown } = createForemanWss(queue, registry, httpServer, { taskLabel: defaultCfg.taskLabel, reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs, graph }));
 
   return new Promise<void>((resolve) => {
     httpServer.listen(0, () => {
@@ -519,7 +516,7 @@ describe("hello_ack handshake", () => {
 describe("dependency-aware task assignment", () => {
   it("idle worker gets no message when the only pending task is blocked", async () => {
     queue.addTask(makeTask(42));
-    openIssues.add(10); // blocker is open
+    taskModel.setIssueOpenState(10, true); // blocker is open
     setBlockers(42, [10], graph);
 
     const ws = await connect();
@@ -548,9 +545,9 @@ describe("dependency-aware task assignment", () => {
 
   it("issues/closed event unblocks a waiting task and sends task_assigned to idle worker", async () => {
     const task42 = makeTask(42);
-    labeledIssues.set(42, { issue: { number: 42, title: task42.title, body: task42.body, labels: task42.labels, repoUrl: task42.repoUrl }, depsLoaded: true });
+    taskModel.trackIssue(42, { number: 42, title: task42.title, body: task42.body, labels: task42.labels, repoUrl: task42.repoUrl }, true);
     queue.addTask(task42);
-    openIssues.add(10);
+    taskModel.setIssueOpenState(10, true);
     setBlockers(42, [10], graph);
 
     const ws = await connect();
@@ -592,7 +589,7 @@ describe("dependency-aware task assignment", () => {
   it("worker gets first unblocked task when queue has mixed blocked/unblocked tasks", async () => {
     queue.addTask(makeTask(1)); // blocked
     queue.addTask(makeTask(2)); // unblocked
-    openIssues.add(99);
+    taskModel.setIssueOpenState(99, true);
     setBlockers(1, [99], graph);
     // task 2 has no blockers
 

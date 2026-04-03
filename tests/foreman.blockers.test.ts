@@ -1,16 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
 import { TaskQueue, WorkerRegistry, createForemanWss } from "../src/foreman.js";
 import type { TaskStore } from "../src/db.js";
-import type { LabeledIssueState } from "../src/types.js";
+import type { TaskIssue } from "../src/types.js";
 import http from "http";
 
-/** Build a labeledIssues map for a single issue so reconcile doesn't evict it. */
-function makeLabeledIssues(issueNumber: number): Map<number, LabeledIssueState> {
-  return new Map([[issueNumber, {
-    issue: { title: "T", body: "b", labels: [], repoUrl: "r" },
-    depsLoaded: true,
-  }]]);
-}
+const ISSUE_10: TaskIssue = { number: 10, title: "T", body: "b", labels: [], repoUrl: "r" };
 
 function makeTaskStore(overrides: Partial<TaskStore> = {}): TaskStore {
   return {
@@ -39,15 +33,14 @@ describe("foreman — blocker transitions via routeEvent", () => {
       labels: [], repoUrl: "r", status: "blocked",
     });
     const graph = new Map([[10, new Set([5])]]);
-    const openIssues = new Set([5]);
 
-    const { wss, routeEvent } = createForemanWss(taskQueue, registry, server, {
+    const { wss, taskModel, routeEvent } = createForemanWss(taskQueue, registry, server, {
       taskLabel: "brunel:ready",
       graph,
-      openIssues,
-      labeledIssues: makeLabeledIssues(10),
       reclaimTimeoutMs: 300_000,
     });
+    taskModel.trackIssue(10, ISSUE_10, true);
+    taskModel.setIssueOpenState(5, true);
     wss.close();
 
     routeEvent("evt-1", "issues", {
@@ -69,16 +62,15 @@ describe("foreman — blocker transitions via routeEvent", () => {
       labels: [], repoUrl: "r", status: "blocked",
     });
     const graph = new Map([[10, new Set([5])]]);
-    const openIssues = new Set([5]);
 
-    const { wss, routeEvent } = createForemanWss(taskQueue, registry, server, {
+    const { wss, taskModel, routeEvent } = createForemanWss(taskQueue, registry, server, {
       taskLabel: "brunel:ready",
       graph,
-      openIssues,
-      labeledIssues: makeLabeledIssues(10),
       taskStore,
       reclaimTimeoutMs: 300_000,
     });
+    taskModel.trackIssue(10, ISSUE_10, true);
+    taskModel.setIssueOpenState(5, true);
     wss.close();
 
     routeEvent("evt-1", "issues", {
@@ -101,16 +93,16 @@ describe("foreman — blocker transitions via routeEvent", () => {
     });
     // Task 10 is blocked by BOTH 5 and 6
     const graph = new Map([[10, new Set([5, 6])]]);
-    const openIssues = new Set([5, 6]);
 
-    const { wss, routeEvent } = createForemanWss(taskQueue, registry, server, {
+    const { wss, taskModel, routeEvent } = createForemanWss(taskQueue, registry, server, {
       taskLabel: "brunel:ready",
       graph,
-      openIssues,
-      labeledIssues: makeLabeledIssues(10),
       taskStore,
       reclaimTimeoutMs: 300_000,
     });
+    taskModel.trackIssue(10, ISSUE_10, true);
+    taskModel.setIssueOpenState(5, true);
+    taskModel.setIssueOpenState(6, true);
     wss.close();
 
     // Close issue 5 — but 6 is still open
