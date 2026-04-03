@@ -598,25 +598,25 @@ function fmtRateLimitInfo(info: { status?: string; utilization?: number; rateLim
 
   if (info.status === "allowed_warning") {
     if (info.utilization != null && typeLabel) {
-      return `Usage warning: ${Math.round(info.utilization * 100)}% of ${typeLabel} limit.`;
+      return `Usage warning: ${Math.round(info.utilization * 100)}% of ${typeLabel} usage limit`;
     } else if (info.utilization != null) {
-      return `Usage warning: ${Math.round(info.utilization * 100)}% used.`;
+      return `Usage warning: ${Math.round(info.utilization * 100)}% used`;
     } else if (typeLabel) {
-      return `Usage warning: ${typeLabel} limit.`;
+      return `Usage warning: ${typeLabel} usage limit`;
     }
-    return "Usage warning.";
+    return "Usage warning";
   }
 
   if (info.status === "rejected") {
-    if (typeLabel) return `Rate limit reached: ${typeLabel} limit.`;
-    return "Rate limit reached.";
+    if (typeLabel) return `Usage limit reached: ${typeLabel} usage limit`;
+    return "Usage limit reached";
   }
 
   // Fallback for unknown statuses
-  const parts: string[] = [`Rate limit: ${info.status}`];
+  const parts: string[] = [`Usage: ${info.status}`];
   if (typeLabel) parts.push(typeLabel);
   if (info.utilization != null) parts.push(`${Math.round(info.utilization * 100)}% used`);
-  return parts.join(", ") + ".";
+  return parts.join(", ");
 }
 
 function fmtApiRetryDetail(m: { error_status?: number | null; error?: string }): string {
