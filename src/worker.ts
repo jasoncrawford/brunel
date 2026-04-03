@@ -466,7 +466,7 @@ export class WorkerSession {
     const ws = this.wsFactory(this.workerId, this.currentTaskId);
     this.ws = ws;
 
-    const pingIntervalMs = this.options.pingIntervalMs ?? 30_000;
+    const pingIntervalMs = this.options.pingIntervalMs ?? 25_000;
     let isAlive = false;
     let pingTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -482,7 +482,11 @@ export class WorkerSession {
       // The first tick sends the initial ping. If no pong arrives before the next
       // tick, the connection is terminated so the status bar updates and reconnect runs.
       isAlive = true;
+      // Any incoming frame (pong from our ping, or ping from the foreman's heartbeat)
+      // proves the connection is alive. Listening to both avoids sending a redundant
+      // ping when the foreman already pinged us in the same interval.
       ws.on("pong", () => { isAlive = true; });
+      ws.on("ping", () => { isAlive = true; });
       pingTimer = setInterval(() => {
         if (!isAlive) {
           clearPingTimer();

@@ -1696,6 +1696,19 @@ describe("heartbeat", () => {
     expect(ws.terminate).not.toHaveBeenCalled();
   });
 
+  it("keeps the connection alive when an incoming ping from the foreman resets liveness", () => {
+    vi.useFakeTimers();
+    const { ws } = makeHeartbeatSession(100);
+    ws.emit("open");
+    sendMsg(ws, { type: "hello_ack", status: "idle" });
+
+    vi.advanceTimersByTime(100); // first ping sent, isAlive set to false
+    ws.emit("ping");             // foreman's heartbeat ping resets isAlive to true
+    vi.advanceTimersByTime(100); // second tick: isAlive is true → keeps connection
+
+    expect(ws.terminate).not.toHaveBeenCalled();
+  });
+
   it("terminates the connection when no pong is received after a ping", () => {
     vi.useFakeTimers();
     const { ws } = makeHeartbeatSession(100);
