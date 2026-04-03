@@ -55,8 +55,50 @@ describe("reconcile()", () => {
     queue.addTask({ taskId: "42", issueNumber: 42, title: "Existing", body: "b", labels: [], repoUrl: "", depsLoaded: true });
     labeledIssues.set(42, { issue: makeIssue(42), depsLoaded: true });
     reconcile();
-    // Title must not be overwritten by reconcile
-    expect(queue.get("42")?.title).toBe("Existing");
+    // Only one task for issue 42 exists (no duplicate created)
+    expect(queue.getTaskForIssue(42)).toBeDefined();
+    // Title is synced from GitHub
+    expect(queue.get("42")?.title).toBe("Issue 42");
+  });
+
+  it("syncs title from labeledIssues to an existing in-memory task", () => {
+    // Simulates: task restored from DB with empty/stale title, then GitHub data loaded.
+    queue.addTask({ taskId: "42", issueNumber: 42, title: "", body: "b", labels: [], repoUrl: "", depsLoaded: true });
+    labeledIssues.set(42, { issue: { ...makeIssue(42), title: "Real Title" }, depsLoaded: true });
+    reconcile();
+    expect(queue.get("42")?.title).toBe("Real Title");
+  });
+
+  it("calls updateTaskContent for existing tasks (not upsertTask)", async () => {
+    const mockStore = {
+      upsertTask: vi.fn().mockResolvedValue(undefined),
+      markAssigned: vi.fn().mockResolvedValue(undefined),
+      markComplete: vi.fn().mockResolvedValue(undefined),
+      markPending: vi.fn().mockResolvedValue(undefined),
+      markBlocked: vi.fn().mockResolvedValue(undefined),
+      updateTaskContent: vi.fn().mockResolvedValue(undefined),
+      updateTaskPr: vi.fn().mockResolvedValue(undefined),
+      listTasks: vi.fn().mockResolvedValue([]),
+    };
+    const server2 = http.createServer();
+    const { reconcile: rec2 } = createForemanWss(queue, registry, server2, {
+      taskLabel: TASK_LABEL,
+      reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs,
+      labeledIssues,
+      taskStore: mockStore as any,
+    });
+
+    // Existing task in queue
+    queue.addTask({ taskId: "42", issueNumber: 42, title: "Old Title", body: "old", labels: [], repoUrl: "", depsLoaded: true });
+    labeledIssues.set(42, { issue: { ...makeIssue(42), title: "New Title", body: "new body", labels: ["brunel:ready", "bug"] }, depsLoaded: true });
+
+    rec2();
+    await new Promise((r) => setImmediate(r));
+
+    // updateTaskContent should be called for the existing task
+    expect(mockStore.updateTaskContent).toHaveBeenCalledWith("42", "New Title", "new body", ["brunel:ready", "bug"]);
+    // upsertTask should NOT be called (it resets status to pending)
+    expect(mockStore.upsertTask).not.toHaveBeenCalled();
   });
 
   it("syncs depsLoaded from labeledIssues to an existing task that has depsLoaded: false", () => {

@@ -994,6 +994,7 @@ describe("worker_goodbye — DB persistence", () => {
   it("calls markPending when goodbye carries a taskId", async () => {
     const taskStore: TaskStore = {
       upsertTask: vi.fn().mockResolvedValue(undefined),
+      updateTaskContent: vi.fn().mockResolvedValue(undefined),
       markAssigned: vi.fn().mockResolvedValue(undefined),
       markComplete: vi.fn().mockResolvedValue(undefined),
       markPending: vi.fn().mockResolvedValue(undefined),
@@ -1039,6 +1040,7 @@ describe("worker_goodbye — DB persistence", () => {
   it("does not call markPending when goodbye has no taskId", async () => {
     const taskStore: TaskStore = {
       upsertTask: vi.fn().mockResolvedValue(undefined),
+      updateTaskContent: vi.fn().mockResolvedValue(undefined),
       markAssigned: vi.fn().mockResolvedValue(undefined),
       markComplete: vi.fn().mockResolvedValue(undefined),
       markPending: vi.fn().mockResolvedValue(undefined),
@@ -1085,6 +1087,7 @@ describe("issues/closed — DB persistence", () => {
   it("calls markComplete immediately when an issue is closed while a worker is active", async () => {
     const taskStore: TaskStore = {
       upsertTask: vi.fn().mockResolvedValue(undefined),
+      updateTaskContent: vi.fn().mockResolvedValue(undefined),
       markAssigned: vi.fn().mockResolvedValue(undefined),
       markComplete: vi.fn().mockResolvedValue(undefined),
       markPending: vi.fn().mockResolvedValue(undefined),
@@ -1119,6 +1122,7 @@ describe("worker_hello — DB persistence", () => {
   it("calls markComplete when cancelling a worker whose task is already complete (issue closed)", async () => {
     const taskStore: TaskStore = {
       upsertTask: vi.fn().mockResolvedValue(undefined),
+      updateTaskContent: vi.fn().mockResolvedValue(undefined),
       markAssigned: vi.fn().mockResolvedValue(undefined),
       markComplete: vi.fn().mockResolvedValue(undefined),
       markPending: vi.fn().mockResolvedValue(undefined),

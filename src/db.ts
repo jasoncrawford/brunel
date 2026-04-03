@@ -244,6 +244,8 @@ export interface TaskStore {
   /** Upsert task: insert with status=pending, or on re-label reset an existing row back to pending
    * and refresh title/body/labels/assigned_at/completed_at/worker_id. */
   upsertTask(taskId: string, issueNumber: number, repo: string, title: string, body: string, labels: string[]): Promise<void>;
+  /** Refresh title/body/labels for an existing task without touching status or assignment. */
+  updateTaskContent(taskId: string, title: string, body: string, labels: string[]): Promise<void>;
   /** Mark task as assigned to a worker. */
   markAssigned(taskId: string, workerId: string): Promise<void>;
   /** Mark task as complete. */
@@ -298,6 +300,13 @@ export function createTaskStore(supabase: SupabaseClient): TaskStore {
         },
         { onConflict: "task_id" },
       );
+      if (error) throw error;
+    },
+
+    async updateTaskContent(taskId, title, body, labels) {
+      const { error } = await supabase.from("tasks")
+        .update({ title, body, labels })
+        .eq("task_id", taskId);
       if (error) throw error;
     },
 
@@ -363,6 +372,7 @@ export function createTaskStore(supabase: SupabaseClient): TaskStore {
 export function createNullTaskStore(): TaskStore {
   return {
     async upsertTask() {},
+    async updateTaskContent() {},
     async markAssigned() {},
     async markComplete() {},
     async markPending() {},
