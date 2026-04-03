@@ -174,6 +174,8 @@ export type WorkspaceCtx = {
 export type WorkerSessionOptions = {
   afterTask?: () => Promise<void>;
   workspaceCtx?: WorkspaceCtx;
+  /** Interval in ms between WebSocket pings. Defaults to 20_000. */
+  pingIntervalMs?: number;
 };
 
 // Sentinels used to signal WebSocket events through ask()'s abort param
@@ -432,6 +434,22 @@ export class WorkerSession {
     ws.on("open", () => {
       this.connectionState = "hello_sent";
       this.statusModel.update({ connectionStatus: "handshaking" });
+
+      // Heartbeat: send periodic pings to detect stale connections. If no pong
+      // is received before the next ping fires, the connection is dead — terminate
+      // it so the close handler can trigger a reconnect.
+      let isAlive = true;
+      const intervalMs = this.options.pingIntervalMs ?? 20_000;
+      const pingTimer = setInterval(() => {
+        if (!isAlive) {
+          ws.terminate();
+          return;
+        }
+        isAlive = false;
+        ws.ping();
+      }, intervalMs);
+      ws.on("pong", () => { isAlive = true; });
+      ws.once("close", () => clearInterval(pingTimer));
     });
 
     ws.on("message", (data: Buffer | string) => {

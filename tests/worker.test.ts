@@ -9,6 +9,11 @@ import { stripAnsi } from "./helpers.js";
 class FakeWs extends EventEmitter {
   readyState = 1; // OPEN
   send = vi.fn();
+  ping = vi.fn();
+  terminate = vi.fn(() => {
+    this.readyState = 3; // CLOSED
+    this.emit("close", 1006, Buffer.from(""));
+  });
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -1639,5 +1644,101 @@ describe("interrupt()", () => {
     await session.waitUntilIdle();
 
     expect(session.interrupt()).toBe(false);
+  });
+});
+
+// ── Heartbeat ─────────────────────────────────────────────────────────────────
+
+describe("heartbeat", () => {
+  const PING_INTERVAL = 100;
+  let pingWs: FakeWs;
+  let pingWsFactory: ReturnType<typeof vi.fn>;
+  let pingSession: WorkerSession;
+
+  beforeEach(() => {
+    pingWs = new FakeWs();
+    pingWsFactory = vi.fn().mockReturnValue(pingWs);
+    pingSession = new WorkerSession(WORKER_ID, pingWsFactory, runQuery, display, { pingIntervalMs: PING_INTERVAL });
+    pingSession.start();
+  });
+
+  it("sends a ping after the interval when the connection is open", () => {
+    vi.useFakeTimers();
+    try {
+      pingWs.emit("open");
+      vi.advanceTimersByTime(PING_INTERVAL);
+      expect(pingWs.ping).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("terminates connection when no pong is received before the next ping", () => {
+    vi.useFakeTimers();
+    try {
+      pingWs.emit("open");
+      vi.advanceTimersByTime(PING_INTERVAL); // first ping sent, isAlive set to false
+      expect(pingWs.ping).toHaveBeenCalledOnce();
+      vi.advanceTimersByTime(PING_INTERVAL); // second interval: no pong → terminate
+      expect(pingWs.terminate).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not terminate when a pong is received between pings", () => {
+    vi.useFakeTimers();
+    try {
+      pingWs.emit("open");
+      vi.advanceTimersByTime(PING_INTERVAL); // first ping sent
+      pingWs.emit("pong");                   // pong received → isAlive = true
+      vi.advanceTimersByTime(PING_INTERVAL); // second ping sent (not terminate)
+      expect(pingWs.terminate).not.toHaveBeenCalled();
+      expect(pingWs.ping).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reconnects after heartbeat-induced termination", () => {
+    vi.useFakeTimers();
+    try {
+      const newWs = new FakeWs();
+      pingWsFactory.mockReturnValueOnce(newWs);
+
+      pingWs.emit("open");
+      vi.advanceTimersByTime(PING_INTERVAL * 2); // two intervals → terminate → close → reconnect scheduled
+      vi.advanceTimersByTime(5001); // advance past the reconnect delay
+      expect(pingWsFactory).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows Disconnected in status bar after heartbeat timeout", () => {
+    vi.useFakeTimers();
+    try {
+      pingWs.emit("open");
+      sendMsg(pingWs, { type: "hello_ack", workerId: WORKER_ID, status: "idle" });
+      expect(stripAnsi(pingSession.getStatusText())).toContain("Connected");
+
+      vi.advanceTimersByTime(PING_INTERVAL * 2); // two intervals → terminate → close
+      expect(stripAnsi(pingSession.getStatusText())).toContain("Disconnected");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not ping after the connection is closed", () => {
+    vi.useFakeTimers();
+    try {
+      pingWs.emit("open");
+      pingWs.emit("close", 1006, Buffer.from("")); // close before first ping
+      pingWs.ping.mockClear();
+      vi.advanceTimersByTime(PING_INTERVAL * 3);
+      expect(pingWs.ping).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
