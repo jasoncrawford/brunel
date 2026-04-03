@@ -252,6 +252,8 @@ export interface TaskStore {
   markPending(taskId: string): Promise<void>;
   /** Mark task as blocked (waiting on a dependency). */
   markBlocked(taskId: string): Promise<void>;
+  /** Delete the task row entirely (e.g. when brunel:ready label is removed). */
+  deleteTask(taskId: string): Promise<void>;
   /** Update PR number and branch for a task. */
   updateTaskPr(taskId: string, prNumber: number, branch: string | null): Promise<void>;
   /** List tasks, optionally filtered by status. */
@@ -327,6 +329,17 @@ export function createTaskStore(supabase: SupabaseClient): TaskStore {
       if (error) throw error;
     },
 
+    async deleteTask(taskId) {
+      // Only delete rows that were never assigned — tasks that had a previous worker
+      // (assigned_at IS NOT NULL) retain their history. markPending() leaves assigned_at
+      // intact when reverting a worker_goodbye, so this guard is reliable.
+      const { error } = await supabase.from("tasks")
+        .delete()
+        .eq("task_id", taskId)
+        .is("assigned_at", null);
+      if (error) throw error;
+    },
+
     async updateTaskPr(taskId, prNumber, branch) {
       const { error } = await supabase.from("tasks")
         .update({ pr_number: prNumber, branch })
@@ -354,6 +367,7 @@ export function createNullTaskStore(): TaskStore {
     async markComplete() {},
     async markPending() {},
     async markBlocked() {},
+    async deleteTask() {},
     async updateTaskPr() {},
     async listTasks() { return []; },
   };

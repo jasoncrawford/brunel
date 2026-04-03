@@ -11,6 +11,7 @@ function makeStore(): TaskStore {
     markComplete: vi.fn().mockResolvedValue(undefined),
     markPending: vi.fn().mockResolvedValue(undefined),
     markBlocked: vi.fn().mockResolvedValue(undefined),
+    deleteTask: vi.fn().mockResolvedValue(undefined),
     updateTaskPr: vi.fn().mockResolvedValue(undefined),
     listTasks: vi.fn().mockResolvedValue([]),
   };
@@ -203,6 +204,30 @@ describe("TaskModel.assign", () => {
   });
 });
 
+describe("TaskModel.cancel", () => {
+  let queue: TaskQueue;
+  let store: TaskStore;
+  let model: TaskModel;
+
+  beforeEach(() => {
+    queue = new TaskQueue();
+    store = makeStore();
+    model = new TaskModel(queue, store, () => {});
+    queue.addTask(baseTask); // pending
+  });
+
+  it("removes the task from memory", () => {
+    model.cancel("42");
+    expect(queue.get("42")).toBeUndefined();
+  });
+
+  it("calls store.deleteTask", async () => {
+    model.cancel("42");
+    await Promise.resolve();
+    expect(store.deleteTask).toHaveBeenCalledWith("42");
+  });
+});
+
 describe("TaskModel.logError callback", () => {
   it("fires on store.markComplete failure", async () => {
     const queue = new TaskQueue();
@@ -243,6 +268,20 @@ describe("TaskModel.logError callback", () => {
     (store.markBlocked as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("oops"));
 
     model.block("42");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatch(/42/);
+  });
+
+  it("fires on store.deleteTask failure (cancel)", async () => {
+    const queue = new TaskQueue();
+    const store = makeStore();
+    const errors: string[] = [];
+    const model = new TaskModel(queue, store, (msg) => errors.push(msg));
+    queue.addTask(baseTask);
+    (store.deleteTask as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("oops"));
+
+    model.cancel("42");
     await new Promise((r) => setTimeout(r, 0));
     expect(errors).toHaveLength(1);
     expect(errors[0]).toMatch(/42/);

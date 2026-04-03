@@ -198,6 +198,37 @@ describe("createTaskStore", () => {
   });
 });
 
+// ── Tests: createTaskStore — deleteTask ───────────────────────────────────────
+
+describe("createTaskStore — deleteTask", () => {
+  it("deletes a never-assigned pending row", async () => {
+    const store = createTaskStore(supabase);
+    await store.upsertTask("dbt-42", 42, "owner/repo", "Fix", "", []);
+    await store.deleteTask("dbt-42");
+
+    expect(own(await store.listTasks())).toHaveLength(0);
+  });
+
+  it("does NOT delete a row that was previously assigned (assigned_at is set)", async () => {
+    const store = createTaskStore(supabase);
+    await store.upsertTask("dbt-42", 42, "owner/repo", "Fix", "", []);
+    await store.markAssigned("dbt-42", "worker-1");
+    await store.markPending("dbt-42"); // revert (e.g. worker_goodbye) — assigned_at stays set
+
+    await store.deleteTask("dbt-42");
+
+    // Row must still exist because it has history
+    const tasks = own(await store.listTasks());
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0].taskId).toBe("dbt-42");
+  });
+
+  it("is a no-op when the row does not exist", async () => {
+    const store = createTaskStore(supabase);
+    await expect(store.deleteTask("dbt-42")).resolves.toBeUndefined();
+  });
+});
+
 // ── Tests: createTaskStore — blocked status ────────────────────────────────────
 
 describe("createTaskStore — blocked status", () => {
@@ -265,6 +296,11 @@ describe("createNullTaskStore", () => {
   it("updateTaskPr resolves without error", async () => {
     const store = createNullTaskStore();
     await expect(store.updateTaskPr("dbt-42", 10, "fix")).resolves.toBeUndefined();
+  });
+
+  it("deleteTask resolves without error", async () => {
+    const store = createNullTaskStore();
+    await expect(store.deleteTask("dbt-42")).resolves.toBeUndefined();
   });
 
   it("listTasks returns empty array", async () => {
