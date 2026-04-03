@@ -4,7 +4,7 @@ A GitHub-driven autonomous agent. Labels a GitHub issue `brunel:ready` → the f
 
 ## Architecture
 
-- **`src/foreman.ts`** — HTTP server + WebSocket server. Polls GitHub for `brunel:ready` issues, queues them, and assigns them to idle workers over WebSocket.
+- **`src/foreman.ts`** — HTTP server + WebSocket server. Polls GitHub for `brunel:ready` issues, queues them, and assigns them to idle workers over WebSocket. Contains `TaskQueue` (in-memory task state), `TaskModel` (paired in-memory + DB operations, plus `labeledIssues`/`openIssues` ownership), and `WorkerRegistry`.
 - **`src/repl.ts`** — Interactive REPL (default) or worker process (`--worker-mode`). Workers connect to the foreman, receive tasks, run Claude Agent SDK sessions, and report completion.
 - **`src/config.ts`** — Unified config loader. Merges CLI flags, `BRUNEL_*` env vars, `brunel.config.ts` file, legacy env vars, and built-in defaults via zod schema.
 - **`src/display.ts`** — Shared display/rendering engine used by both foreman and worker.
@@ -87,6 +87,7 @@ A task moves through states: **pending → assigned → complete**.
 - When a GitHub issue is closed while a worker is still active, the foreman marks the task `complete` in both memory and the DB immediately. The worker stays assigned and will call `task_complete` to release itself when done.
 - On foreman restart, `loadIssuesToQueue` fetches only **open** GitHub issues. Tasks whose issues were closed mid-task are restored from `taskStore` (status=`assigned`) so their workers can reconnect and complete normally. Restored tasks use `row.body` and `row.labels` from the DB (not hardcoded empty values).
 - `reconcile()` only removes **pending** tasks that are no longer in `labeledIssues`. Assigned and complete tasks are never removed by reconcile. Removal calls `taskModel.cancel()`, which deletes the DB row — but only if `assigned_at IS NULL`. `markPending()` (called on `worker_goodbye`) leaves `assigned_at` intact, so rows that ever had a worker are preserved even if the task reverts to pending before the label is removed.
+- `labeledIssues` and `openIssues` are owned by `TaskModel` (not raw maps in the closure). Use `taskModel.trackIssue()`, `taskModel.untrackIssue()`, `taskModel.closeIssue()` etc. to mutate them. Tests inject state via these methods — not by passing raw maps to `createForemanWss`.
 
 ## Design principles
 
