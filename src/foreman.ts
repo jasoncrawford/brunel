@@ -825,6 +825,7 @@ export function createForemanWss(
       }
 
       if (action === "closed") {
+        labeledIssues.delete(issueNumber);
         openIssues.delete(issueNumber);
 
         // Close this issue as a blocker for any tasks that depend on it.
