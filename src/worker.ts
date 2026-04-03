@@ -178,7 +178,7 @@ export type WorkerSessionOptions = {
   afterTask?: () => Promise<void>;
   workspaceCtx?: WorkspaceCtx;
   /** Interval in ms between worker-sent pings. Dead connections are detected after
-   * one interval with no pong. Defaults to 30 000 ms. */
+   * one interval with no pong. Defaults to 25 000 ms (matches the foreman's interval). */
   pingIntervalMs?: number;
 };
 
