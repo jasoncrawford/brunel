@@ -575,6 +575,17 @@ export function ask(
       }
     }
 
+    // Called when the status bar changes while ask() is waiting for input.
+    // Unlike drawFresh (which assumes cursor is at a fresh new line after
+    // display.print()), this is called while the cursor is at the current
+    // buffer position.  Navigate back to the prompt line using the known
+    // cursor row, then call fullRedraw so status bars land in the right place.
+    function redrawFromCurrent() {
+      if (done) return;
+      const curRow = screenPosOf(cursor).row;
+      fullRedraw(curRow, computeMatches());
+    }
+
     // Register the fresh-redraw hook so display.print() can notify us.
     // Only register when there is a visible prompt to redraw — an empty prompt
     // string means the caller doesn't want any prompt shown (e.g. worker
@@ -582,6 +593,7 @@ export function ask(
     if (promptLine) {
       display.setInputClearCallback(clearForPrint);
       display.setInputPrintCallback(drawFresh);
+      display.setInputStatusCallback(redrawFromCurrent);
     }
 
     if (abort) {
@@ -611,6 +623,7 @@ export function ask(
     function cleanup() {
       display.setInputPrintCallback(null);
       display.setInputClearCallback(null);
+      display.setInputStatusCallback(null);
       process.stdin.removeListener("data", onData);
     }
 

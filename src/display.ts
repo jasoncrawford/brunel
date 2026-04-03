@@ -709,6 +709,17 @@ export function getInputPrintCallback(): (() => void) | null {
   return _inputPrintCallback;
 }
 
+// Callback invoked when the status bar changes while ask() is active.
+// Unlike _inputPrintCallback (which assumes the cursor is at a fresh new line
+// after display.print()), this callback is called while the cursor is at the
+// current buffer position.  ask() registers a handler that navigates back to
+// the prompt line (using the known cursor row) and calls fullRedraw(), so the
+// status bars are redrawn without misplacing them inside the buffer area.
+let _inputStatusCallback: (() => void) | null = null;
+export function setInputStatusCallback(fn: (() => void) | null) {
+  _inputStatusCallback = fn;
+}
+
 // Callback invoked by print() BEFORE console.log to clear the prompt area.
 // When the prompt string has a leading \n (blank-line prefix), the clear must
 // also erase that blank line; otherwise it is orphaned above the printed
@@ -724,7 +735,7 @@ function _lineCount(): number {
   return n === 2 ? 3 : n; // blank separator between the two bars when both are active
 }
 function _clearStatus() {
-  if (_inputPrintCallback) return; // ask() owns the screen; drawFresh handles redraws
+  if (_inputPrintCallback || _inputStatusCallback) return; // ask() owns the screen; drawFresh handles redraws
   const n = _lineCount();
   if (n === 0) return;
   // Cursor rests on the blank separator row above the status lines.
@@ -738,8 +749,14 @@ function _clearStatus() {
 }
 
 function _drawStatus() {
+  if (_inputStatusCallback) {
+    // ask() is active and cursor is in the buffer area — use the status-aware
+    // redraw that navigates back to the prompt line before redrawing.
+    _inputStatusCallback();
+    return;
+  }
   if (_inputPrintCallback) {
-    // ask() is active — let drawFresh handle the full redraw including status bars.
+    // ask() is active after display.print() — cursor is at a fresh new line.
     _inputPrintCallback();
     return;
   }
