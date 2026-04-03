@@ -688,34 +688,82 @@ describe("MESSAGE_FMT", () => {
     expect(text).toContain("150 out");
   });
 
-  it("rate_limit_event, VERBOSE=false → null", () => {
+  it("rate_limit_event, status=allowed, VERBOSE=false → null", () => {
     setVerbose(false);
     expect(resolve(MESSAGE_FMT, "rate_limit_event", { rate_limit_info: { status: "allowed" } })).toBeNull();
   });
 
-  it("rate_limit_event, VERBOSE=true, status=allowed → null (silenced)", () => {
+  it("rate_limit_event, status=allowed, VERBOSE=true → null (silenced)", () => {
     setVerbose(true);
     expect(resolve(MESSAGE_FMT, "rate_limit_event", { rate_limit_info: { status: "allowed" } })).toBeNull();
   });
 
-  it("rate_limit_event, VERBOSE=true, status=allowed_warning → shows warning with details", () => {
+  it("rate_limit_event, status=allowed_warning, VERBOSE=false → shows warning (not verbose-only)", () => {
+    setVerbose(false);
+    const result = r(MESSAGE_FMT, "rate_limit_event", {
+      rate_limit_info: { status: "allowed_warning", rateLimitType: "seven_day", utilization: 0.85 },
+    });
+    expect(result).not.toBeNull();
+    expect(result).toBe("Usage warning: 85% of seven-day limit.");
+  });
+
+  it("rate_limit_event, status=allowed_warning, VERBOSE=true → shows warning with details", () => {
     setVerbose(true);
     const result = r(MESSAGE_FMT, "rate_limit_event", {
       rate_limit_info: { status: "allowed_warning", rateLimitType: "seven_day", utilization: 0.85 },
     });
     expect(result).not.toBeNull();
-    expect(result).toContain("rate limit: allowed_warning");
-    expect(result).toContain("seven_day");
-    expect(result).toContain("85% used");
+    expect(result).toBe("Usage warning: 85% of seven-day limit.");
   });
 
-  it("rate_limit_event, VERBOSE=true, status=rejected → shows rejection", () => {
+  it("rate_limit_event, status=allowed_warning, five_hour type → formats correctly", () => {
+    setVerbose(false);
+    const result = r(MESSAGE_FMT, "rate_limit_event", {
+      rate_limit_info: { status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.72 },
+    });
+    expect(result).toBe("Usage warning: 72% of five-hour limit.");
+  });
+
+  it("rate_limit_event, status=allowed_warning, seven_day_sonnet type → formats correctly", () => {
+    setVerbose(false);
+    const result = r(MESSAGE_FMT, "rate_limit_event", {
+      rate_limit_info: { status: "allowed_warning", rateLimitType: "seven_day_sonnet", utilization: 0.9 },
+    });
+    expect(result).toBe("Usage warning: 90% of seven-day Sonnet limit.");
+  });
+
+  it("rate_limit_event, status=allowed_warning, no rateLimitType → omits limit type", () => {
+    setVerbose(false);
+    const result = r(MESSAGE_FMT, "rate_limit_event", {
+      rate_limit_info: { status: "allowed_warning", utilization: 0.82 },
+    });
+    expect(result).toBe("Usage warning: 82% used.");
+  });
+
+  it("rate_limit_event, status=rejected, VERBOSE=false → shows rejection (not verbose-only)", () => {
+    setVerbose(false);
+    const result = r(MESSAGE_FMT, "rate_limit_event", {
+      rate_limit_info: { status: "rejected" },
+    });
+    expect(result).not.toBeNull();
+    expect(result).toBe("Rate limit reached.");
+  });
+
+  it("rate_limit_event, status=rejected, VERBOSE=true → shows rejection", () => {
     setVerbose(true);
     const result = r(MESSAGE_FMT, "rate_limit_event", {
       rate_limit_info: { status: "rejected" },
     });
     expect(result).not.toBeNull();
-    expect(result).toContain("rate limit: rejected");
+    expect(result).toBe("Rate limit reached.");
+  });
+
+  it("rate_limit_event, status=rejected, with rateLimitType → includes limit type", () => {
+    setVerbose(false);
+    const result = r(MESSAGE_FMT, "rate_limit_event", {
+      rate_limit_info: { status: "rejected", rateLimitType: "seven_day_opus" },
+    });
+    expect(result).toBe("Rate limit reached: seven-day Opus limit.");
   });
 
   it("_default → msg: <type>", () => {
