@@ -256,8 +256,8 @@ export interface TaskStore {
   markBlocked(taskId: string): Promise<void>;
   /** Delete the task row entirely (e.g. when brunel:ready label is removed). */
   deleteTask(taskId: string): Promise<void>;
-  /** Update PR number and branch for a task. */
-  updateTaskPr(taskId: string, prNumber: number, branch: string | null): Promise<void>;
+  /** Update PR number and branch for a task. Pass null to clear. */
+  updateTaskPr(taskId: string, prNumber: number | null, branch: string | null): Promise<void>;
   /** List tasks, optionally filtered by status. */
   listTasks(opts?: ListTasksOpts): Promise<TaskRow[]>;
 }

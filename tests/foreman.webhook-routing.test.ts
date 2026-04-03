@@ -137,6 +137,19 @@ function checkRunPayload(prNumber: number, conclusion: string) {
   };
 }
 
+function prClosedPayload(prNumber: number, merged: boolean) {
+  return {
+    action: "closed",
+    pull_request: {
+      number: prNumber,
+      title: `PR ${prNumber}`,
+      merged,
+      head: { ref: `branch-for-pr-${prNumber}` },
+    },
+    repository: { html_url: "https://github.com/owner/repo" },
+  };
+}
+
 function prReviewPayload(prNumber: number) {
   return {
     action: "submitted",
@@ -586,6 +599,75 @@ describe("PR event forwarding to workers", () => {
       new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
     ]);
     expect(raceResult).toBe("timeout");
+  });
+
+  it("pull_request/closed without merging clears PR from task in TaskQueue", async () => {
+    queue.addTask({
+      taskId: "42",
+      issueNumber: 42,
+      title: "Issue 42",
+      body: "Body",
+      labels: ["brunel:ready"],
+      repoUrl: "https://github.com/owner/repo",
+    });
+
+    const ws = await connect();
+    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    await nextMsg(ws); // task_assigned
+
+    routeEvent("evt-pr-open", "pull_request", prOpenedPayload(10, "Closes #42"));
+    expect(queue.getTaskForPr(10)?.taskId).toBe("42");
+    expect(queue.get("42")?.prNumber).toBe(10);
+
+    routeEvent("evt-pr-close", "pull_request", prClosedPayload(10, false));
+    expect(queue.getTaskForPr(10)).toBeUndefined();
+    expect(queue.get("42")?.prNumber).toBeUndefined();
+  });
+
+  it("pull_request/closed without merging still forwards the event to the worker", async () => {
+    queue.addTask({
+      taskId: "42",
+      issueNumber: 42,
+      title: "Issue 42",
+      body: "Body",
+      labels: ["brunel:ready"],
+      repoUrl: "https://github.com/owner/repo",
+    });
+
+    const ws = await connect();
+    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    await nextMsg(ws); // task_assigned
+
+    routeEvent("evt-pr-open", "pull_request", prOpenedPayload(10, "Closes #42"));
+    await nextMsgWhere(ws, m => m.type === "event_notification" && (m as any).event.name === "pull_request");
+
+    const reply = nextMsgWhere(ws, m => m.type === "event_notification" && (m as any).event.name === "pull_request");
+    routeEvent("evt-pr-close", "pull_request", prClosedPayload(10, false));
+    const msg = await reply;
+    expect((msg as any).event.payload.action).toBe("closed");
+  });
+
+  it("pull_request/closed with merge does NOT clear PR from task in TaskQueue", async () => {
+    queue.addTask({
+      taskId: "42",
+      issueNumber: 42,
+      title: "Issue 42",
+      body: "Body",
+      labels: ["brunel:ready"],
+      repoUrl: "https://github.com/owner/repo",
+    });
+
+    const ws = await connect();
+    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    await nextMsg(ws); // task_assigned
+
+    routeEvent("evt-pr-open", "pull_request", prOpenedPayload(10, "Closes #42"));
+    expect(queue.get("42")?.prNumber).toBe(10);
+
+    routeEvent("evt-pr-close", "pull_request", prClosedPayload(10, true));
+    // Merged PR: keep the association (issue will close → task completes)
+    expect(queue.get("42")?.prNumber).toBe(10);
+    expect(queue.getTaskForPr(10)?.taskId).toBe("42");
   });
 });
 

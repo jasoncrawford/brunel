@@ -232,6 +232,16 @@ export class TaskQueue extends EventEmitter {
     this.emit("changed");
   }
 
+  unregisterPr(prNumber: number) {
+    const taskId = this.prToTaskId.get(prNumber);
+    this.prToTaskId.delete(prNumber);
+    if (taskId) {
+      const t = this.tasks.get(taskId);
+      if (t) t.prNumber = undefined;
+    }
+    this.emit("changed");
+  }
+
   getTaskForPr(prNumber: number): Task | undefined {
     const taskId = this.prToTaskId.get(prNumber);
     return taskId ? this.tasks.get(taskId) : undefined;
@@ -819,6 +829,22 @@ export function createForemanWss(
           }
         }
         // Fall through: the PR is now registered (if linked), forward event below
+      }
+
+      // When a PR is closed without merging, clear it from the task so the issue
+      // goes back to having no PR associated.
+      if (p.action === "closed" && pr && !pr.merged) {
+        const task = taskQueue.getTaskForPr(prNumber);
+        if (task) {
+          taskQueue.unregisterPr(prNumber);
+          taskStore.updateTaskPr(task.taskId, null, null).catch(err =>
+            flog(`ERROR Failed to clear task PR for #${task.taskId}: ${fmtError(err)}`)
+          );
+          flog(`[task #${task.issueNumber}] PR #${prNumber} unregistered (closed without merging)`);
+          forwardEvent(task, evt, `PR #${prNumber}`);
+          return result(task);
+        }
+        return result(null);
       }
 
       const task = taskQueue.getTaskForPr(prNumber);

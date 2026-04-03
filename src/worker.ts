@@ -514,8 +514,11 @@ export class WorkerSession {
 
       // Track PR number from any pull_request event for the status bar.
       if (event.name === "pull_request") {
-        const pr = event.payload["pull_request"] as { number?: number } | undefined;
-        if (pr?.number != null) {
+        const pr = event.payload["pull_request"] as { number?: number; merged?: boolean } | undefined;
+        if (action === "closed" && !pr?.merged) {
+          // PR was closed without merging — clear the PR from the status bar.
+          this.statusModel.update({ prNumber: undefined });
+        } else if (pr?.number != null) {
           this.statusModel.update({ prNumber: pr.number });
         }
       }
