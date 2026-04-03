@@ -86,7 +86,7 @@ A task moves through states: **pending → assigned → complete**.
 - When a worker sends `worker_goodbye`, the foreman calls `taskStore.markPending()` to reset the DB row, not just in-memory state.
 - When a GitHub issue is closed while a worker is still active, the foreman marks the task `complete` in both memory and the DB immediately. The worker stays assigned and will call `task_complete` to release itself when done.
 - On foreman restart, `loadIssuesToQueue` fetches only **open** GitHub issues. Tasks whose issues were closed mid-task are restored from `taskStore` (status=`assigned`) so their workers can reconnect and complete normally. Restored tasks use `row.body` and `row.labels` from the DB (not hardcoded empty values).
-- `reconcile()` only removes **pending** tasks that are no longer in `labeledIssues`. Assigned and complete tasks are never removed by reconcile.
+- `reconcile()` only removes **pending** tasks that are no longer in `labeledIssues`. Assigned and complete tasks are never removed by reconcile. Removal calls `taskModel.cancel()`, which deletes the DB row — but only if `assigned_at IS NULL`. `markPending()` (called on `worker_goodbye`) leaves `assigned_at` intact, so rows that ever had a worker are preserved even if the task reverts to pending before the label is removed.
 
 ## Design principles
 
