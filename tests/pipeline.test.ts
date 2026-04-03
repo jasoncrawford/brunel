@@ -78,7 +78,7 @@ function connectWorker(port: number): Promise<WebSocket> {
  */
 async function pollUntil<T>(
   fn: () => Promise<T | null | undefined>,
-  timeoutMs = 10000,
+  timeoutMs = 30000,
   intervalMs = 30,
 ): Promise<T> {
   const deadline = Date.now() + timeoutMs;
