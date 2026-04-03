@@ -323,8 +323,21 @@ export class TaskModel {
     this._openIssues = openIssues;
   }
 
-  get labeledIssues(): Map<number, LabeledIssueState> { return this._labeledIssues; }
-  get openIssues(): Set<number> { return this._openIssues; }
+  /** Whether the issue is currently tracked (has the brunel:ready label). */
+  isTracked(issueNumber: number): boolean { return this._labeledIssues.has(issueNumber); }
+
+  /** Read-only view of tracked labeled issues — used by reconcile() for iteration. */
+  getLabeledIssues(): ReadonlyMap<number, LabeledIssueState> { return this._labeledIssues; }
+
+  /** Whether the issue is blocked by an open dependency. */
+  isBlocked(issueNumber: number, graph: DependencyGraph): boolean {
+    return isBlocked(issueNumber, graph, this._openIssues);
+  }
+
+  /** Task snapshots with open-issue state baked in — for admin broadcasts. */
+  getTaskSnapshots(graph: DependencyGraph): TaskSnapshot[] {
+    return this.queue.getTaskSnapshots(graph, this._openIssues);
+  }
 
   // ── Issue-lifecycle methods ────────────────────────────────────────────────
 
@@ -732,7 +745,7 @@ export function createForemanWss(
   function broadcastSnapshot() {
     if (!adminWss) return;
     adminWss.broadcastSnapshot({
-      tasks: taskQueue.getTaskSnapshots(graph, taskModel.openIssues),
+      tasks: taskModel.getTaskSnapshots(graph),
       workers: registry.getWorkerSnapshots(),
     });
   }
@@ -913,7 +926,7 @@ export function createForemanWss(
           if (blockers.has(issueNumber)) {
             const blockedTask = taskQueue.getTaskForIssue(depIssueNum);
             if (blockedTask && blockedTask.status === "blocked") {
-              if (!isBlocked(depIssueNum, graph, taskModel.openIssues)) {
+              if (!taskModel.isBlocked(depIssueNum, graph)) {
                 unblockPromises.push(
                   taskModel.unblock(blockedTask.taskId).catch((err: unknown) =>
                     flog(`ERROR Failed to unblock task #${blockedTask.taskId}: ${fmtError(err)}`)
@@ -942,7 +955,7 @@ export function createForemanWss(
 
       if (action === "edited") {
         const changes = p.changes as Record<string, unknown> | undefined;
-        if (changes?.body && taskModel.labeledIssues.has(issueNumber)) {
+        if (changes?.body && taskModel.isTracked(issueNumber)) {
           const newBody = String(issue.body ?? "");
           taskModel.resetIssueDeps(issueNumber, newBody);
           startDepsLoad(issueNumber, newBody);
@@ -998,7 +1011,7 @@ export function createForemanWss(
 
   async function tryAssignWork(workerId: string): Promise<void> {
     const task = taskQueue.nextPending(
-      (t) => t.depsLoaded && !isBlocked(t.issueNumber, graph, taskModel.openIssues),
+      (t) => t.depsLoaded && !taskModel.isBlocked(t.issueNumber, graph),
     );
     if (task) {
       // Reserve in memory first to prevent concurrent double-assignment in the reconcile loop.
@@ -1233,7 +1246,7 @@ export function createForemanWss(
         taskModel.markIssueDepsLoaded(issueNumber);
         // If the task is currently pending and is now blocked, persist blocked status.
         const task = taskQueue.getTaskForIssue(issueNumber);
-        if (task && task.status === "pending" && isBlocked(issueNumber, graph, taskModel.openIssues)) {
+        if (task && task.status === "pending" && taskModel.isBlocked(issueNumber, graph)) {
           taskModel.block(task.taskId);
         }
         reconcile();
@@ -1242,7 +1255,7 @@ export function createForemanWss(
   }
 
   function reconcile() {
-    const labeledIssues = taskModel.labeledIssues;
+    const labeledIssues = taskModel.getLabeledIssues();
 
     // Step 1: materialise tasks for new labeledIssues entries
     for (const [num, { issue, depsLoaded }] of labeledIssues) {
@@ -1328,7 +1341,7 @@ if (isMain) {
   // Admin WebSocket broadcaster
   const { createAdminWss } = await import("./admin-ws.js");
   const adminWss = createAdminWss(server, () => ({
-    tasks: taskQueue.getTaskSnapshots(graph, openIssues),
+    tasks: foremanWss.taskModel.getTaskSnapshots(graph),
     workers: registry.getWorkerSnapshots(),
   }));
 
@@ -1402,7 +1415,7 @@ if (isMain) {
     // that were loaded from DB. If a blocker closed while the foreman was down,
     // the DB still shows 'blocked' but the graph no longer reflects it.
     for (const t of taskQueue.getPendingAndBlockedTasks()) {
-      const shouldBeBlocked = isBlocked(t.issueNumber, graph, openIssues);
+      const shouldBeBlocked = foremanWss.taskModel.isBlocked(t.issueNumber, graph);
       if (t.status === "blocked" && !shouldBeBlocked) {
         foremanWss.taskModel.unblock(t.taskId).catch((err) =>
           flog(`ERROR Failed to mark task #${t.taskId} pending on startup: ${fmtError(err)}`)
