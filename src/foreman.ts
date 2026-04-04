@@ -1408,6 +1408,7 @@ if (isMain) {
       workerSecret: config.workerSecret,
       taskStore,
       reclaimTimeoutMs: config.workerReclaimTimeoutMs,
+      pingIntervalMs: config.pingIntervalMs,
     },
   );
 
