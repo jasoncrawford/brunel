@@ -958,3 +958,134 @@ describe("ask() - substring and description autocomplete", () => {
   });
 });
 
+// ── Arrow navigation in autocomplete ─────────────────────────────────────────
+
+const DOWN = "\x1b[B";
+const UP   = "\x1b[A";
+
+describe("ask() - arrow navigation in autocomplete", () => {
+  it("down arrow then Enter selects first suggestion", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = ask("> ", cmds);
+      stdin.push("/");
+      stdin.push(DOWN);  // highlight first suggestion (brainstorm)
+      stdin.push("\r");   // Enter selects it
+      const result = await p;
+      expect(result).toBe("/brainstorm");
+    });
+  });
+
+  it("down arrow twice then Enter selects second suggestion", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = ask("> ", cmds);
+      stdin.push("/");
+      stdin.push(DOWN);  // highlight brainstorm
+      stdin.push(DOWN);  // highlight clear
+      stdin.push("\r");
+      const result = await p;
+      expect(result).toBe("/clear");
+    });
+  });
+
+  it("down arrow three times then Enter selects third suggestion", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = ask("> ", cmds);
+      stdin.push("/");
+      stdin.push(DOWN);  // brainstorm
+      stdin.push(DOWN);  // clear
+      stdin.push(DOWN);  // exit
+      stdin.push("\r");
+      const result = await p;
+      expect(result).toBe("/exit");
+    });
+  });
+
+  it("down arrow past last suggestion wraps or clamps at last", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = ask("> ", cmds);
+      stdin.push("/");
+      stdin.push(DOWN);  // brainstorm
+      stdin.push(DOWN);  // clear
+      stdin.push(DOWN);  // exit (last)
+      stdin.push(DOWN);  // should stay at exit
+      stdin.push("\r");
+      const result = await p;
+      expect(result).toBe("/exit");
+    });
+  });
+
+  it("down then up arrow returns to unselected, Enter completes to first match", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = ask("> ", cmds);
+      stdin.push("/");
+      stdin.push(DOWN);  // highlight brainstorm
+      stdin.push(UP);    // back to unselected
+      stdin.push("\r");   // Enter with no selection → completes to first match
+      const result = await p;
+      expect(result).toBe("/brainstorm");
+    });
+  });
+
+  it("Tab with arrow-selected suggestion completes with trailing space", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = ask("> ", cmds);
+      stdin.push("/");
+      stdin.push(DOWN);  // highlight brainstorm
+      stdin.push(DOWN);  // highlight clear
+      stdin.push("\x09"); // Tab — completes to "/clear "
+      stdin.push("arg");
+      stdin.push("\r");
+      const result = await p;
+      expect(result).toBe("/clear arg");
+    });
+  });
+
+  it("typing after arrow selection resets selection and updates buffer", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = ask("> ", cmds);
+      stdin.push("/");
+      stdin.push(DOWN);  // highlight brainstorm
+      stdin.push("e");   // type 'e' — resets selection, buffer becomes "/e"
+      stdin.push("\r");   // Enter completes to first match of "/e" → exit
+      const result = await p;
+      expect(result).toBe("/exit");
+    });
+  });
+
+  it("down arrow with no suggestions is a no-op", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = ask("> ", cmds);
+      stdin.push("hello");  // no slash, no suggestions
+      stdin.push(DOWN);
+      stdin.push("\r");
+      const result = await p;
+      expect(result).toBe("hello");
+    });
+  });
+
+  it("selected suggestion is rendered differently (not all darkGray)", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = ask("> ", cmds);
+      stdin.push("/");
+      stdin.push(DOWN);  // highlight first suggestion
+      stdin.push("\r");
+      await p;
+      const allOutput = vi.mocked(process.stdout.write).mock.calls.map(c => String(c[0])).join("");
+      // The selected suggestion should have ▶ marker
+      expect(allOutput).toContain("▶");
+    });
+  });
+
+  it("arrow-selected Enter submits directly (does not just fill buffer)", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = ask("> ", cmds);
+      stdin.push("/");
+      stdin.push(DOWN);  // highlight brainstorm
+      stdin.push(DOWN);  // highlight clear
+      stdin.push("\r");   // Enter submits /clear
+      const result = await p;
+      expect(result).toBe("/clear");
+    });
+  });
+});
+
