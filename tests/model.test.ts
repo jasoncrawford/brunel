@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { handleModelCommand, setCachedModels, _resetCachedModels, getCachedModels, findModel } from "../src/model.js";
+import { handleModelCommand, setCachedModels, _resetCachedModels, getCachedModels, findModel, validateModel, validateConfigModel } from "../src/model.js";
 import type { PickResult } from "../src/input.js";
 import { stripAnsi } from "./helpers.js";
 
@@ -147,13 +147,13 @@ describe("/model (interactive picker)", () => {
     expect(printed.join("")).toContain("Haiku 4.5");
   });
 
-  it("Other with invalid model ID rejects", async () => {
+  it("Other with unknown string accepts it as-is", async () => {
     setCachedModels(MODELS);
     const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickResult>>()
-      .mockResolvedValue({ type: "other", text: "not-a-model" });
+      .mockResolvedValue({ type: "other", text: "claude-custom-model-2025" });
     const result = await handleModelCommand("", "opus", pickFn, undefined, print);
-    expect(result).toBe("opus"); // unchanged
-    expect(printed.join("")).toContain("Unknown model");
+    expect(result).toBe("claude-custom-model-2025");
+    expect(printed.join("")).toContain("claude-custom-model-2025");
   });
 
   it("Other with empty input preserves current", async () => {
@@ -177,6 +177,72 @@ describe("display names", () => {
     expect(options[0]).toMatch(/^Sonnet 4\.6/);
     expect(options[1]).toMatch(/^Opus 4\.6/);
     expect(options[2]).toMatch(/^Haiku 4\.5/);
+  });
+});
+
+// ── validateModel ───────────────────────────────────────────────────────────
+
+describe("validateModel", () => {
+  it("accepts known alias", () => {
+    expect(validateModel(MODELS, "sonnet")).toBeUndefined();
+  });
+
+  it("accepts full model ID via substring match", () => {
+    expect(validateModel(MODELS, "claude-opus-4-6")).toBeUndefined();
+  });
+
+  it("accepts unknown string containing claude-", () => {
+    expect(validateModel(MODELS, "claude-sonnet-4-6-20250514")).toBeUndefined();
+  });
+
+  it("rejects unknown string without claude-", () => {
+    const error = validateModel(MODELS, "nope");
+    expect(error).toContain("Unknown model");
+    expect(error).toContain("sonnet");
+    expect(error).toContain("opus");
+    expect(error).toContain("haiku");
+  });
+});
+
+// ── validateConfigModel ─────────────────────────────────────────────────────
+
+describe("validateConfigModel", () => {
+  it("returns resolved alias for known model", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(MODELS);
+    const onError = vi.fn();
+    const result = await validateConfigModel("claude-opus-4-6", fetchFn, onError);
+    expect(result).toBe("opus");
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("caches models after fetch", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(MODELS);
+    await validateConfigModel("sonnet", fetchFn, vi.fn());
+    expect(getCachedModels()).toEqual(MODELS);
+  });
+
+  it("calls onError and returns undefined for invalid model", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(MODELS);
+    const onError = vi.fn();
+    const result = await validateConfigModel("nope", fetchFn, onError);
+    expect(result).toBeUndefined();
+    expect(onError).toHaveBeenCalledWith(expect.stringContaining("Unknown model"));
+  });
+
+  it("accepts full model ID with claude- prefix", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(MODELS);
+    const onError = vi.fn();
+    const result = await validateConfigModel("claude-custom-model-2025", fetchFn, onError);
+    expect(result).toBe("claude-custom-model-2025");
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("returns model as-is when fetch fails", async () => {
+    const fetchFn = vi.fn().mockRejectedValue(new Error("network"));
+    const onError = vi.fn();
+    const result = await validateConfigModel("whatever", fetchFn, onError);
+    expect(result).toBe("whatever");
+    expect(onError).not.toHaveBeenCalled();
   });
 });
 

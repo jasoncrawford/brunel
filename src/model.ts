@@ -36,6 +36,52 @@ export function findModel(models: ModelInfo[], input: string): ModelInfo | undef
 
 export type FetchModelsFn = () => Promise<ModelInfo[]>;
 
+/** Resolve a model string: return the matched alias value if known, or the raw string. */
+function resolveModel(models: ModelInfo[], input: string): { value: string; displayName: string } {
+  const match = findModel(models, input);
+  if (match) return { value: match.value, displayName: match.displayName };
+  return { value: input, displayName: input };
+}
+
+/**
+ * Validate a model string against the supported models list. Returns an error
+ * message if invalid, or undefined if valid. A model is valid if it matches a
+ * known alias or looks like a full model ID (contains "claude-").
+ */
+export function validateModel(models: ModelInfo[], input: string): string | undefined {
+  if (findModel(models, input)) return undefined;
+  if (input.includes("claude-")) return undefined;
+  const valid = models.filter(m => typeof m.value === "string");
+  const names = valid.map(m => m.value).join(", ");
+  return `Unknown model "${input}". Valid options: ${names}, or a full model ID (e.g. claude-sonnet-4-6-20250514).`;
+}
+
+/**
+ * Validate the configured model at startup. Fetches the model list and checks
+ * the model string. Returns the (possibly resolved) model value, or calls
+ * onError and returns undefined.
+ */
+export async function validateConfigModel(
+  model: string,
+  fetchModelsFn: FetchModelsFn,
+  onError: (msg: string) => void,
+): Promise<string | undefined> {
+  let models: ModelInfo[];
+  try {
+    models = await fetchModelsFn();
+    setCachedModels(models);
+  } catch {
+    // Can't fetch model list — skip validation, accept as-is
+    return model;
+  }
+  const error = validateModel(models, model);
+  if (error) {
+    onError(error);
+    return undefined;
+  }
+  return resolveModel(models, model).value;
+}
+
 /**
  * Handle the /model command: show a picker or set directly from an argument.
  * Returns the new model value (undefined = default).
@@ -64,13 +110,14 @@ export async function handleModelCommand(
       return undefined;
     }
     if (models) {
-      const match = findModel(models, args);
-      if (match) {
-        print(display.c.darkGray(`Model set to ${match.displayName}.`));
-        return match.value;
+      const error = validateModel(models, args);
+      if (error) {
+        print(display.c.boldRed(error));
+        return currentModel;
       }
-      print(display.c.boldRed(`Unknown model "${args}". Use /model to see available options.`));
-      return currentModel;
+      const { value, displayName } = resolveModel(models, args);
+      print(display.c.darkGray(`Model set to ${displayName}.`));
+      return value;
     }
     // No cache — accept as-is
     print(display.c.darkGray(`Model set to ${args}.`));
@@ -106,13 +153,12 @@ export async function handleModelCommand(
 
   if (result.type === "other") {
     if (!result.text) return currentModel;
-    const match = findModel(models, result.text);
-    if (!match) {
-      print(display.c.boldRed(`Unknown model "${result.text}".`));
-      return currentModel;
-    }
-    print(display.c.darkGray(`Model set to ${match.displayName}.`));
-    return match.value;
+    // "Other" accepts any string — for entering full model IDs not in the
+    // standard list (e.g. claude-sonnet-4-6-20250514). Resolve to alias if
+    // recognized, otherwise pass through as-is.
+    const { value, displayName } = resolveModel(models, result.text);
+    print(display.c.darkGray(`Model set to ${displayName}.`));
+    return value;
   }
 
   // Selected a model from the list
