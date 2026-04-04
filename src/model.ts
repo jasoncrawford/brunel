@@ -18,25 +18,20 @@ export function _resetCachedModels(): void { _cachedModels = null; }
 // ── Matching ─────────────────────────────────────────────────────────────────
 
 /**
- * Find a model by value match. SDK values are short aliases like "sonnet",
- * "opus", "haiku" (and "sonnet[1m]", "opus[1m]"). The Default entry has
- * value:null, which is skipped.
- *
- * Tries in order:
- * 1. Exact match (e.g. "sonnet" or "opus[1m]")
- * 2. Input contains value as substring (e.g. "claude-sonnet-4-6" contains "sonnet")
+ * Find a model by exact value match. SDK values are short aliases like
+ * "sonnet", "opus", "haiku" (and "sonnet[1m]", "opus[1m]"). The Default
+ * entry has value:null, which is skipped.
  */
 export function findModel(models: ModelInfo[], input: string): ModelInfo | undefined {
   const valid = models.filter(m => typeof m.value === "string");
-  return valid.find(m => m.value === input)
-    ?? valid.find(m => input.includes(m.value));
+  return valid.find(m => m.value === input);
 }
 
 // ── Model selection ──────────────────────────────────────────────────────────
 
 export type FetchModelsFn = () => Promise<ModelInfo[]>;
 
-/** Resolve a model string: return the matched alias value if known, or the raw string. */
+/** Resolve a model string: return the matched alias if it's an exact match, or the raw string. */
 function resolveModel(models: ModelInfo[], input: string): { value: string; displayName: string } {
   const match = findModel(models, input);
   if (match) return { value: match.value, displayName: match.displayName };
