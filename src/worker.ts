@@ -740,7 +740,7 @@ export async function workerMain(
   display.print(display.c.sageGreen(display.hr("═")));
   display.print(display.c.skyBlue(display.s.bold("  Brunel Worker")));
   display.print(display.c.lavender(`  Worker ID: ${workerId} | Foreman: ${FOREMAN_URL}`));
-  display.print(display.c.lavender(`  Permissions: ${config.permissionMode} | Output: ${config.verbose ? "verbose" : "quiet"} | Log: ${config.logFile}`));
+  display.print(display.c.lavender(`  Permissions: ${config.permissionMode} | Model: ${config.model ?? "default"} | Output: ${config.verbose ? "verbose" : "quiet"} | Log: ${config.logFile}`));
   display.print(display.c.sageGreen(display.hr("═")));
 
   session.start();
