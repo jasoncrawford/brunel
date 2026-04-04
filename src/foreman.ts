@@ -458,6 +458,22 @@ export class TaskModel {
     }
   }
 
+  /** Restore a task into the in-memory queue from the DB record.
+   *  Used when a worker reconnects claiming a task that's not in memory (e.g. issue
+   *  was closed mid-task, marking the DB row complete, which startup skips).
+   *  Falls back to empty placeholder if the DB row is missing. */
+  async restoreFromDb(taskId: string, issueNumber: number): Promise<void> {
+    const row = await this.store.getTask(taskId);
+    this.queue.addTask({
+      taskId,
+      issueNumber: row?.issueNumber ?? issueNumber,
+      title: row?.title ?? "",
+      body: row?.body ?? "",
+      labels: row?.labels ?? [],
+      repoUrl: row ? `https://github.com/${row.repo}` : "",
+    });
+  }
+
   /** Assigns a task to a worker. Awaits the DB write; reverts memory and returns
    *  false if the write fails so the caller can release the worker. */
   async assign(taskId: string, workerId: string): Promise<boolean> {
@@ -1124,14 +1140,13 @@ export function createForemanWss(
         const existing = taskQueue.get(msg.taskId);
 
         if (!existing) {
-          // Task not in queue — label may have been removed while worker was disconnected.
-          // Re-add a minimal in-memory entry so GitHub events can still be forwarded.
-          // The DB record still exists (written by the reclaim timer via taskStore.markPending);
-          // no new DB write is needed here.
+          // Task not in queue — issue may have been closed (marking the task complete in DB,
+          // which startup skips) or the label may have been removed while worker was disconnected.
+          // Restore from DB so title/body/labels are preserved on the dashboard.
           const issueNumber = parseInt(msg.taskId, 10);
           if (!isNaN(issueNumber)) {
-            log(workerId, `hello busy task=#${msg.taskId} — task unlabeled, re-adding for event forwarding`);
-            taskQueue.addTask({ taskId: msg.taskId, issueNumber, title: "", body: "", labels: [], repoUrl: "" });
+            log(workerId, `hello busy task=#${msg.taskId} — task not in queue, restoring from DB for event forwarding`);
+            await taskModel.restoreFromDb(msg.taskId, issueNumber);
           } else {
             log(workerId, `hello busy task=#${msg.taskId} — unknown task, respecting busy status`);
           }
