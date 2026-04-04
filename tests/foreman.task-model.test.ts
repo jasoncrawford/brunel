@@ -37,21 +37,22 @@ describe("TaskModel.complete", () => {
   beforeEach(() => {
     queue = new TaskQueue();
     store = makeStore();
-    model = new TaskModel(queue, store, () => {});
+    model = new TaskModel(queue, store);
     queue.addTask(baseTask);
     queue.assignTask("42", "w1");
   });
 
-  it("marks the task complete in memory", () => {
-    model.complete("42");
+  it("marks the task complete in memory and awaits store.markComplete", async () => {
+    await model.complete("42");
     expect(queue.get("42")?.status).toBe("complete");
+    expect(store.markComplete).toHaveBeenCalledWith("42");
   });
 
-  it("calls store.markComplete", async () => {
-    model.complete("42");
-    // allow microtasks to flush
-    await Promise.resolve();
-    expect(store.markComplete).toHaveBeenCalledWith("42");
+  it("propagates store errors to the caller", async () => {
+    (store.markComplete as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("DB down"));
+    await expect(model.complete("42")).rejects.toThrow("DB down");
+    // memory is updated even on DB failure
+    expect(queue.get("42")?.status).toBe("complete");
   });
 });
 
@@ -63,21 +64,22 @@ describe("TaskModel.revert", () => {
   beforeEach(() => {
     queue = new TaskQueue();
     store = makeStore();
-    model = new TaskModel(queue, store, () => {});
+    model = new TaskModel(queue, store);
     queue.addTask(baseTask);
     queue.assignTask("42", "w1");
   });
 
-  it("reverts the task to pending in memory", () => {
-    model.revert("42");
+  it("reverts the task to pending in memory and awaits store.markPending", async () => {
+    await model.revert("42");
     expect(queue.get("42")?.status).toBe("pending");
     expect(queue.get("42")?.assignedWorkerId).toBeUndefined();
+    expect(store.markPending).toHaveBeenCalledWith("42");
   });
 
-  it("calls store.markPending", async () => {
-    model.revert("42");
-    await Promise.resolve();
-    expect(store.markPending).toHaveBeenCalledWith("42");
+  it("propagates store errors to the caller", async () => {
+    (store.markPending as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("DB down"));
+    await expect(model.revert("42")).rejects.toThrow("DB down");
+    expect(queue.get("42")?.status).toBe("pending");
   });
 });
 
@@ -89,19 +91,20 @@ describe("TaskModel.block", () => {
   beforeEach(() => {
     queue = new TaskQueue();
     store = makeStore();
-    model = new TaskModel(queue, store, () => {});
+    model = new TaskModel(queue, store);
     queue.addTask(baseTask); // pending
   });
 
-  it("marks the task blocked in memory", () => {
-    model.block("42");
+  it("marks the task blocked in memory and awaits store.markBlocked", async () => {
+    await model.block("42");
     expect(queue.get("42")?.status).toBe("blocked");
+    expect(store.markBlocked).toHaveBeenCalledWith("42");
   });
 
-  it("calls store.markBlocked", async () => {
-    model.block("42");
-    await Promise.resolve();
-    expect(store.markBlocked).toHaveBeenCalledWith("42");
+  it("propagates store errors to the caller", async () => {
+    (store.markBlocked as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("DB down"));
+    await expect(model.block("42")).rejects.toThrow("DB down");
+    expect(queue.get("42")?.status).toBe("blocked");
   });
 });
 
@@ -113,7 +116,7 @@ describe("TaskModel.unblock", () => {
   beforeEach(() => {
     queue = new TaskQueue();
     store = makeStore();
-    model = new TaskModel(queue, store, () => {});
+    model = new TaskModel(queue, store);
     queue.addTask({ ...baseTask, status: "blocked" });
   });
 
@@ -147,7 +150,7 @@ describe("TaskModel.register", () => {
   beforeEach(() => {
     queue = new TaskQueue();
     store = makeStore();
-    model = new TaskModel(queue, store, () => {});
+    model = new TaskModel(queue, store);
   });
 
   it("adds the task to memory", () => {
@@ -157,14 +160,18 @@ describe("TaskModel.register", () => {
   });
 
   it("calls store.upsertTask with the repo slug", async () => {
-    model.register("42", 42, "owner/repo", "Title", "Body", ["label"], "https://github.com/owner/repo");
-    await Promise.resolve();
+    await model.register("42", 42, "owner/repo", "Title", "Body", ["label"], "https://github.com/owner/repo");
     expect(store.upsertTask).toHaveBeenCalledWith("42", 42, "owner/repo", "Title", "Body", ["label"]);
   });
 
   it("respects the depsLoaded flag", () => {
     model.register("42", 42, "owner/repo", "Title", "Body", [], "https://github.com/owner/repo", false);
     expect(queue.get("42")?.depsLoaded).toBe(false);
+  });
+
+  it("propagates store errors to the caller", async () => {
+    (store.upsertTask as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("oops"));
+    await expect(model.register("42", 42, "owner/repo", "T", "B", [], "url")).rejects.toThrow("oops");
   });
 });
 
@@ -176,7 +183,7 @@ describe("TaskModel.assign", () => {
   beforeEach(() => {
     queue = new TaskQueue();
     store = makeStore();
-    model = new TaskModel(queue, store, () => {});
+    model = new TaskModel(queue, store);
     queue.addTask(baseTask);
   });
 
@@ -213,87 +220,88 @@ describe("TaskModel.cancel", () => {
   beforeEach(() => {
     queue = new TaskQueue();
     store = makeStore();
-    model = new TaskModel(queue, store, () => {});
+    model = new TaskModel(queue, store);
     queue.addTask(baseTask); // pending
   });
 
-  it("removes the task from memory", () => {
-    model.cancel("42");
+  it("removes the task from memory and awaits store.deleteTask", async () => {
+    await model.cancel("42");
     expect(queue.get("42")).toBeUndefined();
+    expect(store.deleteTask).toHaveBeenCalledWith("42");
   });
 
-  it("calls store.deleteTask", async () => {
-    model.cancel("42");
-    await Promise.resolve();
-    expect(store.deleteTask).toHaveBeenCalledWith("42");
+  it("propagates store errors to the caller", async () => {
+    (store.deleteTask as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("DB down"));
+    await expect(model.cancel("42")).rejects.toThrow("DB down");
+    expect(queue.get("42")).toBeUndefined(); // memory still updated
   });
 });
 
-describe("TaskModel.logError callback", () => {
-  it("fires on store.markComplete failure", async () => {
-    const queue = new TaskQueue();
-    const store = makeStore();
-    const errors: string[] = [];
-    const model = new TaskModel(queue, store, (msg) => errors.push(msg));
-    queue.addTask(baseTask);
-    queue.assignTask("42", "w1");
-    (store.markComplete as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("oops"));
+describe("TaskModel.refreshContent", () => {
+  let store: TaskStore;
+  let model: TaskModel;
 
-    model.complete("42");
-    await new Promise((r) => setTimeout(r, 0));
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toMatch(/42/);
+  beforeEach(() => {
+    store = makeStore();
+    model = new TaskModel(new TaskQueue(), store);
   });
 
-  it("fires on store.markPending failure (revert)", async () => {
-    const queue = new TaskQueue();
-    const store = makeStore();
-    const errors: string[] = [];
-    const model = new TaskModel(queue, store, (msg) => errors.push(msg));
-    queue.addTask(baseTask);
-    queue.assignTask("42", "w1");
-    (store.markPending as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("oops"));
-
-    model.revert("42");
-    await new Promise((r) => setTimeout(r, 0));
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toMatch(/42/);
+  it("awaits store.updateTaskContent", async () => {
+    await model.refreshContent("42", "New Title", "New Body", ["bug"]);
+    expect(store.updateTaskContent).toHaveBeenCalledWith("42", "New Title", "New Body", ["bug"]);
   });
 
-  it("fires on store.markBlocked failure", async () => {
-    const queue = new TaskQueue();
-    const store = makeStore();
-    const errors: string[] = [];
-    const model = new TaskModel(queue, store, (msg) => errors.push(msg));
-    queue.addTask(baseTask);
-    (store.markBlocked as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("oops"));
+  it("propagates store errors to the caller", async () => {
+    (store.updateTaskContent as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("DB down"));
+    await expect(model.refreshContent("42", "T", "B", [])).rejects.toThrow("DB down");
+  });
+});
 
-    model.block("42");
-    await new Promise((r) => setTimeout(r, 0));
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toMatch(/42/);
+describe("TaskModel.registerPr", () => {
+  let queue: TaskQueue;
+  let store: TaskStore;
+  let model: TaskModel;
+
+  beforeEach(() => {
+    queue = new TaskQueue();
+    store = makeStore();
+    model = new TaskModel(queue, store);
+    queue.addTask(baseTask);
   });
 
-  it("fires on store.deleteTask failure (cancel)", async () => {
-    const queue = new TaskQueue();
-    const store = makeStore();
-    const errors: string[] = [];
-    const model = new TaskModel(queue, store, (msg) => errors.push(msg));
-    queue.addTask(baseTask);
-    (store.deleteTask as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("oops"));
-
-    model.cancel("42");
-    await new Promise((r) => setTimeout(r, 0));
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toMatch(/42/);
+  it("registers PR in memory and awaits store.updateTaskPr", async () => {
+    await model.registerPr("42", 10, "fix-branch");
+    expect(queue.getTaskForPr(10)?.taskId).toBe("42");
+    expect(store.updateTaskPr).toHaveBeenCalledWith("42", 10, "fix-branch");
   });
 
-  it("rejects on store.upsertTask failure (register)", async () => {
-    const queue = new TaskQueue();
-    const store = makeStore();
-    const model = new TaskModel(queue, store, () => {});
-    (store.upsertTask as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("oops"));
+  it("propagates store errors to the caller", async () => {
+    (store.updateTaskPr as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("DB down"));
+    await expect(model.registerPr("42", 10, "fix-branch")).rejects.toThrow("DB down");
+  });
+});
 
-    await expect(model.register("42", 42, "owner/repo", "T", "B", [], "url")).rejects.toThrow("oops");
+describe("TaskModel.unregisterPr", () => {
+  let queue: TaskQueue;
+  let store: TaskStore;
+  let model: TaskModel;
+
+  beforeEach(() => {
+    queue = new TaskQueue();
+    store = makeStore();
+    model = new TaskModel(queue, store);
+    queue.addTask(baseTask);
+    queue.registerPr(10, "42");
+  });
+
+  it("unregisters PR in memory and awaits store.updateTaskPr", async () => {
+    await model.unregisterPr(10);
+    expect(queue.getTaskForPr(10)).toBeUndefined();
+    expect(store.updateTaskPr).toHaveBeenCalledWith("42", null, null);
+  });
+
+  it("propagates store errors to the caller", async () => {
+    (store.updateTaskPr as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("DB down"));
+    await expect(model.unregisterPr(10)).rejects.toThrow("DB down");
   });
 });

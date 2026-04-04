@@ -26,7 +26,7 @@ function makeTaskStore(overrides: Partial<TaskStore> = {}): TaskStore {
 // ── Issue close → markPending ─────────────────────────────────────────────────
 
 describe("foreman — blocker transitions via routeEvent", () => {
-  it("issue close unblocks task in memory when no open blockers remain", () => {
+  it("issue close unblocks task in memory when no open blockers remain", async () => {
     const taskQueue = new TaskQueue();
     const registry = new WorkerRegistry();
     const server = http.createServer();
@@ -47,7 +47,7 @@ describe("foreman — blocker transitions via routeEvent", () => {
     taskModel.setIssueOpenState(5, true);
     wss.close();
 
-    routeEvent("evt-1", "issues", {
+    await routeEvent("evt-1", "issues", {
       action: "closed",
       issue: { number: 5, title: "Blocker", labels: [] },
     });
@@ -55,7 +55,7 @@ describe("foreman — blocker transitions via routeEvent", () => {
     expect(taskQueue.get("10")?.status).toBe("pending");
   });
 
-  it("issue close calls markPending on taskStore when task is fully unblocked", () => {
+  it("issue close calls markPending on taskStore when task is fully unblocked", async () => {
     const taskQueue = new TaskQueue();
     const registry = new WorkerRegistry();
     const server = http.createServer();
@@ -78,7 +78,7 @@ describe("foreman — blocker transitions via routeEvent", () => {
     taskModel.setIssueOpenState(5, true);
     wss.close();
 
-    routeEvent("evt-1", "issues", {
+    await routeEvent("evt-1", "issues", {
       action: "closed",
       issue: { number: 5, title: "Blocker", labels: [] },
     });
@@ -86,7 +86,7 @@ describe("foreman — blocker transitions via routeEvent", () => {
     expect(taskStore.markPending).toHaveBeenCalledWith("10");
   });
 
-  it("issue close does NOT unblock task when other blockers are still open", () => {
+  it("issue close does NOT unblock task when other blockers are still open", async () => {
     const taskQueue = new TaskQueue();
     const registry = new WorkerRegistry();
     const server = http.createServer();
@@ -112,7 +112,7 @@ describe("foreman — blocker transitions via routeEvent", () => {
     wss.close();
 
     // Close issue 5 — but 6 is still open
-    routeEvent("evt-1", "issues", {
+    await routeEvent("evt-1", "issues", {
       action: "closed",
       issue: { number: 5, title: "Blocker 5", labels: [] },
     });
