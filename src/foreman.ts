@@ -325,7 +325,6 @@ export class TaskModel {
   constructor(
     readonly queue: TaskQueue,
     private store: TaskStore,
-    private logError: (msg: string) => void,
     labeledIssues = new Map<number, LabeledIssueState>(),
     openIssues = new Set<number>(),
   ) {
@@ -366,12 +365,12 @@ export class TaskModel {
   /** Called when issues/closed fires: stop tracking and mark any active task complete.
    *  Handles pending and blocked tasks too — not just assigned ones — so that DB rows
    *  are always finalised regardless of whether a worker was active. (Bug #489) */
-  closeIssue(issueNumber: number): void {
+  async closeIssue(issueNumber: number): Promise<void> {
     this._labeledIssues.delete(issueNumber);
     this._openIssues.delete(issueNumber);
     const task = this.queue.getTaskForIssue(issueNumber);
     if (task && task.status !== "complete") {
-      this.complete(task.taskId);
+      await this.complete(task.taskId);
     }
   }
 
@@ -403,38 +402,28 @@ export class TaskModel {
 
   // ── Task-lifecycle methods ─────────────────────────────────────────────────
 
-  complete(taskId: string): void {
+  async complete(taskId: string): Promise<void> {
     this.queue.completeTask(taskId);
-    this.store.markComplete(taskId).catch((err: unknown) =>
-      this.logError(`ERROR Failed to mark task #${taskId} complete: ${fmtError(err)}`)
-    );
+    await this.store.markComplete(taskId);
   }
 
-  revert(taskId: string): void {
+  async revert(taskId: string): Promise<void> {
     this.queue.revertTask(taskId);
-    this.store.markPending(taskId).catch((err: unknown) =>
-      this.logError(`ERROR Failed to revert task #${taskId} to pending: ${fmtError(err)}`)
-    );
+    await this.store.markPending(taskId);
   }
 
-  block(taskId: string): void {
+  async block(taskId: string): Promise<void> {
     this.queue.setBlocked(taskId);
-    this.store.markBlocked(taskId).catch((err: unknown) =>
-      this.logError(`ERROR Failed to mark task #${taskId} blocked: ${fmtError(err)}`)
-    );
+    await this.store.markBlocked(taskId);
   }
 
-  /** Unblocks a task and awaits the DB write — callers must await this to avoid
-   *  a race where markAssigned (also awaited) lands before markPending in the DB. */
   async unblock(taskId: string): Promise<void> {
     this.queue.setUnblocked(taskId);
     await this.store.markPending(taskId);
   }
 
-  refreshContent(taskId: string, title: string, body: string, labels: string[]): void {
-    this.store.updateTaskContent(taskId, title, body, labels).catch((err: unknown) =>
-      this.logError(`ERROR Failed to refresh content for task #${taskId}: ${fmtError(err)}`)
-    );
+  async refreshContent(taskId: string, title: string, body: string, labels: string[]): Promise<void> {
+    await this.store.updateTaskContent(taskId, title, body, labels);
   }
 
   async register(
@@ -451,27 +440,21 @@ export class TaskModel {
     await this.store.upsertTask(taskId, issueNumber, repoSlug, title, body, labels);
   }
 
-  cancel(taskId: string): void {
+  async cancel(taskId: string): Promise<void> {
     this.queue.removeTask(taskId);
-    this.store.deleteTask(taskId).catch((err: unknown) =>
-      this.logError(`ERROR Failed to delete task #${taskId} from DB: ${fmtError(err)}`)
-    );
+    await this.store.deleteTask(taskId);
   }
 
-  registerPr(taskId: string, prNumber: number, branch: string | null): void {
+  async registerPr(taskId: string, prNumber: number, branch: string | null): Promise<void> {
     this.queue.registerPr(prNumber, taskId);
-    this.store.updateTaskPr(taskId, prNumber, branch).catch((err: unknown) =>
-      this.logError(`ERROR Failed to update task PR for #${taskId}: ${fmtError(err)}`)
-    );
+    await this.store.updateTaskPr(taskId, prNumber, branch);
   }
 
-  unregisterPr(prNumber: number): void {
+  async unregisterPr(prNumber: number): Promise<void> {
     const task = this.queue.getTaskForPr(prNumber);
     this.queue.unregisterPr(prNumber);
     if (task) {
-      this.store.updateTaskPr(task.taskId, null, null).catch((err: unknown) =>
-        this.logError(`ERROR Failed to clear task PR for #${task.taskId}: ${fmtError(err)}`)
-      );
+      await this.store.updateTaskPr(task.taskId, null, null);
     }
   }
 
@@ -569,7 +552,7 @@ function printEvent(id: string, name: string, payload: unknown) {
 
 export function createHttpServer(
   webhooks: InstanceType<typeof Webhooks> | null,
-  routeEvent: (id: string, name: string, payload: unknown) => void,
+  routeEvent: (id: string, name: string, payload: unknown) => void | Promise<void>,
   dbLogger?: DbLogger,
   taskStore?: TaskStore,
 ): http.Server {
@@ -600,7 +583,7 @@ export function createHttpServer(
       } else {
         const parsed = JSON.parse(rawBody) as unknown;
         printEvent(id, name, parsed);
-        routeEvent(id, name, parsed);
+        await routeEvent(id, name, parsed);
       }
       return c.text("OK", 200);
     } catch (err) {
@@ -696,7 +679,7 @@ export function createHttpServer(
 export interface ForemanWss {
   wss: WebSocketServer;
   taskModel: TaskModel;
-  routeEvent(id: string, name: string, payload: unknown): void;
+  routeEvent(id: string, name: string, payload: unknown): Promise<void>;
   reconcile(): Promise<void>;
   /** Close all connected worker clients with code 1001 and wait for their close events to fire. */
   shutdown(): Promise<void>;
@@ -736,7 +719,6 @@ export function createForemanWss(
   const taskModel = new TaskModel(
     taskQueue,
     taskStore,
-    flog,
     options.labeledIssues,
     options.openIssues,
   );
@@ -810,7 +792,7 @@ export function createForemanWss(
   // Routes the event to the appropriate worker and returns the associated task
   // and worker IDs. Separating this from logging ensures we always log exactly
   // once with the correct taskId and workerId.
-  function doRouteEvent(name: string, p: Record<string, unknown>, evt: GitHubEvent): RouteResult {
+  async function doRouteEvent(name: string, p: Record<string, unknown>, evt: GitHubEvent): Promise<RouteResult> {
     function result(task: { taskId: string; assignedWorkerId?: string } | null | undefined): RouteResult {
       return { taskId: task?.taskId ?? null, workerId: task?.assignedWorkerId ?? null };
     }
@@ -834,7 +816,9 @@ export function createForemanWss(
           if (linkedTask) {
             const branch = strProp(pr.head, "ref");
             if (branch) taskQueue.registerBranch(branch, linkedTask.taskId);
-            taskModel.registerPr(linkedTask.taskId, prNumber, branch ?? null);
+            await taskModel.registerPr(linkedTask.taskId, prNumber, branch ?? null).catch((err: unknown) =>
+              flog(`ERROR Failed to register PR for task #${linkedTask.taskId}: ${fmtError(err)}`)
+            );
             flog(`[task #${linkedIssue}] PR #${prNumber} registered`);
             // Fall through to forward the event to the worker
           }
@@ -848,7 +832,9 @@ export function createForemanWss(
         const task = taskQueue.getTaskForPr(prNumber);
         if (task) {
           flog(`[task #${task.issueNumber}] PR #${prNumber} unregistered (closed without merging)`);
-          taskModel.unregisterPr(prNumber);
+          await taskModel.unregisterPr(prNumber).catch((err: unknown) =>
+            flog(`ERROR Failed to unregister PR #${prNumber}: ${fmtError(err)}`)
+          );
           forwardEvent(task, evt, `PR #${prNumber}`);
           return result(task);
         }
@@ -935,7 +921,7 @@ export function createForemanWss(
         };
         taskModel.trackIssue(issueNumber, issueData);
         startDepsLoad(issueNumber, issueData.body);
-        void reconcile();
+        await reconcile();
         flog(`[task #${issueNumber}] enqueued via ${name}/${action}`);
         // task is pending here (no worker yet); taskId is String(issueNumber)
         return { taskId: String(issueNumber), workerId: null };
@@ -953,19 +939,18 @@ export function createForemanWss(
       ) {
         taskModel.untrackIssue(issueNumber);
         flog(`[task #${issueNumber}] dequeued (label removed)`);
-        void reconcile();
+        await reconcile();
         return result(task);
       }
 
       if (action === "closed") {
         // Remove from tracking and mark any assigned task complete atomically.
-        taskModel.closeIssue(issueNumber);
+        await taskModel.closeIssue(issueNumber).catch((err: unknown) =>
+          flog(`ERROR Failed to close issue #${issueNumber}: ${fmtError(err)}`)
+        );
 
         // Close this issue as a blocker for any tasks that depend on it.
         // If unblocking a task, transition it from blocked → pending.
-        // Collect markPending promises so we can await them before calling
-        // reconcile() — otherwise markPending races with markAssigned (which
-        // tryAssignWork awaits) and the DB can end up stuck at "pending".
         const unblockPromises: Promise<void>[] = [];
         for (const [depIssueNum, blockers] of graph) {
           if (blockers.has(issueNumber)) {
@@ -982,19 +967,16 @@ export function createForemanWss(
           }
         }
 
-        // Defer reconcile until unblock DB writes have flushed so that
-        // tryAssignWork's markAssigned (which is awaited) always wins the race.
-        if (unblockPromises.length > 0) {
-          void Promise.all(unblockPromises).then(() => reconcile()).catch(() => reconcile());
-        } else {
-          void reconcile();
-        }
+        // Await unblock DB writes before reconcile — ensures markPending lands
+        // before markAssigned (which tryAssignWork awaits).
+        await Promise.all(unblockPromises);
+        await reconcile();
         return result(task);
       }
 
       if (action === "reopened") {
         taskModel.reopenIssue(issueNumber);
-        void reconcile();
+        await reconcile();
         return result(task);
       }
 
@@ -1014,11 +996,11 @@ export function createForemanWss(
     return result(task);
   }
 
-  function routeEvent(id: string, name: string, payload: unknown) {
+  async function routeEvent(id: string, name: string, payload: unknown) {
     const p = payload as Record<string, unknown>;
     const evt: GitHubEvent = { id, name, payload: p };
 
-    const { taskId, workerId } = doRouteEvent(name, p, evt);
+    const { taskId, workerId } = await doRouteEvent(name, p, evt);
 
     // Log webhook event to DB and broadcast to admin GUI with the resolved
     // taskId and workerId so events appear in task/worker history.
@@ -1048,10 +1030,12 @@ export function createForemanWss(
     });
   }
 
-  function assignIdleWorkers() {
-    for (const w of registry.getIdleWorkers()) {
-      tryAssignWork(w.workerId).catch(err => flog(`ERROR tryAssignWork: ${fmtError(err)}`));
-    }
+  async function assignIdleWorkers(): Promise<void> {
+    await Promise.all(
+      registry.getIdleWorkers().map(w =>
+        tryAssignWork(w.workerId).catch(err => flog(`ERROR tryAssignWork: ${fmtError(err)}`))
+      )
+    );
   }
 
   async function tryAssignWork(workerId: string): Promise<void> {
@@ -1105,7 +1089,7 @@ export function createForemanWss(
   wss.on("connection", (ws) => {
     let workerId = "";
 
-    function handleWorkerHello(msg: Extract<WorkerMessage, { type: "worker_hello" }>) {
+    async function handleWorkerHello(msg: Extract<WorkerMessage, { type: "worker_hello" }>) {
       // Reject if workerSecret is configured and the message's secret doesn't match
       if (workerSecret && msg.workerSecret !== workerSecret) {
         ws.close(4001, "unauthorized");
@@ -1157,7 +1141,9 @@ export function createForemanWss(
           // on a closed issue would be incorrect. Finalize the DB record since the worker's
           // buffered task_complete will be discarded on cancelled.
           log(workerId, `hello busy task=#${msg.taskId} — task complete (issue closed), cancelling`);
-          taskModel.complete(msg.taskId);
+          await taskModel.complete(msg.taskId).catch((err: unknown) =>
+            flog(`ERROR Failed to mark task #${msg.taskId} complete: ${fmtError(err)}`)
+          );
           cancelWorker(msg.taskId);
         } else if (existing.assignedWorkerId && existing.assignedWorkerId !== workerId) {
           // Task is assigned to a different worker — cancel.
@@ -1173,7 +1159,9 @@ export function createForemanWss(
         // session loaded from DB, or a disconnect during this session), revert it.
         const priorTask = taskQueue.getAssignedTaskForWorker(workerId);
         if (priorTask) {
-          taskModel.revert(priorTask.taskId);
+          await taskModel.revert(priorTask.taskId).catch((err: unknown) =>
+            flog(`ERROR Failed to revert task #${priorTask.taskId} to pending: ${fmtError(err)}`)
+          );
           log(workerId, `hello idle (had task #${priorTask.taskId}) — reverting task to pending`);
         } else {
           log(workerId, "hello idle");
@@ -1183,7 +1171,7 @@ export function createForemanWss(
       }
     }
 
-    function handleTaskComplete(msg: Extract<WorkerMessage, { type: "task_complete" }>) {
+    async function handleTaskComplete(msg: Extract<WorkerMessage, { type: "task_complete" }>) {
       log(workerId, `task_complete #${msg.taskId}`);
       const task = taskQueue.get(msg.taskId);
       // Belt-and-suspenders ownership check: ignore if this worker doesn't own the task.
@@ -1192,41 +1180,47 @@ export function createForemanWss(
         return;
       }
       if (task) {
-        taskModel.complete(msg.taskId);
+        await taskModel.complete(msg.taskId).catch((err: unknown) =>
+          flog(`ERROR Failed to mark task #${msg.taskId} complete: ${fmtError(err)}`)
+        );
       }
       registry.releaseWorker(workerId);
     }
 
-    function handleWorkerGoodbye(msg: Extract<WorkerMessage, { type: "worker_goodbye" }>) {
+    async function handleWorkerGoodbye(msg: Extract<WorkerMessage, { type: "worker_goodbye" }>) {
       log(workerId, `worker_goodbye (task=${msg.taskId ?? "none"})`);
       if (msg.taskId) {
-        taskModel.revert(msg.taskId);
+        await taskModel.revert(msg.taskId).catch((err: unknown) =>
+          flog(`ERROR Failed to revert task #${msg.taskId} to pending: ${fmtError(err)}`)
+        );
       }
       registry.remove(workerId);
     }
 
     ws.on("message", (data) => {
-      let msg: WorkerMessage;
-      try { msg = JSON.parse(data.toString()); } catch { return; }
+      void (async () => {
+        let msg: WorkerMessage;
+        try { msg = JSON.parse(data.toString()); } catch { return; }
 
-      // Log all received messages
-      const rcvWorkerId = workerId || ((msg as { workerId?: string }).workerId ?? null);
-      const rcvTaskId = (msg as { taskId?: string }).taskId ?? null;
-      const rcvPayload = msg as unknown as Record<string, unknown>;
-      dbLogger?.logForemanMessage({
-        direction: "received",
-        workerId: rcvWorkerId,
-        taskId: rcvTaskId,
-        msgType: msg.type,
-        payload: rcvPayload,
-      });
-      broadcastMessageEvent({ direction: "received", workerId: rcvWorkerId, taskId: rcvTaskId, msgType: msg.type, payload: rcvPayload });
+        // Log all received messages
+        const rcvWorkerId = workerId || ((msg as { workerId?: string }).workerId ?? null);
+        const rcvTaskId = (msg as { taskId?: string }).taskId ?? null;
+        const rcvPayload = msg as unknown as Record<string, unknown>;
+        dbLogger?.logForemanMessage({
+          direction: "received",
+          workerId: rcvWorkerId,
+          taskId: rcvTaskId,
+          msgType: msg.type,
+          payload: rcvPayload,
+        });
+        broadcastMessageEvent({ direction: "received", workerId: rcvWorkerId, taskId: rcvTaskId, msgType: msg.type, payload: rcvPayload });
 
-      if (msg.type === "worker_hello") handleWorkerHello(msg);
-      else if (msg.type === "task_complete") handleTaskComplete(msg);
-      else if (msg.type === "worker_goodbye") handleWorkerGoodbye(msg);
-      else { flog(`[worker ${workerId}] unknown message type: ${(msg as R).type}`); return; }
-      assignIdleWorkers();
+        if (msg.type === "worker_hello") await handleWorkerHello(msg);
+        else if (msg.type === "task_complete") await handleTaskComplete(msg);
+        else if (msg.type === "worker_goodbye") await handleWorkerGoodbye(msg);
+        else { flog(`[worker ${workerId}] unknown message type: ${(msg as R).type}`); return; }
+        await assignIdleWorkers();
+      })().catch(err => flog(`ERROR handling worker message: ${fmtError(err)}`));
     });
 
     ws.on("close", (code, reason) => {
@@ -1257,9 +1251,13 @@ export function createForemanWss(
             const w = registry.get(workerId);
             if (!w || w.status !== "disconnected") return;
             log(workerId, `reclaim timer fired — reverting task #${taskId} to pending`);
-            taskModel.revert(taskId);
-            registry.remove(workerId);
-            assignIdleWorkers();
+            void (async () => {
+              await taskModel.revert(taskId).catch((err: unknown) =>
+                flog(`ERROR Failed to revert task #${taskId} to pending: ${fmtError(err)}`)
+              );
+              registry.remove(workerId);
+              await assignIdleWorkers();
+            })().catch(err => flog(`ERROR reclaim timer: ${fmtError(err)}`));
           });
         } else {
           registry.remove(workerId);
@@ -1291,9 +1289,9 @@ export function createForemanWss(
         // If the task is currently pending and is now blocked, persist blocked status.
         const task = taskQueue.getTaskForIssue(issueNumber);
         if (task && task.status === "pending" && taskModel.isBlocked(issueNumber, graph)) {
-          taskModel.block(task.taskId);
+          await taskModel.block(task.taskId);
         }
-        void reconcile();
+        await reconcile();
       })
       .catch((err) => flog(`ERROR fetching deps for #${issueNumber}: ${fmtError(err)}`));
   }
@@ -1319,6 +1317,7 @@ export function createForemanWss(
     // Step 2: sync title/body/labels/depsLoaded from labeledIssues to existing tasks.
     // Tasks restored from the DB at startup need their content refreshed from GitHub
     // data once loadIssuesToQueue has run.
+    const refreshPromises: Promise<void>[] = [];
     for (const [num, { issue, depsLoaded }] of labeledIssues) {
       const t = taskQueue.getTaskForIssue(num);
       if (t) {
@@ -1326,23 +1325,30 @@ export function createForemanWss(
         t.title = issue.title;
         t.body = issue.body;
         t.labels = issue.labels;
-        taskModel.refreshContent(t.taskId, issue.title, issue.body, issue.labels);
+        refreshPromises.push(
+          taskModel.refreshContent(t.taskId, issue.title, issue.body, issue.labels)
+            .catch((err: unknown) => flog(`ERROR Failed to refresh content for task #${t.taskId}: ${fmtError(err)}`))
+        );
       }
     }
 
     // Step 3: remove pending/blocked tasks whose issue no longer has the label
+    const cancelPromises: Promise<void>[] = [];
     for (const t of taskQueue.getPendingAndBlockedTasks()) {
       if (!labeledIssues.has(t.issueNumber)) {
-        taskModel.cancel(t.taskId);
+        cancelPromises.push(
+          taskModel.cancel(t.taskId)
+            .catch((err: unknown) => flog(`ERROR Failed to delete task #${t.taskId} from DB: ${fmtError(err)}`))
+        );
       }
     }
 
-    // Step 4: await register upserts before assigning — ensures upsertTask lands
-    // in the DB before markAssigned so the row exists for the status update.
-    await Promise.all(registerPromises);
+    // Step 4: await all DB writes before assigning — ensures rows exist/are updated
+    // before markAssigned runs on the same rows.
+    await Promise.all([...registerPromises, ...refreshPromises, ...cancelPromises]);
 
     // Step 5: try assignment for all idle workers
-    assignIdleWorkers();
+    await assignIdleWorkers();
   }
 
   function shutdown(): Promise<void> {
@@ -1420,9 +1426,9 @@ if (isMain) {
   );
 
   if (webhooks) {
-    webhooks.onAny(({ id, name, payload }) => {
+    webhooks.onAny(async ({ id, name, payload }) => {
       printEvent(id, name as string, payload);
-      foremanWss.routeEvent(id, name as string, payload);
+      await foremanWss.routeEvent(id, name as string, payload);
     });
   }
 
@@ -1470,18 +1476,25 @@ if (isMain) {
     // After rebuilding the graph from GitHub, reconcile blocked status for tasks
     // that were loaded from DB. If a blocker closed while the foreman was down,
     // the DB still shows 'blocked' but the graph no longer reflects it.
+    const startupPromises: Promise<void>[] = [];
     for (const t of taskQueue.getPendingAndBlockedTasks()) {
       const shouldBeBlocked = foremanWss.taskModel.isBlocked(t.issueNumber, graph);
       if (t.status === "blocked" && !shouldBeBlocked) {
-        foremanWss.taskModel.unblock(t.taskId).catch((err) =>
-          flog(`ERROR Failed to mark task #${t.taskId} pending on startup: ${fmtError(err)}`)
+        startupPromises.push(
+          foremanWss.taskModel.unblock(t.taskId).catch((err) =>
+            flog(`ERROR Failed to mark task #${t.taskId} pending on startup: ${fmtError(err)}`)
+          )
         );
       } else if (t.status === "pending" && shouldBeBlocked) {
-        foremanWss.taskModel.block(t.taskId);
+        startupPromises.push(
+          foremanWss.taskModel.block(t.taskId).catch((err) =>
+            flog(`ERROR Failed to mark task #${t.taskId} blocked on startup: ${fmtError(err)}`)
+          )
+        );
       }
     }
-
-    void foremanWss.reconcile();
+    await Promise.all(startupPromises);
+    await foremanWss.reconcile();
   } catch (err) {
     flog(`ERROR Failed to load issues from GitHub: ${fmtError(err)}`);
     process.exit(1);
