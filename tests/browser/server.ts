@@ -153,6 +153,7 @@ const adminWss = createAdminWss(server, () => ({
 foremanWss = createForemanWss(queue, registry, server, {
   taskLabel: cfg.taskLabel,
   reclaimTimeoutMs: cfg.workerReclaimTimeoutMs,
+  pingIntervalMs: cfg.pingIntervalMs,
   graph,
   openIssues,
   labeledIssues,

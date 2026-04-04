@@ -229,6 +229,7 @@ function buildForeman(opts: {
   const { wss, routeEvent } = createForemanWss(queue, registry, httpServer, {
     taskLabel: defaultCfg.taskLabel,
     reclaimTimeoutMs: opts.reclaimTimeoutMs ?? defaultCfg.workerReclaimTimeoutMs,
+    pingIntervalMs: defaultCfg.pingIntervalMs,
     dbLogger: opts.dbLogger ?? nullDbLogger,
     taskStore,
     repo: "owner/repo",

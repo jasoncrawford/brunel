@@ -717,7 +717,7 @@ export function createForemanWss(
     adminWss?: AdminWss;
     workerSecret?: string;
     labeledIssues?: Map<number, LabeledIssueState>;
-    pingIntervalMs?: number;
+    pingIntervalMs: number;
     taskStore?: TaskStore;
     reclaimTimeoutMs: number;
   },
@@ -1095,12 +1095,11 @@ export function createForemanWss(
 
   const wss = new WebSocketServer({ noServer: true });
 
-  const PING_INTERVAL_MS = options.pingIntervalMs ?? 25_000;
   const pingTimer = setInterval(() => {
     for (const client of wss.clients) {
       if (client.readyState === WebSocket.OPEN) client.ping();
     }
-  }, PING_INTERVAL_MS);
+  }, options.pingIntervalMs);
   wss.on("close", () => clearInterval(pingTimer));
 
   wss.on("connection", (ws) => {

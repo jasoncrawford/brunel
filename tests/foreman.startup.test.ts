@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { TaskQueue, WorkerRegistry, createForemanWss } from "../src/foreman.js";
+import { loadDefaultConfig } from "../src/config.js";
 import { isBlocked } from "../src/dependencies.js";
+
+const defaultCfg = await loadDefaultConfig();
 import type { TaskStore, TaskRow } from "../src/db.js";
 import type { LabeledIssueState, TaskStatus } from "../src/types.js";
 import WebSocket, { WebSocketServer } from "ws";
@@ -138,6 +141,7 @@ describe("tryAssignWork — DB persistence", () => {
     ({ wss } = createForemanWss(taskQueue, registry, httpServer, {
       taskLabel: "brunel:ready",
       taskStore,
+      pingIntervalMs: defaultCfg.pingIntervalMs,
     }));
 
     port = await startServer();
@@ -160,6 +164,7 @@ describe("tryAssignWork — DB persistence", () => {
     ({ wss } = createForemanWss(taskQueue, registry, httpServer, {
       taskLabel: "brunel:ready",
       taskStore,
+      pingIntervalMs: defaultCfg.pingIntervalMs,
     }));
 
     port = await startServer();
@@ -171,7 +176,7 @@ describe("tryAssignWork — DB persistence", () => {
 
   it("works transparently without taskStore (null store)", async () => {
     taskQueue.addTask(baseTask);
-    ({ wss } = createForemanWss(taskQueue, registry, httpServer, { taskLabel: "brunel:ready" }));
+    ({ wss } = createForemanWss(taskQueue, registry, httpServer, { taskLabel: "brunel:ready", pingIntervalMs: defaultCfg.pingIntervalMs }));
 
     port = await startServer();
     const ws = await connect({ type: "worker_hello", workerId: "w1", status: "idle" });
@@ -195,6 +200,7 @@ describe("startup reconnect behaviour", () => {
     ({ wss } = createForemanWss(taskQueue, registry, httpServer, {
       taskLabel: "brunel:ready",
       taskStore,
+      pingIntervalMs: defaultCfg.pingIntervalMs,
     }));
 
     port = await startServer();
@@ -217,6 +223,7 @@ describe("startup reconnect behaviour", () => {
     ({ wss } = createForemanWss(taskQueue, registry, httpServer, {
       taskLabel: "brunel:ready",
       taskStore,
+      pingIntervalMs: defaultCfg.pingIntervalMs,
     }));
 
     port = await startServer();
@@ -236,6 +243,7 @@ describe("startup reconnect behaviour", () => {
     ({ wss } = createForemanWss(taskQueue, registry, httpServer, {
       taskLabel: "brunel:ready",
       taskStore,
+      pingIntervalMs: defaultCfg.pingIntervalMs,
     }));
 
     port = await startServer();
@@ -260,6 +268,7 @@ describe("PR tracking persistence", () => {
     const result = createForemanWss(taskQueue, registry, httpServer, {
       taskLabel: "brunel:ready",
       taskStore,
+      pingIntervalMs: defaultCfg.pingIntervalMs,
     });
     ({ wss } = result);
 
@@ -283,6 +292,7 @@ describe("PR tracking persistence", () => {
     const result = createForemanWss(taskQueue, registry, httpServer, {
       taskLabel: "brunel:ready",
       taskStore,
+      pingIntervalMs: defaultCfg.pingIntervalMs,
     });
     ({ wss } = result);
 
@@ -329,6 +339,7 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
       taskLabel: "brunel:ready",
       taskStore,
       reclaimTimeoutMs: 1000,
+      pingIntervalMs: defaultCfg.pingIntervalMs,
     }));
 
     port = await startServer();
@@ -349,6 +360,7 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
       taskLabel: "brunel:ready",
       taskStore,
       reclaimTimeoutMs: 1000,
+      pingIntervalMs: defaultCfg.pingIntervalMs,
     }));
 
     port = await startServer();
@@ -370,6 +382,7 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
       taskLabel: "brunel:ready",
       taskStore,
       reclaimTimeoutMs: 1000,
+      pingIntervalMs: defaultCfg.pingIntervalMs,
     }));
 
     port = await startServer();
@@ -388,6 +401,7 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
       taskLabel: "brunel:ready",
       taskStore,
       reclaimTimeoutMs: 1000,
+      pingIntervalMs: defaultCfg.pingIntervalMs,
     }));
 
     port = await startServer();
@@ -412,6 +426,7 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
       taskStore,
       labeledIssues,
       reclaimTimeoutMs: 1000,
+      pingIntervalMs: defaultCfg.pingIntervalMs,
     });
     wss = fwss;
 
@@ -470,6 +485,7 @@ describe("startup — blocked status reconciliation after graph rebuild", () => 
       taskLabel: "brunel:ready",
       taskStore,
       reclaimTimeoutMs: 1000,
+      pingIntervalMs: defaultCfg.pingIntervalMs,
     });
     wss = fwss;
 
@@ -500,6 +516,7 @@ describe("startup — blocked status reconciliation after graph rebuild", () => 
       taskLabel: "brunel:ready",
       taskStore,
       reclaimTimeoutMs: 1000,
+      pingIntervalMs: defaultCfg.pingIntervalMs,
     });
     wss = fwss;
 
@@ -527,6 +544,7 @@ describe("startup reconnect — worker reconnects to complete task", () => {
     ({ wss } = createForemanWss(taskQueue, registry, httpServer, {
       taskLabel: "brunel:ready",
       reclaimTimeoutMs: 1000,
+      pingIntervalMs: defaultCfg.pingIntervalMs,
     }));
 
     port = await startServer();
@@ -549,6 +567,7 @@ describe("startup reconnect — worker reconnects to complete task", () => {
       taskLabel: "brunel:ready",
       taskStore,
       reclaimTimeoutMs: 1000,
+      pingIntervalMs: defaultCfg.pingIntervalMs,
     }));
 
     port = await startServer();
@@ -573,6 +592,7 @@ describe("task_complete marks task complete in DB", () => {
     ({ wss } = createForemanWss(taskQueue, registry, httpServer, {
       taskLabel: "brunel:ready",
       taskStore,
+      pingIntervalMs: defaultCfg.pingIntervalMs,
     }));
 
     port = await startServer();
