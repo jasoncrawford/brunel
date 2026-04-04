@@ -391,7 +391,7 @@ async function main(
     if (action.type === "model") {
       const modelArgs = input.slice("/model".length).trim();
       const pickModelFn = (opts: string[], idx: number) =>
-        pick(opts, { currentIdx: idx, escapable: true, lastIsTextEntry: true });
+        pick(opts, { currentIdx: idx, escapable: true });
       currentModel = await handleModelCommand(
         modelArgs, currentModel, pickModelFn,
         fetchModelsFn,

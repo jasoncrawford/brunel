@@ -43,6 +43,13 @@ describe("/model <arg> (direct set)", () => {
     expect(printed.join("")).toContain("default");
   });
 
+  it("'sonnet' maps to default", async () => {
+    setCachedModels(MODELS);
+    const result = await handleModelCommand("sonnet", "opus", noopPick, undefined, print);
+    expect(result).toBeUndefined();
+    expect(printed.join("")).toContain("default");
+  });
+
   it("accepts value as-is when no cache", async () => {
     const result = await handleModelCommand("opus", undefined, noopPick, undefined, print);
     expect(result).toBe("opus");

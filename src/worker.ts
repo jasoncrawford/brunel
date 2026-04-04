@@ -396,7 +396,7 @@ export class WorkerSession {
     if (action.type === "model") {
       const modelArgs = input.slice("/model".length).trim();
       const pickModelFn = (opts: string[], idx: number) =>
-        pick(opts, { currentIdx: idx, escapable: true, lastIsTextEntry: true });
+        pick(opts, { currentIdx: idx, escapable: true });
       this._currentModel = await handleModelCommand(
         modelArgs, this._currentModel, pickModelFn,
         undefined, // models cached from first query; no fetchModelsFn in worker

@@ -52,7 +52,7 @@ export async function handleModelCommand(
 
   // Direct set: /model <alias-or-id>
   if (args) {
-    if (args === "default") {
+    if (args === "default" || args === "sonnet") {
       print(display.c.darkGray("Model set to default."));
       return undefined;
     }
