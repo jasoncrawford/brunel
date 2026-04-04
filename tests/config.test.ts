@@ -21,6 +21,7 @@ const ENV_KEYS = [
   "BRUNEL_SUPABASE_URL", "BRUNEL_SUPABASE_SECRET_KEY", "BRUNEL_WORKER_SECRET",
   "BRUNEL_WORKSPACE_DIR", "BRUNEL_WORKER_RECLAIM_TIMEOUT_MS",
   "BRUNEL_MODEL",
+  "BRUNEL_EFFORT",
 ];
 
 beforeEach(() => {
@@ -560,6 +561,25 @@ describe("effort", () => {
     const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => { throw new Error("exit"); });
     await expect(loadConfig(["node", "repl.js", "--effort", "turbo"])).rejects.toThrow("exit");
     exitSpy.mockRestore();
+  });
+
+  it("'auto' in config normalizes to undefined", async () => {
+    baseEnv();
+    const cfg = await loadConfig(["node", "repl.js"], { effort: "auto" });
+    expect(cfg.effort).toBeUndefined();
+  });
+
+  it("--effort auto overrides file config", async () => {
+    baseEnv();
+    const cfg = await loadConfig(["node", "repl.js", "--effort", "auto"], { effort: "high" });
+    expect(cfg.effort).toBeUndefined();
+  });
+
+  it("BRUNEL_EFFORT=auto overrides file config", async () => {
+    baseEnv();
+    process.env.BRUNEL_EFFORT = "auto";
+    const cfg = await loadConfig(["node", "repl.js"], { effort: "max" });
+    expect(cfg.effort).toBeUndefined();
   });
 
   it("accepts all valid levels", async () => {
