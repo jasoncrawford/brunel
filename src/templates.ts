@@ -167,7 +167,7 @@ export function resolveEventTemplate(table: EventTemplateFmtTable, key: string, 
 }
 
 const BRANCH_REVIEW_PROMPT =
-  "Check whether all tests have passed. If not, take no action now; wait for the remaining ones. " +
+  "Check whether all tests have passed. If not, take no action now — you will be notified when each check completes, so do not sleep or poll waiting for results. " +
   "If all tests passed, check if the branch is up to date, and if not, rebase it. " +
   "Then check if the PR can be merged. If anything is blocking merge, resolve it, but do not merge yourself.";
 
