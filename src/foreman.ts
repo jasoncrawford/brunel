@@ -321,9 +321,6 @@ export class TaskQueue extends EventEmitter {
 export class TaskModel {
   private _labeledIssues: Map<number, LabeledIssueState>;
   private _openIssues: Set<number>;
-  /** Pending upsert promises keyed by taskId — awaited by assign() to avoid
-   *  the race where markAssigned runs before the row exists in the DB. */
-  private _pendingUpserts = new Map<string, Promise<void>>();
 
   constructor(
     readonly queue: TaskQueue,
@@ -440,7 +437,7 @@ export class TaskModel {
     );
   }
 
-  register(
+  async register(
     taskId: string,
     issueNumber: number,
     repoSlug: string,
@@ -449,14 +446,9 @@ export class TaskModel {
     labels: string[],
     repoUrl: string,
     depsLoaded?: boolean,
-  ): void {
+  ): Promise<void> {
     this.queue.addTask({ taskId, issueNumber, title, body, labels, repoUrl, depsLoaded });
-    const p = this.store.upsertTask(taskId, issueNumber, repoSlug, title, body, labels)
-      .catch((err: unknown) =>
-        this.logError(`ERROR Failed to persist task #${taskId}: ${fmtError(err)}`)
-      )
-      .finally(() => this._pendingUpserts.delete(taskId));
-    this._pendingUpserts.set(taskId, p);
+    await this.store.upsertTask(taskId, issueNumber, repoSlug, title, body, labels);
   }
 
   cancel(taskId: string): void {
@@ -488,9 +480,6 @@ export class TaskModel {
   async assign(taskId: string, workerId: string): Promise<boolean> {
     this.queue.assignTask(taskId, workerId);
     try {
-      // Ensure the row exists before updating — register() fires upsertTask
-      // without awaiting, so it may still be in-flight.
-      await this._pendingUpserts.get(taskId);
       await this.store.markAssigned(taskId, workerId);
       return true;
     } catch {
@@ -708,7 +697,7 @@ export interface ForemanWss {
   wss: WebSocketServer;
   taskModel: TaskModel;
   routeEvent(id: string, name: string, payload: unknown): void;
-  reconcile(): void;
+  reconcile(): Promise<void>;
   /** Close all connected worker clients with code 1001 and wait for their close events to fire. */
   shutdown(): Promise<void>;
 }
@@ -946,7 +935,7 @@ export function createForemanWss(
         };
         taskModel.trackIssue(issueNumber, issueData);
         startDepsLoad(issueNumber, issueData.body);
-        reconcile();
+        void reconcile();
         flog(`[task #${issueNumber}] enqueued via ${name}/${action}`);
         // task is pending here (no worker yet); taskId is String(issueNumber)
         return { taskId: String(issueNumber), workerId: null };
@@ -964,7 +953,7 @@ export function createForemanWss(
       ) {
         taskModel.untrackIssue(issueNumber);
         flog(`[task #${issueNumber}] dequeued (label removed)`);
-        reconcile();
+        void reconcile();
         return result(task);
       }
 
@@ -996,16 +985,16 @@ export function createForemanWss(
         // Defer reconcile until unblock DB writes have flushed so that
         // tryAssignWork's markAssigned (which is awaited) always wins the race.
         if (unblockPromises.length > 0) {
-          Promise.all(unblockPromises).then(() => reconcile()).catch(() => reconcile());
+          void Promise.all(unblockPromises).then(() => reconcile()).catch(() => reconcile());
         } else {
-          reconcile();
+          void reconcile();
         }
         return result(task);
       }
 
       if (action === "reopened") {
         taskModel.reopenIssue(issueNumber);
-        reconcile();
+        void reconcile();
         return result(task);
       }
 
@@ -1305,20 +1294,26 @@ export function createForemanWss(
         if (task && task.status === "pending" && taskModel.isBlocked(issueNumber, graph)) {
           taskModel.block(task.taskId);
         }
-        reconcile();
+        void reconcile();
       })
       .catch((err) => flog(`ERROR fetching deps for #${issueNumber}: ${fmtError(err)}`));
   }
 
-  function reconcile() {
+  async function reconcile() {
     const labeledIssues = taskModel.getLabeledIssues();
 
-    // Step 1: materialise tasks for new labeledIssues entries
+    // Step 1: materialise tasks for new labeledIssues entries.
+    // Collect register promises — each fires an upsertTask that must land in the
+    // DB before assignIdleWorkers can markAssigned on the same row.
+    const registerPromises: Promise<void>[] = [];
     for (const [num, { issue, depsLoaded }] of labeledIssues) {
       if (!taskQueue.getTaskForIssue(num)) {
         // Persist task record; on re-label of a completed issue, resets to pending.
         flog(`[task #${num}] reconcile: creating task (title: ${JSON.stringify(issue.title)})`);
-        taskModel.register(String(num), num, repo, issue.title, issue.body, issue.labels, issue.repoUrl, depsLoaded);
+        registerPromises.push(
+          taskModel.register(String(num), num, repo, issue.title, issue.body, issue.labels, issue.repoUrl, depsLoaded)
+            .catch((err: unknown) => flog(`ERROR Failed to persist task #${num}: ${fmtError(err)}`))
+        );
       }
     }
 
@@ -1343,7 +1338,11 @@ export function createForemanWss(
       }
     }
 
-    // Step 4: try assignment for all idle workers
+    // Step 4: await register upserts before assigning — ensures upsertTask lands
+    // in the DB before markAssigned so the row exists for the status update.
+    await Promise.all(registerPromises);
+
+    // Step 5: try assignment for all idle workers
     assignIdleWorkers();
   }
 
@@ -1483,7 +1482,7 @@ if (isMain) {
       }
     }
 
-    foremanWss.reconcile();
+    void foremanWss.reconcile();
   } catch (err) {
     flog(`ERROR Failed to load issues from GitHub: ${fmtError(err)}`);
     process.exit(1);

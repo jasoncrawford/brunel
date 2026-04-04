@@ -288,16 +288,12 @@ describe("TaskModel.logError callback", () => {
     expect(errors[0]).toMatch(/42/);
   });
 
-  it("fires on store.upsertTask failure (register)", async () => {
+  it("rejects on store.upsertTask failure (register)", async () => {
     const queue = new TaskQueue();
     const store = makeStore();
-    const errors: string[] = [];
-    const model = new TaskModel(queue, store, (msg) => errors.push(msg));
+    const model = new TaskModel(queue, store, () => {});
     (store.upsertTask as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("oops"));
 
-    model.register("42", 42, "owner/repo", "T", "B", [], "url");
-    await new Promise((r) => setTimeout(r, 0));
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toMatch(/42/);
+    await expect(model.register("42", 42, "owner/repo", "T", "B", [], "url")).rejects.toThrow("oops");
   });
 });
