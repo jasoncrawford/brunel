@@ -72,6 +72,14 @@ describe("buildInitialPrompt", () => {
     expect(p).not.toContain("isolated worktree");
   });
 
+  it("reminds worker to update project docs alongside code changes", () => {
+    const p = buildInitialPrompt({
+      number: 1, title: "T", body: "body", labels: [], repoUrl: "https://github.com/x/y",
+    }, true);
+    expect(p).toContain("CLAUDE.md");
+    expect(p).toMatch(/project doc/i);
+  });
+
   it("shared checkout — mentions worktree", () => {
     const p = buildInitialPrompt({
       number: 1, title: "T", body: "body", labels: [], repoUrl: "https://github.com/x/y",
