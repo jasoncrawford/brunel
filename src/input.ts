@@ -409,6 +409,8 @@ export function ask(
     let cursor = buffer.length; // start cursor at end of any pre-populated stash
     // Number of rows used by the last full redraw (suggestion row is always included)
     let totalDrawnRows = 0;
+    // Arrow-key selection index into the autocomplete suggestions (-1 = none selected)
+    let selectedSuggestion = -1;
     stash = null; // consume the stash
 
     if (promptLine) process.stdout.write("\x1b[?25h"); // show cursor when there's a visible prompt
@@ -449,12 +451,14 @@ export function ask(
     // Each suggestion is rendered on its own line. Command names are padded so
     // descriptions start at the same column across all visible suggestions.
 
-    function renderSuggestions(suggestions: CommandSuggestion[]): string[] {
+    function renderSuggestions(suggestions: CommandSuggestion[], selIdx = -1): string[] {
       if (suggestions.length === 0) return [];
       const cols = process.stdout.columns || 80;
       const maxNameLen = Math.max(...suggestions.map(s => s.name.length));
-      return suggestions.map(s => {
-        const prefix = "  /" + s.name.padEnd(maxNameLen + 2);
+      return suggestions.map((s, i) => {
+        const isSelected = i === selIdx;
+        const marker = isSelected ? "▶ /" : "  /";
+        const prefix = marker + s.name.padEnd(maxNameLen + 2);
         const remaining = cols - prefix.length;
         let desc = s.description;
         if (remaining > 3 && desc) {
@@ -462,7 +466,7 @@ export function ask(
         } else {
           desc = "";
         }
-        return display.c.darkGray(prefix + desc);
+        return isSelected ? prefix + desc : display.c.darkGray(prefix + desc);
       });
     }
 
@@ -478,7 +482,7 @@ export function ask(
       const { row: endRow } = screenPosOf(buffer.length);
 
       // 3. Clear to end of last buffer line, then write suggestion rows.
-      const sugLines = renderSuggestions(suggestions);
+      const sugLines = renderSuggestions(suggestions, selectedSuggestion);
       process.stdout.write("\x1b[K");
       if (sugLines.length > 0) {
         process.stdout.write("\r\n\x1b[K" + sugLines[0]);
@@ -671,6 +675,7 @@ export function ask(
       const prevRow = screenPosOf(cursor).row;
       buffer = newText;
       cursor = newText.length;
+      selectedSuggestion = -1;
       fullRedraw(prevRow, computeMatches());
     }
 
@@ -678,6 +683,7 @@ export function ask(
       const prevRow = screenPosOf(cursor).row;
       buffer = buffer.slice(0, cursor) + ch + buffer.slice(cursor);
       cursor++;
+      selectedSuggestion = -1;
       fullRedraw(prevRow, computeMatches());
     }
 
@@ -686,6 +692,7 @@ export function ask(
       const prevRow = screenPosOf(cursor).row;
       buffer = buffer.slice(0, cursor - 1) + buffer.slice(cursor);
       cursor--;
+      selectedSuggestion = -1;
       fullRedraw(prevRow, computeMatches());
     }
 
@@ -693,6 +700,7 @@ export function ask(
       if (cursor === buffer.length) return;
       const prevRow = screenPosOf(cursor).row;
       buffer = buffer.slice(0, cursor) + buffer.slice(cursor + 1);
+      selectedSuggestion = -1;
       fullRedraw(prevRow, computeMatches());
     }
 
@@ -811,7 +819,11 @@ export function ask(
         const code = ch.charCodeAt(0);
         if (ch === "\r" || ch === "\n") {
           const matches = computeMatches();
-          if (matches.length > 0) { replaceBuffer("/" + matches[0].name); }
+          if (selectedSuggestion >= 0 && selectedSuggestion < matches.length) {
+            replaceBuffer("/" + matches[selectedSuggestion].name);
+          } else if (matches.length > 0) {
+            replaceBuffer("/" + matches[0].name);
+          }
           submit(buffer);
           return;
         }
@@ -823,8 +835,27 @@ export function ask(
         else if (ch === "\x0b")                       { killToEnd(); }           // ^K
         else if (ch === "\x15")                       { killToStart(); }         // ^U
         else if (ch === "\x17")                       { deleteWord(); }          // ^W
-        else if (ch === "\x10")                       { moveLineUp(); }          // ↑
-        else if (ch === "\x11")                       { moveLineDown(); }        // ↓
+        else if (ch === "\x10") {                                                 // ↑
+          const matches = computeMatches();
+          if (selectedSuggestion > 0) {
+            selectedSuggestion--;
+            fullRedraw(screenPosOf(cursor).row, matches);
+          } else if (selectedSuggestion === 0) {
+            selectedSuggestion = -1;
+            fullRedraw(screenPosOf(cursor).row, matches);
+          } else {
+            moveLineUp();
+          }
+        }
+        else if (ch === "\x11") {                                                 // ↓
+          const matches = computeMatches();
+          if (matches.length > 0 && selectedSuggestion < matches.length - 1) {
+            selectedSuggestion++;
+            fullRedraw(screenPosOf(cursor).row, matches);
+          } else if (matches.length === 0) {
+            moveLineDown();
+          }
+        }
         else if (ch === "\x13")                       { stashBuffer(); }         // ^S
         else if (ch === "\x1c")                       { moveWordLeft(); }        // option+←
         else if (ch === "\x1d")                       { moveWordRight(); }       // option+→
@@ -832,7 +863,11 @@ export function ask(
         else if (ch === "\x1f")                       { moveTo(cursor + 1); }    // →
         else if (ch === "\x09") {                                                 // Tab
           const matches = computeMatches();
-          if (matches.length > 0) { replaceBuffer("/" + matches[0].name + " "); }
+          if (selectedSuggestion >= 0 && selectedSuggestion < matches.length) {
+            replaceBuffer("/" + matches[selectedSuggestion].name + " ");
+          } else if (matches.length > 0) {
+            replaceBuffer("/" + matches[0].name + " ");
+          }
         }
         else if (code >= 32)                          { insert(ch); }
       }
