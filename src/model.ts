@@ -18,22 +18,18 @@ export function _resetCachedModels(): void { _cachedModels = null; }
 // ── Matching ─────────────────────────────────────────────────────────────────
 
 /**
- * Find a model by value match. Tries, in order:
- * 1. Exact match on value
- * 2. Value starts with input (e.g. input "claude-opus-4-6" matches "claude-opus-4-6-20250514")
- * 3. Input starts with value (e.g. input "claude-opus-4-6-20250514" matches value "claude-opus-4-6")
- * 4. Value starts with "claude-" + input (alias: "sonnet" → "claude-sonnet-*")
- * 5. Value contains input or input contains value (substring match)
+ * Find a model by value match. SDK values are short aliases like "sonnet",
+ * "opus", "haiku" (and "sonnet[1m]", "opus[1m]"). The Default entry has
+ * value:null, which is skipped.
  *
- * Note: SDK returns value:null for the Default entry, so all checks guard against null.
+ * Tries in order:
+ * 1. Exact match (e.g. "sonnet" or "opus[1m]")
+ * 2. Input contains value as substring (e.g. "claude-sonnet-4-6" contains "sonnet")
  */
 export function findModel(models: ModelInfo[], input: string): ModelInfo | undefined {
-  const has = (m: ModelInfo) => typeof m.value === "string";
-  return models.find(m => m.value === input)
-    ?? models.find(m => has(m) && m.value.startsWith(input))
-    ?? models.find(m => has(m) && input.startsWith(m.value))
-    ?? models.find(m => has(m) && m.value.startsWith(`claude-${input}`))
-    ?? models.find(m => has(m) && (m.value.includes(input) || input.includes(m.value)));
+  const valid = models.filter(m => typeof m.value === "string");
+  return valid.find(m => m.value === input)
+    ?? valid.find(m => input.includes(m.value));
 }
 
 // ── Model selection ──────────────────────────────────────────────────────────

@@ -35,9 +35,9 @@ const defaultPermConfig = {
 };
 
 const FAKE_MODELS = [
-  { value: "claude-sonnet-4-6", displayName: "Sonnet 4.6", description: "Best for everyday tasks" },
-  { value: "claude-opus-4-6", displayName: "Opus 4.6", description: "Most capable for complex work" },
-  { value: "claude-haiku-4-5-20251001", displayName: "Haiku 4.5", description: "Fastest for quick answers" },
+  { value: "sonnet", displayName: "Sonnet 4.6", description: "Best for everyday tasks" },
+  { value: "opus", displayName: "Opus 4.6", description: "Most capable for complex work" },
+  { value: "haiku", displayName: "Haiku 4.5", description: "Fastest for quick answers" },
 ];
 
 function mockQueryMessages(messages: object[], models = FAKE_MODELS) {
