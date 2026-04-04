@@ -1,4 +1,5 @@
 import * as display from "./display.js";
+import type { PickModelResult } from "./input.js";
 
 // ── Model cache ──────────────────────────────────────────────────────────────
 
@@ -14,7 +15,20 @@ export function setCachedModels(models: ModelInfo[]): void { _cachedModels = mod
 /** Reset the cached models (for testing). */
 export function _resetCachedModels(): void { _cachedModels = null; }
 
+// ── Matching ─────────────────────────────────────────────────────────────────
+
+/** Find a model by exact value, prefix, or alias (e.g. "sonnet" → "claude-sonnet-*"). */
+export function findModel(models: ModelInfo[], input: string): ModelInfo | undefined {
+  return models.find(
+    m => m.value === input
+      || m.value.startsWith(input)
+      || m.value.startsWith(`claude-${input}`)
+  );
+}
+
 // ── Model selection ──────────────────────────────────────────────────────────
+
+export type FetchModelsFn = () => Promise<ModelInfo[]>;
 
 /**
  * Handle the /model command: show a picker or set directly from an argument.
@@ -23,10 +37,18 @@ export function _resetCachedModels(): void { _cachedModels = null; }
 export async function handleModelCommand(
   args: string,
   currentModel: string | undefined,
-  pickFn: (options: string[]) => Promise<number>,
-  askFn: (prompt: string) => Promise<string>,
+  pickModelFn: (options: string[], currentIdx: number) => Promise<PickModelResult>,
+  fetchModelsFn: FetchModelsFn | undefined,
   print: (msg: string) => void,
 ): Promise<string | undefined> {
+  // Ensure models are loaded
+  if (!_cachedModels && fetchModelsFn) {
+    try {
+      _cachedModels = await fetchModelsFn();
+    } catch {
+      // fall through with null cache
+    }
+  }
   const models = _cachedModels;
 
   // Direct set: /model <alias-or-id>
@@ -35,11 +57,8 @@ export async function handleModelCommand(
       print(display.c.darkGray("Model set to default."));
       return undefined;
     }
-    // Validate against cached models if available
     if (models) {
-      const match = models.find(
-        m => m.value === args || m.value.startsWith(`claude-${args}`)
-      );
+      const match = findModel(models, args);
       if (match) {
         print(display.c.darkGray(`Model set to ${match.displayName}.`));
         return match.value;
@@ -47,7 +66,7 @@ export async function handleModelCommand(
       print(display.c.boldRed(`Unknown model "${args}". Use /model to see available options.`));
       return currentModel;
     }
-    // No cache yet — accept the value as-is (validated by SDK on next query)
+    // No cache — accept as-is
     print(display.c.darkGray(`Model set to ${args}.`));
     return args;
   }
@@ -58,41 +77,49 @@ export async function handleModelCommand(
     return currentModel;
   }
 
+  // Build options from SDK model list (no separate "Default" entry — the SDK
+  // includes a default/recommended entry already).
   const options: string[] = [];
-  const defaultLabel = currentModel ? "Default" : "Default (current)";
-  options.push(defaultLabel);
-  for (const m of models) {
-    const isCurrent = m.value === currentModel;
-    const label = `${m.displayName}${isCurrent ? " (current)" : ""}`;
-    const desc = m.description ? ` — ${m.description}` : "";
-    options.push(`${label}${desc}`);
+  let currentIdx = -1;
+  for (let i = 0; i < models.length; i++) {
+    const m = models[i];
+    const desc = m.description ? ` \u00b7 ${m.description}` : "";
+    options.push(`${m.displayName}${desc}`);
+    if (m.value === currentModel) currentIdx = i;
   }
-  options.push("Other\u2026");
+  // If currentModel is undefined (default), mark the first entry as current
+  if (currentModel === undefined) currentIdx = 0;
+  options.push("Other:");
 
   print(display.c.yellow("\nSelect model:"));
-  const idx = await pickFn(options);
+  const result = await pickModelFn(options, currentIdx);
 
-  // Default
-  if (idx === 0) {
-    print(display.c.darkGray("Model set to default."));
-    return undefined;
+  if (result.type === "cancelled") {
+    return currentModel;
   }
 
-  // Other…
-  if (idx === options.length - 1) {
-    const value = await askFn("Model ID: ");
-    if (!value || value === "__eof__") return currentModel;
-    const match = models.find(m => m.value === value);
+  if (result.type === "other") {
+    if (!result.text) return currentModel;
+    const match = findModel(models, result.text);
     if (!match) {
-      print(display.c.boldRed(`Unknown model "${value}". Must be a full model ID (e.g. claude-sonnet-4-6).`));
+      print(display.c.boldRed(`Unknown model "${result.text}".`));
       return currentModel;
     }
     print(display.c.darkGray(`Model set to ${match.displayName}.`));
     return match.value;
   }
 
-  // Named model
-  const chosen = models[idx - 1];
+  // Selected a model from the list
+  const chosen = models[result.index];
+  if (result.index === 0 && currentModel === undefined) {
+    // Already on default, no change
+    return currentModel;
+  }
+  // Selecting the first (default/recommended) entry resets to undefined
+  if (result.index === 0) {
+    print(display.c.darkGray(`Model set to ${chosen.displayName}.`));
+    return undefined;
+  }
   print(display.c.darkGray(`Model set to ${chosen.displayName}.`));
   return chosen.value;
 }

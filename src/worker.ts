@@ -7,7 +7,7 @@ import path from "node:path";
 import { WebSocket } from "ws";
 import * as display from "./display.js";
 import { buildInitialPrompt, buildEventPrompt } from "./templates.js";
-import { ask, listWorkerCommands, dispatchInput, pick } from "./input.js";
+import { ask, listWorkerCommands, dispatchInput, pick, pickModel } from "./input.js";
 import { handleModelCommand } from "./model.js";
 import type { ForemanMessage, GitHubEvent, TaskIssue, WorkerMessage } from "./types.js";
 import type { PermissionMode } from "@anthropic-ai/claude-agent-sdk";
@@ -396,8 +396,8 @@ export class WorkerSession {
     if (action.type === "model") {
       const modelArgs = input.slice("/model".length).trim();
       this._currentModel = await handleModelCommand(
-        modelArgs, this._currentModel, pick,
-        (prompt) => ask(prompt),
+        modelArgs, this._currentModel, pickModel,
+        undefined, // models cached from first query; no fetchModelsFn in worker
         this.display.print,
       );
       return;

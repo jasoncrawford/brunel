@@ -1182,3 +1182,143 @@ export async function pickQuestion(
     process.stdin.on("data", onData);
   });
 }
+
+// ── Model picker ─────────────────────────────────────────────────────────────
+
+export type PickModelResult =
+  | { type: "selected"; index: number }
+  | { type: "other"; text: string }
+  | { type: "cancelled" };
+
+/**
+ * Model selection picker with:
+ * - ✓ in left margin for the current model (overwritten by ▶ when focused)
+ * - Escape erases the menu and cancels
+ * - "Other:" inline text entry row (last option)
+ * - Up/Down to navigate, Enter to confirm
+ */
+export async function pickModel(
+  options: string[],
+  currentIdx: number,
+): Promise<PickModelResult> {
+  return new Promise((resolve) => {
+    let idx = currentIdx >= 0 ? currentIdx : 0;
+    let done = false;
+    const count = options.length;
+    const otherIdx = count - 1;
+    let textMode = false;
+    let textBuf = "";
+
+    function renderLine(i: number): string {
+      const isSelected = i === idx;
+      const isCurrent = i === currentIdx;
+      // Margin: ▶ when selected, ✓ when current (not selected), space otherwise
+      const margin = isSelected ? "▶ " : (isCurrent ? "✓ " : "  ");
+      const text = (i === otherIdx && textMode) ? `Other: ${textBuf}` : options[i];
+      const full = margin + text;
+      return isSelected ? full : display.s.dim(full);
+    }
+
+    for (let i = 0; i < count; i++) {
+      process.stdout.write(renderLine(i) + "\r\n");
+    }
+
+    function positionTextCursor() {
+      // Move up from below last line to Other row, position after "▶ Other: " + textBuf
+      process.stdout.write(`\x1b[${count - otherIdx}A\r\x1b[${10 + textBuf.length}C`);
+    }
+
+    function redraw() {
+      process.stdout.write(`\x1b[${count}A\r`);
+      for (let i = 0; i < count; i++) {
+        process.stdout.write(renderLine(i) + "\x1b[K\r\n");
+      }
+      if (idx === otherIdx && textMode) positionTextCursor();
+    }
+
+    function navigateTo(newIdx: number) {
+      if (idx === otherIdx && textMode) {
+        process.stdout.write(`\x1b[${count - otherIdx}B`);
+        textMode = false;
+        textBuf = "";
+      }
+      idx = newIdx;
+      if (idx === otherIdx) textMode = true;
+      redraw();
+    }
+
+    function eraseMenu() {
+      // If text mode, move cursor back to below-last-line first
+      if (textMode) {
+        process.stdout.write(`\x1b[${count - otherIdx}B`);
+      }
+      // Move cursor up to first line and clear all rows
+      process.stdout.write(`\x1b[${count}A\r`);
+      for (let i = 0; i < count; i++) {
+        process.stdout.write("\x1b[K\r\n");
+      }
+      // Move back up to starting position
+      process.stdout.write(`\x1b[${count}A\r`);
+    }
+
+    function finish(result: PickModelResult) {
+      done = true;
+      process.stdin.removeListener("data", onData);
+      resolve(result);
+    }
+
+    function onData(raw: string) {
+      if (done) return;
+      let data = raw;
+      data = data.replace(/\x1b\[A/g, "\x10"); // up arrow
+      data = data.replace(/\x1b\[B/g, "\x11"); // down arrow
+      // Escape key: bare \x1b NOT followed by [ (which would be an arrow/CSI)
+      const hasEscape = raw === "\x1b";
+      data = data.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
+      data = data.replace(/\x1b./gs, "");
+      if (hasEscape) {
+        eraseMenu();
+        finish({ type: "cancelled" });
+        return;
+      }
+
+      for (const ch of data) {
+        if (textMode) {
+          if (ch === "\r" || ch === "\n") {
+            finish({ type: "other", text: textBuf });
+            return;
+          } else if (ch === "\x10") { navigateTo((idx - 1 + count) % count); }
+          else if (ch === "\x11")   { navigateTo((idx + 1) % count); }
+          else if (ch === "\x7f" || ch === "\x08") {
+            if (textBuf.length > 0) {
+              textBuf = textBuf.slice(0, -1);
+              process.stdout.write("\x08 \x08");
+            }
+          } else if (ch === "\x03") {
+            process.stdout.write("^C\r\n");
+            process.exit(0);
+          } else if (ch.charCodeAt(0) >= 32) {
+            textBuf += ch;
+            process.stdout.write(ch);
+          }
+        } else {
+          if (ch === "\x10") { navigateTo((idx - 1 + count) % count); }
+          else if (ch === "\x11") { navigateTo((idx + 1) % count); }
+          else if (ch === "\r" || ch === "\n") {
+            if (idx === otherIdx) {
+              finish({ type: "other", text: textBuf });
+            } else {
+              finish({ type: "selected", index: idx });
+            }
+            return;
+          } else if (ch === "\x03") {
+            process.stdout.write("^C\r\n");
+            process.exit(0);
+          }
+        }
+      }
+    }
+
+    process.stdin.on("data", onData);
+  });
+}

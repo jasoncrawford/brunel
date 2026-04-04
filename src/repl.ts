@@ -8,7 +8,7 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { CanUseTool, PermissionMode, PermissionResult } from "@anthropic-ai/claude-agent-sdk";
 import * as display from "./display.js";
 import { setVerbose, setThinkOutLoud } from "./display.js";
-import { ask, listCommandNames, dispatchInput, pick, pickMultiple, pickQuestion } from "./input.js";
+import { ask, listCommandNames, dispatchInput, pick, pickMultiple, pickQuestion, pickModel } from "./input.js";
 import type { PickQuestionResult } from "./input.js";
 import { workerMain } from "./worker.js";
 import type { RunQuery } from "./worker.js";
@@ -378,9 +378,16 @@ async function main(
 
     if (action.type === "model") {
       const modelArgs = input.slice("/model".length).trim();
+      const fetchModelsFn = async () => {
+        const q = query({ prompt: "", options: { cwd: process.cwd(), systemPrompt: { type: "preset", preset: "claude_code" }, permissionMode: permConfig.permissionMode } });
+        type QueryWithModels = { supportedModels?: () => Promise<ModelInfo[]> };
+        const qm = q as unknown as QueryWithModels;
+        if (typeof qm.supportedModels === "function") return qm.supportedModels();
+        return [];
+      };
       currentModel = await handleModelCommand(
-        modelArgs, currentModel, pick,
-        (prompt) => ask(prompt),
+        modelArgs, currentModel, pickModel,
+        fetchModelsFn,
         display.print,
       );
       continue;
