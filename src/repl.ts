@@ -15,7 +15,7 @@ import type { RunQuery } from "./worker.js";
 import { loadConfig } from "./config.js";
 import { Workspace, confirmIfUnsafe } from "./workspace.js";
 import { fmtError } from "./utils.js";
-import { handleModelCommand, getCachedModels, _resetCachedModels, setCachedModels, validateConfigModel } from "./model.js";
+import { handleModelCommand, getCachedModels, _resetCachedModels, setCachedModels } from "./model.js";
 import type { ModelInfo, FetchModelsFn } from "./model.js";
 export { parseSlashCommand, resolveCommandFilePath, resolveContent, dispatchInput, matchCommands, listCommandNames, listWorkerCommandNames, ask } from "./input.js";
 export type { SlashCommandResult, DispatchResult, ListDir } from "./input.js";
@@ -434,17 +434,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     allowDangerouslySkipPermissions: config.allowDangerouslySkipPermissions,
   };
 
-  // Validate configured model at startup (before entering REPL or worker mode)
-  let validatedModel = config.model;
-  if (config.model) {
-    const fetchFn = createFetchModelsFn(permConfig);
-    const result = await validateConfigModel(config.model, fetchFn, (msg) => {
-      console.error(display.c.boldRed(msg));
-    });
-    if (result === undefined) process.exit(1);
-    validatedModel = result;
-  }
-
   const boundRunQuery: RunQuery = (prompt, sessionId, ac, model) =>
     runQuery(permConfig, prompt, sessionId, ac, model);
 
@@ -465,9 +454,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       permissionMode: config.permissionMode,
       verbose: config.verbose,
       logFile: LOG_FILE,
-      model: validatedModel,
+      model: config.model,
     });
   } else {
-    void main(permConfig, workspaceCfg, validatedModel);
+    void main(permConfig, workspaceCfg, config.model);
   }
 }

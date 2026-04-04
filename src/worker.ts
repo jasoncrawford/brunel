@@ -8,7 +8,7 @@ import { WebSocket } from "ws";
 import * as display from "./display.js";
 import { buildInitialPrompt, buildEventPrompt } from "./templates.js";
 import { ask, listWorkerCommands, dispatchInput, pick } from "./input.js";
-import { handleModelCommand, validateConfigModel } from "./model.js";
+import { handleModelCommand } from "./model.js";
 import type { ForemanMessage, GitHubEvent, TaskIssue, WorkerMessage } from "./types.js";
 import type { PermissionMode } from "@anthropic-ai/claude-agent-sdk";
 import { Workspace, confirmIfUnsafe } from "./workspace.js";

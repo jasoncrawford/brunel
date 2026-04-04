@@ -19,62 +19,15 @@ export function _resetCachedModels(): void { _cachedModels = null; }
 
 /**
  * Find a model by exact value match. SDK values are short aliases like
- * "sonnet", "opus", "haiku" (and "sonnet[1m]", "opus[1m]"). The Default
- * entry has value:null, which is skipped.
+ * "default", "opus", "haiku" (and "sonnet[1m]", "opus[1m]").
  */
 export function findModel(models: ModelInfo[], input: string): ModelInfo | undefined {
-  const valid = models.filter(m => typeof m.value === "string");
-  return valid.find(m => m.value === input);
+  return models.find(m => m.value === input);
 }
 
 // ── Model selection ──────────────────────────────────────────────────────────
 
 export type FetchModelsFn = () => Promise<ModelInfo[]>;
-
-/** Resolve a model string: return the matched alias if it's an exact match, or the raw string. */
-function resolveModel(models: ModelInfo[], input: string): { value: string; displayName: string } {
-  const match = findModel(models, input);
-  if (match) return { value: match.value, displayName: match.displayName };
-  return { value: input, displayName: input };
-}
-
-/**
- * Validate a model string against the supported models list. Returns an error
- * message if invalid, or undefined if valid. A model is valid if it matches a
- * known alias exactly or via substring (e.g. "claude-sonnet-4-6" contains "sonnet").
- */
-export function validateModel(models: ModelInfo[], input: string): string | undefined {
-  if (findModel(models, input)) return undefined;
-  const valid = models.filter(m => typeof m.value === "string");
-  const names = valid.map(m => m.value).join(", ");
-  return `Unknown model "${input}". Valid options: ${names}, or a full model ID (e.g. claude-sonnet-4-6-20250514).`;
-}
-
-/**
- * Validate the configured model at startup. Fetches the model list and checks
- * the model string. Returns the (possibly resolved) model value, or calls
- * onError and returns undefined.
- */
-export async function validateConfigModel(
-  model: string,
-  fetchModelsFn: FetchModelsFn,
-  onError: (msg: string) => void,
-): Promise<string | undefined> {
-  let models: ModelInfo[];
-  try {
-    models = await fetchModelsFn();
-    setCachedModels(models);
-  } catch {
-    // Can't fetch model list — skip validation, accept as-is
-    return model;
-  }
-  const error = validateModel(models, model);
-  if (error) {
-    onError(error);
-    return undefined;
-  }
-  return resolveModel(models, model).value;
-}
 
 /**
  * Handle the /model command: show a picker or set directly from an argument.
@@ -104,14 +57,16 @@ export async function handleModelCommand(
       return undefined;
     }
     if (models) {
-      const error = validateModel(models, args);
-      if (error) {
-        print(display.c.boldRed(error));
-        return currentModel;
+      const match = findModel(models, args);
+      if (match) {
+        print(display.c.darkGray(`Model set to ${match.displayName}.`));
+        return match.value;
       }
-      const { value, displayName } = resolveModel(models, args);
-      print(display.c.darkGray(`Model set to ${displayName}.`));
-      return value;
+      // Unknown model — warn but accept (power-user escape hatch)
+      const names = models.map(m => m.value).join(", ");
+      print(display.c.amber(`Warning: "${args}" is not a known model. Known models: ${names}`));
+      print(display.c.darkGray(`Model set to ${args}.`));
+      return args;
     }
     // No cache — accept as-is
     print(display.c.darkGray(`Model set to ${args}.`));
@@ -124,8 +79,7 @@ export async function handleModelCommand(
     return currentModel;
   }
 
-  // Build options from SDK model list (no separate "Default" entry — the SDK
-  // includes a default/recommended entry already).
+  // Build options from SDK model list — known models only, no "Other".
   const options: string[] = [];
   let currentIdx = -1;
   for (let i = 0; i < models.length; i++) {
@@ -136,25 +90,12 @@ export async function handleModelCommand(
   }
   // If currentModel is undefined (default), mark the first entry as current
   if (currentModel === undefined) currentIdx = 0;
-  options.push("Other:");
 
   print(display.c.yellow("\nSelect model:"));
   const result = await pickModelFn(options, currentIdx);
 
-  if (result.type === "cancelled") {
+  if (result.type !== "selected") {
     return currentModel;
-  }
-
-  if (result.type === "other") {
-    if (!result.text) return currentModel;
-    const error = validateModel(models, result.text);
-    if (error) {
-      print(display.c.boldRed(error));
-      return currentModel;
-    }
-    const { value, displayName } = resolveModel(models, result.text);
-    print(display.c.darkGray(`Model set to ${displayName}.`));
-    return value;
   }
 
   // Selected a model from the list
