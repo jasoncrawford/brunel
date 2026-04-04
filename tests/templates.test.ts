@@ -615,6 +615,17 @@ describe("EVENT_FMT — new entries", () => {
     expect(result).toContain("do not merge yourself");
   });
 
+  it("branch-review prompt advises not to sleep or poll", () => {
+    const evt: GitHubEvent = {
+      id: "e1",
+      name: "_check_suites",
+      payload: { status: "succeeded", failed: [], succeeded: ["CI"] },
+    };
+    const result = EVENT_FMT._check_suites(evt.payload, evt);
+    expect(result).toMatch(/do not sleep|don't sleep/i);
+    expect(result).toMatch(/notif/i);
+  });
+
   it("_code_review renders PR number, review state, body, and inline comments", () => {
     const evt: GitHubEvent = {
       id: "e1",
