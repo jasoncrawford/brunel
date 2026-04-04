@@ -34,7 +34,8 @@ You are working in ${workspaceContext}. Use your branch-discipline skill, and re
 1. Pull main to get the latest before making any edits.
 2. ${branchInstruction}
 3. As much as possible, use test-driven development.
-4. Create a PR when done, and include the text "Closes #${issue.number}".
+4. Before creating a PR, check whether your changes call for updates to project documentation (CLAUDE.md, README, or other docs). Include any doc updates in the same PR as the code changes.
+5. Create a PR when done, and include the text "Closes #${issue.number}".
 
 Do not work on any other issues: leave task assignment to the foreman. Do not merge any PRs or set them to auto-merge: leave merging to the user after UAT.`;
 }
