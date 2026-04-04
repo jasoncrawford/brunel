@@ -8,7 +8,7 @@ import { WebSocket } from "ws";
 import * as display from "./display.js";
 import { buildInitialPrompt, buildEventPrompt } from "./templates.js";
 import { ask, listWorkerCommands, dispatchInput, pick } from "./input.js";
-import { MODEL_ALIASES } from "./config.js";
+import { handleModelCommand } from "./model.js";
 import type { ForemanMessage, GitHubEvent, TaskIssue, WorkerMessage } from "./types.js";
 import type { PermissionMode } from "@anthropic-ai/claude-agent-sdk";
 import { Workspace, confirmIfUnsafe } from "./workspace.js";
@@ -394,20 +394,12 @@ export class WorkerSession {
     }
 
     if (action.type === "model") {
-      const labels = MODEL_ALIASES.map(a =>
-        a === this._currentModel ? `${a} (current)` : a
+      const modelArgs = input.slice("/model".length).trim();
+      this._currentModel = await handleModelCommand(
+        modelArgs, this._currentModel, pick,
+        (prompt) => ask(prompt),
+        this.display.print,
       );
-      const defaultLabel = this._currentModel ? "default" : "default (current)";
-      const options = [defaultLabel, ...labels];
-      this.display.print(display.c.skyBlue("\nSelect model:"));
-      const idx = await pick(options);
-      if (idx === 0) {
-        this._currentModel = undefined;
-        this.display.print(display.c.sageGreen("Model set to default."));
-      } else {
-        this._currentModel = MODEL_ALIASES[idx - 1];
-        this.display.print(display.c.sageGreen(`Model set to ${this._currentModel}.`));
-      }
       return;
     }
 

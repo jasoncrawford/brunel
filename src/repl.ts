@@ -12,11 +12,14 @@ import { ask, listCommandNames, dispatchInput, pick, pickMultiple, pickQuestion 
 import type { PickQuestionResult } from "./input.js";
 import { workerMain } from "./worker.js";
 import type { RunQuery } from "./worker.js";
-import { loadConfig, MODEL_ALIASES } from "./config.js";
+import { loadConfig } from "./config.js";
 import { Workspace, confirmIfUnsafe } from "./workspace.js";
 import { fmtError } from "./utils.js";
+import { handleModelCommand, getCachedModels, _resetCachedModels, setCachedModels } from "./model.js";
+import type { ModelInfo } from "./model.js";
 export { parseSlashCommand, resolveCommandFilePath, resolveContent, dispatchInput, matchCommands, listCommandNames, listWorkerCommandNames, ask } from "./input.js";
 export type { SlashCommandResult, DispatchResult, ListDir } from "./input.js";
+export { handleModelCommand, getCachedModels, _resetCachedModels } from "./model.js";
 
 // ── Log file ──────────────────────────────────────────────────────────────────
 
@@ -140,6 +143,15 @@ export async function runQuery(
       ...(model ? { model } : {}),
     },
   });
+
+  // Cache the available models list from the SDK (fire-and-forget).
+  // The Query object exposes supportedModels() which returns model info
+  // without consuming the message stream.
+  type QueryWithModels = { supportedModels?: () => Promise<ModelInfo[]> };
+  const qm = iterable as unknown as QueryWithModels;
+  if (typeof qm.supportedModels === "function") {
+    qm.supportedModels().then(models => { setCachedModels(models); }).catch(() => {});
+  }
 
   // Register a temporary raw-stdin listener to catch ^C and abort the query.
   // The listener is removed in a finally block regardless of how the query ends.
@@ -365,20 +377,12 @@ async function main(
     }
 
     if (action.type === "model") {
-      const labels = MODEL_ALIASES.map(a =>
-        a === currentModel ? `${a} (current)` : a
+      const modelArgs = input.slice("/model".length).trim();
+      currentModel = await handleModelCommand(
+        modelArgs, currentModel, pick,
+        (prompt) => ask(prompt),
+        display.print,
       );
-      const defaultLabel = currentModel ? "default" : "default (current)";
-      const options = [defaultLabel, ...labels];
-      display.print(display.c.skyBlue("\nSelect model:"));
-      const idx = await pick(options);
-      if (idx === 0) {
-        currentModel = undefined;
-        display.print(display.c.sageGreen("Model set to default."));
-      } else {
-        currentModel = MODEL_ALIASES[idx - 1];
-        display.print(display.c.sageGreen(`Model set to ${currentModel}.`));
-      }
       continue;
     }
 

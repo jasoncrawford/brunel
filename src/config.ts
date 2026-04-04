@@ -3,11 +3,6 @@ import { z } from "zod";
 import type { PermissionMode } from "@anthropic-ai/claude-agent-sdk";
 import { fmtError } from "./utils.js";
 
-// ── Model aliases ─────────────────────────────────────────────────────────────
-
-/** Well-known model aliases accepted by the Claude Agent SDK. */
-export const MODEL_ALIASES = ["sonnet", "opus", "haiku"] as const;
-
 // ── Permission modes ──────────────────────────────────────────────────────────
 
 export const VALID_PERMISSION_MODES = [
