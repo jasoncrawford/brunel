@@ -58,6 +58,8 @@ const BrunelConfigSchema = z.object({
   repoUrl:        z.string().optional(),
   /** Claude model alias (e.g. 'sonnet', 'opus') or full model ID (e.g. 'claude-sonnet-4-6'). */
   model:          z.string().optional(),
+  /** Effort level for Claude's thinking/reasoning: low, medium, high, max. Omit for auto (default). */
+  effort:         z.enum(["low", "medium", "high", "max"]).optional(),
 
   // ── Cloud deployment ───────────────────────────────────────────────────────
 

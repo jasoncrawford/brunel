@@ -17,9 +17,12 @@ import { Workspace, confirmIfUnsafe } from "./workspace.js";
 import { fmtError } from "./utils.js";
 import { handleModelCommand, getCachedModels, _resetCachedModels, setCachedModels } from "./model.js";
 import type { ModelInfo, FetchModelsFn } from "./model.js";
+import { handleEffortCommand } from "./effort.js";
+import type { EffortValue } from "./effort.js";
 export { parseSlashCommand, resolveCommandFilePath, resolveContent, dispatchInput, matchCommands, listCommandNames, listWorkerCommandNames, ask } from "./input.js";
 export type { SlashCommandResult, DispatchResult, ListDir } from "./input.js";
 export { handleModelCommand, getCachedModels, _resetCachedModels } from "./model.js";
+export { handleEffortCommand } from "./effort.js";
 
 // ── Log file ──────────────────────────────────────────────────────────────────
 
@@ -87,6 +90,7 @@ export async function runQuery(
   sessionId: string | undefined,
   abortController?: AbortController,
   model?: string,
+  effort?: EffortValue,
 ): Promise<string | undefined> {
   logFull("QUERY", { prompt, sessionId });
   // Save and clear the input print callback while the query runs. In worker
@@ -141,6 +145,7 @@ export async function runQuery(
       ...(permConfig.allowDangerouslySkipPermissions ? { allowDangerouslySkipPermissions: true } : {}),
       ...(sessionId ? { resume: sessionId } : {}),
       ...(model ? { model } : {}),
+      ...(effort ? { effort } : {}),
     },
   });
 
@@ -315,9 +320,11 @@ async function main(
   permConfig: { permissionMode: PermissionMode; allowDangerouslySkipPermissions: boolean },
   workspaceCfg?: { workspaceDir: string; repoUrl: string },
   initialModel?: string,
+  initialEffort?: EffortValue,
 ): Promise<void> {
   const fetchModelsFn = createFetchModelsFn(permConfig);
   let currentModel: string | undefined = initialModel;
+  let currentEffort: EffortValue | undefined = initialEffort;
 
   process.stdout.write("\x1b[?2004h"); // enable bracketed paste mode
   process.stdin.setRawMode(true);
@@ -338,7 +345,7 @@ async function main(
 
   display.print(display.c.sageGreen(display.hr("═")));
   display.print(display.c.skyBlue(display.s.bold("  Claude Agent SDK REPL")));
-  display.print(display.c.lavender(`  Permissions: ${permConfig.permissionMode} | Model: ${initialModel ?? "default"} | Output: ${display.verbose ? "verbose" : "quiet"} | Log: ${LOG_FILE}`));
+  display.print(display.c.lavender(`  Permissions: ${permConfig.permissionMode} | Model: ${initialModel ?? "default"} | Effort: ${initialEffort ?? "auto"} | Output: ${display.verbose ? "verbose" : "quiet"} | Log: ${LOG_FILE}`));
   display.print(display.c.lavender(`  Type /exit to quit, /clear to start a new session.`));
   display.print(display.c.sageGreen(display.hr("═")));
 
@@ -400,6 +407,17 @@ async function main(
       continue;
     }
 
+    if (action.type === "effort") {
+      const effortArgs = input.slice("/effort".length).trim();
+      const pickEffortFn = (opts: string[], idx: number) =>
+        pick(opts, { currentIdx: idx, escapable: true });
+      currentEffort = await handleEffortCommand(
+        effortArgs, currentEffort, pickEffortFn,
+        display.print,
+      );
+      continue;
+    }
+
     if (
       action.type === "create-workspace" ||
       action.type === "reset-workspace" ||
@@ -417,7 +435,7 @@ async function main(
     if (action.type !== "query") continue;
 
     try {
-      sessionId = await runQuery(permConfig, action.prompt, sessionId, undefined, currentModel);
+      sessionId = await runQuery(permConfig, action.prompt, sessionId, undefined, currentModel, currentEffort);
     } catch (err) {
       console.error(display.c.boldRed(`\nERROR: ${fmtError(err)}`));
       logFull("ERROR", err instanceof Error ? { message: err.message, stack: err.stack } : err);
@@ -434,8 +452,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     allowDangerouslySkipPermissions: config.allowDangerouslySkipPermissions,
   };
 
-  const boundRunQuery: RunQuery = (prompt, sessionId, ac, model) =>
-    runQuery(permConfig, prompt, sessionId, ac, model);
+  const boundRunQuery: RunQuery = (prompt, sessionId, ac, model, effort) =>
+    runQuery(permConfig, prompt, sessionId, ac, model, effort);
 
   const workspaceCfg = (config.githubRepo && config.githubToken)
     ? {
@@ -455,8 +473,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       verbose: config.verbose,
       logFile: LOG_FILE,
       model: config.model,
+      effort: config.effort,
     });
   } else {
-    void main(permConfig, workspaceCfg, config.model);
+    void main(permConfig, workspaceCfg, config.model, config.effort);
   }
 }

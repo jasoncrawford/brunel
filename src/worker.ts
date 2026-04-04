@@ -9,6 +9,8 @@ import * as display from "./display.js";
 import { buildInitialPrompt, buildEventPrompt } from "./templates.js";
 import { ask, listWorkerCommands, dispatchInput, pick } from "./input.js";
 import { handleModelCommand } from "./model.js";
+import { handleEffortCommand } from "./effort.js";
+import type { EffortValue } from "./effort.js";
 import type { ForemanMessage, GitHubEvent, TaskIssue, WorkerMessage } from "./types.js";
 import type { PermissionMode } from "@anthropic-ai/claude-agent-sdk";
 import { Workspace, confirmIfUnsafe } from "./workspace.js";
@@ -153,7 +155,7 @@ export class WorkerStatusModel extends EventEmitter {
 // ── WorkerSession ─────────────────────────────────────────────────────────────
 
 export type WsFactory = (workerId: string, taskId?: string) => WebSocket;
-export type RunQuery = (prompt: string, sessionId: string | undefined, abortController?: AbortController, model?: string) => Promise<string | undefined>;
+export type RunQuery = (prompt: string, sessionId: string | undefined, abortController?: AbortController, model?: string, effort?: EffortValue) => Promise<string | undefined>;
 export type WorkerDisplay = {
   print: (line: string | null) => void;
   printForemanMessage: (msg: ForemanMessage) => void;
@@ -203,6 +205,7 @@ export class WorkerSession {
   private connectionState: "hello_sent" | "registered" = "registered";
   private bufferedMessages: BufferableMessage[] = [];
   private _currentModel: string | undefined;
+  private _currentEffort: EffortValue | undefined;
 
   // Reactive status bar model: emits "change" on any state mutation, so the
   // display subscription in start() automatically refreshes without manual calls.
@@ -220,6 +223,9 @@ export class WorkerSession {
 
   get currentModel(): string | undefined { return this._currentModel; }
   set currentModel(model: string | undefined) { this._currentModel = model; }
+
+  get currentEffort(): EffortValue | undefined { return this._currentEffort; }
+  set currentEffort(effort: EffortValue | undefined) { this._currentEffort = effort; }
 
   /** Returns the formatted worker status bar text. Used by startPersistentStatus and tests. */
   getStatusText(): string {
@@ -400,6 +406,17 @@ export class WorkerSession {
       this._currentModel = await handleModelCommand(
         modelArgs, this._currentModel, pickModelFn,
         undefined, // models cached from first query; no fetchModelsFn in worker
+        this.display.print,
+      );
+      return;
+    }
+
+    if (action.type === "effort") {
+      const effortArgs = input.slice("/effort".length).trim();
+      const pickEffortFn = (opts: string[], idx: number) =>
+        pick(opts, { currentIdx: idx, escapable: true });
+      this._currentEffort = await handleEffortCommand(
+        effortArgs, this._currentEffort, pickEffortFn,
         this.display.print,
       );
       return;
@@ -591,7 +608,7 @@ export class WorkerSession {
       this.isRunningQuery = true;
       let queryFailed = false;
       try {
-        this.currentSessionId = await this.runQuery(initialPrompt, this.currentSessionId, ac, this._currentModel) ?? this.currentSessionId;
+        this.currentSessionId = await this.runQuery(initialPrompt, this.currentSessionId, ac, this._currentModel, this._currentEffort) ?? this.currentSessionId;
       } catch (err) {
         if (err instanceof Error && /aborted by user/i.test(err.message)) return;
         this.display.print(display.c.boldRed(`\nERROR: ${fmtError(err)}`));
@@ -612,7 +629,7 @@ export class WorkerSession {
         const prompt = this.buildAndLogEventPrompt(events);
         this.isRunningQuery = true;
         try {
-          this.currentSessionId = await this.runQuery(prompt, this.currentSessionId, eventAc, this._currentModel) ?? this.currentSessionId;
+          this.currentSessionId = await this.runQuery(prompt, this.currentSessionId, eventAc, this._currentModel, this._currentEffort) ?? this.currentSessionId;
         } catch (err) {
           if (err instanceof Error && /aborted by user/i.test(err.message)) return;
           this.display.print(display.c.boldRed(`\nERROR: ${fmtError(err)}`));
@@ -651,6 +668,7 @@ export async function workerMain(
     verbose: boolean;
     logFile: string;
     model?: string;
+    effort?: EffortValue;
   },
 ): Promise<void> {
   const FOREMAN_URL = config.foremanUrl;
@@ -719,6 +737,7 @@ export async function workerMain(
     workspaceCtx: { workspace, originalCwd, workspaceDir, repoUrl, confirm },
   });
   session.currentModel = config.model;
+  session.currentEffort = config.effort;
 
   // SIGINT: interrupt the running query if one is active; otherwise prompt and shut down.
   // This lets the user press ^C to interrupt a running tool without killing the worker.

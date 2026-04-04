@@ -55,6 +55,9 @@ describe("parseSlashCommand", () => {
   it("recognizes /model", () => {
     expect(parseSlashCommand("/model")).toEqual({ type: "model" });
   });
+  it("recognizes /effort", () => {
+    expect(parseSlashCommand("/effort")).toEqual({ type: "effort" });
+  });
 });
 
 describe("resolveCommandFilePath", () => {

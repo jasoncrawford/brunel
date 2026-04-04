@@ -229,13 +229,19 @@ describe("handleUserInput", () => {
 
   it("regular query text runs runQuery with prompt and sessionId", async () => {
     await session.handleUserInput("hello claude");
-    expect(runQuery).toHaveBeenCalledWith("hello claude", undefined, expect.anything(), undefined);
+    expect(runQuery).toHaveBeenCalledWith("hello claude", undefined, expect.anything(), undefined, undefined);
   });
 
   it("passes currentModel to runQuery when set", async () => {
     session.currentModel = "opus";
     await session.handleUserInput("hello claude");
-    expect(runQuery).toHaveBeenCalledWith("hello claude", undefined, expect.anything(), "opus");
+    expect(runQuery).toHaveBeenCalledWith("hello claude", undefined, expect.anything(), "opus", undefined);
+  });
+
+  it("passes currentEffort to runQuery when set", async () => {
+    session.currentEffort = "low";
+    await session.handleUserInput("hello claude");
+    expect(runQuery).toHaveBeenCalledWith("hello claude", undefined, expect.anything(), undefined, "low");
   });
 
   it("WS_TASK_ASSIGNED sentinel triggers initial runQuery", async () => {
