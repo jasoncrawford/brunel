@@ -46,11 +46,10 @@ function resolveModel(models: ModelInfo[], input: string): { value: string; disp
 /**
  * Validate a model string against the supported models list. Returns an error
  * message if invalid, or undefined if valid. A model is valid if it matches a
- * known alias or looks like a full model ID (contains "claude-").
+ * known alias exactly or via substring (e.g. "claude-sonnet-4-6" contains "sonnet").
  */
 export function validateModel(models: ModelInfo[], input: string): string | undefined {
   if (findModel(models, input)) return undefined;
-  if (input.includes("claude-")) return undefined;
   const valid = models.filter(m => typeof m.value === "string");
   const names = valid.map(m => m.value).join(", ");
   return `Unknown model "${input}". Valid options: ${names}, or a full model ID (e.g. claude-sonnet-4-6-20250514).`;

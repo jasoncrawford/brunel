@@ -155,13 +155,13 @@ describe("/model (interactive picker)", () => {
     expect(printed.join("")).toContain("Haiku 4.5");
   });
 
-  it("Other with unknown string accepts it as-is", async () => {
+  it("Other with full model ID resolves via substring", async () => {
     setCachedModels(MODELS);
     const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickResult>>()
-      .mockResolvedValue({ type: "other", text: "claude-custom-model-2025" });
-    const result = await handleModelCommand("", "opus", pickFn, undefined, print);
-    expect(result).toBe("claude-custom-model-2025");
-    expect(printed.join("")).toContain("claude-custom-model-2025");
+      .mockResolvedValue({ type: "other", text: "claude-opus-4-6-20250514" });
+    const result = await handleModelCommand("", undefined, pickFn, undefined, print);
+    expect(result).toBe("opus");
+    expect(printed.join("")).toContain("Opus 4.6");
   });
 
   it("Other with invalid string rejects", async () => {
@@ -208,8 +208,13 @@ describe("validateModel", () => {
     expect(validateModel(MODELS, "claude-opus-4-6")).toBeUndefined();
   });
 
-  it("accepts unknown string containing claude-", () => {
+  it("accepts full model ID that matches alias via substring", () => {
     expect(validateModel(MODELS, "claude-sonnet-4-6-20250514")).toBeUndefined();
+  });
+
+  it("rejects partial/typo model ID even with claude- prefix", () => {
+    const error = validateModel(MODELS, "claude-haik");
+    expect(error).toContain("Unknown model");
   });
 
   it("rejects unknown string without claude-", () => {
@@ -246,11 +251,11 @@ describe("validateConfigModel", () => {
     expect(onError).toHaveBeenCalledWith(expect.stringContaining("Unknown model"));
   });
 
-  it("accepts full model ID with claude- prefix", async () => {
+  it("accepts full model ID that matches alias via substring", async () => {
     const fetchFn = vi.fn().mockResolvedValue(MODELS);
     const onError = vi.fn();
-    const result = await validateConfigModel("claude-custom-model-2025", fetchFn, onError);
-    expect(result).toBe("claude-custom-model-2025");
+    const result = await validateConfigModel("claude-sonnet-4-6-20250514", fetchFn, onError);
+    expect(result).toBe("sonnet");
     expect(onError).not.toHaveBeenCalled();
   });
 
