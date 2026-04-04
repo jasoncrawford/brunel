@@ -170,4 +170,9 @@ describe("dispatchInput", () => {
     const result = await dispatchInput("/prune", () => null);
     expect(result).toEqual({ type: "prune" });
   });
+
+  it("/model returns { type: 'model' }", async () => {
+    const result = await dispatchInput("/model", () => null);
+    expect(result).toEqual({ type: "model" });
+  });
 });

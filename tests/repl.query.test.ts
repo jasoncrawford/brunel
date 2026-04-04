@@ -25,7 +25,7 @@ vi.mock("../src/input.js", async (importOriginal) => {
 
 import { PassThrough } from "stream";
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { runQuery } from "../src/repl.js";
+import { runQuery, getCachedModels, _resetCachedModels } from "../src/repl.js";
 import { ask, pick, pickMultiple, pickQuestion } from "../src/input.js";
 import { toolUseNames, stopStatus, setVerbose } from "../src/display.js";
 
@@ -34,11 +34,19 @@ const defaultPermConfig = {
   allowDangerouslySkipPermissions: false,
 };
 
-function mockQueryMessages(messages: object[]) {
+const FAKE_MODELS = [
+  { value: "sonnet", displayName: "Sonnet 4.6", description: "Best for everyday tasks" },
+  { value: "opus", displayName: "Opus 4.6", description: "Most capable for complex work" },
+  { value: "haiku", displayName: "Haiku 4.5", description: "Fastest for quick answers" },
+];
+
+function mockQueryMessages(messages: object[], models = FAKE_MODELS) {
   (query as any).mockImplementation((_opts: any) => {
-    return (async function* () {
+    const gen = (async function* () {
       for (const m of messages) yield m;
     })();
+    (gen as any).supportedModels = () => Promise.resolve(models);
+    return gen;
   });
 }
 
@@ -628,6 +636,53 @@ describe("runQuery - interrupt via ^C on stdin", () => {
 
     expect(thrown).toBeInstanceOf(Error);
     expect((thrown as Error).message).toBe("network failure");
+  });
+});
+
+describe("runQuery - model option", () => {
+  beforeEach(() => _resetCachedModels());
+
+  it("passes model to SDK query options when provided", async () => {
+    mockQueryMessages([
+      { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } },
+    ]);
+    const cap = captureConsole();
+    try {
+      await runQuery(defaultPermConfig, "test", undefined, undefined, "opus");
+    } finally {
+      cap.restore();
+    }
+    const callArg = (query as any).mock.calls[0][0];
+    expect(callArg.options.model).toBe("opus");
+  });
+
+  it("omits model from SDK query options when undefined", async () => {
+    mockQueryMessages([
+      { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } },
+    ]);
+    const cap = captureConsole();
+    try {
+      await runQuery(defaultPermConfig, "test", undefined);
+    } finally {
+      cap.restore();
+    }
+    const callArg = (query as any).mock.calls[0][0];
+    expect(callArg.options.model).toBeUndefined();
+  });
+
+  it("caches supportedModels from the query object", async () => {
+    mockQueryMessages([
+      { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } },
+    ]);
+    expect(getCachedModels()).toBeNull();
+    const cap = captureConsole();
+    try {
+      await runQuery(defaultPermConfig, "test", undefined);
+    } finally {
+      cap.restore();
+    }
+    const models = getCachedModels();
+    expect(models).toEqual(FAKE_MODELS);
   });
 });
 

@@ -15,8 +15,11 @@ import type { RunQuery } from "./worker.js";
 import { loadConfig } from "./config.js";
 import { Workspace, confirmIfUnsafe } from "./workspace.js";
 import { fmtError } from "./utils.js";
+import { handleModelCommand, getCachedModels, _resetCachedModels, setCachedModels } from "./model.js";
+import type { ModelInfo, FetchModelsFn } from "./model.js";
 export { parseSlashCommand, resolveCommandFilePath, resolveContent, dispatchInput, matchCommands, listCommandNames, listWorkerCommandNames, ask } from "./input.js";
 export type { SlashCommandResult, DispatchResult, ListDir } from "./input.js";
+export { handleModelCommand, getCachedModels, _resetCachedModels } from "./model.js";
 
 // ── Log file ──────────────────────────────────────────────────────────────────
 
@@ -83,6 +86,7 @@ export async function runQuery(
   prompt: string,
   sessionId: string | undefined,
   abortController?: AbortController,
+  model?: string,
 ): Promise<string | undefined> {
   logFull("QUERY", { prompt, sessionId });
   // Save and clear the input print callback while the query runs. In worker
@@ -136,8 +140,18 @@ export async function runQuery(
       abortController: ac,
       ...(permConfig.allowDangerouslySkipPermissions ? { allowDangerouslySkipPermissions: true } : {}),
       ...(sessionId ? { resume: sessionId } : {}),
+      ...(model ? { model } : {}),
     },
   });
+
+  // Cache the available models list from the SDK (fire-and-forget).
+  // The Query object exposes supportedModels() which returns model info
+  // without consuming the message stream.
+  type QueryWithModels = { supportedModels?: () => Promise<ModelInfo[]> };
+  const qm = iterable as unknown as QueryWithModels;
+  if (typeof qm.supportedModels === "function") {
+    qm.supportedModels().then(models => { setCachedModels(models); }).catch(() => {});
+  }
 
   // Register a temporary raw-stdin listener to catch ^C and abort the query.
   // The listener is removed in a finally block regardless of how the query ends.
@@ -287,10 +301,24 @@ export async function handleWorkspaceAction(
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
+function createFetchModelsFn(permConfig: { permissionMode: PermissionMode }): FetchModelsFn {
+  return async () => {
+    const q = query({ prompt: "", options: { cwd: process.cwd(), systemPrompt: { type: "preset", preset: "claude_code" }, permissionMode: permConfig.permissionMode } });
+    type QueryWithModels = { supportedModels?: () => Promise<ModelInfo[]> };
+    const qm = q as unknown as QueryWithModels;
+    if (typeof qm.supportedModels === "function") return qm.supportedModels();
+    return [];
+  };
+}
+
 async function main(
   permConfig: { permissionMode: PermissionMode; allowDangerouslySkipPermissions: boolean },
   workspaceCfg?: { workspaceDir: string; repoUrl: string },
+  initialModel?: string,
 ): Promise<void> {
+  const fetchModelsFn = createFetchModelsFn(permConfig);
+  let currentModel: string | undefined = initialModel;
+
   process.stdout.write("\x1b[?2004h"); // enable bracketed paste mode
   process.stdin.setRawMode(true);
   process.stdin.resume();
@@ -310,7 +338,7 @@ async function main(
 
   display.print(display.c.sageGreen(display.hr("═")));
   display.print(display.c.skyBlue(display.s.bold("  Claude Agent SDK REPL")));
-  display.print(display.c.lavender(`  Permissions: ${permConfig.permissionMode} | Output: ${display.verbose ? "verbose" : "quiet"} | Log: ${LOG_FILE}`));
+  display.print(display.c.lavender(`  Permissions: ${permConfig.permissionMode} | Model: ${initialModel ?? "default"} | Output: ${display.verbose ? "verbose" : "quiet"} | Log: ${LOG_FILE}`));
   display.print(display.c.lavender(`  Type /exit to quit, /clear to start a new session.`));
   display.print(display.c.sageGreen(display.hr("═")));
 
@@ -360,6 +388,18 @@ async function main(
       continue;
     }
 
+    if (action.type === "model") {
+      const modelArgs = input.slice("/model".length).trim();
+      const pickModelFn = (opts: string[], idx: number) =>
+        pick(opts, { currentIdx: idx, escapable: true });
+      currentModel = await handleModelCommand(
+        modelArgs, currentModel, pickModelFn,
+        fetchModelsFn,
+        display.print,
+      );
+      continue;
+    }
+
     if (
       action.type === "create-workspace" ||
       action.type === "reset-workspace" ||
@@ -377,7 +417,7 @@ async function main(
     if (action.type !== "query") continue;
 
     try {
-      sessionId = await runQuery(permConfig, action.prompt, sessionId);
+      sessionId = await runQuery(permConfig, action.prompt, sessionId, undefined, currentModel);
     } catch (err) {
       console.error(display.c.boldRed(`\nERROR: ${fmtError(err)}`));
       logFull("ERROR", err instanceof Error ? { message: err.message, stack: err.stack } : err);
@@ -393,8 +433,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     permissionMode: config.permissionMode,
     allowDangerouslySkipPermissions: config.allowDangerouslySkipPermissions,
   };
-  const boundRunQuery: RunQuery = (prompt, sessionId, ac) =>
-    runQuery(permConfig, prompt, sessionId, ac);
+
+  const boundRunQuery: RunQuery = (prompt, sessionId, ac, model) =>
+    runQuery(permConfig, prompt, sessionId, ac, model);
 
   const workspaceCfg = (config.githubRepo && config.githubToken)
     ? {
@@ -413,8 +454,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       permissionMode: config.permissionMode,
       verbose: config.verbose,
       logFile: LOG_FILE,
+      model: config.model,
     });
   } else {
-    void main(permConfig, workspaceCfg);
+    void main(permConfig, workspaceCfg, config.model);
   }
 }

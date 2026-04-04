@@ -52,6 +52,9 @@ describe("parseSlashCommand", () => {
   it("recognizes /prune", () => {
     expect(parseSlashCommand("/prune")).toEqual({ type: "prune" });
   });
+  it("recognizes /model", () => {
+    expect(parseSlashCommand("/model")).toEqual({ type: "model" });
+  });
 });
 
 describe("resolveCommandFilePath", () => {

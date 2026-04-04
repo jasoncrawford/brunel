@@ -56,6 +56,8 @@ const BrunelConfigSchema = z.object({
   workspaceDir:   z.string().optional(),
   /** Override the git repo URL used for workspace clones. Defaults to https://{token}@github.com/{repo}.git. */
   repoUrl:        z.string().optional(),
+  /** Claude model alias (e.g. 'sonnet', 'opus') or full model ID (e.g. 'claude-sonnet-4-6'). */
+  model:          z.string().optional(),
 
   // ── Cloud deployment ───────────────────────────────────────────────────────
 
