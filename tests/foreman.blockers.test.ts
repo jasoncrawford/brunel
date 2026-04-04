@@ -1,8 +1,11 @@
 import { describe, it, expect, vi } from "vitest";
 import { TaskQueue, WorkerRegistry, createForemanWss } from "../src/foreman.js";
+import { loadDefaultConfig } from "../src/config.js";
 import type { TaskStore } from "../src/db.js";
 import type { TaskIssue } from "../src/types.js";
 import http from "http";
+
+const defaultCfg = await loadDefaultConfig();
 
 const ISSUE_10: TaskIssue = { number: 10, title: "T", body: "b", labels: [], repoUrl: "r" };
 
@@ -38,6 +41,7 @@ describe("foreman — blocker transitions via routeEvent", () => {
       taskLabel: "brunel:ready",
       graph,
       reclaimTimeoutMs: 300_000,
+      pingIntervalMs: defaultCfg.pingIntervalMs,
     });
     taskModel.trackIssue(10, ISSUE_10, true);
     taskModel.setIssueOpenState(5, true);
@@ -68,6 +72,7 @@ describe("foreman — blocker transitions via routeEvent", () => {
       graph,
       taskStore,
       reclaimTimeoutMs: 300_000,
+      pingIntervalMs: defaultCfg.pingIntervalMs,
     });
     taskModel.trackIssue(10, ISSUE_10, true);
     taskModel.setIssueOpenState(5, true);
@@ -99,6 +104,7 @@ describe("foreman — blocker transitions via routeEvent", () => {
       graph,
       taskStore,
       reclaimTimeoutMs: 300_000,
+      pingIntervalMs: defaultCfg.pingIntervalMs,
     });
     taskModel.trackIssue(10, ISSUE_10, true);
     taskModel.setIssueOpenState(5, true);

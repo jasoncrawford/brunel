@@ -72,6 +72,7 @@ beforeEach(() => {
   ({ wss, routeEvent } = createForemanWss(queue, registry, httpServer, {
     taskLabel: defaultCfg.taskLabel,
     reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs,
+    pingIntervalMs: defaultCfg.pingIntervalMs,
     adminWss,
   }));
 

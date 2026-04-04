@@ -25,6 +25,7 @@ beforeEach(() => {
   ({ reconcile, routeEvent, taskModel } = createForemanWss(queue, registry, server, {
     taskLabel: TASK_LABEL,
     reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs,
+    pingIntervalMs: defaultCfg.pingIntervalMs,
   }));
 });
 
@@ -82,6 +83,7 @@ describe("reconcile()", () => {
     const { reconcile: rec2, taskModel: taskModel2 } = createForemanWss(queue, registry, server2, {
       taskLabel: TASK_LABEL,
       reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs,
+      pingIntervalMs: defaultCfg.pingIntervalMs,
       taskStore: mockStore as any,
     });
 
@@ -171,6 +173,7 @@ describe("reconcile()", () => {
     const { reconcile: spyReconcile } = createForemanWss(spyQueue, spyRegistry, spyServer, {
       taskLabel: TASK_LABEL,
       reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs,
+      pingIntervalMs: defaultCfg.pingIntervalMs,
       taskStore: mockStore,
     });
 
@@ -288,6 +291,7 @@ describe("issues/closed — task lifecycle", () => {
     const { routeEvent: re2, taskModel: tm2 } = createForemanWss(q2, r2, s2, {
       taskLabel: TASK_LABEL,
       reclaimTimeoutMs: 30000,
+      pingIntervalMs: defaultCfg.pingIntervalMs,
       taskStore: mockStore as any,
     });
 
