@@ -58,6 +58,8 @@ const BrunelConfigSchema = z.object({
   repoUrl:        z.string().optional(),
   /** Claude model alias (e.g. 'sonnet', 'opus') or full model ID (e.g. 'claude-sonnet-4-6'). */
   model:          z.string().optional(),
+  /** Effort level for Claude's thinking/reasoning: low, medium, high, max, or auto (default). */
+  effort:         z.enum(["low", "medium", "high", "max", "auto"]).optional(),
 
   // ── Cloud deployment ───────────────────────────────────────────────────────
 
@@ -71,9 +73,11 @@ const BrunelConfigSchema = z.object({
   workerReclaimTimeoutMs: z.coerce.number().int().positive().default(DEFAULT_WORKER_RECLAIM_TIMEOUT_MS),
 });
 
-export type BrunelConfig = Omit<z.infer<typeof BrunelConfigSchema>, "thinkOutLoud"> & {
+export type BrunelConfig = Omit<z.infer<typeof BrunelConfigSchema>, "thinkOutLoud" | "effort"> & {
   thinkOutLoud: boolean;
   allowDangerouslySkipPermissions: boolean;
+  /** Resolved effort level. "auto" in config is normalized to undefined here. */
+  effort?: "low" | "medium" | "high" | "max";
 };
 
 // ── Cosmiconfig explorer ──────────────────────────────────────────────────────
@@ -264,6 +268,7 @@ export async function loadConfig(
     ...parsed,
     thinkOutLoud: parsed.thinkOutLoud ?? parsed.verbose,
     allowDangerouslySkipPermissions: parsed.permissionMode === "bypassPermissions",
+    effort: parsed.effort === "auto" ? undefined : parsed.effort,
   };
 }
 

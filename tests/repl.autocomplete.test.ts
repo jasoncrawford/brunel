@@ -317,7 +317,7 @@ describe("listCommandNames", () => {
 
   it("returns only builtins when directory is missing", () => {
     const result = listCommandNames(() => null);
-    expect(result).toEqual(["clear", "create-workspace", "exit", "model", "prune", "remove-workspace", "reset-workspace"]);
+    expect(result).toEqual(["clear", "create-workspace", "effort", "exit", "model", "prune", "remove-workspace", "reset-workspace"]);
   });
 
   it("includes a file at root level", () => {
