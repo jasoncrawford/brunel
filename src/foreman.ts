@@ -1095,12 +1095,11 @@ export function createForemanWss(
 
   const wss = new WebSocketServer({ noServer: true });
 
-  const PING_INTERVAL_MS = options.pingIntervalMs;
   const pingTimer = setInterval(() => {
     for (const client of wss.clients) {
       if (client.readyState === WebSocket.OPEN) client.ping();
     }
-  }, PING_INTERVAL_MS);
+  }, options.pingIntervalMs);
   wss.on("close", () => clearInterval(pingTimer));
 
   wss.on("connection", (ws) => {
