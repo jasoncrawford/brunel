@@ -258,6 +258,8 @@ export interface TaskStore {
   deleteTask(taskId: string): Promise<void>;
   /** Update PR number and branch for a task. Pass null to clear. */
   updateTaskPr(taskId: string, prNumber: number | null, branch: string | null): Promise<void>;
+  /** Fetch a single task by ID, or null if not found. */
+  getTask(taskId: string): Promise<TaskRow | null>;
   /** List tasks, optionally filtered by status. */
   listTasks(opts?: ListTasksOpts): Promise<TaskRow[]>;
 }
@@ -356,6 +358,15 @@ export function createTaskStore(supabase: SupabaseClient): TaskStore {
       if (error) throw error;
     },
 
+    async getTask(taskId) {
+      const { data, error } = await supabase.from("tasks")
+        .select("task_id, issue_number, repo, title, body, labels, status, worker_id, pr_number, branch, created_at, assigned_at, completed_at")
+        .eq("task_id", taskId)
+        .maybeSingle();
+      if (error) throw error;
+      return data ? rowToTaskRow(data as Record<string, unknown>) : null;
+    },
+
     async listTasks(opts) {
       const limit = opts?.limit ?? 200;
       let q = supabase.from("tasks").select(
@@ -379,6 +390,7 @@ export function createNullTaskStore(): TaskStore {
     async markBlocked() {},
     async deleteTask() {},
     async updateTaskPr() {},
+    async getTask() { return null; },
     async listTasks() { return []; },
   };
 }
