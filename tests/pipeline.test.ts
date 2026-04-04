@@ -215,7 +215,7 @@ function buildForeman(opts: {
   registry: WorkerRegistry;
   httpServer: http.Server;
   wss: WebSocketServer;
-  routeEvent: (id: string, name: string, payload: unknown) => void;
+  routeEvent: (id: string, name: string, payload: unknown) => Promise<void>;
   port: number;
   openClients: WebSocket[];
   connect: () => Promise<WebSocket>;
@@ -309,7 +309,7 @@ describe("pipeline: happy path and queued-then-assigned", () => {
     const { queue, routeEvent, connect } = foreman;
 
     // 1. Webhook fires; foreman enqueues the task
-    routeEvent("evt-1", "issues", labeledPayload(42));
+    await routeEvent("evt-1", "issues", labeledPayload(42));
 
     // 2. Task row appears in DB with status=pending
     const pendingRow = await pollUntil(() => getDbTask("42"));
@@ -351,7 +351,7 @@ describe("pipeline: happy path and queued-then-assigned", () => {
     const { routeEvent, connect } = foreman;
 
     // 1. Webhook fires but no worker is connected
-    routeEvent("evt-1", "issues", labeledPayload(55));
+    await routeEvent("evt-1", "issues", labeledPayload(55));
 
     // 2. Task appears as pending in DB
     const pendingRow = await pollUntil(() => getDbTask("55"));
@@ -406,7 +406,7 @@ describe("pipeline: worker disconnect/reclaim (within reclaim window)", () => {
     const { routeEvent, connect, openClients } = foreman;
 
     // 1. Assign task to a worker
-    routeEvent("evt-1", "issues", labeledPayload(70));
+    await routeEvent("evt-1", "issues", labeledPayload(70));
     const ws1 = await connect();
     const q1 = makeQueue(ws1);
     send(ws1, { type: "worker_hello", workerId: "w-reclaim", status: "idle" });
@@ -478,7 +478,7 @@ describe("pipeline: worker disconnect/expire (reclaim timer fires)", () => {
     const { queue, routeEvent, connect, openClients } = foreman;
 
     // 1. Assign task to first worker
-    routeEvent("evt-1", "issues", labeledPayload(80));
+    await routeEvent("evt-1", "issues", labeledPayload(80));
     const ws1 = await connect();
     const q1 = makeQueue(ws1);
     send(ws1, { type: "worker_hello", workerId: "w-expire", status: "idle" });
@@ -586,7 +586,7 @@ describe("pipeline: dependency blocking", () => {
     expect((ack as any).status).toBe("idle");
 
     // 2. Issue #92 depends on issue #91 (via body text). Issue #91 is open.
-    routeEvent("evt-1", "issues", labeledPayload(92, "Depends on #91"));
+    await routeEvent("evt-1", "issues", labeledPayload(92, "Depends on #91"));
 
     // 3. Wait for the task row to appear in DB as pending (deps loaded, but blocked)
     await pollUntil(() => getDbTask("92"));
@@ -597,7 +597,7 @@ describe("pipeline: dependency blocking", () => {
     expect(q.isEmpty()).toBe(true);
 
     // 5. Close the blocker issue — this unblocks task #92
-    routeEvent("evt-2", "issues", closedPayload(91));
+    await routeEvent("evt-2", "issues", closedPayload(91));
 
     // 6. Worker now receives task_assigned
     const assigned = await q.next();
@@ -645,7 +645,7 @@ describe("pipeline: PR events forwarded and logged to DB", () => {
     const { routeEvent, connect } = foreman;
 
     // 1. Get a task assigned to a worker
-    routeEvent("evt-1", "issues", labeledPayload(100));
+    await routeEvent("evt-1", "issues", labeledPayload(100));
     const ws = await connect();
     const q = makeQueue(ws);
     send(ws, { type: "worker_hello", workerId: "w-pr", status: "idle" });
@@ -653,11 +653,11 @@ describe("pipeline: PR events forwarded and logged to DB", () => {
     await q.next(); // task_assigned
 
     // 2. Worker opens a PR that closes issue #100 (now also forwarded as event_notification)
-    routeEvent("evt-pr", "pull_request", prOpenedPayload(20, "Closes #100"));
+    await routeEvent("evt-pr", "pull_request", prOpenedPayload(20, "Closes #100"));
     await q.next(); // pull_request event_notification
 
     // 3. A check_run fires for PR #20
-    routeEvent("evt-cr", "check_run", checkRunPayload(20));
+    await routeEvent("evt-cr", "check_run", checkRunPayload(20));
 
     // 4. Worker receives event_notification
     const evtMsg = await q.next();
