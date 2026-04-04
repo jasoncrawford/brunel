@@ -474,6 +474,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       logFile: LOG_FILE,
       model: config.model,
       effort: config.effort,
+      pingIntervalMs: config.pingIntervalMs,
     });
   } else {
     void main(permConfig, workspaceCfg, config.model, config.effort);

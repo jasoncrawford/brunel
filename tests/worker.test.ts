@@ -9,6 +9,11 @@ import { stripAnsi } from "./helpers.js";
 class FakeWs extends EventEmitter {
   readyState = 1; // OPEN
   send = vi.fn();
+  ping = vi.fn();
+  terminate = vi.fn().mockImplementation(() => {
+    this.readyState = 3; // CLOSED
+    this.emit("close", 1006, Buffer.from(""));
+  });
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -1651,5 +1656,133 @@ describe("interrupt()", () => {
     await session.waitUntilIdle();
 
     expect(session.interrupt()).toBe(false);
+  });
+});
+
+// ── Heartbeat / ping-pong ──────────────────────────────────────────────────────
+
+describe("heartbeat", () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  function makeHeartbeatSession(pingIntervalMs = 100) {
+    const ws = new FakeWs();
+    const factory = vi.fn().mockReturnValue(ws);
+    const s = new WorkerSession(WORKER_ID, factory, vi.fn().mockResolvedValue("s"), display, { pingIntervalMs });
+    s.start();
+    return { ws, factory, s };
+  }
+
+  it("sends a ping after the interval when the socket is open", () => {
+    vi.useFakeTimers();
+    const { ws } = makeHeartbeatSession(100);
+    ws.emit("open");
+    sendMsg(ws, { type: "hello_ack", status: "idle" });
+
+    expect(ws.ping).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(100);
+    expect(ws.ping).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the connection alive when a pong is received before the next ping tick", () => {
+    vi.useFakeTimers();
+    const { ws } = makeHeartbeatSession(100);
+    ws.emit("open");
+    sendMsg(ws, { type: "hello_ack", status: "idle" });
+
+    vi.advanceTimersByTime(100); // first ping sent, isAlive set to false
+    ws.emit("pong");             // pong received, isAlive reset to true
+    vi.advanceTimersByTime(100); // second tick: isAlive is true → keeps connection
+
+    expect(ws.terminate).not.toHaveBeenCalled();
+  });
+
+  it("keeps the connection alive when an incoming ping from the foreman resets liveness", () => {
+    vi.useFakeTimers();
+    const { ws } = makeHeartbeatSession(100);
+    ws.emit("open");
+    sendMsg(ws, { type: "hello_ack", status: "idle" });
+
+    vi.advanceTimersByTime(100); // first ping sent, isAlive set to false
+    ws.emit("ping");             // foreman's heartbeat ping resets isAlive to true
+    vi.advanceTimersByTime(100); // second tick: isAlive is true → keeps connection
+
+    expect(ws.terminate).not.toHaveBeenCalled();
+  });
+
+  it("terminates the connection when no pong is received after a ping", () => {
+    vi.useFakeTimers();
+    const { ws } = makeHeartbeatSession(100);
+    ws.emit("open");
+    sendMsg(ws, { type: "hello_ack", status: "idle" });
+
+    vi.advanceTimersByTime(100); // first ping sent, isAlive set to false
+    // no pong emitted
+    vi.advanceTimersByTime(100); // second tick: isAlive is false → terminate
+
+    expect(ws.terminate).toHaveBeenCalledOnce();
+  });
+
+  it("shows Disconnected in status text after heartbeat timeout", () => {
+    vi.useFakeTimers();
+    const { ws, s } = makeHeartbeatSession(100);
+    ws.emit("open");
+    sendMsg(ws, { type: "hello_ack", status: "idle" });
+    expect(stripAnsi(s.getStatusText())).toContain("Connected");
+
+    vi.advanceTimersByTime(100); // ping sent
+    vi.advanceTimersByTime(100); // no pong → terminate → close fires
+
+    expect(stripAnsi(s.getStatusText())).toContain("Disconnected");
+  });
+
+  it("reconnects after heartbeat timeout", () => {
+    vi.useFakeTimers();
+    const { ws, factory } = makeHeartbeatSession(100);
+    ws.emit("open");
+    sendMsg(ws, { type: "hello_ack", status: "idle" });
+
+    vi.advanceTimersByTime(100); // ping sent
+    vi.advanceTimersByTime(100); // no pong → terminate
+    vi.advanceTimersByTime(5000); // reconnect delay
+
+    expect(factory).toHaveBeenCalledTimes(2); // initial + one reconnect
+  });
+
+  it("resets the ping interval when a pong is received mid-cycle", () => {
+    vi.useFakeTimers();
+    const { ws } = makeHeartbeatSession(100);
+    ws.emit("open");
+    sendMsg(ws, { type: "hello_ack", status: "idle" });
+
+    vi.advanceTimersByTime(100); // first ping sent
+    expect(ws.ping).toHaveBeenCalledOnce();
+
+    ws.emit("pong");             // resets the timer
+    ws.ping.mockClear();
+
+    // Only 50ms after reset — no ping should fire yet
+    vi.advanceTimersByTime(50);
+    expect(ws.ping).not.toHaveBeenCalled();
+
+    // Full interval after reset — now the next ping fires
+    vi.advanceTimersByTime(50);
+    expect(ws.ping).toHaveBeenCalledOnce();
+  });
+
+  it("stops the ping timer when the socket closes", () => {
+    vi.useFakeTimers();
+    const { ws } = makeHeartbeatSession(100);
+    ws.emit("open");
+    sendMsg(ws, { type: "hello_ack", status: "idle" });
+
+    vi.advanceTimersByTime(100); // first ping sent
+
+    // Socket closes normally before the second tick
+    ws.emit("close", 1000, Buffer.from(""));
+    ws.ping.mockClear();
+
+    // Even after another interval, no more pings sent on the closed socket
+    vi.advanceTimersByTime(100);
+    expect(ws.ping).not.toHaveBeenCalled();
   });
 });
