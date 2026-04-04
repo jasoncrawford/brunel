@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { handleModelCommand, setCachedModels, _resetCachedModels, getCachedModels } from "../src/model.js";
+import { handleModelCommand, setCachedModels, _resetCachedModels, getCachedModels, findModel } from "../src/model.js";
 import type { PickModelResult } from "../src/input.js";
 import { stripAnsi } from "./helpers.js";
 
@@ -170,5 +170,38 @@ describe("display names", () => {
     expect(options[0]).toMatch(/^Sonnet 4\.6/);
     expect(options[1]).toMatch(/^Opus 4\.6/);
     expect(options[2]).toMatch(/^Haiku 4\.5/);
+  });
+});
+
+// ── findModel matching ──────────────────────────────────────────────────────
+
+describe("findModel", () => {
+  const DATED_MODELS = [
+    { value: "claude-sonnet-4-6-20250514", displayName: "Sonnet 4.6", description: "" },
+    { value: "claude-opus-4-6-20250514", displayName: "Opus 4.6", description: "" },
+  ];
+
+  it("exact match", () => {
+    expect(findModel(MODELS, "claude-opus-4-6")?.value).toBe("claude-opus-4-6");
+  });
+
+  it("value starts with input (prefix match)", () => {
+    expect(findModel(DATED_MODELS, "claude-opus-4-6")?.displayName).toBe("Opus 4.6");
+  });
+
+  it("input starts with value", () => {
+    expect(findModel(MODELS, "claude-opus-4-6-20250514")?.value).toBe("claude-opus-4-6");
+  });
+
+  it("alias without claude- prefix", () => {
+    expect(findModel(MODELS, "sonnet")?.value).toBe("claude-sonnet-4-6");
+  });
+
+  it("substring match (value contains input)", () => {
+    expect(findModel(DATED_MODELS, "opus-4-6")?.displayName).toBe("Opus 4.6");
+  });
+
+  it("returns undefined for no match", () => {
+    expect(findModel(MODELS, "gpt-4")).toBeUndefined();
   });
 });

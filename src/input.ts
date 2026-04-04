@@ -1285,6 +1285,7 @@ export async function pickModel(
       for (const ch of data) {
         if (textMode) {
           if (ch === "\r" || ch === "\n") {
+            process.stdout.write("\r\n"); // move cursor past the menu
             finish({ type: "other", text: textBuf });
             return;
           } else if (ch === "\x10") { navigateTo((idx - 1 + count) % count); }
@@ -1306,6 +1307,7 @@ export async function pickModel(
           else if (ch === "\x11") { navigateTo((idx + 1) % count); }
           else if (ch === "\r" || ch === "\n") {
             if (idx === otherIdx) {
+              process.stdout.write("\r\n"); // move cursor past the menu
               finish({ type: "other", text: textBuf });
             } else {
               finish({ type: "selected", index: idx });

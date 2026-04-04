@@ -17,13 +17,20 @@ export function _resetCachedModels(): void { _cachedModels = null; }
 
 // ── Matching ─────────────────────────────────────────────────────────────────
 
-/** Find a model by exact value, prefix, or alias (e.g. "sonnet" → "claude-sonnet-*"). */
+/**
+ * Find a model by value match. Tries, in order:
+ * 1. Exact match on value
+ * 2. Value starts with input (e.g. input "claude-opus-4-6" matches "claude-opus-4-6-20250514")
+ * 3. Input starts with value (e.g. input "claude-opus-4-6-20250514" matches value "claude-opus-4-6")
+ * 4. Value starts with "claude-" + input (alias: "sonnet" → "claude-sonnet-*")
+ * 5. Value contains input or input contains value (substring match)
+ */
 export function findModel(models: ModelInfo[], input: string): ModelInfo | undefined {
-  return models.find(
-    m => m.value === input
-      || m.value.startsWith(input)
-      || m.value.startsWith(`claude-${input}`)
-  );
+  return models.find(m => m.value === input)
+    ?? models.find(m => m.value.startsWith(input))
+    ?? models.find(m => input.startsWith(m.value))
+    ?? models.find(m => m.value.startsWith(`claude-${input}`))
+    ?? models.find(m => m.value.includes(input) || input.includes(m.value));
 }
 
 // ── Model selection ──────────────────────────────────────────────────────────
