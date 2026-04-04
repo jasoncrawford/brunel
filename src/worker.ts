@@ -178,7 +178,7 @@ export type WorkerSessionOptions = {
   afterTask?: () => Promise<void>;
   workspaceCtx?: WorkspaceCtx;
   /** Interval in ms between worker-sent pings. Dead connections are detected after
-   * one interval with no pong. Defaults to 25 000 ms (matches the foreman's interval). */
+   * one interval with no pong. Default is set in the config schema (pingIntervalMs). */
   pingIntervalMs?: number;
 };
 
@@ -479,23 +479,33 @@ export class WorkerSession {
       this.statusModel.update({ connectionStatus: "handshaking" });
 
       // Heartbeat: detect silent connection drops (network loss, laptop sleep, etc.)
-      // The first tick sends the initial ping. If no pong arrives before the next
-      // tick, the connection is terminated so the status bar updates and reconnect runs.
+      // Each tick sends a ping. If no pong/ping arrives before the next tick, the
+      // connection is terminated so the status bar updates and reconnect runs.
+      // Receiving any frame (pong from our ping, or ping from the foreman's heartbeat)
+      // resets the timer so the next check is a full interval away.
       isAlive = true;
-      // Any incoming frame (pong from our ping, or ping from the foreman's heartbeat)
-      // proves the connection is alive. Listening to both avoids sending a redundant
-      // ping when the foreman already pinged us in the same interval.
-      ws.on("pong", () => { isAlive = true; });
-      ws.on("ping", () => { isAlive = true; });
-      pingTimer = setInterval(() => {
-        if (!isAlive) {
-          clearPingTimer();
-          ws.terminate();
-          return;
-        }
-        isAlive = false;
-        ws.ping();
-      }, pingIntervalMs);
+
+      const startPingTimer = () => {
+        clearPingTimer();
+        pingTimer = setInterval(() => {
+          if (!isAlive) {
+            clearPingTimer();
+            ws.terminate();
+            return;
+          }
+          isAlive = false;
+          ws.ping();
+        }, pingIntervalMs);
+      };
+
+      const resetLiveness = () => {
+        isAlive = true;
+        startPingTimer();
+      };
+
+      ws.on("pong", resetLiveness);
+      ws.on("ping", resetLiveness);
+      startPingTimer();
     });
 
     ws.on("message", (data: Buffer | string) => {
@@ -702,6 +712,7 @@ export async function workerMain(
     logFile: string;
     model?: string;
     effort?: EffortValue;
+    pingIntervalMs: number;
   },
 ): Promise<void> {
   const FOREMAN_URL = config.foremanUrl;
@@ -768,6 +779,7 @@ export async function workerMain(
   const session = new WorkerSession(workerId, wsFactory, runQueryFn, workerDisplay, {
     afterTask,
     workspaceCtx: { workspace, originalCwd, workspaceDir, repoUrl, confirm },
+    pingIntervalMs: config.pingIntervalMs,
   });
   session.currentModel = config.model;
   session.currentEffort = config.effort;

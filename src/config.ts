@@ -36,6 +36,8 @@ const BrunelConfigSchema = z.object({
   verbose:        z.preprocess(boolPreprocess, z.boolean()).default(false),
   /** Show full agent thinking text. Defaults to the value of verbose. */
   thinkOutLoud:   z.preprocess(boolPreprocess, z.boolean()).optional(),
+  /** Interval in ms between pings. Used by both foreman and worker to detect dead connections. */
+  pingIntervalMs: z.coerce.number().int().positive().default(25_000),
 
   // ── Foreman-only ───────────────────────────────────────────────────────────
 

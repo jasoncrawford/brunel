@@ -1748,6 +1748,27 @@ describe("heartbeat", () => {
     expect(factory).toHaveBeenCalledTimes(2); // initial + one reconnect
   });
 
+  it("resets the ping interval when a pong is received mid-cycle", () => {
+    vi.useFakeTimers();
+    const { ws } = makeHeartbeatSession(100);
+    ws.emit("open");
+    sendMsg(ws, { type: "hello_ack", status: "idle" });
+
+    vi.advanceTimersByTime(100); // first ping sent
+    expect(ws.ping).toHaveBeenCalledOnce();
+
+    ws.emit("pong");             // resets the timer
+    ws.ping.mockClear();
+
+    // Only 50ms after reset — no ping should fire yet
+    vi.advanceTimersByTime(50);
+    expect(ws.ping).not.toHaveBeenCalled();
+
+    // Full interval after reset — now the next ping fires
+    vi.advanceTimersByTime(50);
+    expect(ws.ping).toHaveBeenCalledOnce();
+  });
+
   it("stops the ping timer when the socket closes", () => {
     vi.useFakeTimers();
     const { ws } = makeHeartbeatSession(100);

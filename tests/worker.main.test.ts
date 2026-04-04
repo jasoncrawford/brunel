@@ -55,6 +55,7 @@ const WORKER_CONFIG = {
   permissionMode: "bypassPermissions" as const,
   verbose: true,
   logFile: "worker.log",
+  pingIntervalMs: 25_000,
 };
 
 async function runWorkerMain(): Promise<{ exitCalled: boolean; exitCode: number | undefined }> {
