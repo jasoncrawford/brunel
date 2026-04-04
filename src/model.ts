@@ -153,9 +153,11 @@ export async function handleModelCommand(
 
   if (result.type === "other") {
     if (!result.text) return currentModel;
-    // "Other" accepts any string — for entering full model IDs not in the
-    // standard list (e.g. claude-sonnet-4-6-20250514). Resolve to alias if
-    // recognized, otherwise pass through as-is.
+    const error = validateModel(models, result.text);
+    if (error) {
+      print(display.c.boldRed(error));
+      return currentModel;
+    }
     const { value, displayName } = resolveModel(models, result.text);
     print(display.c.darkGray(`Model set to ${displayName}.`));
     return value;

@@ -35,6 +35,14 @@ describe("/model <arg> (direct set)", () => {
     expect(printed.join("")).toContain("Opus 4.6");
   });
 
+  it("shows resolved display name for substring match", async () => {
+    setCachedModels(MODELS);
+    const result = await handleModelCommand("claude-haiku-4-5", undefined, noopPick, undefined, print);
+    expect(result).toBe("haiku");
+    expect(printed.join("")).toContain("Haiku 4.5");
+    expect(printed.join("")).not.toContain("claude-haiku-4-5");
+  });
+
   it("rejects unknown alias when cache is available", async () => {
     setCachedModels(MODELS);
     const result = await handleModelCommand("unknown", "opus", noopPick, undefined, print);
@@ -154,6 +162,15 @@ describe("/model (interactive picker)", () => {
     const result = await handleModelCommand("", "opus", pickFn, undefined, print);
     expect(result).toBe("claude-custom-model-2025");
     expect(printed.join("")).toContain("claude-custom-model-2025");
+  });
+
+  it("Other with invalid string rejects", async () => {
+    setCachedModels(MODELS);
+    const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickResult>>()
+      .mockResolvedValue({ type: "other", text: "not-a-model" });
+    const result = await handleModelCommand("", "opus", pickFn, undefined, print);
+    expect(result).toBe("opus"); // unchanged
+    expect(printed.join("")).toContain("Unknown model");
   });
 
   it("Other with empty input preserves current", async () => {
