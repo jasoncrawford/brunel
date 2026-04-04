@@ -12,7 +12,7 @@ import { ask, listCommandNames, dispatchInput, pick, pickMultiple, pickQuestion 
 import type { PickQuestionResult } from "./input.js";
 import { workerMain } from "./worker.js";
 import type { RunQuery } from "./worker.js";
-import { loadConfig } from "./config.js";
+import { loadConfig, MODEL_ALIASES } from "./config.js";
 import { Workspace, confirmIfUnsafe } from "./workspace.js";
 import { fmtError } from "./utils.js";
 export { parseSlashCommand, resolveCommandFilePath, resolveContent, dispatchInput, matchCommands, listCommandNames, listWorkerCommandNames, ask } from "./input.js";
@@ -83,6 +83,7 @@ export async function runQuery(
   prompt: string,
   sessionId: string | undefined,
   abortController?: AbortController,
+  model?: string,
 ): Promise<string | undefined> {
   logFull("QUERY", { prompt, sessionId });
   // Save and clear the input print callback while the query runs. In worker
@@ -136,6 +137,7 @@ export async function runQuery(
       abortController: ac,
       ...(permConfig.allowDangerouslySkipPermissions ? { allowDangerouslySkipPermissions: true } : {}),
       ...(sessionId ? { resume: sessionId } : {}),
+      ...(model ? { model } : {}),
     },
   });
 
@@ -290,6 +292,7 @@ export async function handleWorkspaceAction(
 async function main(
   permConfig: { permissionMode: PermissionMode; allowDangerouslySkipPermissions: boolean },
   workspaceCfg?: { workspaceDir: string; repoUrl: string },
+  initialModel?: string,
 ): Promise<void> {
   process.stdout.write("\x1b[?2004h"); // enable bracketed paste mode
   process.stdin.setRawMode(true);
@@ -297,6 +300,7 @@ async function main(
   process.stdin.setEncoding("utf8");
 
   let sessionId: string | undefined;
+  let currentModel: string | undefined = initialModel;
   const sessionId_ = crypto.randomUUID();
   const originalCwd = process.cwd();
   let workspace: Workspace | undefined = undefined;
@@ -360,6 +364,24 @@ async function main(
       continue;
     }
 
+    if (action.type === "model") {
+      const labels = MODEL_ALIASES.map(a =>
+        a === currentModel ? `${a} (current)` : a
+      );
+      const defaultLabel = currentModel ? "default" : "default (current)";
+      const options = [defaultLabel, ...labels];
+      display.print(display.c.skyBlue("\nSelect model:"));
+      const idx = await pick(options);
+      if (idx === 0) {
+        currentModel = undefined;
+        display.print(display.c.sageGreen("Model set to default."));
+      } else {
+        currentModel = MODEL_ALIASES[idx - 1];
+        display.print(display.c.sageGreen(`Model set to ${currentModel}.`));
+      }
+      continue;
+    }
+
     if (
       action.type === "create-workspace" ||
       action.type === "reset-workspace" ||
@@ -377,7 +399,7 @@ async function main(
     if (action.type !== "query") continue;
 
     try {
-      sessionId = await runQuery(permConfig, action.prompt, sessionId);
+      sessionId = await runQuery(permConfig, action.prompt, sessionId, undefined, currentModel);
     } catch (err) {
       console.error(display.c.boldRed(`\nERROR: ${fmtError(err)}`));
       logFull("ERROR", err instanceof Error ? { message: err.message, stack: err.stack } : err);
@@ -393,8 +415,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     permissionMode: config.permissionMode,
     allowDangerouslySkipPermissions: config.allowDangerouslySkipPermissions,
   };
-  const boundRunQuery: RunQuery = (prompt, sessionId, ac) =>
-    runQuery(permConfig, prompt, sessionId, ac);
+  const boundRunQuery: RunQuery = (prompt, sessionId, ac, model) =>
+    runQuery(permConfig, prompt, sessionId, ac, model);
 
   const workspaceCfg = (config.githubRepo && config.githubToken)
     ? {
@@ -413,8 +435,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       permissionMode: config.permissionMode,
       verbose: config.verbose,
       logFile: LOG_FILE,
+      model: config.model,
     });
   } else {
-    void main(permConfig, workspaceCfg);
+    void main(permConfig, workspaceCfg, config.model);
   }
 }

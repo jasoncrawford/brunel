@@ -8,6 +8,7 @@ import { WebSocket } from "ws";
 import * as display from "./display.js";
 import { buildInitialPrompt, buildEventPrompt } from "./templates.js";
 import { ask, listWorkerCommands, dispatchInput, pick } from "./input.js";
+import { MODEL_ALIASES } from "./config.js";
 import type { ForemanMessage, GitHubEvent, TaskIssue, WorkerMessage } from "./types.js";
 import type { PermissionMode } from "@anthropic-ai/claude-agent-sdk";
 import { Workspace, confirmIfUnsafe } from "./workspace.js";
@@ -152,7 +153,7 @@ export class WorkerStatusModel extends EventEmitter {
 // ── WorkerSession ─────────────────────────────────────────────────────────────
 
 export type WsFactory = (workerId: string, taskId?: string) => WebSocket;
-export type RunQuery = (prompt: string, sessionId: string | undefined, abortController?: AbortController) => Promise<string | undefined>;
+export type RunQuery = (prompt: string, sessionId: string | undefined, abortController?: AbortController, model?: string) => Promise<string | undefined>;
 export type WorkerDisplay = {
   print: (line: string | null) => void;
   printForemanMessage: (msg: ForemanMessage) => void;
@@ -201,6 +202,7 @@ export class WorkerSession {
   // behave as if already registered.
   private connectionState: "hello_sent" | "registered" = "registered";
   private bufferedMessages: BufferableMessage[] = [];
+  private _currentModel: string | undefined;
 
   // Reactive status bar model: emits "change" on any state mutation, so the
   // display subscription in start() automatically refreshes without manual calls.
@@ -215,6 +217,9 @@ export class WorkerSession {
   ) {
     this.statusModel = new WorkerStatusModel(workerId);
   }
+
+  get currentModel(): string | undefined { return this._currentModel; }
+  set currentModel(model: string | undefined) { this._currentModel = model; }
 
   /** Returns the formatted worker status bar text. Used by startPersistentStatus and tests. */
   getStatusText(): string {
@@ -384,6 +389,24 @@ export class WorkerSession {
       } else {
         for (const dir of removed) this.display.print(display.c.darkGray(`  Removed: ${dir}`));
         this.display.print(display.c.sageGreen(`Pruned ${removed.length} orphaned workspace(s).`));
+      }
+      return;
+    }
+
+    if (action.type === "model") {
+      const labels = MODEL_ALIASES.map(a =>
+        a === this._currentModel ? `${a} (current)` : a
+      );
+      const defaultLabel = this._currentModel ? "default" : "default (current)";
+      const options = [defaultLabel, ...labels];
+      this.display.print(display.c.skyBlue("\nSelect model:"));
+      const idx = await pick(options);
+      if (idx === 0) {
+        this._currentModel = undefined;
+        this.display.print(display.c.sageGreen("Model set to default."));
+      } else {
+        this._currentModel = MODEL_ALIASES[idx - 1];
+        this.display.print(display.c.sageGreen(`Model set to ${this._currentModel}.`));
       }
       return;
     }
@@ -574,7 +597,7 @@ export class WorkerSession {
       this.isRunningQuery = true;
       let queryFailed = false;
       try {
-        this.currentSessionId = await this.runQuery(initialPrompt, this.currentSessionId, ac) ?? this.currentSessionId;
+        this.currentSessionId = await this.runQuery(initialPrompt, this.currentSessionId, ac, this._currentModel) ?? this.currentSessionId;
       } catch (err) {
         if (err instanceof Error && /aborted by user/i.test(err.message)) return;
         this.display.print(display.c.boldRed(`\nERROR: ${fmtError(err)}`));
@@ -595,7 +618,7 @@ export class WorkerSession {
         const prompt = this.buildAndLogEventPrompt(events);
         this.isRunningQuery = true;
         try {
-          this.currentSessionId = await this.runQuery(prompt, this.currentSessionId, eventAc) ?? this.currentSessionId;
+          this.currentSessionId = await this.runQuery(prompt, this.currentSessionId, eventAc, this._currentModel) ?? this.currentSessionId;
         } catch (err) {
           if (err instanceof Error && /aborted by user/i.test(err.message)) return;
           this.display.print(display.c.boldRed(`\nERROR: ${fmtError(err)}`));
@@ -633,6 +656,7 @@ export async function workerMain(
     permissionMode: PermissionMode;
     verbose: boolean;
     logFile: string;
+    model?: string;
   },
 ): Promise<void> {
   const FOREMAN_URL = config.foremanUrl;
@@ -700,6 +724,7 @@ export async function workerMain(
     afterTask,
     workspaceCtx: { workspace, originalCwd, workspaceDir, repoUrl, confirm },
   });
+  session.currentModel = config.model;
 
   // SIGINT: interrupt the running query if one is active; otherwise prompt and shut down.
   // This lets the user press ^C to interrupt a running tool without killing the worker.

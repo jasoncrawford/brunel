@@ -631,6 +631,36 @@ describe("runQuery - interrupt via ^C on stdin", () => {
   });
 });
 
+describe("runQuery - model option", () => {
+  it("passes model to SDK query options when provided", async () => {
+    mockQueryMessages([
+      { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } },
+    ]);
+    const cap = captureConsole();
+    try {
+      await runQuery(defaultPermConfig, "test", undefined, undefined, "opus");
+    } finally {
+      cap.restore();
+    }
+    const callArg = (query as any).mock.calls[0][0];
+    expect(callArg.options.model).toBe("opus");
+  });
+
+  it("omits model from SDK query options when undefined", async () => {
+    mockQueryMessages([
+      { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } },
+    ]);
+    const cap = captureConsole();
+    try {
+      await runQuery(defaultPermConfig, "test", undefined);
+    } finally {
+      cap.restore();
+    }
+    const callArg = (query as any).mock.calls[0][0];
+    expect(callArg.options.model).toBeUndefined();
+  });
+});
+
 describe("runQuery - prompt redraw after query (worker mode integration)", () => {
   it("redraws input prompt on stdout after query completes, not during query output", async () => {
     // In worker mode: ask() is waiting for input while runQuery runs in the background.

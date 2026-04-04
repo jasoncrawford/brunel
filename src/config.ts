@@ -3,6 +3,11 @@ import { z } from "zod";
 import type { PermissionMode } from "@anthropic-ai/claude-agent-sdk";
 import { fmtError } from "./utils.js";
 
+// ── Model aliases ─────────────────────────────────────────────────────────────
+
+/** Well-known model aliases accepted by the Claude Agent SDK. */
+export const MODEL_ALIASES = ["sonnet", "opus", "haiku"] as const;
+
 // ── Permission modes ──────────────────────────────────────────────────────────
 
 export const VALID_PERMISSION_MODES = [
@@ -56,6 +61,8 @@ const BrunelConfigSchema = z.object({
   workspaceDir:   z.string().optional(),
   /** Override the git repo URL used for workspace clones. Defaults to https://{token}@github.com/{repo}.git. */
   repoUrl:        z.string().optional(),
+  /** Claude model alias (e.g. 'sonnet', 'opus') or full model ID (e.g. 'claude-sonnet-4-6'). */
+  model:          z.string().optional(),
 
   // ── Cloud deployment ───────────────────────────────────────────────────────
 

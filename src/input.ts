@@ -55,6 +55,7 @@ const BUILTIN_COMMANDS = [
   { name: "reset-workspace"  as const, description: "Reset workspace to clean main branch"                  },
   { name: "remove-workspace" as const, description: "Remove the workspace checkout for this session"        },
   { name: "prune"            as const, description: "Remove orphaned worker workspace directories"          },
+  { name: "model"            as const, description: "Select the Claude model to use"                        },
 ];
 
 type BuiltinCommand = typeof BUILTIN_COMMANDS[number];

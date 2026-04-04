@@ -20,6 +20,7 @@ const ENV_KEYS = [
   "BRUNEL_FOREMAN_URL", "BRUNEL_PERMISSION_MODE",
   "BRUNEL_SUPABASE_URL", "BRUNEL_SUPABASE_SECRET_KEY", "BRUNEL_WORKER_SECRET",
   "BRUNEL_WORKSPACE_DIR", "BRUNEL_WORKER_RECLAIM_TIMEOUT_MS",
+  "BRUNEL_MODEL",
 ];
 
 beforeEach(() => {
@@ -472,5 +473,48 @@ describe("workerReclaimTimeoutMs", () => {
     process.env.BRUNEL_WORKER_RECLAIM_TIMEOUT_MS = "60000";
     const cfg = await loadConfig(["node", "repl.js"]);
     expect(cfg.workerReclaimTimeoutMs).toBe(60_000);
+  });
+});
+
+// ── model ────────────────────────────────────────────────────────────────────
+
+describe("model", () => {
+  it("is undefined by default", async () => {
+    baseEnv();
+    const cfg = await loadConfig(["node", "repl.js"]);
+    expect(cfg.model).toBeUndefined();
+  });
+
+  it("BRUNEL_MODEL sets model", async () => {
+    baseEnv();
+    process.env.BRUNEL_MODEL = "opus";
+    const cfg = await loadConfig(["node", "repl.js"]);
+    expect(cfg.model).toBe("opus");
+  });
+
+  it("--model CLI flag sets model", async () => {
+    baseEnv();
+    const cfg = await loadConfig(["node", "repl.js", "--model", "sonnet"]);
+    expect(cfg.model).toBe("sonnet");
+  });
+
+  it("CLI flag beats BRUNEL_MODEL", async () => {
+    baseEnv();
+    process.env.BRUNEL_MODEL = "haiku";
+    const cfg = await loadConfig(["node", "repl.js", "--model", "opus"]);
+    expect(cfg.model).toBe("opus");
+  });
+
+  it("BRUNEL_MODEL beats file config", async () => {
+    baseEnv();
+    process.env.BRUNEL_MODEL = "opus";
+    const cfg = await loadConfig(["node", "repl.js"], { model: "sonnet" });
+    expect(cfg.model).toBe("opus");
+  });
+
+  it("accepts full model IDs", async () => {
+    baseEnv();
+    const cfg = await loadConfig(["node", "repl.js", "--model", "claude-sonnet-4-6"]);
+    expect(cfg.model).toBe("claude-sonnet-4-6");
   });
 });
