@@ -1,5 +1,5 @@
 import * as display from "./display.js";
-import type { PickModelResult } from "./input.js";
+import type { PickResult } from "./input.js";
 
 // ── Model cache ──────────────────────────────────────────────────────────────
 
@@ -44,7 +44,7 @@ export type FetchModelsFn = () => Promise<ModelInfo[]>;
 export async function handleModelCommand(
   args: string,
   currentModel: string | undefined,
-  pickModelFn: (options: string[], currentIdx: number) => Promise<PickModelResult>,
+  pickModelFn: (options: string[], currentIdx: number) => Promise<PickResult>,
   fetchModelsFn: FetchModelsFn | undefined,
   print: (msg: string) => void,
 ): Promise<string | undefined> {

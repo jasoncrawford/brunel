@@ -886,34 +886,94 @@ export function ask(
 
 // ── Interactive pickers (raw-mode arrow-key menus) ─────────────────────────
 
-/** Formats a single picker row: adds ▶/space marker and dims non-selected rows. */
-function pickerLine(text: string, isSelected: boolean): string {
-  const prefix = isSelected ? "▶ " : "  ";
+/** Formats a single picker row: adds marker and dims non-selected rows. */
+function pickerLine(text: string, isSelected: boolean, marker?: string): string {
+  const prefix = isSelected ? "▶ " : (marker ?? "  ");
   const full = prefix + text;
   return isSelected ? full : display.s.dim(full);
 }
 
+export type PickConfig = {
+  /** Index of the "current" item — shows ✓ marker when not focused. */
+  currentIdx?: number;
+  /** Allow Escape to cancel (erases menu, returns { type: "cancelled" }). */
+  escapable?: boolean;
+  /** Treat the last option as an inline text-entry row ("Other:"). */
+  lastIsTextEntry?: boolean;
+};
+
+export type PickResult =
+  | { type: "selected"; index: number }
+  | { type: "other"; text: string }
+  | { type: "cancelled" };
+
 /**
- * Single-selection arrow-key picker. Returns the index of the chosen option.
- * Up/down arrows move the cursor; Enter confirms. Ctrl-C exits the process.
- * Assumes stdin is already in raw mode.
+ * Single-selection arrow-key picker. Assumes stdin is already in raw mode.
+ *
+ * Without config: returns the selected index (number).
+ * With config: returns a PickResult (supports escape, text entry, current marker).
  */
-export async function pick(options: string[], promptStr?: string): Promise<number> {
+export async function pick(options: string[]): Promise<number>;
+export async function pick(options: string[], config: PickConfig): Promise<PickResult>;
+export async function pick(options: string[], config?: PickConfig): Promise<number | PickResult> {
+  const currentIdx = config?.currentIdx ?? -1;
+  const escapable = config?.escapable ?? false;
+  const lastIsTextEntry = config?.lastIsTextEntry ?? false;
+  const hasConfig = config != null;
+
   return new Promise((resolve) => {
-    let idx = 0;
+    let idx = hasConfig && currentIdx >= 0 ? currentIdx : 0;
     let done = false;
     const count = options.length;
+    const otherIdx = lastIsTextEntry ? count - 1 : -1;
+    let textMode = false;
+    let textBuf = "";
 
-    if (promptStr) process.stdout.write(promptStr + "\n");
+    function renderLine(i: number): string {
+      const marker = (i === currentIdx) ? "✓ " : undefined;
+      const text = (i === otherIdx && textMode) ? `Other: ${textBuf}` : options[i];
+      return pickerLine(text, i === idx, marker);
+    }
+
     for (let i = 0; i < count; i++) {
-      process.stdout.write(pickerLine(options[i], i === idx) + "\n");
+      process.stdout.write(renderLine(i) + "\r\n");
+    }
+
+    function positionTextCursor() {
+      // Move up from below last line to Other row, position after "▶ Other: " + textBuf
+      process.stdout.write(`\x1b[${count - otherIdx}A\r\x1b[${10 + textBuf.length}C`);
     }
 
     function redraw() {
       process.stdout.write(`\x1b[${count}A\r`);
       for (let i = 0; i < count; i++) {
-        process.stdout.write(pickerLine(options[i], i === idx) + "\x1b[K\r\n");
+        process.stdout.write(renderLine(i) + "\x1b[K\r\n");
       }
+      if (idx === otherIdx && textMode) positionTextCursor();
+    }
+
+    function navigateTo(newIdx: number) {
+      if (idx === otherIdx && textMode) {
+        process.stdout.write(`\x1b[${count - otherIdx}B`);
+        textMode = false;
+        textBuf = "";
+      }
+      idx = newIdx;
+      if (idx === otherIdx) textMode = true;
+      redraw();
+    }
+
+    function eraseMenu() {
+      if (textMode) process.stdout.write(`\x1b[${count - otherIdx}B`);
+      process.stdout.write(`\x1b[${count}A\r`);
+      for (let i = 0; i < count; i++) process.stdout.write("\x1b[K\r\n");
+      process.stdout.write(`\x1b[${count}A\r`);
+    }
+
+    function finish(result: number | PickResult) {
+      done = true;
+      process.stdin.removeListener("data", onData);
+      resolve(result);
     }
 
     function onData(raw: string) {
@@ -921,18 +981,42 @@ export async function pick(options: string[], promptStr?: string): Promise<numbe
       let data = raw;
       data = data.replace(/\x1b\[A/g, "\x10"); // up arrow
       data = data.replace(/\x1b\[B/g, "\x11"); // down arrow
+
+      if (escapable && raw === "\x1b") {
+        eraseMenu();
+        finish({ type: "cancelled" });
+        return;
+      }
+
       data = data.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
       data = data.replace(/\x1b./gs, "");
+
       for (const ch of data) {
-        if (ch === "\x10") { idx = (idx - 1 + count) % count; redraw(); }
-        else if (ch === "\x11") { idx = (idx + 1) % count; redraw(); }
-        else if (ch === "\r" || ch === "\n") {
-          done = true;
-          process.stdin.removeListener("data", onData);
-          resolve(idx);
-        } else if (ch === "\x03") {
-          process.stdout.write("^C\r\n");
-          process.exit(0);
+        if (textMode) {
+          if (ch === "\r" || ch === "\n") {
+            process.stdout.write("\r\n");
+            finish({ type: "other", text: textBuf });
+            return;
+          } else if (ch === "\x10") { navigateTo((idx - 1 + count) % count); }
+          else if (ch === "\x11")   { navigateTo((idx + 1) % count); }
+          else if (ch === "\x7f" || ch === "\x08") {
+            if (textBuf.length > 0) { textBuf = textBuf.slice(0, -1); process.stdout.write("\x08 \x08"); }
+          } else if (ch === "\x03") { process.stdout.write("^C\r\n"); process.exit(0); }
+          else if (ch.charCodeAt(0) >= 32) { textBuf += ch; process.stdout.write(ch); }
+        } else {
+          if (ch === "\x10") { navigateTo((idx - 1 + count) % count); }
+          else if (ch === "\x11") { navigateTo((idx + 1) % count); }
+          else if (ch === "\r" || ch === "\n") {
+            if (idx === otherIdx) {
+              process.stdout.write("\r\n");
+              finish({ type: "other", text: textBuf });
+            } else if (hasConfig) {
+              finish({ type: "selected", index: idx });
+            } else {
+              finish(idx);
+            }
+            return;
+          } else if (ch === "\x03") { process.stdout.write("^C\r\n"); process.exit(0); }
         }
       }
     }
@@ -1183,144 +1267,3 @@ export async function pickQuestion(
   });
 }
 
-// ── Model picker ─────────────────────────────────────────────────────────────
-
-export type PickModelResult =
-  | { type: "selected"; index: number }
-  | { type: "other"; text: string }
-  | { type: "cancelled" };
-
-/**
- * Model selection picker with:
- * - ✓ in left margin for the current model (overwritten by ▶ when focused)
- * - Escape erases the menu and cancels
- * - "Other:" inline text entry row (last option)
- * - Up/Down to navigate, Enter to confirm
- */
-export async function pickModel(
-  options: string[],
-  currentIdx: number,
-): Promise<PickModelResult> {
-  return new Promise((resolve) => {
-    let idx = currentIdx >= 0 ? currentIdx : 0;
-    let done = false;
-    const count = options.length;
-    const otherIdx = count - 1;
-    let textMode = false;
-    let textBuf = "";
-
-    function renderLine(i: number): string {
-      const isSelected = i === idx;
-      const isCurrent = i === currentIdx;
-      // Margin: ▶ when selected, ✓ when current (not selected), space otherwise
-      const margin = isSelected ? "▶ " : (isCurrent ? "✓ " : "  ");
-      const text = (i === otherIdx && textMode) ? `Other: ${textBuf}` : options[i];
-      const full = margin + text;
-      return isSelected ? full : display.s.dim(full);
-    }
-
-    for (let i = 0; i < count; i++) {
-      process.stdout.write(renderLine(i) + "\r\n");
-    }
-
-    function positionTextCursor() {
-      // Move up from below last line to Other row, position after "▶ Other: " + textBuf
-      process.stdout.write(`\x1b[${count - otherIdx}A\r\x1b[${10 + textBuf.length}C`);
-    }
-
-    function redraw() {
-      process.stdout.write(`\x1b[${count}A\r`);
-      for (let i = 0; i < count; i++) {
-        process.stdout.write(renderLine(i) + "\x1b[K\r\n");
-      }
-      if (idx === otherIdx && textMode) positionTextCursor();
-    }
-
-    function navigateTo(newIdx: number) {
-      if (idx === otherIdx && textMode) {
-        process.stdout.write(`\x1b[${count - otherIdx}B`);
-        textMode = false;
-        textBuf = "";
-      }
-      idx = newIdx;
-      if (idx === otherIdx) textMode = true;
-      redraw();
-    }
-
-    function eraseMenu() {
-      // If text mode, move cursor back to below-last-line first
-      if (textMode) {
-        process.stdout.write(`\x1b[${count - otherIdx}B`);
-      }
-      // Move cursor up to first line and clear all rows
-      process.stdout.write(`\x1b[${count}A\r`);
-      for (let i = 0; i < count; i++) {
-        process.stdout.write("\x1b[K\r\n");
-      }
-      // Move back up to starting position
-      process.stdout.write(`\x1b[${count}A\r`);
-    }
-
-    function finish(result: PickModelResult) {
-      done = true;
-      process.stdin.removeListener("data", onData);
-      resolve(result);
-    }
-
-    function onData(raw: string) {
-      if (done) return;
-      let data = raw;
-      data = data.replace(/\x1b\[A/g, "\x10"); // up arrow
-      data = data.replace(/\x1b\[B/g, "\x11"); // down arrow
-      // Escape key: bare \x1b NOT followed by [ (which would be an arrow/CSI)
-      const hasEscape = raw === "\x1b";
-      data = data.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
-      data = data.replace(/\x1b./gs, "");
-      if (hasEscape) {
-        eraseMenu();
-        finish({ type: "cancelled" });
-        return;
-      }
-
-      for (const ch of data) {
-        if (textMode) {
-          if (ch === "\r" || ch === "\n") {
-            process.stdout.write("\r\n"); // move cursor past the menu
-            finish({ type: "other", text: textBuf });
-            return;
-          } else if (ch === "\x10") { navigateTo((idx - 1 + count) % count); }
-          else if (ch === "\x11")   { navigateTo((idx + 1) % count); }
-          else if (ch === "\x7f" || ch === "\x08") {
-            if (textBuf.length > 0) {
-              textBuf = textBuf.slice(0, -1);
-              process.stdout.write("\x08 \x08");
-            }
-          } else if (ch === "\x03") {
-            process.stdout.write("^C\r\n");
-            process.exit(0);
-          } else if (ch.charCodeAt(0) >= 32) {
-            textBuf += ch;
-            process.stdout.write(ch);
-          }
-        } else {
-          if (ch === "\x10") { navigateTo((idx - 1 + count) % count); }
-          else if (ch === "\x11") { navigateTo((idx + 1) % count); }
-          else if (ch === "\r" || ch === "\n") {
-            if (idx === otherIdx) {
-              process.stdout.write("\r\n"); // move cursor past the menu
-              finish({ type: "other", text: textBuf });
-            } else {
-              finish({ type: "selected", index: idx });
-            }
-            return;
-          } else if (ch === "\x03") {
-            process.stdout.write("^C\r\n");
-            process.exit(0);
-          }
-        }
-      }
-    }
-
-    process.stdin.on("data", onData);
-  });
-}

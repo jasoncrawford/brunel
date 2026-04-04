@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { handleModelCommand, setCachedModels, _resetCachedModels, getCachedModels, findModel } from "../src/model.js";
-import type { PickModelResult } from "../src/input.js";
+import type { PickResult } from "../src/input.js";
 import { stripAnsi } from "./helpers.js";
 
 const MODELS = [
@@ -72,7 +72,7 @@ describe("/model (interactive picker)", () => {
 
   it("selecting first entry resets to undefined (default)", async () => {
     setCachedModels(MODELS);
-    const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickModelResult>>()
+    const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickResult>>()
       .mockResolvedValue({ type: "selected", index: 0 });
     const result = await handleModelCommand("", "claude-opus-4-6", pickFn, undefined, print);
     expect(result).toBeUndefined();
@@ -80,7 +80,7 @@ describe("/model (interactive picker)", () => {
 
   it("selecting a named model returns its value", async () => {
     setCachedModels(MODELS);
-    const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickModelResult>>()
+    const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickResult>>()
       .mockResolvedValue({ type: "selected", index: 1 });
     const result = await handleModelCommand("", undefined, pickFn, undefined, print);
     expect(result).toBe("claude-opus-4-6");
@@ -89,7 +89,7 @@ describe("/model (interactive picker)", () => {
 
   it("passes currentIdx matching the active model", async () => {
     setCachedModels(MODELS);
-    const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickModelResult>>()
+    const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickResult>>()
       .mockResolvedValue({ type: "cancelled" });
     await handleModelCommand("", "claude-sonnet-4-6", pickFn, undefined, print);
     // currentIdx should be 0 (index of claude-sonnet-4-6 in MODELS)
@@ -98,7 +98,7 @@ describe("/model (interactive picker)", () => {
 
   it("passes currentIdx 0 when no model set (default)", async () => {
     setCachedModels(MODELS);
-    const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickModelResult>>()
+    const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickResult>>()
       .mockResolvedValue({ type: "cancelled" });
     await handleModelCommand("", undefined, pickFn, undefined, print);
     expect(pickFn.mock.calls[0][1]).toBe(0);
@@ -106,7 +106,7 @@ describe("/model (interactive picker)", () => {
 
   it("shows model descriptions in options", async () => {
     setCachedModels(MODELS);
-    const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickModelResult>>()
+    const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickResult>>()
       .mockResolvedValue({ type: "cancelled" });
     await handleModelCommand("", undefined, pickFn, undefined, print);
     const options = pickFn.mock.calls[0][0] as string[];
@@ -115,7 +115,7 @@ describe("/model (interactive picker)", () => {
 
   it("includes Other: as last option", async () => {
     setCachedModels(MODELS);
-    const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickModelResult>>()
+    const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickResult>>()
       .mockResolvedValue({ type: "cancelled" });
     await handleModelCommand("", undefined, pickFn, undefined, print);
     const options = pickFn.mock.calls[0][0] as string[];
@@ -124,7 +124,7 @@ describe("/model (interactive picker)", () => {
 
   it("cancel preserves current model", async () => {
     setCachedModels(MODELS);
-    const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickModelResult>>()
+    const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickResult>>()
       .mockResolvedValue({ type: "cancelled" });
     const result = await handleModelCommand("", "claude-opus-4-6", pickFn, undefined, print);
     expect(result).toBe("claude-opus-4-6");
@@ -132,7 +132,7 @@ describe("/model (interactive picker)", () => {
 
   it("Other with valid model ID sets it", async () => {
     setCachedModels(MODELS);
-    const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickModelResult>>()
+    const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickResult>>()
       .mockResolvedValue({ type: "other", text: "claude-haiku-4-5-20251001" });
     const result = await handleModelCommand("", undefined, pickFn, undefined, print);
     expect(result).toBe("claude-haiku-4-5-20251001");
@@ -141,7 +141,7 @@ describe("/model (interactive picker)", () => {
 
   it("Other with invalid model ID rejects", async () => {
     setCachedModels(MODELS);
-    const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickModelResult>>()
+    const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickResult>>()
       .mockResolvedValue({ type: "other", text: "not-a-model" });
     const result = await handleModelCommand("", "claude-opus-4-6", pickFn, undefined, print);
     expect(result).toBe("claude-opus-4-6"); // unchanged
@@ -150,7 +150,7 @@ describe("/model (interactive picker)", () => {
 
   it("Other with empty input preserves current", async () => {
     setCachedModels(MODELS);
-    const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickModelResult>>()
+    const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickResult>>()
       .mockResolvedValue({ type: "other", text: "" });
     const result = await handleModelCommand("", "claude-opus-4-6", pickFn, undefined, print);
     expect(result).toBe("claude-opus-4-6");
@@ -162,7 +162,7 @@ describe("/model (interactive picker)", () => {
 describe("display names", () => {
   it("uses displayName from model info, not raw alias", async () => {
     setCachedModels(MODELS);
-    const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickModelResult>>()
+    const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickResult>>()
       .mockResolvedValue({ type: "cancelled" });
     await handleModelCommand("", undefined, pickFn, undefined, print);
     const options = pickFn.mock.calls[0][0] as string[];

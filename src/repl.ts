@@ -8,7 +8,7 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { CanUseTool, PermissionMode, PermissionResult } from "@anthropic-ai/claude-agent-sdk";
 import * as display from "./display.js";
 import { setVerbose, setThinkOutLoud } from "./display.js";
-import { ask, listCommandNames, dispatchInput, pick, pickMultiple, pickQuestion, pickModel } from "./input.js";
+import { ask, listCommandNames, dispatchInput, pick, pickMultiple, pickQuestion } from "./input.js";
 import type { PickQuestionResult } from "./input.js";
 import { workerMain } from "./worker.js";
 import type { RunQuery } from "./worker.js";
@@ -385,8 +385,10 @@ async function main(
         if (typeof qm.supportedModels === "function") return qm.supportedModels();
         return [];
       };
+      const pickModelFn = (opts: string[], idx: number) =>
+        pick(opts, { currentIdx: idx, escapable: true, lastIsTextEntry: true });
       currentModel = await handleModelCommand(
-        modelArgs, currentModel, pickModel,
+        modelArgs, currentModel, pickModelFn,
         fetchModelsFn,
         display.print,
       );
