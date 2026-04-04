@@ -181,6 +181,16 @@ describe("findModel", () => {
     { value: "claude-opus-4-6-20250514", displayName: "Opus 4.6", description: "" },
   ];
 
+  // SDK returns value:null for the "Default (recommended)" entry
+  const SDK_MODELS = [
+    { value: null as unknown as string, displayName: "Default (recommended)", description: "Sonnet 4.6" },
+    { value: "sonnet", displayName: "Sonnet", description: "Sonnet 4.6" },
+    { value: "sonnet[1m]", displayName: "Sonnet (1M context)", description: "" },
+    { value: "opus", displayName: "Opus", description: "Opus 4.6" },
+    { value: "opus[1m]", displayName: "Opus (1M context)", description: "" },
+    { value: "haiku", displayName: "Haiku", description: "Haiku 4.5" },
+  ];
+
   it("exact match", () => {
     expect(findModel(MODELS, "claude-opus-4-6")?.value).toBe("claude-opus-4-6");
   });
@@ -203,5 +213,18 @@ describe("findModel", () => {
 
   it("returns undefined for no match", () => {
     expect(findModel(MODELS, "gpt-4")).toBeUndefined();
+  });
+
+  it("skips null-value entries without crashing", () => {
+    expect(findModel(SDK_MODELS, "sonnet")?.displayName).toBe("Sonnet");
+    expect(findModel(SDK_MODELS, "opus")?.displayName).toBe("Opus");
+    expect(findModel(SDK_MODELS, "haiku")?.displayName).toBe("Haiku");
+  });
+
+  it("matches full model ID via substring when SDK uses short aliases", () => {
+    // SDK values are "sonnet", "opus", "haiku" — user might type full IDs
+    expect(findModel(SDK_MODELS, "claude-sonnet-4-6")?.value).toBe("sonnet");
+    expect(findModel(SDK_MODELS, "claude-opus-4-6")?.value).toBe("opus");
+    expect(findModel(SDK_MODELS, "claude-haiku-4-5")?.value).toBe("haiku");
   });
 });

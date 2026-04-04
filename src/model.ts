@@ -24,13 +24,16 @@ export function _resetCachedModels(): void { _cachedModels = null; }
  * 3. Input starts with value (e.g. input "claude-opus-4-6-20250514" matches value "claude-opus-4-6")
  * 4. Value starts with "claude-" + input (alias: "sonnet" → "claude-sonnet-*")
  * 5. Value contains input or input contains value (substring match)
+ *
+ * Note: SDK returns value:null for the Default entry, so all checks guard against null.
  */
 export function findModel(models: ModelInfo[], input: string): ModelInfo | undefined {
+  const has = (m: ModelInfo) => typeof m.value === "string";
   return models.find(m => m.value === input)
-    ?? models.find(m => m.value.startsWith(input))
-    ?? models.find(m => input.startsWith(m.value))
-    ?? models.find(m => m.value.startsWith(`claude-${input}`))
-    ?? models.find(m => m.value.includes(input) || input.includes(m.value));
+    ?? models.find(m => has(m) && m.value.startsWith(input))
+    ?? models.find(m => has(m) && input.startsWith(m.value))
+    ?? models.find(m => has(m) && m.value.startsWith(`claude-${input}`))
+    ?? models.find(m => has(m) && (m.value.includes(input) || input.includes(m.value)));
 }
 
 // ── Model selection ──────────────────────────────────────────────────────────
