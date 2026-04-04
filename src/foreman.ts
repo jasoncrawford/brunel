@@ -321,6 +321,9 @@ export class TaskQueue extends EventEmitter {
 export class TaskModel {
   private _labeledIssues: Map<number, LabeledIssueState>;
   private _openIssues: Set<number>;
+  /** Pending upsert promises keyed by taskId — awaited by assign() to avoid
+   *  the race where markAssigned runs before the row exists in the DB. */
+  private _pendingUpserts = new Map<string, Promise<void>>();
 
   constructor(
     readonly queue: TaskQueue,
@@ -448,9 +451,12 @@ export class TaskModel {
     depsLoaded?: boolean,
   ): void {
     this.queue.addTask({ taskId, issueNumber, title, body, labels, repoUrl, depsLoaded });
-    this.store.upsertTask(taskId, issueNumber, repoSlug, title, body, labels).catch((err: unknown) =>
-      this.logError(`ERROR Failed to persist task #${taskId}: ${fmtError(err)}`)
-    );
+    const p = this.store.upsertTask(taskId, issueNumber, repoSlug, title, body, labels)
+      .catch((err: unknown) =>
+        this.logError(`ERROR Failed to persist task #${taskId}: ${fmtError(err)}`)
+      )
+      .finally(() => this._pendingUpserts.delete(taskId));
+    this._pendingUpserts.set(taskId, p);
   }
 
   cancel(taskId: string): void {
@@ -482,6 +488,9 @@ export class TaskModel {
   async assign(taskId: string, workerId: string): Promise<boolean> {
     this.queue.assignTask(taskId, workerId);
     try {
+      // Ensure the row exists before updating — register() fires upsertTask
+      // without awaiting, so it may still be in-flight.
+      await this._pendingUpserts.get(taskId);
       await this.store.markAssigned(taskId, workerId);
       return true;
     } catch {
