@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { dispatchInput, applyArguments, resolveContent } from "../src/input.js";
+import { dispatchInput, applyArguments, resolveContent } from "../src/agent/input.js";
 
 // ── applyArguments ────────────────────────────────────────────────────────────
 

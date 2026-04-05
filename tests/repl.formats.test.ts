@@ -16,7 +16,7 @@ import {
   fmtToolSearchOutput,
   fmtTodoWriteOutput,
   type FmtTable,
-} from "../src/display.js";
+} from "../src/agent/display.js";
 
 // Helper to call resolve and strip ANSI
 function r(table: FmtTable, key: string, data: any): string | null {

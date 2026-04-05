@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { handleEffortCommand, EFFORT_LEVELS } from "../src/effort.js";
-import type { PickResult } from "../src/input.js";
+import { handleEffortCommand, EFFORT_LEVELS } from "../src/agent/effort.js";
+import type { PickResult } from "../src/agent/input.js";
 import { stripAnsi } from "./helpers.js";
 
 let printed: string[];

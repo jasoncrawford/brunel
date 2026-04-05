@@ -11,7 +11,7 @@ import {
   fmtEditResult,
   fmtHunk,
   c,
-} from "../src/display.js";
+} from "../src/agent/display.js";
 
 describe("trunc", () => {
   it("returns short string unchanged", () => {

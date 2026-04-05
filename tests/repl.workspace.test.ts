@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Mock workspace module before importing repl
-vi.mock("../src/workspace.js", () => {
+vi.mock("../src/agent/workspace.js", () => {
   const mockInstance = {
     dir: "/fake/workspace",
     reset: vi.fn().mockResolvedValue(undefined),
@@ -23,8 +23,8 @@ vi.mock("fs", () => ({ default: { appendFileSync: vi.fn() } }));
 // Prevent SDK import side-effects
 vi.mock("@anthropic-ai/claude-agent-sdk", () => ({ query: vi.fn() }));
 
-import { handleWorkspaceAction } from "../src/repl.js";
-import { Workspace, confirmIfUnsafe } from "../src/workspace.js";
+import { handleWorkspaceAction } from "../src/agent/index.js";
+import { Workspace, confirmIfUnsafe } from "../src/agent/workspace.js";
 import { stripAnsi } from "./helpers.js";
 
 const cfg = { workspaceDir: "/base", repoUrl: "https://x@github.com/owner/repo.git" };

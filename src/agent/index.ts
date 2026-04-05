@@ -12,9 +12,9 @@ import { ask, listCommandNames, dispatchInput, pick, pickMultiple, pickQuestion 
 import type { PickQuestionResult } from "./input.js";
 import { workerMain } from "./worker.js";
 import type { RunQuery } from "./worker.js";
-import { loadConfig } from "./config.js";
+import { loadConfig } from "../config.js";
 import { Workspace, confirmIfUnsafe } from "./workspace.js";
-import { fmtError } from "./utils.js";
+import { fmtError } from "../utils.js";
 import { handleModelCommand, getCachedModels, _resetCachedModels, setCachedModels } from "./model.js";
 import type { ModelInfo, FetchModelsFn } from "./model.js";
 import { handleEffortCommand } from "./effort.js";

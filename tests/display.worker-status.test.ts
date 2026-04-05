@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import * as display from "../src/display.js";
+import * as display from "../src/agent/display.js";
 
 // Strip ANSI codes for assertion
 function stripAnsi(s: string): string {
