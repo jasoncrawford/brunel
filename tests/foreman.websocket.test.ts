@@ -172,24 +172,26 @@ describe("foreman WebSocket protocol", () => {
   });
 
   it("task_complete completes task and assigns next task", async () => {
-    // Create tasks in reverse order so task 1 is assigned first (tasks are ordered newest to oldest)
-    await makeTask(taskModel, 2);
-    await makeTask(taskModel, 1);
+    // Create first task and ensure it has an older timestamp
+    await makeTask(taskModel, 1001);
+    // Wait to ensure distinct timestamps for sorting
+    await new Promise(r => setTimeout(r, 10));
+    await makeTask(taskModel, 1002);
     const ws = await connect();
     const q = makeQueue(ws);
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
     await q.next(); // hello_ack
     const first = await q.next();
     assert(first.type === "task_assigned");
-    expect(first.issue.number).toBe(1);
+    expect(first.issue.number).toBe(1002);
 
     const second = q.next();
-    send(ws, { type: "task_complete", workerId: "w1", taskId: "1" });
+    send(ws, { type: "task_complete", workerId: "w1", taskId: "1002" });
     const msg = await second;
     assert(msg.type === "task_assigned");
-    expect(msg.issue.number).toBe(2);
+    expect(msg.issue.number).toBe(1001);
 
-    expect((await taskModel.get("1"))?.status).toBe("complete");
+    expect((await taskModel.get("1002"))?.status).toBe("complete");
   });
 
   it("task_complete with no further tasks sends no message", async () => {
