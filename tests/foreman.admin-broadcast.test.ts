@@ -16,7 +16,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import http from "http";
 import { WebSocket, WebSocketServer } from "ws";
 import type { AddressInfo } from "net";
-import { TaskQueue, WorkerRegistry, createForemanWss } from "../src/foreman.js";
+import { WorkerRegistry, createForemanWss } from "../src/foreman.js";
+import { TaskModel } from "../src/task-model.js";
 import { loadDefaultConfig } from "../src/config.js";
 const defaultCfg = await loadDefaultConfig();
 import type { AdminWss, AdminSnapshot, LogEntry } from "../src/admin-ws.js";
@@ -47,7 +48,7 @@ function send(ws: WebSocket, msg: object) {
 
 // ── Test harness ──────────────────────────────────────────────────────────────
 
-let queue: TaskQueue;
+let taskModel: TaskModel;
 let registry: WorkerRegistry;
 let httpServer: http.Server;
 let wss: WebSocketServer;
@@ -65,11 +66,11 @@ beforeEach(() => {
   process.env.GITHUB_REPO = "owner/repo";
   process.env.GITHUB_TOKEN = "token";
 
-  queue = new TaskQueue();
+  taskModel = new TaskModel();
   registry = new WorkerRegistry();
   adminWss = makeMockAdminWss();
   httpServer = http.createServer();
-  ({ wss, routeEvent } = createForemanWss(queue, registry, httpServer, {
+  ({ wss, routeEvent } = createForemanWss(taskModel, registry, httpServer, {
     taskLabel: defaultCfg.taskLabel,
     reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs,
     pingIntervalMs: defaultCfg.pingIntervalMs,
@@ -110,7 +111,7 @@ afterEach(() => {
 
 describe("foreman admin broadcast — snapshot on PR registration", () => {
   it("broadcasts updated snapshot with prNumber when a PR is opened for a task", async () => {
-    queue.addTask({ taskId: "42", issueNumber: 42, title: "Fix the bug", body: "", labels: [], repoUrl: "https://github.com/owner/repo" });
+    taskModel.loadTask({ taskId: "42", issueNumber: 42, title: "Fix the bug", body: "", labels: [], repoUrl: "https://github.com/owner/repo" });
 
     const snapshots: AdminSnapshot[] = [];
     adminWss.broadcastSnapshot = (snapshot) => snapshots.push(snapshot);
@@ -148,9 +149,9 @@ describe("foreman admin broadcast — reactive snapshot pipeline", () => {
     const snapshots: AdminSnapshot[] = [];
     adminWss.broadcastSnapshot = (snapshot) => snapshots.push(snapshot);
 
-    queue.addTask({ taskId: "1", issueNumber: 1, title: "T1", body: "", labels: [], repoUrl: "https://github.com/owner/repo" });
-    queue.addTask({ taskId: "2", issueNumber: 2, title: "T2", body: "", labels: [], repoUrl: "https://github.com/owner/repo" });
-    queue.addTask({ taskId: "3", issueNumber: 3, title: "T3", body: "", labels: [], repoUrl: "https://github.com/owner/repo" });
+    taskModel.loadTask({ taskId: "1", issueNumber: 1, title: "T1", body: "", labels: [], repoUrl: "https://github.com/owner/repo" });
+    taskModel.loadTask({ taskId: "2", issueNumber: 2, title: "T2", body: "", labels: [], repoUrl: "https://github.com/owner/repo" });
+    taskModel.loadTask({ taskId: "3", issueNumber: 3, title: "T3", body: "", labels: [], repoUrl: "https://github.com/owner/repo" });
 
     await waitUntil(() => snapshots.length > 0);
     // All three addTask calls are within the same tick, so debounce collapses them
@@ -173,7 +174,7 @@ describe("foreman admin broadcast — hello_ack log event summary", () => {
   });
 
   it("hello_ack busy includes status and taskId in summary", async () => {
-    queue.addTask({ taskId: "42", issueNumber: 42, title: "Fix the bug", body: "", labels: [], repoUrl: "https://github.com/owner/repo" });
+    taskModel.loadTask({ taskId: "42", issueNumber: 42, title: "Fix the bug", body: "", labels: [], repoUrl: "https://github.com/owner/repo" });
 
     const logEntries: LogEntry[] = [];
     adminWss.broadcastLogEvent = (entry) => logEntries.push(entry);
@@ -188,8 +189,8 @@ describe("foreman admin broadcast — hello_ack log event summary", () => {
   });
 
   it("hello_ack cancelled includes status and taskId in summary", async () => {
-    queue.addTask({ taskId: "42", issueNumber: 42, title: "Fix the bug", body: "", labels: [], repoUrl: "https://github.com/owner/repo" });
-    queue.completeTask("42");
+    taskModel.loadTask({ taskId: "42", issueNumber: 42, title: "Fix the bug", body: "", labels: [], repoUrl: "https://github.com/owner/repo" });
+    await taskModel.complete("42");
 
     const logEntries: LogEntry[] = [];
     adminWss.broadcastLogEvent = (entry) => logEntries.push(entry);

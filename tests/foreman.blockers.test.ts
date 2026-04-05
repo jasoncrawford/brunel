@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
-import { TaskQueue, WorkerRegistry, createForemanWss } from "../src/foreman.js";
+import { WorkerRegistry, createForemanWss } from "../src/foreman.js";
+import { TaskModel } from "../src/task-model.js";
 import { loadDefaultConfig } from "../src/config.js";
 import type { TaskStore } from "../src/db.js";
 import type { TaskIssue } from "../src/types.js";
@@ -18,6 +19,8 @@ function makeTaskStore(overrides: Partial<TaskStore> = {}): TaskStore {
     markPending: vi.fn().mockResolvedValue(undefined),
     markBlocked: vi.fn().mockResolvedValue(undefined),
     updateTaskPr: vi.fn().mockResolvedValue(undefined),
+    deleteTask: vi.fn().mockResolvedValue(undefined),
+    getTask: vi.fn().mockResolvedValue(null),
     listTasks: vi.fn().mockResolvedValue([]),
     ...overrides,
   };
@@ -27,17 +30,17 @@ function makeTaskStore(overrides: Partial<TaskStore> = {}): TaskStore {
 
 describe("foreman — blocker transitions via routeEvent", () => {
   it("issue close unblocks task in memory when no open blockers remain", async () => {
-    const taskQueue = new TaskQueue();
+    const taskModel = new TaskModel();
     const registry = new WorkerRegistry();
     const server = http.createServer();
 
-    taskQueue.addTask({
+    taskModel.loadTask({
       taskId: "10", issueNumber: 10, title: "T", body: "b",
       labels: [], repoUrl: "r", status: "blocked",
     });
     const graph = new Map([[10, new Set([5])]]);
 
-    const { wss, taskModel, routeEvent } = createForemanWss(taskQueue, registry, server, {
+    const { wss, routeEvent } = createForemanWss(taskModel, registry, server, {
       taskLabel: "brunel:ready",
       graph,
       reclaimTimeoutMs: 300_000,
@@ -52,25 +55,24 @@ describe("foreman — blocker transitions via routeEvent", () => {
       issue: { number: 5, title: "Blocker", labels: [] },
     });
 
-    expect(taskQueue.get("10")?.status).toBe("pending");
+    expect(taskModel.get("10")?.status).toBe("pending");
   });
 
   it("issue close calls markPending on taskStore when task is fully unblocked", async () => {
-    const taskQueue = new TaskQueue();
+    const taskStore = makeTaskStore();
+    const taskModel = new TaskModel(taskStore);
     const registry = new WorkerRegistry();
     const server = http.createServer();
-    const taskStore = makeTaskStore();
 
-    taskQueue.addTask({
+    taskModel.loadTask({
       taskId: "10", issueNumber: 10, title: "T", body: "b",
       labels: [], repoUrl: "r", status: "blocked",
     });
     const graph = new Map([[10, new Set([5])]]);
 
-    const { wss, taskModel, routeEvent } = createForemanWss(taskQueue, registry, server, {
+    const { wss, routeEvent } = createForemanWss(taskModel, registry, server, {
       taskLabel: "brunel:ready",
       graph,
-      taskStore,
       reclaimTimeoutMs: 300_000,
       pingIntervalMs: defaultCfg.pingIntervalMs,
     });
@@ -87,22 +89,21 @@ describe("foreman — blocker transitions via routeEvent", () => {
   });
 
   it("issue close does NOT unblock task when other blockers are still open", async () => {
-    const taskQueue = new TaskQueue();
+    const taskStore = makeTaskStore();
+    const taskModel = new TaskModel(taskStore);
     const registry = new WorkerRegistry();
     const server = http.createServer();
-    const taskStore = makeTaskStore();
 
-    taskQueue.addTask({
+    taskModel.loadTask({
       taskId: "10", issueNumber: 10, title: "T", body: "b",
       labels: [], repoUrl: "r", status: "blocked",
     });
     // Task 10 is blocked by BOTH 5 and 6
     const graph = new Map([[10, new Set([5, 6])]]);
 
-    const { wss, taskModel, routeEvent } = createForemanWss(taskQueue, registry, server, {
+    const { wss, routeEvent } = createForemanWss(taskModel, registry, server, {
       taskLabel: "brunel:ready",
       graph,
-      taskStore,
       reclaimTimeoutMs: 300_000,
       pingIntervalMs: defaultCfg.pingIntervalMs,
     });
@@ -118,7 +119,7 @@ describe("foreman — blocker transitions via routeEvent", () => {
     });
 
     // Task remains blocked (6 is still open)
-    expect(taskQueue.get("10")?.status).toBe("blocked");
+    expect(taskModel.get("10")?.status).toBe("blocked");
     expect(taskStore.markPending).not.toHaveBeenCalled();
   });
 });

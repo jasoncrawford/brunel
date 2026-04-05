@@ -13,6 +13,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import http from "http";
 import type { AddressInfo } from "net";
 import { createHttpServer } from "../src/foreman.js";
+import { TaskModel } from "../src/task-model.js";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -186,34 +187,36 @@ describe("GET /api/workers/:id/messages", () => {
 });
 
 describe("GET /api/tasks", () => {
-  it("returns 200 with an empty JSON array when no taskStore is provided", async () => {
+  it("returns 200 with an empty JSON array when no taskModel is provided", async () => {
     const res = await request(port, "GET", "/api/tasks");
     expect(res.status).toBe(200);
     expect(JSON.parse(res.body)).toEqual([]);
   });
 
-  it("returns task list from taskStore", async () => {
+  it("returns task list from taskModel", async () => {
     const tasks = [{ taskId: "42", issueNumber: 42, title: "Fix bug", status: "complete" }];
-    const taskStore = { listTasks: vi.fn().mockResolvedValue(tasks) } as never;
-    const s = createHttpServer(null, vi.fn(), undefined, taskStore);
+    const store = { listTasks: vi.fn().mockResolvedValue(tasks) } as never;
+    const tm = new TaskModel(store);
+    const s = createHttpServer(null, vi.fn(), undefined, tm);
     const p = await startServer(s);
     try {
       const res = await request(p, "GET", "/api/tasks");
       expect(res.status).toBe(200);
       expect(JSON.parse(res.body)).toEqual(tasks);
-      expect(taskStore.listTasks).toHaveBeenCalled();
+      expect(store.listTasks).toHaveBeenCalled();
     } finally {
       await stopServer(s);
     }
   });
 
-  it("passes status query param to taskStore", async () => {
-    const taskStore = { listTasks: vi.fn().mockResolvedValue([]) } as never;
-    const s = createHttpServer(null, vi.fn(), undefined, taskStore);
+  it("passes status query param to taskModel", async () => {
+    const store = { listTasks: vi.fn().mockResolvedValue([]) } as never;
+    const tm = new TaskModel(store);
+    const s = createHttpServer(null, vi.fn(), undefined, tm);
     const p = await startServer(s);
     try {
       await request(p, "GET", "/api/tasks?status=complete");
-      expect(taskStore.listTasks).toHaveBeenCalledWith(
+      expect(store.listTasks).toHaveBeenCalledWith(
         expect.objectContaining({ status: "complete" }),
       );
     } finally {

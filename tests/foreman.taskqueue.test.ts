@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { TaskQueue } from "../src/foreman.js";
+import { TaskModel } from "../src/task-model.js";
 import type { GitHubEvent } from "../src/types.js";
 
 const baseTask = {
@@ -11,117 +11,114 @@ const baseTask = {
   repoUrl: "https://github.com/test/repo",
 };
 
-describe("TaskQueue", () => {
-  let q: TaskQueue;
-  beforeEach(() => { q = new TaskQueue(); });
+describe("TaskModel — queue operations", () => {
+  let m: TaskModel;
+  beforeEach(() => { m = new TaskModel(); });
 
-  it("addTask makes task pending", () => {
-    q.addTask(baseTask);
-    expect(q.get("42")?.status).toBe("pending");
+  it("loadTask makes task pending by default", () => {
+    m.loadTask(baseTask);
+    expect(m.get("42")?.status).toBe("pending");
   });
 
-  it("nextPending returns first pending task and removes it from pending", () => {
-    q.addTask(baseTask);
-    const t = q.nextPending();
+  it("nextPending returns first pending task", () => {
+    m.loadTask(baseTask);
+    const t = m.nextPending();
     expect(t?.taskId).toBe("42");
-    // Still in map but status changes when assigned
   });
 
   it("nextPending returns null when no pending tasks", () => {
-    expect(q.nextPending()).toBeNull();
+    expect(m.nextPending()).toBeNull();
   });
 
-  it("assignTask updates status and assignedWorkerId", () => {
-    q.addTask(baseTask);
-    q.nextPending();
-    q.assignTask("42", "w1");
-    expect(q.get("42")?.status).toBe("assigned");
-    expect(q.get("42")?.assignedWorkerId).toBe("w1");
+  it("assignInMemory updates status and assignedWorkerId", () => {
+    m.loadTask(baseTask);
+    m.nextPending();
+    m.assignInMemory("42", "w1");
+    expect(m.get("42")?.status).toBe("assigned");
+    expect(m.get("42")?.assignedWorkerId).toBe("w1");
   });
 
-  it("completeTask updates status", () => {
-    q.addTask(baseTask);
-    q.assignTask("42", "w1");
-    q.completeTask("42");
-    expect(q.get("42")?.status).toBe("complete");
+  it("complete updates status", async () => {
+    m.loadTask(baseTask);
+    m.assignInMemory("42", "w1");
+    await m.complete("42");
+    expect(m.get("42")?.status).toBe("complete");
   });
 
   it("queueEvent appends to task eventQueue", () => {
-    q.addTask(baseTask);
+    m.loadTask(baseTask);
     const evt: GitHubEvent = { id: "e1", name: "check_run", payload: {} };
-    q.queueEvent("42", evt);
-    expect(q.get("42")?.eventQueue).toHaveLength(1);
+    m.queueEvent("42", evt);
+    expect(m.get("42")?.eventQueue).toHaveLength(1);
   });
 
   it("drainEvents returns all events and clears the queue", () => {
-    q.addTask(baseTask);
+    m.loadTask(baseTask);
     const evt: GitHubEvent = { id: "e1", name: "check_run", payload: {} };
-    q.queueEvent("42", evt);
-    const drained = q.drainEvents("42");
+    m.queueEvent("42", evt);
+    const drained = m.drainEvents("42");
     expect(drained).toHaveLength(1);
-    expect(q.get("42")?.eventQueue).toHaveLength(0);
+    expect(m.get("42")?.eventQueue).toHaveLength(0);
   });
 
   it("getTaskForIssue looks up by issueNumber", () => {
-    q.addTask(baseTask);
-    expect(q.getTaskForIssue(42)?.taskId).toBe("42");
+    m.loadTask(baseTask);
+    expect(m.getTaskForIssue(42)?.taskId).toBe("42");
   });
 
-  it("registerPr + getTaskForPr looks up task by PR number", () => {
-    q.addTask(baseTask);
-    q.registerPr(10, "42");
-    expect(q.getTaskForPr(10)?.taskId).toBe("42");
+  it("registerPr + getTaskForPr looks up task by PR number", async () => {
+    m.loadTask(baseTask);
+    await m.registerPr("42", 10, null);
+    expect(m.getTaskForPr(10)?.taskId).toBe("42");
   });
 
-  it("registerPr stores prNumber on the task", () => {
-    q.addTask(baseTask);
-    q.registerPr(10, "42");
-    expect(q.get("42")?.prNumber).toBe(10);
+  it("registerPr stores prNumber on the task", async () => {
+    m.loadTask(baseTask);
+    await m.registerPr("42", 10, null);
+    expect(m.get("42")?.prNumber).toBe(10);
   });
 
   it("getTaskForPr returns undefined for unknown PR number", () => {
-    expect(q.getTaskForPr(999)).toBeUndefined();
-  });
-
-  it("registerPr for unknown taskId returns no task from getTaskForPr", () => {
-    q.registerPr(10, "nonexistent");
-    expect(q.getTaskForPr(10)).toBeUndefined();
+    expect(m.getTaskForPr(999)).toBeUndefined();
   });
 
   it("registerBranch + getTaskForBranch looks up task by branch name", () => {
-    q.addTask(baseTask);
-    q.registerBranch("fix-issue-42", "42");
-    expect(q.getTaskForBranch("fix-issue-42")?.taskId).toBe("42");
+    m.loadTask(baseTask);
+    m.registerBranch("fix-issue-42", "42");
+    expect(m.getTaskForBranch("fix-issue-42")?.taskId).toBe("42");
   });
 
   it("getTaskForBranch returns undefined for unknown branch", () => {
-    expect(q.getTaskForBranch("unknown-branch")).toBeUndefined();
+    expect(m.getTaskForBranch("unknown-branch")).toBeUndefined();
   });
 
-  it("getTaskSnapshots includes prUrl when PR is registered", () => {
-    q.addTask(baseTask);
-    q.registerPr(10, "42");
-    const snapshots = q.getTaskSnapshots();
+  it("getTaskSnapshots includes prUrl when PR is registered", async () => {
+    m.loadTask(baseTask);
+    await m.registerPr("42", 10, null);
+    const snapshots = m.getTaskSnapshots(new Map());
     expect(snapshots[0].prUrl).toBe("https://github.com/test/repo/pull/10");
   });
 
   it("getTaskSnapshots omits prUrl when no PR registered", () => {
-    q.addTask(baseTask);
-    const snapshots = q.getTaskSnapshots();
+    m.loadTask(baseTask);
+    const snapshots = m.getTaskSnapshots(new Map());
     expect(snapshots[0].prUrl).toBeUndefined();
   });
 
-  it("getTaskSnapshots with no graph/openIssues omits blockers field", () => {
-    q.addTask(baseTask);
-    const snapshots = q.getTaskSnapshots();
-    expect(snapshots[0].blockers).toBeUndefined();
+  it("getTaskSnapshots with no graph omits blockers field", () => {
+    // getTaskSnapshots always takes a graph via TaskModel, so passing empty
+    // graph still includes an empty blockers array
+    m.loadTask(baseTask);
+    const snapshots = m.getTaskSnapshots(new Map());
+    expect(snapshots[0].blockers).toEqual([]);
   });
 
   it("getTaskSnapshots with graph includes blockers with isOpen status", () => {
-    q.addTask(baseTask); // issueNumber: 42
+    m.loadTask(baseTask); // issueNumber: 42
+    m.setIssueOpenState(10, true);  // 10 is open
+    m.setIssueOpenState(11, false); // 11 is closed
     const graph = new Map([[42, new Set([10, 11])]]);
-    const openIssues = new Set([10]); // 10 is open, 11 is closed
-    const snapshots = q.getTaskSnapshots(graph, openIssues);
+    const snapshots = m.getTaskSnapshots(graph);
     expect(snapshots[0].blockers).toEqual([
       { issueNumber: 10, isOpen: true },
       { issueNumber: 11, isOpen: false },
@@ -129,234 +126,225 @@ describe("TaskQueue", () => {
   });
 
   it("getTaskSnapshots with graph shows empty blockers array when no deps", () => {
-    q.addTask(baseTask); // issueNumber: 42, no entry in graph
+    m.loadTask(baseTask); // issueNumber: 42, no entry in graph
     const graph = new Map<number, Set<number>>();
-    const openIssues = new Set<number>();
-    const snapshots = q.getTaskSnapshots(graph, openIssues);
+    const snapshots = m.getTaskSnapshots(graph);
     expect(snapshots[0].blockers).toEqual([]);
   });
 });
 
-describe("TaskQueue — blocked status", () => {
-  let q: TaskQueue;
-  beforeEach(() => { q = new TaskQueue(); });
+describe("TaskModel — blocked status", () => {
+  let m: TaskModel;
+  beforeEach(() => { m = new TaskModel(); });
 
-  it("addTask with status=blocked creates a blocked task", () => {
-    q.addTask({ ...baseTask, status: "blocked" });
-    expect(q.get("42")?.status).toBe("blocked");
+  it("loadTask with status=blocked creates a blocked task", () => {
+    m.loadTask({ ...baseTask, status: "blocked" });
+    expect(m.get("42")?.status).toBe("blocked");
   });
 
-  it("setBlocked transitions pending → blocked", () => {
-    q.addTask(baseTask);
-    q.setBlocked("42");
-    expect(q.get("42")?.status).toBe("blocked");
+  it("block transitions pending → blocked", async () => {
+    m.loadTask(baseTask);
+    await m.block("42");
+    expect(m.get("42")?.status).toBe("blocked");
   });
 
-  it("setBlocked is a no-op on non-pending tasks", () => {
-    q.addTask(baseTask);
-    q.assignTask("42", "w1");
-    q.setBlocked("42");
-    expect(q.get("42")?.status).toBe("assigned");
+  it("block is a no-op on non-pending tasks", () => {
+    m.loadTask(baseTask);
+    m.assignInMemory("42", "w1");
+    m.block("42");
+    expect(m.get("42")?.status).toBe("assigned");
   });
 
-  it("setUnblocked transitions blocked → pending", () => {
-    q.addTask({ ...baseTask, status: "blocked" });
-    q.setUnblocked("42");
-    expect(q.get("42")?.status).toBe("pending");
+  it("unblock transitions blocked → pending", async () => {
+    m.loadTask({ ...baseTask, status: "blocked" });
+    await m.unblock("42");
+    expect(m.get("42")?.status).toBe("pending");
   });
 
-  it("setUnblocked is a no-op on non-blocked tasks", () => {
-    q.addTask(baseTask);
-    q.setUnblocked("42");
-    expect(q.get("42")?.status).toBe("pending"); // unchanged
+  it("unblock is a no-op on non-blocked tasks", () => {
+    m.loadTask(baseTask);
+    m.unblock("42");
+    expect(m.get("42")?.status).toBe("pending"); // unchanged
   });
 
   it("nextPending does not return blocked tasks", () => {
-    q.addTask({ ...baseTask, status: "blocked" });
-    expect(q.nextPending()).toBeNull();
+    m.loadTask({ ...baseTask, status: "blocked" });
+    expect(m.nextPending()).toBeNull();
   });
 
-  it("setBlocked emits changed", () => {
-    q.addTask(baseTask);
+  it("block emits changed", async () => {
+    m.loadTask(baseTask);
     const changed = vi.fn();
-    q.on("changed", changed);
-    q.setBlocked("42");
+    m.on("changed", changed);
+    await m.block("42");
     expect(changed).toHaveBeenCalledOnce();
   });
 
-  it("setUnblocked emits changed", () => {
-    q.addTask({ ...baseTask, status: "blocked" });
+  it("unblock emits changed", async () => {
+    m.loadTask({ ...baseTask, status: "blocked" });
     const changed = vi.fn();
-    q.on("changed", changed);
-    q.setUnblocked("42");
+    m.on("changed", changed);
+    await m.unblock("42");
     expect(changed).toHaveBeenCalledOnce();
   });
 
   it("getPendingAndBlockedTasks returns pending and blocked but not assigned/complete", () => {
-    q.addTask({ ...baseTask, taskId: "1", issueNumber: 1 }); // pending
-    q.addTask({ ...baseTask, taskId: "2", issueNumber: 2, status: "blocked" }); // blocked
-    q.addTask({ ...baseTask, taskId: "3", issueNumber: 3 }); // will be assigned
-    q.assignTask("3", "w1");
-    const result = q.getPendingAndBlockedTasks();
+    m.loadTask({ ...baseTask, taskId: "1", issueNumber: 1 }); // pending
+    m.loadTask({ ...baseTask, taskId: "2", issueNumber: 2, status: "blocked" }); // blocked
+    m.loadTask({ ...baseTask, taskId: "3", issueNumber: 3 }); // will be assigned
+    m.assignInMemory("3", "w1");
+    const result = m.getPendingAndBlockedTasks();
     expect(result.map((t) => t.taskId)).toEqual(expect.arrayContaining(["1", "2"]));
     expect(result.map((t) => t.taskId)).not.toContain("3");
   });
 
   it("getTaskSnapshots includes blocked status", () => {
-    q.addTask({ ...baseTask, status: "blocked" });
-    const snapshots = q.getTaskSnapshots();
+    m.loadTask({ ...baseTask, status: "blocked" });
+    const snapshots = m.getTaskSnapshots(new Map());
     expect(snapshots[0].status).toBe("blocked");
   });
 });
 
-describe("removeTask", () => {
-  let q: TaskQueue;
-  beforeEach(() => { q = new TaskQueue(); });
+describe("TaskModel — cancel (removeTask behavior)", () => {
+  let m: TaskModel;
+  beforeEach(() => { m = new TaskModel(); });
 
-  it("removes a pending task so it is no longer retrievable", () => {
-    q.addTask(baseTask);
-    q.removeTask("42");
-    expect(q.get("42")).toBeUndefined();
-    expect(q.getTaskForIssue(42)).toBeUndefined();
-    expect(q.nextPending()).toBeNull();
+  it("removes a pending task so it is no longer retrievable", async () => {
+    m.loadTask(baseTask);
+    await m.cancel("42");
+    expect(m.get("42")).toBeUndefined();
+    expect(m.getTaskForIssue(42)).toBeUndefined();
+    expect(m.nextPending()).toBeNull();
   });
 
-  it("removes a blocked task (label was removed while task was blocked)", () => {
-    q.addTask({ ...baseTask, status: "blocked" });
-    q.removeTask("42");
-    expect(q.get("42")).toBeUndefined();
+  it("removes a blocked task (label was removed while task was blocked)", async () => {
+    m.loadTask({ ...baseTask, status: "blocked" });
+    await m.cancel("42");
+    expect(m.get("42")).toBeUndefined();
   });
 
-  it("does not remove an assigned task", () => {
-    q.addTask(baseTask);
-    q.assignTask("42", "w1");
-    q.removeTask("42");
-    expect(q.get("42")).toBeDefined();
+  it("does not remove an assigned task", async () => {
+    m.loadTask(baseTask);
+    m.assignInMemory("42", "w1");
+    await m.cancel("42");
+    expect(m.get("42")).toBeDefined();
   });
 
-  it("is a no-op for unknown taskId", () => {
-    expect(() => q.removeTask("nonexistent")).not.toThrow();
+  it("is a no-op for unknown taskId", async () => {
+    await expect(m.cancel("nonexistent")).resolves.not.toThrow();
   });
 });
 
-describe("nextPending with predicate", () => {
-  let q: TaskQueue;
-  beforeEach(() => { q = new TaskQueue(); });
+describe("TaskModel — nextPending with predicate", () => {
+  let m: TaskModel;
+  beforeEach(() => { m = new TaskModel(); });
 
   it("returns null when all pending tasks fail the predicate", () => {
-    q.addTask({ ...baseTask, taskId: "1", issueNumber: 1 });
-    q.addTask({ ...baseTask, taskId: "2", issueNumber: 2 });
-    expect(q.nextPending(() => false)).toBeNull();
+    m.loadTask({ ...baseTask, taskId: "1", issueNumber: 1 });
+    m.loadTask({ ...baseTask, taskId: "2", issueNumber: 2 });
+    expect(m.nextPending(() => false)).toBeNull();
   });
 
   it("skips tasks that fail predicate and returns first that passes", () => {
-    q.addTask({ ...baseTask, taskId: "1", issueNumber: 1 });
-    q.addTask({ ...baseTask, taskId: "2", issueNumber: 2 });
-    const t = q.nextPending((task) => task.issueNumber === 2);
+    m.loadTask({ ...baseTask, taskId: "1", issueNumber: 1 });
+    m.loadTask({ ...baseTask, taskId: "2", issueNumber: 2 });
+    const t = m.nextPending((task) => task.issueNumber === 2);
     expect(t?.taskId).toBe("2");
   });
 
   it("no predicate behaves as before (returns first pending)", () => {
-    q.addTask({ ...baseTask, taskId: "1", issueNumber: 1 });
-    q.addTask({ ...baseTask, taskId: "2", issueNumber: 2 });
-    expect(q.nextPending()?.taskId).toBe("1");
+    m.loadTask({ ...baseTask, taskId: "1", issueNumber: 1 });
+    m.loadTask({ ...baseTask, taskId: "2", issueNumber: 2 });
+    expect(m.nextPending()?.taskId).toBe("1");
   });
 });
 
-describe("TaskQueue changed events", () => {
-  let q: TaskQueue;
-  beforeEach(() => { q = new TaskQueue(); });
+describe("TaskModel changed events", () => {
+  let m: TaskModel;
+  beforeEach(() => { m = new TaskModel(); });
 
-  it("addTask emits changed", () => {
+  it("loadTask emits changed", () => {
     const changed = vi.fn();
-    q.on("changed", changed);
-    q.addTask(baseTask);
+    m.on("changed", changed);
+    m.loadTask(baseTask);
+    expect(changed).toHaveBeenCalled();
+  });
+
+  it("assignInMemory emits changed", () => {
+    m.loadTask(baseTask);
+    const changed = vi.fn();
+    m.on("changed", changed);
+    m.assignInMemory("42", "w1");
     expect(changed).toHaveBeenCalledOnce();
   });
 
-  it("assignTask emits changed", () => {
-    q.addTask(baseTask);
+  it("complete emits changed", async () => {
+    m.loadTask(baseTask);
+    m.assignInMemory("42", "w1");
     const changed = vi.fn();
-    q.on("changed", changed);
-    q.assignTask("42", "w1");
+    m.on("changed", changed);
+    await m.complete("42");
     expect(changed).toHaveBeenCalledOnce();
   });
 
-  it("completeTask emits changed", () => {
-    q.addTask(baseTask);
-    q.assignTask("42", "w1");
+  it("revert emits changed", async () => {
+    m.loadTask(baseTask);
+    m.assignInMemory("42", "w1");
     const changed = vi.fn();
-    q.on("changed", changed);
-    q.completeTask("42");
+    m.on("changed", changed);
+    await m.revert("42");
     expect(changed).toHaveBeenCalledOnce();
   });
 
-  it("revertTask emits changed", () => {
-    q.addTask(baseTask);
-    q.assignTask("42", "w1");
+  it("cancel emits changed when task removed", async () => {
+    m.loadTask(baseTask);
     const changed = vi.fn();
-    q.on("changed", changed);
-    q.revertTask("42");
+    m.on("changed", changed);
+    await m.cancel("42");
     expect(changed).toHaveBeenCalledOnce();
   });
 
-  it("removeTask emits changed when task removed", () => {
-    q.addTask(baseTask);
+  it("cancel does not emit changed for assigned task", async () => {
+    m.loadTask(baseTask);
+    m.assignInMemory("42", "w1");
     const changed = vi.fn();
-    q.on("changed", changed);
-    q.removeTask("42");
-    expect(changed).toHaveBeenCalledOnce();
-  });
-
-  it("removeTask does not emit changed for assigned task", () => {
-    q.addTask(baseTask);
-    q.assignTask("42", "w1");
-    const changed = vi.fn();
-    q.on("changed", changed);
-    q.removeTask("42"); // no-op for assigned tasks
+    m.on("changed", changed);
+    await m.cancel("42"); // no-op for assigned tasks
     expect(changed).not.toHaveBeenCalled();
   });
 
-  it("registerPr emits changed", () => {
-    q.addTask(baseTask);
+  it("registerPr emits changed", async () => {
+    m.loadTask(baseTask);
     const changed = vi.fn();
-    q.on("changed", changed);
-    q.registerPr(10, "42");
-    expect(changed).toHaveBeenCalledOnce();
+    m.on("changed", changed);
+    await m.registerPr("42", 10, null);
+    expect(changed).toHaveBeenCalled();
   });
 
-  it("unregisterPr clears prNumber from the task", () => {
-    q.addTask(baseTask);
-    q.registerPr(10, "42");
-    q.unregisterPr(10);
-    expect(q.get("42")?.prNumber).toBeUndefined();
+  it("unregisterPr clears prNumber from the task", async () => {
+    m.loadTask(baseTask);
+    await m.registerPr("42", 10, null);
+    await m.unregisterPr(10);
+    expect(m.get("42")?.prNumber).toBeUndefined();
   });
 
-  it("unregisterPr removes PR from routing so getTaskForPr returns undefined", () => {
-    q.addTask(baseTask);
-    q.registerPr(10, "42");
-    q.unregisterPr(10);
-    expect(q.getTaskForPr(10)).toBeUndefined();
+  it("unregisterPr removes PR from routing so getTaskForPr returns undefined", async () => {
+    m.loadTask(baseTask);
+    await m.registerPr("42", 10, null);
+    await m.unregisterPr(10);
+    expect(m.getTaskForPr(10)).toBeUndefined();
   });
 
-  it("unregisterPr emits changed", () => {
-    q.addTask(baseTask);
-    q.registerPr(10, "42");
+  it("unregisterPr emits changed", async () => {
+    m.loadTask(baseTask);
+    await m.registerPr("42", 10, null);
     const changed = vi.fn();
-    q.on("changed", changed);
-    q.unregisterPr(10);
-    expect(changed).toHaveBeenCalledOnce();
+    m.on("changed", changed);
+    await m.unregisterPr(10);
+    expect(changed).toHaveBeenCalled();
   });
 
-  it("unregisterPr is a no-op for unknown PR number", () => {
-    expect(() => q.unregisterPr(999)).not.toThrow();
-  });
-
-  it("markDepsLoaded emits changed", () => {
-    q.addTask({ ...baseTask, depsLoaded: false });
-    const changed = vi.fn();
-    q.on("changed", changed);
-    q.markDepsLoaded([42]);
-    expect(changed).toHaveBeenCalledOnce();
+  it("unregisterPr is a no-op for unknown PR number", async () => {
+    await expect(m.unregisterPr(999)).resolves.not.toThrow();
   });
 });

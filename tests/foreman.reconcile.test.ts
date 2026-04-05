@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import http from "http";
-import { TaskQueue, WorkerRegistry, TaskModel, createForemanWss } from "../src/foreman.js";
+import { WorkerRegistry, createForemanWss } from "../src/foreman.js";
+import { TaskModel } from "../src/task-model.js";
 import { loadDefaultConfig } from "../src/config.js";
 const defaultCfg = await loadDefaultConfig();
 import type { TaskIssue } from "../src/types.js";
@@ -12,17 +13,16 @@ function makeIssue(n: number): TaskIssue {
   return { number: n, title: `Issue ${n}`, body: "body", labels: [TASK_LABEL], repoUrl: "https://github.com/o/r" };
 }
 
-let queue: TaskQueue;
 let registry: WorkerRegistry;
 let taskModel: TaskModel;
 let reconcile: () => void;
 let routeEvent: (id: string, name: string, payload: unknown) => void;
 
 beforeEach(() => {
-  queue = new TaskQueue();
+  taskModel = new TaskModel();
   registry = new WorkerRegistry();
   const server = http.createServer();
-  ({ reconcile, routeEvent, taskModel } = createForemanWss(queue, registry, server, {
+  ({ reconcile, routeEvent } = createForemanWss(taskModel, registry, server, {
     taskLabel: TASK_LABEL,
     reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs,
     pingIntervalMs: defaultCfg.pingIntervalMs,
@@ -37,7 +37,7 @@ describe("reconcile()", () => {
   it("creates a task for each entry in labeledIssues that has no task yet", () => {
     taskModel.trackIssue(42, makeIssue(42), true);
     reconcile();
-    const t = queue.get("42");
+    const t = taskModel.get("42");
     expect(t?.issueNumber).toBe(42);
     expect(t?.title).toBe("Issue 42");
     expect(t?.depsLoaded).toBe(true);
@@ -47,25 +47,25 @@ describe("reconcile()", () => {
   it("creates task with depsLoaded: false when entry says false", () => {
     taskModel.trackIssue(7, makeIssue(7));
     reconcile();
-    expect(queue.get("7")?.depsLoaded).toBe(false);
+    expect(taskModel.get("7")?.depsLoaded).toBe(false);
   });
 
   it("does not create a duplicate task if one already exists for the issue", () => {
-    queue.addTask({ taskId: "42", issueNumber: 42, title: "Existing", body: "b", labels: [], repoUrl: "", depsLoaded: true });
+    taskModel.loadTask({ taskId: "42", issueNumber: 42, title: "Existing", body: "b", labels: [], repoUrl: "", depsLoaded: true });
     taskModel.trackIssue(42, makeIssue(42), true);
     reconcile();
     // Only one task for issue 42 exists (no duplicate created)
-    expect(queue.getTaskForIssue(42)).toBeDefined();
+    expect(taskModel.getTaskForIssue(42)).toBeDefined();
     // Title is synced from GitHub
-    expect(queue.get("42")?.title).toBe("Issue 42");
+    expect(taskModel.get("42")?.title).toBe("Issue 42");
   });
 
   it("syncs title from labeledIssues to an existing in-memory task", () => {
     // Simulates: task restored from DB with empty/stale title, then GitHub data loaded.
-    queue.addTask({ taskId: "42", issueNumber: 42, title: "", body: "b", labels: [], repoUrl: "", depsLoaded: true });
+    taskModel.loadTask({ taskId: "42", issueNumber: 42, title: "", body: "b", labels: [], repoUrl: "", depsLoaded: true });
     taskModel.trackIssue(42, { ...makeIssue(42), title: "Real Title" }, true);
     reconcile();
-    expect(queue.get("42")?.title).toBe("Real Title");
+    expect(taskModel.get("42")?.title).toBe("Real Title");
   });
 
   it("calls updateTaskContent for existing tasks (not upsertTask)", async () => {
@@ -77,18 +77,20 @@ describe("reconcile()", () => {
       markBlocked: vi.fn().mockResolvedValue(undefined),
       updateTaskContent: vi.fn().mockResolvedValue(undefined),
       updateTaskPr: vi.fn().mockResolvedValue(undefined),
+      deleteTask: vi.fn().mockResolvedValue(undefined),
+      getTask: vi.fn().mockResolvedValue(null),
       listTasks: vi.fn().mockResolvedValue([]),
     };
+    const taskModel2 = new TaskModel(mockStore as any);
     const server2 = http.createServer();
-    const { reconcile: rec2, taskModel: taskModel2 } = createForemanWss(queue, registry, server2, {
+    const { reconcile: rec2 } = createForemanWss(taskModel2, registry, server2, {
       taskLabel: TASK_LABEL,
       reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs,
       pingIntervalMs: defaultCfg.pingIntervalMs,
-      taskStore: mockStore as any,
     });
 
     // Existing task in queue
-    queue.addTask({ taskId: "42", issueNumber: 42, title: "Old Title", body: "old", labels: [], repoUrl: "", depsLoaded: true });
+    taskModel2.loadTask({ taskId: "42", issueNumber: 42, title: "Old Title", body: "old", labels: [], repoUrl: "", depsLoaded: true });
     taskModel2.trackIssue(42, { ...makeIssue(42), title: "New Title", body: "new body", labels: ["brunel:ready", "bug"] }, true);
 
     rec2();
@@ -101,35 +103,35 @@ describe("reconcile()", () => {
   });
 
   it("syncs depsLoaded from labeledIssues to an existing task that has depsLoaded: false", () => {
-    queue.addTask({ taskId: "5", issueNumber: 5, title: "T", body: "b", labels: [], repoUrl: "", depsLoaded: false });
+    taskModel.loadTask({ taskId: "5", issueNumber: 5, title: "T", body: "b", labels: [], repoUrl: "", depsLoaded: false });
     taskModel.trackIssue(5, makeIssue(5), true);
     reconcile();
-    expect(queue.get("5")?.depsLoaded).toBe(true);
+    expect(taskModel.get("5")?.depsLoaded).toBe(true);
   });
 
   it("syncs body and labels from labeledIssues to an existing task (startup restore fix)", () => {
     // Simulates: task restored from DB with empty body/labels, then GitHub data loaded.
-    queue.addTask({ taskId: "42", issueNumber: 42, title: "T", body: "", labels: [], repoUrl: "", depsLoaded: true });
+    taskModel.loadTask({ taskId: "42", issueNumber: 42, title: "T", body: "", labels: [], repoUrl: "", depsLoaded: true });
     taskModel.trackIssue(42, { ...makeIssue(42), body: "Real description", labels: ["brunel:ready", "bug"] }, true);
     reconcile();
-    expect(queue.get("42")?.body).toBe("Real description");
-    expect(queue.get("42")?.labels).toEqual(["brunel:ready", "bug"]);
+    expect(taskModel.get("42")?.body).toBe("Real description");
+    expect(taskModel.get("42")?.labels).toEqual(["brunel:ready", "bug"]);
   });
 
   it("does not change depsLoaded on an existing task when labeledIssues also says false", () => {
-    queue.addTask({ taskId: "5", issueNumber: 5, title: "T", body: "b", labels: [], repoUrl: "", depsLoaded: false });
+    taskModel.loadTask({ taskId: "5", issueNumber: 5, title: "T", body: "b", labels: [], repoUrl: "", depsLoaded: false });
     taskModel.trackIssue(5, makeIssue(5));
     reconcile();
-    expect(queue.get("5")?.depsLoaded).toBe(false);
+    expect(taskModel.get("5")?.depsLoaded).toBe(false);
   });
 
   it("syncs depsLoaded=false from labeledIssues to an existing task that has depsLoaded: true (stale-dep bug)", () => {
     // Simulates: issue body was edited → labeledIssues.depsLoaded reset to false,
     // but task.depsLoaded is still true. reconcile() must propagate false → task.
-    queue.addTask({ taskId: "5", issueNumber: 5, title: "T", body: "b", labels: [], repoUrl: "", depsLoaded: true });
+    taskModel.loadTask({ taskId: "5", issueNumber: 5, title: "T", body: "b", labels: [], repoUrl: "", depsLoaded: true });
     taskModel.trackIssue(5, makeIssue(5));
     reconcile();
-    expect(queue.get("5")?.depsLoaded).toBe(false);
+    expect(taskModel.get("5")?.depsLoaded).toBe(false);
   });
 
   it("does not assign a pending task via tryAssignWork when its depsLoaded is false after reconcile", () => {
@@ -138,21 +140,21 @@ describe("reconcile()", () => {
     registry.register("w1", fakeWs, "idle");
 
     // Task exists with depsLoaded: true but labeledIssues says false (e.g. mid-reload).
-    queue.addTask({ taskId: "42", issueNumber: 42, title: "T", body: "b", labels: [], repoUrl: "", depsLoaded: true });
+    taskModel.loadTask({ taskId: "42", issueNumber: 42, title: "T", body: "b", labels: [], repoUrl: "", depsLoaded: true });
     taskModel.trackIssue(42, makeIssue(42)); // depsLoaded defaults to false
     reconcile();
 
     // reconcile must have propagated depsLoaded=false, so the task must NOT be assigned.
-    expect(queue.get("42")?.depsLoaded).toBe(false);
-    expect(queue.get("42")?.status).toBe("pending");
+    expect(taskModel.get("42")?.depsLoaded).toBe(false);
+    expect(taskModel.get("42")?.status).toBe("pending");
     expect(fakeWs.send).not.toHaveBeenCalledWith(expect.stringContaining('"task_assigned"'));
   });
 
   it("removes a pending task whose issue is no longer in labeledIssues", () => {
-    queue.addTask({ taskId: "9", issueNumber: 9, title: "T", body: "b", labels: [], repoUrl: "" });
+    taskModel.loadTask({ taskId: "9", issueNumber: 9, title: "T", body: "b", labels: [], repoUrl: "" });
     // labeledIssues is empty — issue 9 has no label
     reconcile();
-    expect(queue.get("9")).toBeUndefined();
+    expect(taskModel.get("9")).toBeUndefined();
   });
 
   it("calls store.deleteTask when reconcile removes a pending task whose label was removed", async () => {
@@ -164,41 +166,42 @@ describe("reconcile()", () => {
       markPending: vi.fn().mockResolvedValue(undefined),
       markBlocked: vi.fn().mockResolvedValue(undefined),
       deleteTask,
+      getTask: vi.fn().mockResolvedValue(null),
+      updateTaskContent: vi.fn().mockResolvedValue(undefined),
       updateTaskPr: vi.fn().mockResolvedValue(undefined),
       listTasks: vi.fn().mockResolvedValue([]),
     };
-    const spyQueue = new TaskQueue();
+    const spyTaskModel = new TaskModel(mockStore);
     const spyRegistry = new WorkerRegistry();
     const spyServer = http.createServer();
-    const { reconcile: spyReconcile } = createForemanWss(spyQueue, spyRegistry, spyServer, {
+    const { reconcile: spyReconcile } = createForemanWss(spyTaskModel, spyRegistry, spyServer, {
       taskLabel: TASK_LABEL,
       reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs,
       pingIntervalMs: defaultCfg.pingIntervalMs,
-      taskStore: mockStore,
     });
 
-    spyQueue.addTask({ taskId: "9", issueNumber: 9, title: "T", body: "b", labels: [], repoUrl: "" });
+    spyTaskModel.loadTask({ taskId: "9", issueNumber: 9, title: "T", body: "b", labels: [], repoUrl: "" });
     spyReconcile();
 
-    expect(spyQueue.get("9")).toBeUndefined();
+    expect(spyTaskModel.get("9")).toBeUndefined();
     await Promise.resolve();
     expect(deleteTask).toHaveBeenCalledWith("9");
   });
 
   it("does NOT remove an assigned task even if its issue is not in labeledIssues", () => {
-    queue.addTask({ taskId: "9", issueNumber: 9, title: "T", body: "b", labels: [], repoUrl: "" });
-    queue.assignTask("9", "worker-1");
+    taskModel.loadTask({ taskId: "9", issueNumber: 9, title: "T", body: "b", labels: [], repoUrl: "" });
+    taskModel.assignInMemory("9", "worker-1");
     reconcile();
-    expect(queue.get("9")).toBeDefined();
-    expect(queue.get("9")?.status).toBe("assigned");
+    expect(taskModel.get("9")).toBeDefined();
+    expect(taskModel.get("9")?.status).toBe("assigned");
   });
 
-  it("does NOT remove a complete task even if its issue is not in labeledIssues", () => {
-    queue.addTask({ taskId: "9", issueNumber: 9, title: "T", body: "b", labels: [], repoUrl: "" });
-    queue.completeTask("9");
+  it("does NOT remove a complete task even if its issue is not in labeledIssues", async () => {
+    taskModel.loadTask({ taskId: "9", issueNumber: 9, title: "T", body: "b", labels: [], repoUrl: "" });
+    await taskModel.complete("9");
     reconcile();
-    expect(queue.get("9")).toBeDefined();
-    expect(queue.get("9")?.status).toBe("complete");
+    expect(taskModel.get("9")).toBeDefined();
+    expect(taskModel.get("9")?.status).toBe("complete");
   });
 
   it("calls tryAssignWork for each idle worker, assigning pending ready tasks", async () => {
@@ -213,7 +216,7 @@ describe("reconcile()", () => {
 
     // task_assigned message should have been sent to the idle worker
     expect(fakeWs.send).toHaveBeenCalledWith(expect.stringContaining('"task_assigned"'));
-    expect(queue.get("42")?.status).toBe("assigned");
+    expect(taskModel.get("42")?.status).toBe("assigned");
     expect(registry.get("w1")?.status).toBe("busy");
   });
 });
@@ -221,28 +224,28 @@ describe("reconcile()", () => {
 describe("issues/closed — task lifecycle", () => {
   it("marks an assigned task complete when its issue is closed", () => {
     taskModel.trackIssue(42, makeIssue(42), true);
-    queue.addTask({ taskId: "42", issueNumber: 42, title: "T", body: "b", labels: [], repoUrl: "" });
-    queue.assignTask("42", "worker-1");
+    taskModel.loadTask({ taskId: "42", issueNumber: 42, title: "T", body: "b", labels: [], repoUrl: "" });
+    taskModel.assignInMemory("42", "worker-1");
 
     routeEvent("evt-1", "issues", {
       action: "closed",
       issue: { number: 42, title: "T", body: "", labels: [] },
     });
 
-    expect(queue.get("42")?.status).toBe("complete");
+    expect(taskModel.get("42")?.status).toBe("complete");
   });
 
-  it("leaves a complete task complete when its issue is closed again", () => {
+  it("leaves a complete task complete when its issue is closed again", async () => {
     taskModel.trackIssue(42, makeIssue(42), true);
-    queue.addTask({ taskId: "42", issueNumber: 42, title: "T", body: "b", labels: [], repoUrl: "" });
-    queue.completeTask("42");
+    taskModel.loadTask({ taskId: "42", issueNumber: 42, title: "T", body: "b", labels: [], repoUrl: "" });
+    await taskModel.complete("42");
 
     routeEvent("evt-1", "issues", {
       action: "closed",
       issue: { number: 42, title: "T", body: "", labels: [] },
     });
 
-    expect(queue.get("42")?.status).toBe("complete");
+    expect(taskModel.get("42")?.status).toBe("complete");
   });
 
   it("marks a pending task complete when its issue is closed", () => {
@@ -251,26 +254,26 @@ describe("issues/closed — task lifecycle", () => {
     // via reconcile, but deleteTask silently skips rows where assigned_at IS NOT NULL
     // (tasks that previously had a worker), leaving stale pending rows in the DB.
     taskModel.trackIssue(42, makeIssue(42), true);
-    queue.addTask({ taskId: "42", issueNumber: 42, title: "T", body: "b", labels: [], repoUrl: "" });
+    taskModel.loadTask({ taskId: "42", issueNumber: 42, title: "T", body: "b", labels: [], repoUrl: "" });
 
     routeEvent("evt-1", "issues", {
       action: "closed",
       issue: { number: 42, title: "T", body: "", labels: [] },
     });
 
-    expect(queue.get("42")?.status).toBe("complete");
+    expect(taskModel.get("42")?.status).toBe("complete");
   });
 
   it("marks a blocked task complete when its issue is closed", () => {
     taskModel.trackIssue(42, makeIssue(42), true);
-    queue.addTask({ taskId: "42", issueNumber: 42, title: "T", body: "b", labels: [], repoUrl: "", status: "blocked" });
+    taskModel.loadTask({ taskId: "42", issueNumber: 42, title: "T", body: "b", labels: [], repoUrl: "", status: "blocked" });
 
     routeEvent("evt-1", "issues", {
       action: "closed",
       issue: { number: 42, title: "T", body: "", labels: [] },
     });
 
-    expect(queue.get("42")?.status).toBe("complete");
+    expect(taskModel.get("42")?.status).toBe("complete");
   });
 
   it("calls store.markComplete for a pending task when its issue is closed", async () => {
@@ -281,22 +284,22 @@ describe("issues/closed — task lifecycle", () => {
       markPending: vi.fn().mockResolvedValue(undefined),
       markBlocked: vi.fn().mockResolvedValue(undefined),
       deleteTask: vi.fn().mockResolvedValue(undefined),
+      getTask: vi.fn().mockResolvedValue(null),
       updateTaskContent: vi.fn().mockResolvedValue(undefined),
       updateTaskPr: vi.fn().mockResolvedValue(undefined),
       listTasks: vi.fn().mockResolvedValue([]),
     };
-    const q2 = new TaskQueue();
+    const tm2 = new TaskModel(mockStore as any);
     const r2 = new WorkerRegistry();
     const s2 = http.createServer();
-    const { routeEvent: re2, taskModel: tm2 } = createForemanWss(q2, r2, s2, {
+    const { routeEvent: re2 } = createForemanWss(tm2, r2, s2, {
       taskLabel: TASK_LABEL,
       reclaimTimeoutMs: 30000,
       pingIntervalMs: defaultCfg.pingIntervalMs,
-      taskStore: mockStore as any,
     });
 
     tm2.trackIssue(42, makeIssue(42), true);
-    q2.addTask({ taskId: "42", issueNumber: 42, title: "T", body: "b", labels: [], repoUrl: "" });
+    tm2.loadTask({ taskId: "42", issueNumber: 42, title: "T", body: "b", labels: [], repoUrl: "" });
 
     re2("evt-1", "issues", {
       action: "closed",
@@ -333,13 +336,13 @@ describe("startDepsLoad() error handling", () => {
     });
 
     // Task created synchronously by reconcile() with depsLoaded: false
-    expect(queue.get("42")?.depsLoaded).toBe(false);
+    expect(taskModel.get("42")?.depsLoaded).toBe(false);
 
     // Wait for the async startDepsLoad chain to fail and settle
     await new Promise<void>((resolve) => setTimeout(resolve, 10));
 
     // After failure, depsLoaded must still be false and task still pending
-    expect(queue.get("42")?.depsLoaded).toBe(false);
-    expect(queue.get("42")?.status).toBe("pending");
+    expect(taskModel.get("42")?.depsLoaded).toBe(false);
+    expect(taskModel.get("42")?.status).toBe("pending");
   });
 });
