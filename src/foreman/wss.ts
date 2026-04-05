@@ -8,7 +8,7 @@ import { fmtEvent } from "./event-fmt.js";
 import { fmtError } from "../utils.js";
 import { shortWorkerId } from "../../shared/utils.js";
 import type { BrunelConfig } from "../config.js";
-import type { TaskModel } from "./task-model.js";
+import type { TaskModel, Task } from "./task-model.js";
 import type { WorkerRegistry } from "./worker-registry.js";
 import { doRouteEvent, reconcile, isMutedEvent, summaryEvent, forwardEvent } from "./event-router.js";
 import type { EventRouterDeps } from "./event-router.js";
@@ -222,9 +222,16 @@ export function createForemanWss(
         sendMsg(workerId, { type: "hello_ack", workerId, status: "cancelled" }, taskId);
       }
 
-      async function reclaimWorker(taskId: string, issueRef: string | number) {
+      async function reclaimWorker(taskId: string, issueRef: string | number, task?: Task) {
         registry.register(workerId, ws, "busy", taskId);
-        await taskModel.assign(taskId, workerId);
+        // Only call assign if task is not already complete (to preserve task status)
+        if (!task || task.status !== "complete") {
+          await taskModel.assign(taskId, workerId);
+        } else {
+          // For complete tasks, just update the worker_id without changing status
+          // This is done implicitly by registering the worker as busy above
+          // The task stays complete while worker finishes cleanup/finalization work
+        }
         sendMsg(workerId, { type: "hello_ack", workerId, status: "busy" }, taskId);
         flushQueuedEvents(taskId, issueRef);
       }
@@ -240,15 +247,12 @@ export function createForemanWss(
             await taskModel.register(msg.taskId, issueNumber, "", "", "", []);
           }
           await reclaimWorker(msg.taskId, msg.taskId);
-        } else if (existing.status === "complete") {
-          log(workerId, `hello busy task=#${msg.taskId} — task complete (issue closed), cancelling`);
-          cancelWorker(msg.taskId);
         } else if (existing.assignedWorkerId && existing.assignedWorkerId !== workerId) {
           log(workerId, `hello busy task=#${msg.taskId} — task taken by another worker`);
           cancelWorker(msg.taskId);
         } else {
           log(workerId, `hello busy task=#${msg.taskId} — reclaimed`);
-          await reclaimWorker(msg.taskId, existing.issueNumber);
+          await reclaimWorker(msg.taskId, existing.issueNumber, existing);
         }
       } else {
         const priorTask = await taskModel.getAssignedTaskForWorker(workerId);

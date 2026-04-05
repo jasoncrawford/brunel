@@ -512,9 +512,10 @@ describe("startup — blocked status reconciliation after graph rebuild", () => 
 });
 
 describe("startup reconnect — worker reconnects to complete task", () => {
-  it("busy worker reconnect to complete task is cancelled (not reclaimed)", async () => {
+  it("busy worker reconnect to complete task is reclaimed for finalization", async () => {
     // Simulate: issue was closed while worker was active, so the foreman marked
     // the task complete in-memory. Worker briefly disconnects and reconnects.
+    // Worker should be allowed to reclaim to do finalization work (doc updates, etc.).
     taskModel = new TaskModel();
     await registerReady(taskModel, "42", 42, "owner/repo", "Test task", "body", []);
     await taskModel.assign("42", "w1");
@@ -526,8 +527,8 @@ describe("startup reconnect — worker reconnects to complete task", () => {
     await connect({ type: "worker_hello", workerId: "w1", status: "busy", taskId: "42" });
 
     await waitUntil(() => registry.get("w1") !== undefined);
-    // Worker should be cancelled (registered as idle), not reclaimed as busy
-    expect(registry.get("w1")?.status).toBe("idle");
+    // Worker should be reclaimed as busy to allow finalization work
+    expect(registry.get("w1")?.status).toBe("busy");
     // Task should stay complete
     expect((await taskModel.get("42"))?.status).toBe("complete");
   });
