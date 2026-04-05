@@ -1,15 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { generateWorkerId, PURITAN_NAMES } from "../src/utils.js";
+import { generateWorkerId, WORKER_NAMES } from "../src/utils.js";
 import { shortWorkerId } from "../shared/utils.js";
 
 describe("generateWorkerId", () => {
-  it("returns a string with a Puritan name prefix followed by a UUID", () => {
+  it("returns a string with a worker name prefix followed by a UUID", () => {
     const id = generateWorkerId();
     // Format: <name>-<uuid>
     const parts = id.split("-");
     // UUID has 5 parts; name adds 1 more at the front
     expect(parts.length).toBe(6);
-    expect(PURITAN_NAMES).toContain(parts[0]);
+    expect(WORKER_NAMES).toContain(parts[0]);
   });
 
   it("contains a valid UUID after the name prefix", () => {
@@ -33,8 +33,8 @@ describe("generateWorkerId", () => {
     expect(ids.size).toBe(100);
   });
 
-  it("PURITAN_NAMES contains at least 20 names", () => {
-    expect(PURITAN_NAMES.length).toBeGreaterThanOrEqual(20);
+  it("WORKER_NAMES contains at least 20 names", () => {
+    expect(WORKER_NAMES.length).toBeGreaterThanOrEqual(20);
   });
 });
 
