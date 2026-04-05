@@ -215,6 +215,15 @@ describe("check_suite success prompt", () => {
     expect(p).toContain("all tests passed");
     expect(p).toContain("wait");
   });
+
+  it("branch-review prompt reminds to check docs", () => {
+    const events: GitHubEvent[] = [
+      { id: "e1", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success", name: "CI" } } },
+    ];
+    const p = buildEventPrompt(events);
+    expect(p).toContain("documentation");
+    expect(p).toContain("CLAUDE.md");
+  });
 });
 
 describe("fmtEventList", () => {
@@ -360,6 +369,24 @@ describe("EVENT_FMT table", () => {
     expect(result).toContain("memories");
     expect(result).toMatch(/not|do not|don't/i);
     expect(result).toContain("persist");
+  });
+});
+
+describe("pull_request/opened", () => {
+  it("includes PR number and prompt to check docs", () => {
+    const evt: GitHubEvent = {
+      id: "e1",
+      name: "pull_request",
+      payload: {
+        action: "opened",
+        pull_request: { number: 42 },
+      },
+    };
+    const result = EVENT_FMT.pull_request(evt.payload, evt);
+    expect(result).toContain("PR #42");
+    expect(result).toContain("created");
+    expect(result).toContain("documentation");
+    expect(result).toContain("CLAUDE.md");
   });
 });
 
