@@ -237,21 +237,15 @@ export function createForemanWss(
       if (msg.status === "busy" && msg.taskId) {
         const existing = await taskModel.get(msg.taskId);
 
-        if (!existing) {
-          log(workerId, `hello busy task=#${msg.taskId} — unknown task, respecting busy status`);
-          // Create a placeholder so the worker can complete normally
-          const issueNumber = parseInt(msg.taskId, 10);
-          if (!isNaN(issueNumber)) {
-            await taskModel.register(msg.taskId, issueNumber, "", "", "", []);
-          }
-          await reclaimWorker(msg.taskId, msg.taskId);
-        } else if (existing.assignedWorkerId && existing.assignedWorkerId !== workerId) {
+        if (existing && existing.assignedWorkerId && existing.assignedWorkerId !== workerId) {
           log(workerId, `hello busy task=#${msg.taskId} — task taken by another worker`);
           cancelWorker(msg.taskId);
-        } else {
+        } else if (existing) {
           log(workerId, `hello busy task=#${msg.taskId} — reclaimed`);
           await reclaimWorker(msg.taskId, existing.issueNumber, existing);
         }
+        // If task doesn't exist, worker reconnects with an unknown taskId — don't respond
+        // This shouldn't happen in normal operation (all tasks should exist in the DB)
       } else {
         const priorTask = await taskModel.getAssignedTaskForWorker(workerId);
         if (priorTask) {
