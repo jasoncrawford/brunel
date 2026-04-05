@@ -354,47 +354,47 @@ describe("foreman WebSocket protocol", () => {
   });
 
   it("events are routed to the correct worker when multiple workers have different tasks", async () => {
-    // Two tasks pre-loaded
+    // Two tasks pre-loaded (task store sorts by createdAt descending, so 55 is assigned first)
     await makeTask(taskModel, 53);
     await makeTask(taskModel, 55);
 
-    // Worker A connects and gets task 53
+    // Worker A connects and gets task 55 (created most recently)
     const wsA = await connect();
     const qA = makeQueue(wsA);
     send(wsA, { type: "worker_hello", workerId: "worker-a", status: "idle" });
     await qA.next(); // hello_ack
     const msgA = await qA.next();
     assert(msgA.type === "task_assigned");
-    expect(msgA.issue.number).toBe(53);
+    expect(msgA.issue.number).toBe(55);
 
-    // Worker B connects and gets task 55
+    // Worker B connects and gets task 53 (created first)
     const wsB = await connect();
     const qB = makeQueue(wsB);
     send(wsB, { type: "worker_hello", workerId: "worker-b", status: "idle" });
     await qB.next(); // hello_ack
     const msgB = await qB.next();
     assert(msgB.type === "task_assigned");
-    expect(msgB.issue.number).toBe(55);
+    expect(msgB.issue.number).toBe(53);
 
-    // Event for issue 55 should go ONLY to worker B
-    const replyB = nextMsg(wsB);
-    const noMsgA = Promise.race([
-      nextMsg(wsA).then(() => "message" as const),
-      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
-    ]);
-    routeEvent("evt-1", "issue_comment", { issue: { number: 55 }, comment: { body: "update" } });
-    expect(await replyB).toMatchObject({ type: "event_notification", taskId: "55" });
-    expect(await noMsgA).toBe("timeout");
-
-    // Event for issue 53 should go ONLY to worker A
+    // Event for issue 55 should go ONLY to worker A
     const replyA = nextMsg(wsA);
     const noMsgB = Promise.race([
       nextMsg(wsB).then(() => "message" as const),
       new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
     ]);
-    routeEvent("evt-2", "issue_comment", { issue: { number: 53 }, comment: { body: "update" } });
-    expect(await replyA).toMatchObject({ type: "event_notification", taskId: "53" });
+    routeEvent("evt-1", "issue_comment", { issue: { number: 55 }, comment: { body: "update" } });
+    expect(await replyA).toMatchObject({ type: "event_notification", taskId: "55" });
     expect(await noMsgB).toBe("timeout");
+
+    // Event for issue 53 should go ONLY to worker B
+    const replyB = nextMsg(wsB);
+    const noMsgA = Promise.race([
+      nextMsg(wsA).then(() => "message" as const),
+      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
+    ]);
+    routeEvent("evt-2", "issue_comment", { issue: { number: 53 }, comment: { body: "update" } });
+    expect(await replyB).toMatchObject({ type: "event_notification", taskId: "53" });
+    expect(await noMsgA).toBe("timeout");
   });
 });
 
