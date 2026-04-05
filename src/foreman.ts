@@ -12,7 +12,7 @@ import { loadConfig } from "./config.js";
 import { setBlockers, fetchBlockers } from "./dependencies.js";
 import { fetchIssueStates } from "./github.js";
 import type { DependencyGraph } from "./dependencies.js";
-import { type DbLogger, type TaskStore, createDbLogger, createTaskStore, createNullDbLogger, createNullTaskStore, buildMessageSummary } from "./db.js";
+import { type DbLogger, createDbLogger, createNullDbLogger, buildMessageSummary } from "./db.js";
 import type { AdminWss, WorkerSnapshot } from "./admin-ws.js";
 import { fmtError } from "./utils.js";
 import { shortWorkerId } from "../shared/utils.js";
@@ -1020,21 +1020,19 @@ if (isMain) {
     ? new Webhooks({ secret: config.webhookSecret })
     : null;
 
-  // Setup DB logger and task store (share the same Supabase client if configured)
+  // Setup DB logger and task model (share the same Supabase client if configured)
   let dbLogger: DbLogger;
-  let taskStore: TaskStore;
+  let supabase: import("@supabase/supabase-js").SupabaseClient | undefined;
   if (config.supabaseUrl && config.supabaseSecretKey) {
     const { createClient } = await import("@supabase/supabase-js");
-    const supabase = createClient(config.supabaseUrl, config.supabaseSecretKey);
+    supabase = createClient(config.supabaseUrl, config.supabaseSecretKey);
     dbLogger = createDbLogger(supabase);
-    taskStore = createTaskStore(supabase);
     flog("Supabase logging enabled");
   } else {
     dbLogger = createNullDbLogger();
-    taskStore = createNullTaskStore();
   }
 
-  const taskModel = new TaskModel(taskStore, labeledIssues, openIssues);
+  const taskModel = TaskModel.create(supabase, labeledIssues, openIssues);
 
   let foremanWss: ForemanWss;
   const server = createHttpServer(webhooks, (id, name, payload) => foremanWss.routeEvent(id, name, payload), dbLogger, taskModel);

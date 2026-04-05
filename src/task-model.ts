@@ -1,7 +1,8 @@
 import { EventEmitter } from "events";
 import type { GitHubEvent, LabeledIssueState, TaskIssue, TaskStatus } from "./types.js";
 import type { TaskStore, TaskRow, ListTasksOpts } from "./db.js";
-import { createNullTaskStore } from "./db.js";
+import { createNullTaskStore, createTaskStore } from "./db.js";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { isBlocked } from "./dependencies.js";
 import type { DependencyGraph } from "./dependencies.js";
 import type { TaskSnapshot } from "./admin-ws.js";
@@ -212,6 +213,15 @@ export class TaskModel extends EventEmitter {
   private store: TaskStore;
   private _labeledIssues: Map<number, LabeledIssueState>;
   private _openIssues: Set<number>;
+
+  static create(
+    supabase?: SupabaseClient,
+    labeledIssues?: Map<number, LabeledIssueState>,
+    openIssues?: Set<number>,
+  ): TaskModel {
+    const store = supabase ? createTaskStore(supabase) : createNullTaskStore();
+    return new TaskModel(store, labeledIssues, openIssues);
+  }
 
   constructor(
     store?: TaskStore,
