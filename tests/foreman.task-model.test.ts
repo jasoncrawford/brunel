@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { TaskModel } from "../src/task-model.js";
-import type { TaskStore } from "../src/db.js";
+import { TaskModel } from "../src/foreman/task-model.js";
+import type { TaskStore } from "../src/foreman/db.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

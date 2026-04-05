@@ -3,8 +3,8 @@ import http from "http";
 import net from "net";
 import { WebSocket } from "ws";
 import type { AddressInfo } from "net";
-import { createAdminWss } from "../src/admin-ws.js";
-import type { AdminMessage, LogEntry } from "../src/admin-ws.js";
+import { createAdminWss } from "../src/foreman/admin-ws.js";
+import type { AdminMessage, LogEntry } from "../src/foreman/admin-ws.js";
 
 function startServer(): Promise<{ server: http.Server; port: number; adminWss: ReturnType<typeof createAdminWss> }> {
   return new Promise((resolve) => {
@@ -16,7 +16,7 @@ function startServer(): Promise<{ server: http.Server; port: number; adminWss: R
   });
 }
 
-function startServerWithSnapshot(getSnapshot: () => import("../src/admin-ws.js").AdminSnapshot): Promise<{ server: http.Server; port: number; adminWss: ReturnType<typeof createAdminWss> }> {
+function startServerWithSnapshot(getSnapshot: () => import("../src/foreman/admin-ws.js").AdminSnapshot): Promise<{ server: http.Server; port: number; adminWss: ReturnType<typeof createAdminWss> }> {
   return new Promise((resolve) => {
     const server = http.createServer();
     const adminWss = createAdminWss(server, getSnapshot);

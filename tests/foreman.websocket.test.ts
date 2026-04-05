@@ -3,14 +3,14 @@ import assert from "node:assert";
 import http from "http";
 import { WebSocket, WebSocketServer } from "ws";
 import type { AddressInfo } from "net";
-import { WorkerRegistry, createForemanWss } from "../src/foreman.js";
-import { TaskModel } from "../src/task-model.js";
+import { WorkerRegistry, createForemanWss } from "../src/foreman/index.js";
+import { TaskModel } from "../src/foreman/task-model.js";
 import { loadDefaultConfig } from "../src/config.js";
 const defaultCfg = await loadDefaultConfig();
 import type { ForemanMessage } from "../src/types.js";
-import { setBlockers } from "../src/dependencies.js";
-import type { DependencyGraph } from "../src/dependencies.js";
-import type { DbLogger, TaskStore } from "../src/db.js";
+import { setBlockers } from "../src/foreman/dependencies.js";
+import type { DependencyGraph } from "../src/foreman/dependencies.js";
+import type { DbLogger, TaskStore } from "../src/foreman/db.js";
 import { waitUntil } from "./helpers.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

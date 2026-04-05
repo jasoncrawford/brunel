@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { TaskModel } from "../src/task-model.js";
+import { TaskModel } from "../src/foreman/task-model.js";
 import type { GitHubEvent } from "../src/types.js";
 
 const baseTask = {

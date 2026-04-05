@@ -16,11 +16,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import http from "http";
 import { WebSocket, WebSocketServer } from "ws";
 import type { AddressInfo } from "net";
-import { WorkerRegistry, createForemanWss } from "../src/foreman.js";
-import { TaskModel } from "../src/task-model.js";
+import { WorkerRegistry, createForemanWss } from "../src/foreman/index.js";
+import { TaskModel } from "../src/foreman/task-model.js";
 import { loadDefaultConfig } from "../src/config.js";
 const defaultCfg = await loadDefaultConfig();
-import type { AdminWss, AdminSnapshot, LogEntry } from "../src/admin-ws.js";
+import type { AdminWss, AdminSnapshot, LogEntry } from "../src/foreman/admin-ws.js";
 import { waitUntil } from "./helpers.js";
 
 // ── Mock AdminWss ─────────────────────────────────────────────────────────────

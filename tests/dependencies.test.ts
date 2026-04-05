@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { parseBodyBlockers, isBlocked, setBlockers, fetchBlockers } from "../src/dependencies.js";
-import type { DependencyGraph } from "../src/dependencies.js";
+import { parseBodyBlockers, isBlocked, setBlockers, fetchBlockers } from "../src/foreman/dependencies.js";
+import type { DependencyGraph } from "../src/foreman/dependencies.js";
 
 describe("parseBodyBlockers", () => {
   it("parses 'Depends on #N' from body", () => {

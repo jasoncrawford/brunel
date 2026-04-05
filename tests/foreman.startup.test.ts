@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { WorkerRegistry, createForemanWss } from "../src/foreman.js";
-import { TaskModel } from "../src/task-model.js";
+import { WorkerRegistry, createForemanWss } from "../src/foreman/index.js";
+import { TaskModel } from "../src/foreman/task-model.js";
 import { loadDefaultConfig } from "../src/config.js";
-import { isBlocked } from "../src/dependencies.js";
+import { isBlocked } from "../src/foreman/dependencies.js";
 
 const defaultCfg = await loadDefaultConfig();
-import type { TaskStore, TaskRow } from "../src/db.js";
+import type { TaskStore, TaskRow } from "../src/foreman/db.js";
 import type { LabeledIssueState, TaskStatus } from "../src/types.js";
 import WebSocket, { WebSocketServer } from "ws";
 import http from "http";

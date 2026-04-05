@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { createDbLogger, createNullDbLogger } from "../src/db.js";
+import { createDbLogger, createNullDbLogger } from "../src/foreman/db.js";
 import { createTestSupabase } from "./helpers/db.js";
 
 const supabase = createTestSupabase();

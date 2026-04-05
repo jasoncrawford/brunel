@@ -7,8 +7,8 @@
   },
   "scripts": {
     "build": "cd frontend && npm install && npm run build",
-    "start": "tsx src/foreman.ts",
-    "dev": "tsx watch src/foreman.ts",
+    "start": "tsx src/foreman/index.ts",
+    "dev": "tsx watch src/foreman/index.ts",
     "repl": "tsx src/repl.ts",
     "worker": "tsx src/repl.ts --worker-mode",
     "test": "vitest run",

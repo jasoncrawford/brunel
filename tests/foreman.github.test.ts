@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { loadIssuesToQueue, fetchIssueStates, fetchNativeBlockers } from "../src/github.js";
+import { loadIssuesToQueue, fetchIssueStates, fetchNativeBlockers } from "../src/foreman/github.js";
 import type { LabeledIssueState } from "../src/types.js";
-import { fetchBlockers } from "../src/dependencies.js";
-import type { DependencyGraph } from "../src/dependencies.js";
+import { fetchBlockers } from "../src/foreman/dependencies.js";
+import type { DependencyGraph } from "../src/foreman/dependencies.js";
 
-vi.mock("../src/dependencies.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../src/dependencies.js")>();
+vi.mock("../src/foreman/dependencies.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/foreman/dependencies.js")>();
   return { ...actual, fetchBlockers: vi.fn().mockResolvedValue([]) };
 });
 

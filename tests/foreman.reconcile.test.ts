@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import http from "http";
-import { WorkerRegistry, createForemanWss } from "../src/foreman.js";
-import { TaskModel } from "../src/task-model.js";
+import { WorkerRegistry, createForemanWss } from "../src/foreman/index.js";
+import { TaskModel } from "../src/foreman/task-model.js";
 import { loadDefaultConfig } from "../src/config.js";
 const defaultCfg = await loadDefaultConfig();
 import type { TaskIssue } from "../src/types.js";
-import type { TaskStore } from "../src/db.js";
+import type { TaskStore } from "../src/foreman/db.js";
 
 const TASK_LABEL = "brunel:ready";
 

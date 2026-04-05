@@ -19,14 +19,14 @@ import http from "http";
 import { WebSocket, WebSocketServer } from "ws";
 import type { AddressInfo } from "net";
 import type { ForemanMessage } from "../src/types.js";
-import { WorkerRegistry, createForemanWss } from "../src/foreman.js";
-import { TaskModel } from "../src/task-model.js";
-import type { DbLogger } from "../src/db.js";
+import { WorkerRegistry, createForemanWss } from "../src/foreman/index.js";
+import { TaskModel } from "../src/foreman/task-model.js";
+import type { DbLogger } from "../src/foreman/db.js";
 import {
   createDbLogger,
   createNullDbLogger,
   createTaskStore,
-} from "../src/db.js";
+} from "../src/foreman/db.js";
 import { loadDefaultConfig } from "../src/config.js";
 import { createTestSupabase } from "./helpers/db.js";
 

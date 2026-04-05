@@ -40,11 +40,11 @@ import {
   WorkerRegistry,
   createForemanWss,
   createHttpServer,
-} from "../../src/foreman.js";
-import { TaskModel } from "../../src/task-model.js";
-import { createAdminWss } from "../../src/admin-ws.js";
+} from "../../src/foreman/index.js";
+import { TaskModel } from "../../src/foreman/task-model.js";
+import { createAdminWss } from "../../src/foreman/admin-ws.js";
 import { loadDefaultConfig } from "../../src/config.js";
-import type { DependencyGraph } from "../../src/dependencies.js";
+import type { DependencyGraph } from "../../src/foreman/dependencies.js";
 import type { LabeledIssueState } from "../../src/types.js";
 
 const PORT = parseInt(process.env.PORT ?? "14567", 10);
