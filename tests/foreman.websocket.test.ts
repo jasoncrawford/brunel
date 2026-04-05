@@ -1038,11 +1038,11 @@ describe("worker_goodbye — DB persistence", () => {
 // ── issues/closed — DB persistence ───────────────────────────────────────────
 
 describe("issues/closed — DB persistence", () => {
-  it("calls markComplete immediately when an issue is closed while a worker is active", async () => {
+  it("calls setIssueClosed when an issue is closed while a worker is active", async () => {
     const realStore = createMemoryTaskStore();
     const spiedStore: TaskStore = {
       ...realStore,
-      markComplete: vi.fn(realStore.markComplete),
+      setIssueClosed: vi.fn(realStore.setIssueClosed),
     };
 
     const q = new TaskModel(spiedStore);
@@ -1055,11 +1055,11 @@ describe("issues/closed — DB persistence", () => {
     q.markIssueDepsLoaded(1);
     await q.assign("1", "w1");
 
-    testRouteEvent("evt-1", "issues", { action: "closed", issue: { number: 1, title: "T", body: "", labels: [] } });
+    await testRouteEvent("evt-1", "issues", { action: "closed", issue: { number: 1, title: "T", body: "", labels: [] } });
 
     // closeIssue is async, wait for it
-    await waitUntil(() => (spiedStore.markComplete as ReturnType<typeof vi.fn>).mock.calls.length > 0);
-    expect(spiedStore.markComplete).toHaveBeenCalledWith("1");
+    await waitUntil(() => (spiedStore.setIssueClosed as ReturnType<typeof vi.fn>).mock.calls.length > 0);
+    expect(spiedStore.setIssueClosed).toHaveBeenCalledWith("1");
 
     await new Promise<void>((resolve) => testWss.close(() => srv.close(resolve)));
   });

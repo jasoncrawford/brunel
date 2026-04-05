@@ -193,16 +193,28 @@ describe("GET /api/tasks", () => {
     expect(JSON.parse(res.body)).toEqual([]);
   });
 
-  it("returns task list from taskModel", async () => {
-    const tasks = [{ taskId: "42", issueNumber: 42, title: "Fix bug", status: "complete" }];
-    const store = { listTasks: vi.fn().mockResolvedValue(tasks) } as never;
+  it("returns task list from taskModel with derived status", async () => {
+    const rows = [{
+      taskId: "42", issueNumber: 42, repo: "test/repo", title: "Fix bug",
+      body: "Description", labels: [],
+      workerId: null, assignedAt: null, completedAt: new Date().toISOString(), issueClosedAt: null, prMergedAt: null,
+      prNumber: null, branch: null, createdAt: new Date().toISOString(),
+    }];
+    const store = { listTasks: vi.fn().mockResolvedValue(rows) } as never;
     const tm = new TaskModel(store);
     const s = createHttpServer(null, vi.fn(), undefined, tm);
     const p = await startServer(s);
     try {
       const res = await request(p, "GET", "/api/tasks");
       expect(res.status).toBe(200);
-      expect(JSON.parse(res.body)).toEqual(tasks);
+      const body = JSON.parse(res.body);
+      expect(body).toHaveLength(1);
+      expect(body[0]).toMatchObject({
+        taskId: "42",
+        issueNumber: 42,
+        title: "Fix bug",
+        status: "complete", // derived from completedAt
+      });
       expect(store.listTasks).toHaveBeenCalled();
     } finally {
       await stopServer(s);
