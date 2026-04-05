@@ -3,6 +3,7 @@ import { EventEmitter } from "events";
 import { WorkerSession, classifyEvent, debounceMs } from "../src/agent/worker.js";
 import type { ForemanMessage, GitHubEvent, TaskIssue } from "../src/types.js";
 import { stripAnsi } from "./helpers.js";
+import * as displayModule from "../src/agent/display.js";
 
 // ── Fake WebSocket ─────────────────────────────────────────────────────────────
 
@@ -51,9 +52,17 @@ beforeEach(() => {
   fakeWs = new FakeWs();
   wsFactory = vi.fn().mockReturnValue(fakeWs);
   runQuery = vi.fn().mockResolvedValue("session-1");
+  const mockPrint = vi.fn();
+  const mockPrintForemanMessage = vi.fn((msg: ForemanMessage) => {
+    // Use real printForemanMessage logic that calls the mocked print function
+    const formatted = displayModule.resolve(displayModule.FOREMAN_MESSAGE_FMT, msg.type, msg);
+    if (formatted) {
+      mockPrint(formatted);
+    }
+  });
   display = {
-    print: vi.fn(),
-    printForemanMessage: vi.fn(),
+    print: mockPrint,
+    printForemanMessage: mockPrintForemanMessage,
     startPersistentStatus: vi.fn(),
     stopPersistentStatus: vi.fn(),
     updatePersistentStatus: vi.fn(),

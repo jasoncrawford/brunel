@@ -555,7 +555,6 @@ export class WorkerSession {
           prNumber: undefined,
           branch: "",
         });
-        this.display.print(display.c.amber("Task cancelled (reassigned to another worker)."));
         const ctx = this.options.workspaceCtx;
         if (ctx) {
           void ctx.workspace.reset().then(() => {

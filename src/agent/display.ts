@@ -652,7 +652,10 @@ export const MESSAGE_FMT: FmtTable = {
 export const FOREMAN_MESSAGE_FMT: FmtTable = {
   task_assigned:      { verbose: (m) => c.darkGray(`Task assigned: #${m.issue.number}, ${m.issue.title}`) },
   event_notification: { verbose: (m) => c.darkGray(`Event received [${fmtTime()}]: ${fmtEvent(m.event as GitHubEvent)}`) },
-  hello_ack:          { verbose: (m) => c.darkGray(`hello_ack: ${m.status}`) },
+  hello_ack: {
+    verbose: (m) => c.darkGray(`hello_ack: ${m.status}`),
+    quiet: (m) => m.status === "cancelled" ? c.amber("Task cancelled (reassigned to another worker).") : null,
+  },
   _default:           (m) => c.darkGray(`Unknown foreman message: ${m.type}`),
 };
 
