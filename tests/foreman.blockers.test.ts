@@ -40,7 +40,7 @@ describe("foreman — blocker transitions via routeEvent", () => {
     await taskModel.block("10");
     const graph = new Map([[10, new Set([5])]]);
 
-    const { wss, routeEvent } = createForemanWss(taskModel, registry, server, { ...defaultCfg, taskLabel: "brunel:ready", workerReclaimTimeoutMs: 300_000 }, { graph });
+    const { wss, routeEvent } = createForemanWss(taskModel, registry, server, { ...defaultCfg, taskLabel: "brunel:ready" }, { graph });
     taskModel.trackIssue(10, ISSUE_10, true);
     taskModel.setIssueOpenState(5, true);
     wss.close();
@@ -63,7 +63,7 @@ describe("foreman — blocker transitions via routeEvent", () => {
     await taskModel.block("10");
     const graph = new Map([[10, new Set([5])]]);
 
-    const { wss, routeEvent } = createForemanWss(taskModel, registry, server, { ...defaultCfg, taskLabel: "brunel:ready", workerReclaimTimeoutMs: 300_000 }, { graph });
+    const { wss, routeEvent } = createForemanWss(taskModel, registry, server, { ...defaultCfg, taskLabel: "brunel:ready" }, { graph });
     taskModel.trackIssue(10, ISSUE_10, true);
     taskModel.setIssueOpenState(5, true);
     wss.close();
@@ -87,7 +87,7 @@ describe("foreman — blocker transitions via routeEvent", () => {
     // Task 10 is blocked by BOTH 5 and 6
     const graph = new Map([[10, new Set([5, 6])]]);
 
-    const { wss, routeEvent } = createForemanWss(taskModel, registry, server, { ...defaultCfg, taskLabel: "brunel:ready", workerReclaimTimeoutMs: 300_000 }, { graph });
+    const { wss, routeEvent } = createForemanWss(taskModel, registry, server, { ...defaultCfg, taskLabel: "brunel:ready" }, { graph });
     taskModel.trackIssue(10, ISSUE_10, true);
     taskModel.setIssueOpenState(5, true);
     taskModel.setIssueOpenState(6, true);

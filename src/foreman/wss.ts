@@ -37,7 +37,7 @@ export function createForemanWss(
   taskModel: TaskModel,
   registry: WorkerRegistry,
   server: http.Server,
-  config: Pick<BrunelConfig, "taskLabel" | "githubRepo" | "githubToken" | "githubApiUrl" | "workerSecret" | "pingIntervalMs" | "workerReclaimTimeoutMs">,
+  config: Pick<BrunelConfig, "taskLabel" | "githubRepo" | "githubToken" | "githubApiUrl" | "workerSecret" | "pingIntervalMs">,
   deps?: {
     graph?: DependencyGraph;
     dbLogger?: DbLogger;
@@ -52,7 +52,6 @@ export function createForemanWss(
   const dbLogger = deps?.dbLogger;
   const adminWss = deps?.adminWss;
   const workerSecret = config.workerSecret;
-  const reclaimTimeoutMs = config.workerReclaimTimeoutMs;
 
   // Incrementing counter for unique broadcast IDs (React uses these as keys).
   let nextBroadcastId = 1;
@@ -208,7 +207,6 @@ export function createForemanWss(
       }
 
       workerId = msg.workerId;
-      registry.cancelReclaimTimer(workerId);
 
       function flushQueuedEvents(taskId: string, issueRef: string | number) {
         for (const evt of taskModel.drainEvents(taskId)) {
@@ -334,18 +332,6 @@ export function createForemanWss(
         broadcastMessageEvent({ direction: "received", workerId, taskId, msgType: "worker_disconnected", payload: disconnPayload });
         if (taskId) {
           registry.markDisconnected(workerId);
-          registry.startReclaimTimer(workerId, reclaimTimeoutMs, () => {
-            const w = registry.get(workerId);
-            if (!w || w.status !== "disconnected") return;
-            log(workerId, `reclaim timer fired — reverting task #${taskId} to pending`);
-            void (async () => {
-              await taskModel.revert(taskId).catch((err: unknown) =>
-                flog(`ERROR Failed to revert task #${taskId} to pending: ${fmtError(err)}`)
-              );
-              registry.remove(workerId);
-              await assignIdleWorkers();
-            })().catch(err => flog(`ERROR reclaim timer: ${fmtError(err)}`));
-          });
         } else {
           registry.remove(workerId);
         }

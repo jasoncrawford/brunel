@@ -104,58 +104,6 @@ describe("WorkerRegistry", () => {
   });
 });
 
-describe("reclaim timer", () => {
-  let reg: WorkerRegistry;
-  beforeEach(() => { reg = new WorkerRegistry(); vi.useFakeTimers(); });
-  afterEach(() => { vi.useRealTimers(); });
-
-  it("startReclaimTimer fires callback after timeout", () => {
-    const callback = vi.fn();
-    reg.register("w1", fakeWs(), "busy");
-    reg.assignTask("w1", "42");
-    reg.markDisconnected("w1");
-    reg.startReclaimTimer("w1", 1000, callback);
-    expect(callback).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(1000);
-    expect(callback).toHaveBeenCalledOnce();
-  });
-
-  it("cancelReclaimTimer prevents callback from firing", () => {
-    const callback = vi.fn();
-    reg.register("w1", fakeWs(), "busy");
-    reg.assignTask("w1", "42");
-    reg.markDisconnected("w1");
-    reg.startReclaimTimer("w1", 1000, callback);
-    reg.cancelReclaimTimer("w1");
-    vi.advanceTimersByTime(2000);
-    expect(callback).not.toHaveBeenCalled();
-  });
-
-  it("startReclaimTimer replaces an existing timer (reset on re-disconnect)", () => {
-    const first = vi.fn();
-    const second = vi.fn();
-    reg.register("w1", fakeWs(), "busy");
-    reg.assignTask("w1", "42");
-    reg.markDisconnected("w1");
-    reg.startReclaimTimer("w1", 1000, first);
-    vi.advanceTimersByTime(500);
-    // Start fresh timer (simulates reconnect + re-disconnect)
-    reg.startReclaimTimer("w1", 1000, second);
-    vi.advanceTimersByTime(500); // original would have fired here
-    expect(first).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(500); // second timer fires
-    expect(second).toHaveBeenCalledOnce();
-  });
-
-  it("cancelReclaimTimer is a no-op for unknown worker", () => {
-    expect(() => reg.cancelReclaimTimer("unknown")).not.toThrow();
-  });
-
-  it("cancelReclaimTimer is a no-op when no timer is running", () => {
-    reg.register("w1", fakeWs(), "idle");
-    expect(() => reg.cancelReclaimTimer("w1")).not.toThrow();
-  });
-});
 
 describe("WorkerRegistry changed events", () => {
   let reg: WorkerRegistry;
