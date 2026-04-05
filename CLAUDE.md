@@ -36,10 +36,6 @@ The foreman has **zero imports from `display.ts`** — display.ts is a TUI modul
 
 - **`shared/`** — Code shared between the Node backend (`src/`) and the Vite frontend (`frontend/src/`). Both `tsconfig.json` (root) and `frontend/tsconfig.json` include this directory. Import using `../shared/utils.js` (backend, `.js` extension for NodeNext) or `../../../shared/utils.ts` (frontend pages, `.ts` extension ok with `allowImportingTsExtensions`). Put utilities here when they're needed in both build contexts.
 
-### Re-export stubs
-
-The old file locations (`src/foreman.ts`, `src/task-model.ts`, `src/admin-ws.ts`, `src/db.ts`, `src/github.ts`, `src/dependencies.ts`) contain thin re-export stubs that forward to `src/foreman/`. New code should import directly from `src/foreman/`.
-
 ## Dev workflow
 
 Three terminals:
