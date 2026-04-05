@@ -169,7 +169,8 @@ export function resolveEventTemplate(table: EventTemplateFmtTable, key: string, 
 const BRANCH_REVIEW_PROMPT =
   "Check whether all tests have passed. If not, take no action now — you will be notified when each check completes, so do not sleep or poll waiting for results. " +
   "If all tests passed, check if the branch is up to date, and if not, rebase it. " +
-  "Then check if the PR can be merged. If anything is blocking merge, resolve it, but do not merge yourself.";
+  "Then check if the PR can be merged. If anything is blocking merge, resolve it, but do not merge yourself. " +
+  "Before merging, also check whether any project documentation (like CLAUDE.md or README) should be updated to reflect your changes, and include those updates in this PR.";
 
 const CODE_REVIEW_PROMPT = "Please respond in whatever way you think is most appropriate, replying and/or making code changes.";
 
@@ -211,6 +212,9 @@ export const EVENT_FMT: EventTemplateFmtTable = {
   pull_request: (p) => {
     const pr = p.pull_request as Record<string, unknown> | undefined;
     const prNumber = pr?.number;
+    if (p.action === "opened") {
+      return `PR #${prNumber} has been created. While waiting for user feedback and CI checks, consider whether any project documentation should be updated, like CLAUDE.md, and include those updates in this PR.`;
+    }
     if (p.action === "auto_merge_enabled") {
       return `Auto-merge was enabled on PR #${prNumber}. ${BRANCH_REVIEW_PROMPT}`;
     }
