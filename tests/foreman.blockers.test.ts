@@ -46,7 +46,8 @@ describe("foreman — blocker transitions via routeEvent", () => {
     taskModel.setIssueOpenState(5, true); // blocker is open
     wss.close();
 
-    expect((await taskModel.get("10"))?.status).toBe("blocked");
+    const snapshots = await taskModel.getTaskSnapshots(graph);
+    expect(snapshots[0].status).toBe("blocked");
   });
 
   it("task derives pending status when blocker is closed", async () => {
@@ -63,7 +64,8 @@ describe("foreman — blocker transitions via routeEvent", () => {
     wss.close();
 
     // Initially blocked
-    expect((await taskModel.get("10"))?.status).toBe("blocked");
+    const snapshots1 = await taskModel.getTaskSnapshots(graph);
+    expect(snapshots1[0].status).toBe("blocked");
 
     // Close the blocker
     await routeEvent("evt-1", "issues", {
@@ -72,7 +74,8 @@ describe("foreman — blocker transitions via routeEvent", () => {
     });
 
     // Now pending
-    expect((await taskModel.get("10"))?.status).toBe("pending");
+    const snapshots2 = await taskModel.getTaskSnapshots(graph);
+    expect(snapshots2[0].status).toBe("pending");
   });
 
   it("task remains blocked when other blockers are still open", async () => {
@@ -91,7 +94,8 @@ describe("foreman — blocker transitions via routeEvent", () => {
     wss.close();
 
     // Initially blocked
-    expect((await taskModel.get("10"))?.status).toBe("blocked");
+    const snapshots1 = await taskModel.getTaskSnapshots(graph);
+    expect(snapshots1[0].status).toBe("blocked");
 
     // Close issue 5 — but 6 is still open
     await routeEvent("evt-1", "issues", {
@@ -100,6 +104,7 @@ describe("foreman — blocker transitions via routeEvent", () => {
     });
 
     // Task remains blocked (6 is still open)
-    expect((await taskModel.get("10"))?.status).toBe("blocked");
+    const snapshots2 = await taskModel.getTaskSnapshots(graph);
+    expect(snapshots2[0].status).toBe("blocked");
   });
 });

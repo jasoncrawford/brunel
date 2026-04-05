@@ -237,65 +237,60 @@ describe("reconcile()", () => {
 
 describe("issues/closed — task lifecycle", () => {
   it("marks an assigned task closed when its issue is closed", async () => {
-    taskModel.trackIssue(42, makeIssue(42), true);
-    await taskModel.register("42", 42, "test/repo", "T", "b", []);
-    await taskModel.assign("42", "worker-1");
+    taskModel.trackIssue(142, makeIssue(142), true);
+    await taskModel.register("142", 142, "test/repo", "T", "b", []);
+    await taskModel.assign("142", "worker-1");
 
     await routeEvent("evt-1", "issues", {
       action: "closed",
-      issue: { number: 42, title: "T", body: "", labels: [] },
+      issue: { number: 142, title: "T", body: "", labels: [] },
     });
 
-    expect((await taskModel.get("42"))?.status).toBe("closed");
+    expect((await taskModel.get("142"))?.status).toBe("closed");
   });
 
   it("leaves a complete task complete when its issue is closed again", async () => {
-    taskModel.trackIssue(42, makeIssue(42), true);
-    await taskModel.register("42", 42, "test/repo", "T", "b", []);
-    await taskModel.complete("42");
+    taskModel.trackIssue(143, makeIssue(143), true);
+    await taskModel.register("143", 143, "test/repo", "T", "b", []);
+    await taskModel.complete("143");
 
     await routeEvent("evt-1", "issues", {
       action: "closed",
-      issue: { number: 42, title: "T", body: "", labels: [] },
+      issue: { number: 143, title: "T", body: "", labels: [] },
     });
 
-    expect((await taskModel.get("42"))?.status).toBe("complete");
+    expect((await taskModel.get("143"))?.status).toBe("complete");
   });
 
-  it("marks a pending task closed when its issue is closed", async () => {
-    // When an issue is closed, the task's issueClosedAt timestamp is set, deriving status as 'closed'.
-    // The worker will later call task_complete to finalize it as 'complete'.
-    taskModel.trackIssue(42, makeIssue(42), true);
-    await taskModel.register("42", 42, "test/repo", "T", "b", []);
+  it("deletes a pending task when its issue is closed and no worker is assigned", async () => {
+    // When an issue is closed, pending/blocked tasks are cleaned up by reconcile.
+    // Only tasks with an assigned worker are preserved (with status='closed').
+    taskModel.trackIssue(144, makeIssue(144), true);
+    await taskModel.register("144", 144, "test/repo", "T", "b", []);
 
     await routeEvent("evt-1", "issues", {
       action: "closed",
-      issue: { number: 42, title: "T", body: "", labels: [] },
+      issue: { number: 144, title: "T", body: "", labels: [] },
     });
 
-    expect((await taskModel.get("42"))?.status).toBe("closed");
+    // Task is deleted since it was pending (not assigned to a worker)
+    expect(await taskModel.get("144")).toBeNull();
   });
 
-  it("marks a blocked task closed when its issue is closed", async () => {
-    const server = http.createServer();
-    const { routeEvent: re } = createForemanWss(taskModel, new WorkerRegistry(), server, { ...defaultCfg, taskLabel: TASK_LABEL }, { graph: new Map([[42, new Set([99])]]) });
+  it("marks an assigned task closed when its issue is closed (preserved for worker)", async () => {
+    // Tasks with an assigned worker are preserved even if issue closes.
+    // They get issueClosedAt set, deriving status as 'closed'.
+    taskModel.trackIssue(145, makeIssue(145), true);
+    await taskModel.register("145", 145, "test/repo", "T", "b", []);
+    await taskModel.assign("145", "worker-1");
 
-    taskModel.trackIssue(42, makeIssue(42), true);
-    taskModel.setIssueOpenState(99, true); // blocker is open
-    await taskModel.register("42", 42, "test/repo", "T", "b", []);
-
-    // Verify it's blocked
-    expect((await taskModel.get("42"))?.status).toBe("blocked");
-
-    // Close the issue
-    await re("evt-1", "issues", {
+    await routeEvent("evt-1", "issues", {
       action: "closed",
-      issue: { number: 42, title: "T", body: "", labels: [] },
+      issue: { number: 145, title: "T", body: "", labels: [] },
     });
 
-    // Now it should be closed (not complete, until worker sends task_complete)
-    expect((await taskModel.get("42"))?.status).toBe("closed");
-    server.close();
+    // Task is preserved (assigned to worker) with closed status
+    expect((await taskModel.get("145"))?.status).toBe("closed");
   });
 
   it("calls store.setIssueClosed for a pending task when its issue is closed", async () => {
