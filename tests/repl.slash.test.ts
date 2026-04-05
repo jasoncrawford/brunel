@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseSlashCommand, resolveCommandFilePath, resolveContent } from "../src/input.js";
+import { parseSlashCommand, resolveCommandFilePath, resolveContent } from "../src/agent/input.js";
 
 describe("parseSlashCommand", () => {
   it("returns null for non-slash input", () => {

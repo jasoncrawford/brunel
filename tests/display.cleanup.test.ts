@@ -3,7 +3,7 @@ import { stripAnsi } from "./helpers.js";
 import {
   print, setVerbose, stopStatus, fmtTime, s,
   setInputPrintCallback, distributeWidths,
-} from "../src/display.js";
+} from "../src/agent/display.js";
 
 beforeEach(() => {
   stopStatus();

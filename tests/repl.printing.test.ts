@@ -11,7 +11,7 @@ import {
   setThinkOutLoud,
   _statusActive,
   setInputPrintCallback,
-} from "../src/display.js";
+} from "../src/agent/display.js";
 
 function captureOutput(fn: () => void): string {
   let output = "";

@@ -14,7 +14,7 @@ vi.mock("ws", async () => {
   };
 });
 
-vi.mock("../src/workspace.js", () => ({
+vi.mock("../src/agent/workspace.js", () => ({
   Workspace: {
     create: vi.fn().mockResolvedValue({
       dir: "/fake/workers/test-worker",
@@ -30,8 +30,8 @@ vi.mock("../src/workspace.js", () => ({
   confirmIfUnsafe: vi.fn().mockResolvedValue(true),
 }));
 
-vi.mock("../src/input.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../src/input.js")>();
+vi.mock("../src/agent/input.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/agent/input.js")>();
   return {
     ...actual,
     ask: vi.fn().mockResolvedValue("__eof__"),
@@ -39,10 +39,10 @@ vi.mock("../src/input.js", async (importOriginal) => {
   };
 });
 
-import { workerMain } from "../src/worker.js";
-import { Workspace, confirmIfUnsafe } from "../src/workspace.js";
-import * as inputModule from "../src/input.js";
-import * as displayModule from "../src/display.js";
+import { workerMain } from "../src/agent/worker.js";
+import { Workspace, confirmIfUnsafe } from "../src/agent/workspace.js";
+import * as inputModule from "../src/agent/input.js";
+import * as displayModule from "../src/agent/display.js";
 import { stripAnsi } from "./helpers.js";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────

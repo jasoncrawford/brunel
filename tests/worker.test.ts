@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "events";
-import { WorkerSession, classifyEvent, debounceMs } from "../src/worker.js";
+import { WorkerSession, classifyEvent, debounceMs } from "../src/agent/worker.js";
 import type { ForemanMessage, GitHubEvent, TaskIssue } from "../src/types.js";
 import { stripAnsi } from "./helpers.js";
 
@@ -783,7 +783,7 @@ describe("hello_ack handshake — buffering", () => {
         reset: vi.fn().mockResolvedValue(undefined),
         destroy: vi.fn().mockResolvedValue(undefined),
         checkSafety: vi.fn().mockResolvedValue({ uncommittedFiles: [], unpushedCommits: [], noUpstream: false }),
-      } as unknown as import("../src/workspace.js").Workspace;
+      } as unknown as import("../src/agent/workspace.js").Workspace;
 
       const wsA = new FakeWs();
       const wsB = new FakeWs();
@@ -1382,7 +1382,7 @@ describe("prIsClosed guard", () => {
   });
 });
 
-import { Workspace } from "../src/workspace.js";
+import { Workspace } from "../src/agent/workspace.js";
 
 // ── workspace slash commands in WorkerSession ─────────────────────────────────
 

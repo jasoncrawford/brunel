@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PassThrough } from "stream";
-import { ask } from "../src/input.js";
-import * as display from "../src/display.js";
+import { ask } from "../src/agent/input.js";
+import * as display from "../src/agent/display.js";
 
 function makeStdin() {
   const stream = new PassThrough();

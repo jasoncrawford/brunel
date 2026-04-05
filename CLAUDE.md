@@ -21,16 +21,26 @@ All foreman/server code lives in `src/foreman/` with clean MVC separation:
 - **`src/foreman/dependencies.ts`** — Dependency graph: `parseBodyBlockers`, `setBlockers`, `isBlocked`, `fetchBlockers`.
 - **`src/foreman/event-fmt.ts`** — `fmtEvent` for formatting GitHub events into human-readable summaries. Foreman-side copy so the foreman module has zero imports from `display.ts`.
 
-The foreman has **zero imports from `display.ts`** — display.ts is a TUI module that belongs entirely to the agent/worker side.
+The foreman has **zero imports from agent code** — `src/agent/` is a TUI/worker module that belongs entirely to the agent/worker side.
 
-### Agent/Worker
+### Agent/Worker (`src/agent/`)
 
-- **`src/repl.ts`** — Interactive REPL (default) or worker process (`--worker-mode`). Workers connect to the foreman, receive tasks, run Claude Agent SDK sessions, and report completion.
-- **`src/display.ts`** — Display/rendering engine for the worker TUI.
+All agent/worker code lives in `src/agent/`:
+
+- **`src/agent/index.ts`** — Entry point: core agent loop. Interactive REPL (default) or worker process (`--worker-mode`). Workers connect to the foreman, receive tasks, run Claude Agent SDK sessions, and report completion.
+- **`src/agent/display.ts`** — Display/rendering engine for the worker TUI. Colors, ANSI escapes, status bar, Claude SDK message formatting.
+- **`src/agent/worker.ts`** — WebSocket client + task lifecycle. `WorkerSession`, `WorkerStatusModel`, event classification, debouncing.
+- **`src/agent/input.ts`** — User input handling: `ask()`, slash command parsing, command dispatch, autocomplete.
+- **`src/agent/workspace.ts`** — Git/npm workspace management: `Workspace` class, branch checkout, npm install, safety confirmations.
+- **`src/agent/templates.ts`** — Prompt templates: `buildInitialPrompt`, `buildEventPrompt`, event formatting.
+- **`src/agent/model.ts`** — Model selection logic: cached model list from the SDK, `/model` command handler, `findModel` exact-match lookup. The SDK returns short aliases (`default`, `opus`, `haiku`, `sonnet[1m]`, `opus[1m]`); `"sonnet"` is hardcoded to map to `"default"`. Unknown strings are accepted with a warning (power-user escape hatch for full model IDs).
+- **`src/agent/effort.ts`** — Effort level selection: `/effort` command handler with interactive picker and direct set. Valid levels: `low`, `medium`, `high`, `max`, `auto` (default). `auto` maps to `undefined` (let the SDK decide). Unlike model, effort is a closed set — unknown values are rejected.
+
+### Shared (top-level `src/`)
+
 - **`src/config.ts`** — Unified config loader. Merges CLI flags, `BRUNEL_*` env vars, `brunel.config.ts` file, legacy env vars, and built-in defaults via zod schema.
-- **`src/model.ts`** — Model selection logic: cached model list from the SDK, `/model` command handler, `findModel` exact-match lookup. The SDK returns short aliases (`default`, `opus`, `haiku`, `sonnet[1m]`, `opus[1m]`); `"sonnet"` is hardcoded to map to `"default"`. Unknown strings are accepted with a warning (power-user escape hatch for full model IDs).
-- **`src/effort.ts`** — Effort level selection: `/effort` command handler with interactive picker and direct set. Valid levels: `low`, `medium`, `high`, `max`, `auto` (default). `auto` maps to `undefined` (let the SDK decide). Unlike model, effort is a closed set — unknown values are rejected.
 - **`src/types.ts`** — Shared types: `WorkerMessage`, `ForemanMessage`, `TaskIssue`, `GitHubEvent`.
+- **`src/utils.ts`** — Shared utilities.
 
 ### Shared
 
@@ -116,7 +126,7 @@ A task moves through states: **pending → assigned → complete**.
 
 ## Design principles
 
-- **Prefer event-based designs for real-time UIs.** Whether it's a terminal status bar (worker side) or a web dashboard (foreman side with WebSocket/React), the cleanest pattern is a model that holds state and emits events on change, with the UI subscribing to refresh automatically. Avoid scattering manual "refresh" calls throughout the code — they drift out of sync as the codebase grows. See `WorkerStatusModel` in `src/worker.ts` for an example: model mutations emit `"change"`, and the display subscribes once in `start()` rather than calling `updatePersistentStatus()` from a dozen places.
+- **Prefer event-based designs for real-time UIs.** Whether it's a terminal status bar (worker side) or a web dashboard (foreman side with WebSocket/React), the cleanest pattern is a model that holds state and emits events on change, with the UI subscribing to refresh automatically. Avoid scattering manual "refresh" calls throughout the code — they drift out of sync as the codebase grows. See `WorkerStatusModel` in `src/agent/worker.ts` for an example: model mutations emit `"change"`, and the display subscribes once in `start()` rather than calling `updatePersistentStatus()` from a dozen places.
 
 ## Key conventions
 

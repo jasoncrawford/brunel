@@ -8,7 +8,7 @@ import {
   renderTable,
   fmtHunk,
   W,
-} from "../src/display.js";
+} from "../src/agent/display.js";
 
 beforeEach(() => setVerbose(false));
 afterEach(() => setVerbose(false));

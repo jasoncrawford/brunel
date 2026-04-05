@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PassThrough } from "stream";
-import { ask, pick, pickMultiple, promptLine, pickQuestion, _resetStash } from "../src/input.js";
-import type { PickQuestionResult } from "../src/input.js";
-import * as display from "../src/display.js";
+import { ask, pick, pickMultiple, promptLine, pickQuestion, _resetStash } from "../src/agent/input.js";
+import type { PickQuestionResult } from "../src/agent/input.js";
+import * as display from "../src/agent/display.js";
 
 function makeStdin() {
   const stream = new PassThrough();

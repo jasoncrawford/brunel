@@ -1,5 +1,5 @@
-import type { ForemanMessage, GitHubEvent } from "./types.js";
-import { shortWorkerId } from "../shared/utils.js";
+import type { ForemanMessage, GitHubEvent } from "../types.js";
+import { shortWorkerId } from "../../shared/utils.js";
 
 // ── Display width ─────────────────────────────────────────────────────────────
 

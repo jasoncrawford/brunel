@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import os from "node:os";
 import fs from "node:fs";
 import path from "node:path";
-import { Workspace, confirmIfUnsafe } from "../src/workspace.js";
+import { Workspace, confirmIfUnsafe } from "../src/agent/workspace.js";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 

@@ -3,7 +3,7 @@ import path from "node:path";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
 import * as display from "./display.js";
-import { fmtError } from "./utils.js";
+import { fmtError } from "../utils.js";
 
 const execFileAsync = promisify(execFileCb);
 

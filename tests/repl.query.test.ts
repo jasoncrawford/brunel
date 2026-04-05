@@ -13,7 +13,7 @@ vi.mock("fs", () => ({
   },
 }));
 
-vi.mock("../src/input.js", async (importOriginal) => {
+vi.mock("../src/agent/input.js", async (importOriginal) => {
   const actual = await importOriginal() as Record<string, unknown>;
   return {
     ...actual,
@@ -25,9 +25,9 @@ vi.mock("../src/input.js", async (importOriginal) => {
 
 import { PassThrough } from "stream";
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { runQuery, getCachedModels, _resetCachedModels } from "../src/repl.js";
-import { ask, pick, pickMultiple, pickQuestion } from "../src/input.js";
-import { toolUseNames, stopStatus, setVerbose } from "../src/display.js";
+import { runQuery, getCachedModels, _resetCachedModels } from "../src/agent/index.js";
+import { ask, pick, pickMultiple, pickQuestion } from "../src/agent/input.js";
+import { toolUseNames, stopStatus, setVerbose } from "../src/agent/display.js";
 
 const defaultPermConfig = {
   permissionMode: "default" as const,

@@ -11,10 +11,10 @@ import { ask, listWorkerCommands, dispatchInput, pick } from "./input.js";
 import { handleModelCommand } from "./model.js";
 import { handleEffortCommand } from "./effort.js";
 import type { EffortValue } from "./effort.js";
-import type { ForemanMessage, GitHubEvent, TaskIssue, WorkerMessage } from "./types.js";
+import type { ForemanMessage, GitHubEvent, TaskIssue, WorkerMessage } from "../types.js";
 import type { PermissionMode } from "@anthropic-ai/claude-agent-sdk";
 import { Workspace, confirmIfUnsafe } from "./workspace.js";
-import { fmtError, generateWorkerId } from "./utils.js";
+import { fmtError, generateWorkerId } from "../utils.js";
 
 const execAsync = promisify(exec);
 

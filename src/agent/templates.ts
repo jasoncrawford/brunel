@@ -1,4 +1,4 @@
-import type { GitHubEvent, TaskIssue } from "./types.js";
+import type { GitHubEvent, TaskIssue } from "../types.js";
 
 export function formatCommentLocation(
   path: unknown,
