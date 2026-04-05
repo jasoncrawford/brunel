@@ -16,11 +16,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import http from "http";
 import { WebSocket, WebSocketServer } from "ws";
 import type { AddressInfo } from "net";
-import { WorkerRegistry, createForemanWss } from "../src/foreman.js";
-import { TaskModel } from "../src/task-model.js";
+import { WorkerRegistry } from "../src/foreman/worker-registry.js";
+import { createForemanWss } from "../src/foreman/wss.js";
+import { TaskModel } from "../src/foreman/task-model.js";
 import { loadDefaultConfig } from "../src/config.js";
 const defaultCfg = await loadDefaultConfig();
-import type { AdminWss, AdminSnapshot, LogEntry } from "../src/admin-ws.js";
+import type { AdminWss, AdminSnapshot, LogEntry } from "../src/foreman/admin-ws.js";
 import { waitUntil } from "./helpers.js";
 
 // ── Mock AdminWss ─────────────────────────────────────────────────────────────
@@ -70,12 +71,7 @@ beforeEach(() => {
   registry = new WorkerRegistry();
   adminWss = makeMockAdminWss();
   httpServer = http.createServer();
-  ({ wss, routeEvent } = createForemanWss(taskModel, registry, httpServer, {
-    taskLabel: defaultCfg.taskLabel,
-    reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs,
-    pingIntervalMs: defaultCfg.pingIntervalMs,
-    adminWss,
-  }));
+  ({ wss, routeEvent } = createForemanWss(taskModel, registry, httpServer, defaultCfg, { adminWss }));
 
   return new Promise<void>((resolve) => {
     httpServer.listen(0, () => {

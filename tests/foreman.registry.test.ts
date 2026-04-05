@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { WorkerRegistry } from "../src/foreman.js";
+import { WorkerRegistry } from "../src/foreman/worker-registry.js";
 import type { ForemanMessage } from "../src/types.js";
 
 function fakeWs() {

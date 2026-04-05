@@ -19,14 +19,15 @@ import http from "http";
 import { WebSocket, WebSocketServer } from "ws";
 import type { AddressInfo } from "net";
 import type { ForemanMessage } from "../src/types.js";
-import { WorkerRegistry, createForemanWss } from "../src/foreman.js";
-import { TaskModel } from "../src/task-model.js";
-import type { DbLogger } from "../src/db.js";
+import { WorkerRegistry } from "../src/foreman/worker-registry.js";
+import { createForemanWss } from "../src/foreman/wss.js";
+import { TaskModel } from "../src/foreman/task-model.js";
+import type { DbLogger } from "../src/foreman/db.js";
 import {
   createDbLogger,
   createNullDbLogger,
   createTaskStore,
-} from "../src/db.js";
+} from "../src/foreman/db.js";
 import { loadDefaultConfig } from "../src/config.js";
 import { createTestSupabase } from "./helpers/db.js";
 
@@ -228,12 +229,12 @@ function buildForeman(opts: {
   const openClients: WebSocket[] = [];
 
   const { wss, routeEvent } = createForemanWss(taskModel, registry, httpServer, {
-    taskLabel: defaultCfg.taskLabel,
-    reclaimTimeoutMs: opts.reclaimTimeoutMs ?? defaultCfg.workerReclaimTimeoutMs,
-    pingIntervalMs: defaultCfg.pingIntervalMs,
+    ...defaultCfg,
+    workerReclaimTimeoutMs: opts.reclaimTimeoutMs ?? defaultCfg.workerReclaimTimeoutMs,
+    githubRepo: "owner/repo",
+    githubToken: "token",
+  }, {
     dbLogger: opts.dbLogger ?? nullDbLogger,
-    repo: "owner/repo",
-    token: "token",
   });
 
   // port is assigned synchronously when listen() resolves; we'll resolve it

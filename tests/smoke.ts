@@ -128,7 +128,7 @@ async function run(): Promise<void> {
 
   const spawnOpts = { cwd: REPO_ROOT, stdio: ["ignore", "pipe", "pipe"] as const };
 
-  const foreman = spawn("tsx", ["src/foreman.ts"], {
+  const foreman = spawn("tsx", ["src/foreman/index.ts"], {
     ...spawnOpts,
     env: {
       ...process.env,

@@ -1,6 +1,7 @@
-import type { LabeledIssueState, TaskIssue } from "./types.js";
+import type { TaskIssue } from "../types.js";
 import { fetchBlockers, setBlockers } from "./dependencies.js";
 import type { DependencyGraph } from "./dependencies.js";
+import type { TaskModel } from "./task-model.js";
 
 // ── GitHub API helpers ────────────────────────────────────────────────────────
 
@@ -15,12 +16,11 @@ function ghHeaders(token: string) {
 // ── Exported functions ────────────────────────────────────────────────────────
 
 export async function loadIssuesToQueue(
-  labeledIssues: Map<number, LabeledIssueState>,
+  taskModel: TaskModel,
   graph: DependencyGraph,
-  openIssues: Set<number>,
-  opts: { repo: string; token: string; taskLabel: string; apiUrl?: string },
+  config: { githubRepo: string; githubToken: string; taskLabel: string; githubApiUrl?: string },
 ): Promise<void> {
-  const { repo, token, taskLabel, apiUrl = "https://api.github.com" } = opts;
+  const { githubRepo: repo, githubToken: token, taskLabel, githubApiUrl: apiUrl = "https://api.github.com" } = config;
   const [owner, repoName] = repo.split("/");
   const url = `${apiUrl}/repos/${owner}/${repoName}/issues?labels=${encodeURIComponent(taskLabel)}&state=open&per_page=100`;
   const res = await fetch(url, { headers: ghHeaders(token) });
@@ -40,8 +40,7 @@ export async function loadIssuesToQueue(
       labels: issue.labels.map((l) => l.name),
       repoUrl: `https://github.com/${owner}/${repoName}`,
     };
-    labeledIssues.set(issue.number, { issue: issueData, depsLoaded: false });
-    openIssues.add(issue.number);
+    taskModel.trackIssue(issue.number, issueData);
     const blockers = await fetchBlockers(issue.number, issue.body ?? "", { repo, token, apiUrl });
     setBlockers(issue.number, blockers, graph);
     for (const b of blockers) allBlockerNumbers.add(b);
@@ -51,14 +50,13 @@ export async function loadIssuesToQueue(
   if (allBlockerNumbers.size > 0) {
     const states = await fetchIssueStates(Array.from(allBlockerNumbers), { repo, token });
     for (const [num, state] of states) {
-      if (state === "open") openIssues.add(num);
+      taskModel.setIssueOpenState(num, state === "open");
     }
   }
 
   // Mark all loaded entries as having their deps resolved
   for (const num of loadedIssueNumbers) {
-    const entry = labeledIssues.get(num);
-    if (entry) entry.depsLoaded = true;
+    taskModel.markIssueDepsLoaded(num);
   }
 }
 

@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { fmtEvent } from "./display.js";
-import type { TaskStatus } from "./types.js";
+import { fmtEvent } from "./event-fmt.js";
+import type { TaskStatus } from "../types.js";
 
 // ── Input types ────────────────────────────────────────────────────────────────
 
@@ -53,7 +53,7 @@ export interface DbLogger {
   queryWorkerMessages(workerId: string): Promise<LogEntry[]>;
 }
 
-// ── Shared summary builder (used by both db.ts and foreman.ts) ─────────────────
+// ── Shared summary builder (used by both db.ts and wss.ts) ─────────────────
 
 export function buildMessageSummary(
   direction: string,
@@ -394,4 +394,3 @@ export function createNullTaskStore(): TaskStore {
     async listTasks() { return []; },
   };
 }
-

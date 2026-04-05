@@ -16,7 +16,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { loadConfig } from "../src/config.js";
-import { createTaskStore } from "../src/db.js";
+import { createTaskStore } from "../src/foreman/db.js";
 
 const dryRun = process.argv.includes("--dry-run");
 

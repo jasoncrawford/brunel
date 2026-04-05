@@ -12,8 +12,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import http from "http";
 import type { AddressInfo } from "net";
-import { createHttpServer } from "../src/foreman.js";
-import { TaskModel } from "../src/task-model.js";
+import { createHttpServer } from "../src/foreman/http-server.js";
+import { TaskModel } from "../src/foreman/task-model.js";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
