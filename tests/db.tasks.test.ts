@@ -27,7 +27,7 @@ function own(tasks: { taskId: string }[]) {
 async function insertProtected(taskId: string, issueNumber: number, repo: string, title: string, extra: Record<string, unknown> = {}) {
   const { error } = await supabase.from("tasks").upsert({
     task_id: taskId, issue_number: issueNumber, repo, title,
-    body: "", labels: [], status: "pending",
+    body: "", labels: [],
     assigned_at: "2026-01-01T00:00:00Z",
     ...extra,
   }, { onConflict: "task_id" });
@@ -37,7 +37,7 @@ async function insertProtected(taskId: string, issueNumber: number, repo: string
 // ── Tests: createTaskStore ─────────────────────────────────────────────────────
 
 describe("createTaskStore", () => {
-  it("upsertTask stores a row with status=pending, body, and labels", async () => {
+  it("upsertTask stores a row with body and labels, status derived as pending", async () => {
     const store = createTaskStore(supabase);
     await store.upsertTask("dbt-42", 9042, "owner/repo", "Fix the bug", "Issue body", ["bug", "brunel:ready"]);
 
@@ -50,7 +50,6 @@ describe("createTaskStore", () => {
       title: "Fix the bug",
       body: "Issue body",
       labels: ["bug", "brunel:ready"],
-      status: "pending",
       workerId: null,
       prNumber: null,
       branch: null,
@@ -58,6 +57,8 @@ describe("createTaskStore", () => {
     expect(tasks[0].createdAt).toBeTruthy();
     expect(tasks[0].assignedAt).toBeNull();
     expect(tasks[0].completedAt).toBeNull();
+    expect(tasks[0].issueClosedAt).toBeNull();
+    expect(tasks[0].prMergedAt).toBeNull();
   });
 
   it("upsertTask is idempotent — duplicate task_id does not throw or duplicate", async () => {
@@ -69,55 +70,53 @@ describe("createTaskStore", () => {
     expect(tasks).toHaveLength(1);
   });
 
-  it("upsertTask on re-label resets an existing row back to pending and refreshes content", async () => {
+  it("upsertTask on re-label resets an existing row to pending state and refreshes content", async () => {
     const store = createTaskStore(supabase);
     await store.upsertTask("dbt-42", 9042, "owner/repo", "Original title", "Original body", ["v1"]);
     await store.markAssigned("dbt-42", "worker-1");
     await store.markComplete("dbt-42");
 
-    // Re-label: upsert should reset to pending and update title/body/labels
+    // Re-label: upsert should reset all status markers and update title/body/labels
     await store.upsertTask("dbt-42", 9042, "owner/repo", "New title", "New body", ["v2"]);
 
     const tasks = own(await store.listTasks());
     expect(tasks[0].title).toBe("New title");
     expect(tasks[0].body).toBe("New body");
     expect(tasks[0].labels).toEqual(["v2"]);
-    expect(tasks[0].status).toBe("pending");
     expect(tasks[0].workerId).toBeNull();
     expect(tasks[0].completedAt).toBeNull();
     expect(tasks[0].assignedAt).toBeNull();
+    expect(tasks[0].issueClosedAt).toBeNull();
+    expect(tasks[0].prMergedAt).toBeNull();
   });
 
-  it("markAssigned updates status, worker_id, and sets assigned_at", async () => {
+  it("markAssigned sets worker_id and assigned_at", async () => {
     const store = createTaskStore(supabase);
     await insertProtected("dbt-42", 9042, "owner/repo", "Fix the bug");
     await store.markAssigned("dbt-42", "worker-1");
 
     const task = await store.getTask("dbt-42");
-    expect(task!.status).toBe("assigned");
     expect(task!.workerId).toBe("worker-1");
     expect(task!.assignedAt).toBeTruthy();
   });
 
-  it("markComplete updates status and sets completed_at", async () => {
+  it("markComplete sets completed_at", async () => {
     const store = createTaskStore(supabase);
     await insertProtected("dbt-42", 9042, "owner/repo", "Fix the bug");
     await store.markAssigned("dbt-42", "worker-1");
     await store.markComplete("dbt-42");
 
     const task = await store.getTask("dbt-42");
-    expect(task!.status).toBe("complete");
     expect(task!.completedAt).toBeTruthy();
   });
 
-  it("markPending reverts status to pending and clears worker_id", async () => {
+  it("markPending clears worker_id", async () => {
     const store = createTaskStore(supabase);
     await insertProtected("dbt-42", 9042, "owner/repo", "Fix the bug");
     await store.markAssigned("dbt-42", "worker-1");
     await store.markPending("dbt-42");
 
     const task = await store.getTask("dbt-42");
-    expect(task!.status).toBe("pending");
     expect(task!.workerId).toBeNull();
   });
 
@@ -147,17 +146,17 @@ describe("createTaskStore", () => {
     // Set assigned_at to protect from parallel reconcile in pipeline.test.ts.
     await supabase.from("tasks").insert({
       task_id: "dbt-1", issue_number: 9001, repo: "r/r", title: "First",
-      status: "pending", created_at: "2026-03-27T01:00:00Z",
+      created_at: "2026-03-27T01:00:00Z",
       assigned_at: "2026-01-01T00:00:00Z",
     });
     await supabase.from("tasks").insert({
       task_id: "dbt-2", issue_number: 9002, repo: "r/r", title: "Second",
-      status: "pending", created_at: "2026-03-27T03:00:00Z",
+      created_at: "2026-03-27T03:00:00Z",
       assigned_at: "2026-01-01T00:00:00Z",
     });
     await supabase.from("tasks").insert({
       task_id: "dbt-3", issue_number: 9003, repo: "r/r", title: "Third",
-      status: "pending", created_at: "2026-03-27T02:00:00Z",
+      created_at: "2026-03-27T02:00:00Z",
       assigned_at: "2026-01-01T00:00:00Z",
     });
 
@@ -170,20 +169,21 @@ describe("createTaskStore", () => {
     expect(own(await store.listTasks())).toEqual([]);
   });
 
-  it("listTasks filters by status when provided", async () => {
+  it("listTasks with cancelable=true returns only never-assigned, not-closed, not-completed tasks", async () => {
     const store = createTaskStore(supabase);
-    await insertProtected("dbt-1", 9001, "r/r", "Pending task");
+    // Create a never-assigned task (cancelable)
+    await store.upsertTask("dbt-1", 9001, "r/r", "Pending task", "", []);
+    // Create a task that was assigned then completed (not cancelable)
     await insertProtected("dbt-2", 9002, "r/r", "Complete task");
     await store.markAssigned("dbt-2", "w1");
     await store.markComplete("dbt-2");
 
-    const pending = own(await store.listTasks({ status: "pending" }));
-    expect(pending).toHaveLength(1);
-    expect(pending[0].taskId).toBe("dbt-1");
+    const cancelable = own(await store.listTasks({ cancelable: true }));
+    expect(cancelable).toHaveLength(1);
+    expect(cancelable[0].taskId).toBe("dbt-1");
 
-    const complete = own(await store.listTasks({ status: "complete" }));
-    expect(complete).toHaveLength(1);
-    expect(complete[0].taskId).toBe("dbt-2");
+    const all = own(await store.listTasks());
+    expect(all).toHaveLength(2);
   });
 
   it("listTasks returns all statuses when status not provided", async () => {
@@ -250,39 +250,36 @@ describe("createTaskStore — deleteTask", () => {
   });
 });
 
-// ── Tests: createTaskStore — blocked status ────────────────────────────────────
+// ── Tests: createTaskStore — issue and PR lifecycle ────────────────────────────
 
-describe("createTaskStore — blocked status", () => {
-  it("markBlocked sets status to blocked", async () => {
+describe("createTaskStore — issue and PR lifecycle", () => {
+  it("setIssueClosed records when an issue is closed", async () => {
     const store = createTaskStore(supabase);
     await insertProtected("dbt-42", 9042, "owner/repo", "Fix the bug");
-    await store.markBlocked("dbt-42");
+    await store.setIssueClosed("dbt-42");
 
     const task = await store.getTask("dbt-42");
-    expect(task!.status).toBe("blocked");
-    expect(task!.workerId).toBeNull();
+    expect(task!.issueClosedAt).toBeTruthy();
   });
 
-  it("listTasks filters by status=blocked", async () => {
+  it("clearIssueClosed clears the issue closed marker when issue is reopened", async () => {
     const store = createTaskStore(supabase);
-    await insertProtected("dbt-1", 9001, "r/r", "Pending");
-    await insertProtected("dbt-2", 9002, "r/r", "Blocked");
-    await store.markBlocked("dbt-2");
+    await insertProtected("dbt-42", 9042, "owner/repo", "Fix the bug");
+    await store.setIssueClosed("dbt-42");
+    await store.clearIssueClosed("dbt-42");
 
-    const blocked = own(await store.listTasks({ status: "blocked" }));
-    expect(blocked).toHaveLength(1);
-    expect(blocked[0].taskId).toBe("dbt-2");
+    const task = await store.getTask("dbt-42");
+    expect(task!.issueClosedAt).toBeNull();
   });
 
-  it("listTasks returns blocked tasks when no filter", async () => {
+  it("setPrMerged records when a PR is merged", async () => {
     const store = createTaskStore(supabase);
-    await insertProtected("dbt-1", 9001, "r/r", "Pending");
-    await insertProtected("dbt-2", 9002, "r/r", "Blocked");
-    await store.markBlocked("dbt-2");
+    await insertProtected("dbt-42", 9042, "owner/repo", "Fix the bug");
+    await store.updateTaskPr("dbt-42", 10, "fix-issue");
+    await store.setPrMerged("dbt-42");
 
-    const all = own(await store.listTasks());
-    expect(all).toHaveLength(2);
-    expect(all.map((t) => t.status)).toEqual(expect.arrayContaining(["pending", "blocked"]));
+    const task = await store.getTask("dbt-42");
+    expect(task!.prMergedAt).toBeTruthy();
   });
 });
 
@@ -295,42 +292,47 @@ describe("createMemoryTaskStore", () => {
     const task = await store.getTask("dbt-42");
     expect(task).not.toBeNull();
     expect(task?.taskId).toBe("dbt-42");
-    expect(task?.status).toBe("pending");
   });
 
-  it("markAssigned updates status and workerId", async () => {
+  it("markAssigned sets workerId", async () => {
     const store = createMemoryTaskStore();
     await store.upsertTask("dbt-42", 9042, "r/r", "title", "", []);
     await store.markAssigned("dbt-42", "w1");
     const task = await store.getTask("dbt-42");
-    expect(task?.status).toBe("assigned");
     expect(task?.workerId).toBe("w1");
   });
 
-  it("markComplete updates status", async () => {
+  it("markComplete sets completedAt", async () => {
     const store = createMemoryTaskStore();
     await store.upsertTask("dbt-42", 9042, "r/r", "title", "", []);
     await store.markComplete("dbt-42");
     const task = await store.getTask("dbt-42");
-    expect(task?.status).toBe("complete");
+    expect(task?.completedAt).toBeTruthy();
   });
 
-  it("markPending reverts status and clears workerId", async () => {
+  it("markPending clears workerId", async () => {
     const store = createMemoryTaskStore();
     await store.upsertTask("dbt-42", 9042, "r/r", "title", "", []);
     await store.markAssigned("dbt-42", "w1");
     await store.markPending("dbt-42");
     const task = await store.getTask("dbt-42");
-    expect(task?.status).toBe("pending");
     expect(task?.workerId).toBeNull();
   });
 
-  it("markBlocked updates status", async () => {
+  it("setIssueClosed sets issueClosedAt", async () => {
     const store = createMemoryTaskStore();
     await store.upsertTask("dbt-42", 9042, "r/r", "title", "", []);
-    await store.markBlocked("dbt-42");
+    await store.setIssueClosed("dbt-42");
     const task = await store.getTask("dbt-42");
-    expect(task?.status).toBe("blocked");
+    expect(task?.issueClosedAt).toBeTruthy();
+  });
+
+  it("setPrMerged sets prMergedAt", async () => {
+    const store = createMemoryTaskStore();
+    await store.upsertTask("dbt-42", 9042, "r/r", "title", "", []);
+    await store.setPrMerged("dbt-42");
+    const task = await store.getTask("dbt-42");
+    expect(task?.prMergedAt).toBeTruthy();
   });
 
   it("updateTaskPr stores prNumber and branch", async () => {

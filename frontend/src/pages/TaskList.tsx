@@ -41,7 +41,7 @@ export default function TaskList() {
       <h2>Tasks</h2>
 
       <div style={{ marginBottom: "1rem" }}>
-        {(["all", "pending", "blocked", "assigned", "complete"] as const).map((s) => (
+        {(["all", "pending", "blocked", "assigned", "pushed", "merged", "closed", "complete"] as const).map((s) => (
           <button
             key={s}
             onClick={() => setFilter(s)}

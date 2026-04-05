@@ -226,34 +226,39 @@ export interface TaskRow {
   title: string;
   body: string;
   labels: string[];
-  status: TaskStatus;
   workerId: string | null;
   prNumber: number | null;
   branch: string | null;
   createdAt: string;
   assignedAt: string | null;
   completedAt: string | null;
+  issueClosedAt: string | null;
+  prMergedAt: string | null;
 }
 
 export interface ListTasksOpts {
-  status?: "pending" | "assigned" | "complete" | "blocked";
+  cancelable?: boolean;  // if true, only return tasks that can be deleted (never assigned)
   limit?: number;
 }
 
 export interface TaskStore {
-  /** Upsert task: insert with status=pending, or on re-label reset an existing row back to pending
-   * and refresh title/body/labels/assigned_at/completed_at/worker_id. */
+  /** Upsert task: insert with all timestamps/status fields null, or on re-label reset an existing row
+   * and refresh title/body/labels, clearing assigned_at/completed_at/issue_closed_at/pr_merged_at/worker_id. */
   upsertTask(taskId: string, issueNumber: number, repo: string, title: string, body: string, labels: string[]): Promise<void>;
   /** Refresh title/body/labels for an existing task without touching status or assignment. */
   updateTaskContent(taskId: string, title: string, body: string, labels: string[]): Promise<void>;
   /** Mark task as assigned to a worker. */
   markAssigned(taskId: string, workerId: string): Promise<void>;
-  /** Mark task as complete. */
+  /** Mark task as complete by the worker. */
   markComplete(taskId: string): Promise<void>;
   /** Revert task to pending, clearing worker_id. */
   markPending(taskId: string): Promise<void>;
-  /** Mark task as blocked (waiting on a dependency). */
-  markBlocked(taskId: string): Promise<void>;
+  /** Record that the issue was closed. */
+  setIssueClosed(taskId: string): Promise<void>;
+  /** Clear the issue closed marker (when issue is reopened). */
+  clearIssueClosed(taskId: string): Promise<void>;
+  /** Record that the PR was merged. */
+  setPrMerged(taskId: string): Promise<void>;
   /** Delete the task row entirely (e.g. when brunel:ready label is removed). */
   deleteTask(taskId: string): Promise<void>;
   /** Update PR number and branch for a task. Pass null to clear. */
@@ -266,7 +271,7 @@ export interface TaskStore {
   getTaskByPr(prNumber: number): Promise<TaskRow | null>;
   /** Find the assigned task for a worker, or null if none. */
   getTaskByWorker(workerId: string): Promise<TaskRow | null>;
-  /** List tasks, optionally filtered by status. */
+  /** List tasks, optionally filtered. */
   listTasks(opts?: ListTasksOpts): Promise<TaskRow[]>;
 }
 
@@ -279,20 +284,21 @@ export function createTaskStore(supabase: SupabaseClient): TaskStore {
       title: row.title as string,
       body: (row.body as string | null) ?? "",
       labels: (row.labels as string[] | null) ?? [],
-      status: row.status as TaskStatus,
       workerId: (row.worker_id as string | null) ?? null,
       prNumber: (row.pr_number as number | null) ?? null,
       branch: (row.branch as string | null) ?? null,
       createdAt: row.created_at as string,
       assignedAt: (row.assigned_at as string | null) ?? null,
       completedAt: (row.completed_at as string | null) ?? null,
+      issueClosedAt: (row.issue_closed_at as string | null) ?? null,
+      prMergedAt: (row.pr_merged_at as string | null) ?? null,
     };
   }
 
   return {
     async upsertTask(taskId, issueNumber, repo, title, body, labels) {
-      // Real upsert: on re-label of a completed issue, reset to pending and
-      // refresh content. Each labeling of an issue acts like a fresh task.
+      // Real upsert: on re-label of a completed issue, reset all status markers.
+      // Each labeling of an issue acts like a fresh task.
       const { error } = await supabase.from("tasks").upsert(
         {
           task_id: taskId,
@@ -301,10 +307,11 @@ export function createTaskStore(supabase: SupabaseClient): TaskStore {
           title,
           body,
           labels,
-          status: "pending",
           worker_id: null,
           assigned_at: null,
           completed_at: null,
+          issue_closed_at: null,
+          pr_merged_at: null,
         },
         { onConflict: "task_id" },
       );
@@ -320,28 +327,42 @@ export function createTaskStore(supabase: SupabaseClient): TaskStore {
 
     async markAssigned(taskId, workerId) {
       const { error } = await supabase.from("tasks")
-        .update({ status: "assigned", worker_id: workerId, assigned_at: new Date().toISOString() })
+        .update({ worker_id: workerId, assigned_at: new Date().toISOString() })
         .eq("task_id", taskId);
       if (error) throw error;
     },
 
     async markComplete(taskId) {
       const { error } = await supabase.from("tasks")
-        .update({ status: "complete", completed_at: new Date().toISOString() })
+        .update({ completed_at: new Date().toISOString() })
         .eq("task_id", taskId);
       if (error) throw error;
     },
 
     async markPending(taskId) {
       const { error } = await supabase.from("tasks")
-        .update({ status: "pending", worker_id: null })
+        .update({ worker_id: null })
         .eq("task_id", taskId);
       if (error) throw error;
     },
 
-    async markBlocked(taskId) {
+    async setIssueClosed(taskId) {
       const { error } = await supabase.from("tasks")
-        .update({ status: "blocked", worker_id: null })
+        .update({ issue_closed_at: new Date().toISOString() })
+        .eq("task_id", taskId);
+      if (error) throw error;
+    },
+
+    async clearIssueClosed(taskId) {
+      const { error } = await supabase.from("tasks")
+        .update({ issue_closed_at: null })
+        .eq("task_id", taskId);
+      if (error) throw error;
+    },
+
+    async setPrMerged(taskId) {
+      const { error } = await supabase.from("tasks")
+        .update({ pr_merged_at: new Date().toISOString() })
         .eq("task_id", taskId);
       if (error) throw error;
     },
@@ -366,7 +387,7 @@ export function createTaskStore(supabase: SupabaseClient): TaskStore {
 
     async getTask(taskId) {
       const { data, error } = await supabase.from("tasks")
-        .select("task_id, issue_number, repo, title, body, labels, status, worker_id, pr_number, branch, created_at, assigned_at, completed_at")
+        .select("task_id, issue_number, repo, title, body, labels, worker_id, pr_number, branch, created_at, assigned_at, completed_at, issue_closed_at, pr_merged_at")
         .eq("task_id", taskId)
         .maybeSingle();
       if (error) throw error;
@@ -375,7 +396,7 @@ export function createTaskStore(supabase: SupabaseClient): TaskStore {
 
     async getTaskByIssue(issueNumber) {
       const { data, error } = await supabase.from("tasks")
-        .select("task_id, issue_number, repo, title, body, labels, status, worker_id, pr_number, branch, created_at, assigned_at, completed_at")
+        .select("task_id, issue_number, repo, title, body, labels, worker_id, pr_number, branch, created_at, assigned_at, completed_at, issue_closed_at, pr_merged_at")
         .eq("issue_number", issueNumber)
         .maybeSingle();
       if (error) throw error;
@@ -384,7 +405,7 @@ export function createTaskStore(supabase: SupabaseClient): TaskStore {
 
     async getTaskByPr(prNumber) {
       const { data, error } = await supabase.from("tasks")
-        .select("task_id, issue_number, repo, title, body, labels, status, worker_id, pr_number, branch, created_at, assigned_at, completed_at")
+        .select("task_id, issue_number, repo, title, body, labels, worker_id, pr_number, branch, created_at, assigned_at, completed_at, issue_closed_at, pr_merged_at")
         .eq("pr_number", prNumber)
         .maybeSingle();
       if (error) throw error;
@@ -393,9 +414,9 @@ export function createTaskStore(supabase: SupabaseClient): TaskStore {
 
     async getTaskByWorker(workerId) {
       const { data, error } = await supabase.from("tasks")
-        .select("task_id, issue_number, repo, title, body, labels, status, worker_id, pr_number, branch, created_at, assigned_at, completed_at")
+        .select("task_id, issue_number, repo, title, body, labels, worker_id, pr_number, branch, created_at, assigned_at, completed_at, issue_closed_at, pr_merged_at")
         .eq("worker_id", workerId)
-        .eq("status", "assigned")
+        .is("completed_at", null)
         .maybeSingle();
       if (error) throw error;
       return data ? rowToTaskRow(data as Record<string, unknown>) : null;
@@ -404,9 +425,14 @@ export function createTaskStore(supabase: SupabaseClient): TaskStore {
     async listTasks(opts) {
       const limit = opts?.limit ?? 200;
       let q = supabase.from("tasks").select(
-        "task_id, issue_number, repo, title, body, labels, status, worker_id, pr_number, branch, created_at, assigned_at, completed_at"
+        "task_id, issue_number, repo, title, body, labels, worker_id, pr_number, branch, created_at, assigned_at, completed_at, issue_closed_at, pr_merged_at"
       );
-      if (opts?.status) q = q.eq("status", opts.status);
+      if (opts?.cancelable) {
+        q = q.is("worker_id", null)
+          .is("completed_at", null)
+          .is("issue_closed_at", null)
+          .is("pr_merged_at", null);
+      }
       const { data, error } = await q.order("created_at", { ascending: false }).limit(limit);
       if (error) throw error;
       return ((data ?? []) as Record<string, unknown>[]).map(rowToTaskRow);
@@ -424,10 +450,9 @@ export function createMemoryTaskStore(): TaskStore {
     async upsertTask(taskId, issueNumber, repo, title, body, labels) {
       tasks.set(taskId, {
         taskId, issueNumber, repo, title, body, labels,
-        status: "pending" as TaskStatus,
         workerId: null, prNumber: null, branch: null,
         createdAt: new Date().toISOString(),
-        assignedAt: null, completedAt: null,
+        assignedAt: null, completedAt: null, issueClosedAt: null, prMergedAt: null,
       });
     },
     async updateTaskContent(taskId, title, body, labels) {
@@ -436,19 +461,27 @@ export function createMemoryTaskStore(): TaskStore {
     },
     async markAssigned(taskId, workerId) {
       const t = tasks.get(taskId);
-      if (t) { t.status = "assigned"; t.workerId = workerId; t.assignedAt = new Date().toISOString(); }
+      if (t) { t.workerId = workerId; t.assignedAt = new Date().toISOString(); }
     },
     async markComplete(taskId) {
       const t = tasks.get(taskId);
-      if (t) { t.status = "complete"; t.completedAt = new Date().toISOString(); }
+      if (t) { t.completedAt = new Date().toISOString(); }
     },
     async markPending(taskId) {
       const t = tasks.get(taskId);
-      if (t) { t.status = "pending"; t.workerId = null; }
+      if (t) { t.workerId = null; }
     },
-    async markBlocked(taskId) {
+    async setIssueClosed(taskId) {
       const t = tasks.get(taskId);
-      if (t) { t.status = "blocked"; t.workerId = null; }
+      if (t) { t.issueClosedAt = new Date().toISOString(); }
+    },
+    async clearIssueClosed(taskId) {
+      const t = tasks.get(taskId);
+      if (t) { t.issueClosedAt = null; }
+    },
+    async setPrMerged(taskId) {
+      const t = tasks.get(taskId);
+      if (t) { t.prMergedAt = new Date().toISOString(); }
     },
     async deleteTask(taskId) {
       const t = tasks.get(taskId);
@@ -475,13 +508,17 @@ export function createMemoryTaskStore(): TaskStore {
     },
     async getTaskByWorker(workerId) {
       for (const t of tasks.values()) {
-        if (t.status === "assigned" && t.workerId === workerId) return t;
+        if (t.workerId === workerId && t.completedAt === null) return t;
       }
       return null;
     },
     async listTasks(opts) {
       let result = [...tasks.values()];
-      if (opts?.status) result = result.filter(t => t.status === opts.status);
+      if (opts?.cancelable) {
+        result = result.filter(t =>
+          t.workerId === null && t.completedAt === null && t.issueClosedAt === null && t.prMergedAt === null
+        );
+      }
       return result
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
         .slice(0, opts?.limit ?? 200);

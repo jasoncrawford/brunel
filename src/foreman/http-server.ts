@@ -4,6 +4,8 @@ import { Hono } from "hono";
 import { getRequestListener } from "@hono/node-server";
 import type { DbLogger } from "./db.js";
 import type { TaskModel } from "./task-model.js";
+import { deriveStatus } from "./task-model.js";
+import type { TaskStatus } from "../types.js";
 import { fmtError } from "../utils.js";
 import { summaryEvent, isMutedEvent } from "./event-router.js";
 
@@ -96,8 +98,18 @@ export function createHttpServer(
 
   app.get("/api/tasks", async (c) => {
     try {
-      const status = c.req.query("status") as "pending" | "assigned" | "complete" | undefined;
-      const tasks = taskModel ? await taskModel.listTasks(status ? { status } : undefined) : [];
+      const statusFilter = c.req.query("status") as TaskStatus | undefined;
+      const rows = taskModel ? await taskModel.listTasks() : [];
+
+      // Derive status for each task and filter if requested
+      const tasks = rows.map((row) => ({
+        ...row,
+        status: deriveStatus(row),
+      }));
+
+      if (statusFilter) {
+        return c.json(tasks.filter((t) => t.status === statusFilter));
+      }
       return c.json(tasks);
     } catch (err) {
       flog(`ERROR API query failed: ${fmtError(err)}`);

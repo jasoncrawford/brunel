@@ -25,6 +25,9 @@ export default function Dashboard() {
   const blocked = tasks.filter((t) => t.status === "blocked").length;
   const pending = tasks.filter((t) => t.status === "pending").length;
   const assigned = tasks.filter((t) => t.status === "assigned").length;
+  const pushed = tasks.filter((t) => t.status === "pushed").length;
+  const merged = tasks.filter((t) => t.status === "merged").length;
+  const closed = tasks.filter((t) => t.status === "closed").length;
   const done = tasks.filter((t) => t.status === "complete").length;
 
   return (
@@ -32,7 +35,7 @@ export default function Dashboard() {
       <h2>Dashboard</h2>
 
       <section>
-        <h3>Tasks ({blocked} blocked · {pending} pending · {assigned} assigned · {done} done)</h3>
+        <h3>Tasks ({blocked} blocked · {pending} pending · {assigned} assigned · {pushed} pushed · {merged} merged · {closed} closed · {done} done)</h3>
         {tasks.length === 0 ? <p>No tasks.</p> : (
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>

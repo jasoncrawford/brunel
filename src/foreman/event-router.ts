@@ -108,7 +108,7 @@ export function forwardEvent(deps: EventRouterDeps, task: Task, evt: GitHubEvent
     } else {
       deps.flog(`[task ${ref}] ${evt.name} DROPPED — worker ${shortWorkerId(task.assignedWorkerId)} not in registry (disconnected?)`);
     }
-  } else if (task.status === "pending") {
+  } else if (task.status === "pending" || task.status === "blocked") {
     deps.taskModel.queueEvent(task.taskId, evt);
     deps.flog(`[task ${ref}] ${evt.name} queued (no worker assigned)`);
   }
@@ -127,11 +127,6 @@ export function startDepsLoad(deps: EventRouterDeps, issueNumber: number, body: 
         }
       }
       deps.taskModel.markIssueDepsLoaded(issueNumber);
-      // If the task is currently pending and is now blocked, persist blocked status.
-      const task = await deps.taskModel.getTaskForIssue(issueNumber);
-      if (task && task.status === "pending" && deps.taskModel.isBlocked(issueNumber, deps.graph)) {
-        await deps.taskModel.block(task.taskId);
-      }
       await reconcile(deps);
     })
     .catch((err) => deps.flog(`ERROR fetching deps for #${issueNumber}: ${fmtError(err)}`));
@@ -228,6 +223,20 @@ export async function doRouteEvent(deps: EventRouterDeps, name: string, p: Recor
         flog(`[task #${task.issueNumber}] PR #${prNumber} unregistered (closed without merging)`);
         await taskModel.unregisterPr(prNumber).catch((err: unknown) =>
           flog(`ERROR Failed to unregister PR #${prNumber}: ${fmtError(err)}`)
+        );
+        forwardEvent(deps, task, evt, `PR #${prNumber}`);
+        return result(task);
+      }
+      return result(null);
+    }
+
+    // When a PR is closed with merging, record that it was merged.
+    if (p.action === "closed" && pr && pr.merged) {
+      const task = await taskModel.getTaskForPr(prNumber);
+      if (task) {
+        flog(`[task #${task.issueNumber}] PR #${prNumber} merged`);
+        await taskModel.registerPrMerge(prNumber).catch((err: unknown) =>
+          flog(`ERROR Failed to record PR #${prNumber} merge: ${fmtError(err)}`)
         );
         forwardEvent(deps, task, evt, `PR #${prNumber}`);
         return result(task);
@@ -333,30 +342,14 @@ export async function doRouteEvent(deps: EventRouterDeps, name: string, p: Recor
       await taskModel.closeIssue(issueNumber).catch((err: unknown) =>
         flog(`ERROR Failed to close issue #${issueNumber}: ${fmtError(err)}`)
       );
-
-      const unblockPromises: Promise<void>[] = [];
-      for (const [depIssueNum, blockers] of deps.graph) {
-        if (blockers.has(issueNumber)) {
-          const blockedTask = await taskModel.getTaskForIssue(depIssueNum);
-          if (blockedTask && blockedTask.status === "blocked") {
-            if (!taskModel.isBlocked(depIssueNum, deps.graph)) {
-              unblockPromises.push(
-                taskModel.unblock(blockedTask.taskId).catch((err: unknown) =>
-                  flog(`ERROR Failed to unblock task #${blockedTask.taskId}: ${fmtError(err)}`)
-                )
-              );
-            }
-          }
-        }
-      }
-
-      await Promise.all(unblockPromises);
       await reconcile(deps);
       return result(task);
     }
 
     if (action === "reopened") {
-      taskModel.reopenIssue(issueNumber);
+      await taskModel.reopenIssue(issueNumber).catch((err: unknown) =>
+        flog(`ERROR Failed to reopen issue #${issueNumber}: ${fmtError(err)}`)
+      );
       await reconcile(deps);
       return result(task);
     }

@@ -24,7 +24,8 @@ function makeSpiedStore(): TaskStore {
   vi.spyOn(store, "markAssigned");
   vi.spyOn(store, "markComplete");
   vi.spyOn(store, "markPending");
-  vi.spyOn(store, "markBlocked");
+  vi.spyOn(store, "setIssueClosed");
+  vi.spyOn(store, "setPrMerged");
   vi.spyOn(store, "updateTaskPr");
   vi.spyOn(store, "deleteTask");
   vi.spyOn(store, "getTask");
@@ -299,14 +300,13 @@ describe("PR tracking persistence", () => {
 // Helper: run the new startup DB-restore logic (mirrors what isMain does).
 async function restoreTasksFromDb(rows: TaskRow[], tm: TaskModel): Promise<void> {
   for (const row of rows) {
-    if (row.status === "complete") continue;
+    if (row.completedAt) continue;
     await tm.register(row.taskId, row.issueNumber, row.repo, row.title, row.body, row.labels);
     // Mark deps loaded for the issue (simulates startup having loaded deps)
     tm.trackIssue(row.issueNumber, {
       number: row.issueNumber, title: row.title, body: row.body,
       labels: row.labels, repoUrl: `https://github.com/${row.repo}`,
     }, true);
-    if (row.status === "blocked") await tm.block(row.taskId);
     if (row.workerId) await tm.assign(row.taskId, row.workerId);
     if (row.prNumber !== null) await tm.registerPr(row.taskId, row.prNumber, null);
     if (row.branch) tm.registerBranch(row.branch, row.taskId);
@@ -324,9 +324,10 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
     // Simulate startup: restore from DB rows
     const rows: TaskRow[] = [{
       taskId: "42", issueNumber: 42, repo: "owner/repo", title: "Test task",
-      body: "", labels: [], status: "assigned" as const, workerId: "w1",
+      body: "", labels: [], workerId: "w1",
       prNumber: null, branch: null,
       createdAt: "2026-01-01T00:00:00Z", assignedAt: "2026-01-01T01:00:00Z", completedAt: null,
+      issueClosedAt: null, prMergedAt: null,
     }];
     await restoreTasksFromDb(rows, taskModel);
 
@@ -335,7 +336,7 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
     expect((await taskModel.get("42"))?.title).toBe("Test task");
   });
 
-  it("blocked task from taskStore is restored as blocked", async () => {
+  it("pending task from taskStore can be assigned by nextPending", async () => {
     taskModel = new TaskModel();
 
     ({ wss } = createForemanWss(taskModel, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
@@ -344,14 +345,16 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
 
     const rows: TaskRow[] = [{
       taskId: "42", issueNumber: 42, repo: "owner/repo", title: "Test task",
-      body: "", labels: [], status: "blocked" as const, workerId: null,
+      body: "", labels: [],
       prNumber: null, branch: null,
       createdAt: "2026-01-01T00:00:00Z", assignedAt: null, completedAt: null,
+      issueClosedAt: null, prMergedAt: null, workerId: null,
     }];
     await restoreTasksFromDb(rows, taskModel);
 
-    expect((await taskModel.get("42"))?.status).toBe("blocked");
-    expect(await taskModel.nextPending()).toBeNull(); // blocked tasks are not assignable
+    // Mark deps as loaded so nextPending will return the task
+    const task = await taskModel.nextPending(() => true);
+    expect(task?.taskId).toBe("42");
   });
 
   it("PR number and branch are restored from taskStore", async () => {
@@ -363,9 +366,10 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
 
     const rows: TaskRow[] = [{
       taskId: "42", issueNumber: 42, repo: "owner/repo", title: "Test task",
-      body: "", labels: [], status: "assigned" as const, workerId: "w1",
+      body: "", labels: [], workerId: "w1",
       prNumber: 10, branch: "fix-42",
       createdAt: "2026-01-01T00:00:00Z", assignedAt: "2026-01-01T01:00:00Z", completedAt: null,
+      issueClosedAt: null, prMergedAt: null,
     }];
     await restoreTasksFromDb(rows, taskModel);
 
@@ -382,9 +386,10 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
 
     const rows: TaskRow[] = [{
       taskId: "42", issueNumber: 42, repo: "owner/repo", title: "Test task",
-      body: "", labels: [], status: "complete" as const, workerId: null,
+      body: "", labels: [], workerId: null,
       prNumber: null, branch: null,
       createdAt: "2026-01-01T00:00:00Z", assignedAt: null, completedAt: "2026-01-01T02:00:00Z",
+      issueClosedAt: null, prMergedAt: null,
     }];
     await restoreTasksFromDb(rows, taskModel);
 
@@ -445,69 +450,45 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
 
 // ── Reconnect to complete task (issue closed while worker active) ─────────────
 
-describe("startup — blocked status reconciliation after graph rebuild", () => {
-  it("blocked task whose blocker closed while foreman was down becomes pending", async () => {
-    const taskStore = makeSpiedStore();
-    taskModel = new TaskModel(taskStore);
+describe("startup — derived blocked status based on dependency graph", () => {
+  it("pending task with closed blocker is derived as pending", async () => {
+    taskModel = new TaskModel();
 
-    // Restore from DB: task is blocked
     const rows: TaskRow[] = [{
       taskId: "42", issueNumber: 42, repo: "owner/repo", title: "Test task",
-      body: "", labels: [], status: "blocked" as const, workerId: null,
+      body: "", labels: [], workerId: null,
       prNumber: null, branch: null,
       createdAt: "2026-01-01T00:00:00Z", assignedAt: null, completedAt: null,
+      issueClosedAt: null, prMergedAt: null,
     }];
     await restoreTasksFromDb(rows, taskModel);
-    expect((await taskModel.get("42"))?.status).toBe("blocked");
 
-    // After GitHub reconcile: task 42 was blocked by issue 5, which is now closed
+    // Task 42 was blocked by issue 5, which is now closed
     const graph = new Map([[42, new Set([5])]]);
-    const openIssues = new Set<number>(); // issue 5 is closed — not in openIssues
+    taskModel.setIssueOpenState(5, false); // issue 5 is closed
 
-    const { wss: fwss } = createForemanWss(taskModel, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" });
-    wss = fwss;
-
-    for (const t of await taskModel.getPendingAndBlockedTasks()) {
-      if (t.status === "blocked" && !isBlocked(t.issueNumber, graph, openIssues)) {
-        await taskModel.unblock(t.taskId);
-      } else if (t.status === "pending" && isBlocked(t.issueNumber, graph, openIssues)) {
-        await taskModel.block(t.taskId);
-      }
-    }
-
-    expect((await taskModel.get("42"))?.status).toBe("pending");
-    expect(taskStore.markPending).toHaveBeenCalledWith("42");
+    const snapshots = await taskModel.getTaskSnapshots(graph);
+    expect(snapshots[0].status).toBe("pending");
   });
 
-  it("pending task whose blocker was open when foreman was down becomes blocked", async () => {
-    const taskStore = makeSpiedStore();
-    taskModel = new TaskModel(taskStore);
+  it("pending task with open blocker is derived as blocked", async () => {
+    taskModel = new TaskModel();
 
     const rows: TaskRow[] = [{
       taskId: "42", issueNumber: 42, repo: "owner/repo", title: "Test task",
-      body: "", labels: [], status: "pending" as const, workerId: null,
+      body: "", labels: [], workerId: null,
       prNumber: null, branch: null,
       createdAt: "2026-01-01T00:00:00Z", assignedAt: null, completedAt: null,
+      issueClosedAt: null, prMergedAt: null,
     }];
     await restoreTasksFromDb(rows, taskModel);
 
-    // After GitHub reconcile: issue 5 is still open and blocks task 42
+    // Task 42 is blocked by issue 5, which is still open
     const graph = new Map([[42, new Set([5])]]);
-    const openIssues = new Set([5]);
+    taskModel.setIssueOpenState(5, true); // issue 5 is open
 
-    const { wss: fwss } = createForemanWss(taskModel, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" });
-    wss = fwss;
-
-    for (const t of await taskModel.getPendingAndBlockedTasks()) {
-      if (t.status === "blocked" && !isBlocked(t.issueNumber, graph, openIssues)) {
-        await taskModel.unblock(t.taskId);
-      } else if (t.status === "pending" && isBlocked(t.issueNumber, graph, openIssues)) {
-        await taskModel.block(t.taskId);
-      }
-    }
-
-    expect((await taskModel.get("42"))?.status).toBe("blocked");
-    expect(taskStore.markBlocked).toHaveBeenCalledWith("42");
+    const snapshots = await taskModel.getTaskSnapshots(graph);
+    expect(snapshots[0].status).toBe("blocked");
   });
 });
 

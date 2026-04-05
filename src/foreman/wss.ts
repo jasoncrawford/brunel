@@ -235,7 +235,20 @@ export function createForemanWss(
         const existing = await taskModel.get(msg.taskId);
 
         if (!existing) {
-          log(workerId, `hello busy task=#${msg.taskId} — task not found`);
+          log(workerId, `hello busy task=#${msg.taskId} — unknown task, respecting busy status`);
+          // Create a placeholder so the worker can complete normally
+          const issueNumber = parseInt(msg.taskId, 10);
+          if (!isNaN(issueNumber)) {
+            await taskModel.register(msg.taskId, issueNumber, "", "", "", []);
+          }
+          const placeholderTask = await taskModel.get(msg.taskId);
+          if (placeholderTask) {
+            await reclaimWorker(placeholderTask);
+          } else {
+            cancelWorker(msg.taskId);
+          }
+        } else if (existing.status === "complete") {
+          log(workerId, `hello busy task=#${msg.taskId} — task already complete, cancelling`);
           cancelWorker(msg.taskId);
         } else if (existing.assignedWorkerId && existing.assignedWorkerId !== workerId) {
           log(workerId, `hello busy task=#${msg.taskId} — task taken by another worker`);

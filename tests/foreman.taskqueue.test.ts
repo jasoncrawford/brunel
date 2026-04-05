@@ -136,81 +136,48 @@ describe("TaskModel — queue operations", () => {
   });
 });
 
-describe("TaskModel — blocked status", () => {
+describe("TaskModel — derived blocked status", () => {
   let m: TaskModel;
   beforeEach(() => { m = new TaskModel(); });
 
-  it("block after register creates a blocked task", async () => {
+  it("nextPending with isReady callback can skip blocked tasks", async () => {
     await registerBase(m);
-    await m.block("42");
-    expect((await m.get("42"))?.status).toBe("blocked");
+    // Without a graph, isBlocked always returns false, so nextPending returns the task
+    const task1 = await m.nextPending(() => true);
+    expect(task1?.taskId).toBe("42");
+
+    // If the callback returns false (simulating blocked), nextPending skips
+    const task2 = await m.nextPending(() => false);
+    expect(task2).toBeNull();
   });
 
-  it("block transitions pending → blocked", async () => {
-    await registerBase(m);
-    await m.block("42");
-    expect((await m.get("42"))?.status).toBe("blocked");
-  });
-
-  it("block sets status to blocked even on assigned tasks", async () => {
-    await registerBase(m);
-    await m.assign("42", "w1");
-    await m.block("42");
-    expect((await m.get("42"))?.status).toBe("blocked");
-  });
-
-  it("unblock transitions blocked → pending", async () => {
-    await registerBase(m);
-    await m.block("42");
-    await m.unblock("42");
-    expect((await m.get("42"))?.status).toBe("pending");
-  });
-
-  it("unblock sets status to pending even on non-blocked tasks", async () => {
-    await registerBase(m);
-    await m.unblock("42");
-    expect((await m.get("42"))?.status).toBe("pending"); // unchanged
-  });
-
-  it("nextPending does not return blocked tasks", async () => {
-    await registerBase(m);
-    await m.block("42");
-    expect(await m.nextPending()).toBeNull();
-  });
-
-  it("block emits changed", async () => {
-    await registerBase(m);
-    const changed = vi.fn();
-    m.on("changed", changed);
-    await m.block("42");
-    expect(changed).toHaveBeenCalledOnce();
-  });
-
-  it("unblock emits changed", async () => {
-    await registerBase(m);
-    await m.block("42");
-    const changed = vi.fn();
-    m.on("changed", changed);
-    await m.unblock("42");
-    expect(changed).toHaveBeenCalledOnce();
-  });
-
-  it("getPendingAndBlockedTasks returns pending and blocked but not assigned/complete", async () => {
+  it("getPendingAndBlockedTasks returns pending and assigned but not complete", async () => {
     await registerBase(m, { taskId: "1", issueNumber: 1 }); // pending
-    await registerBase(m, { taskId: "2", issueNumber: 2 }); // will be blocked
-    await m.block("2");
-    await registerBase(m, { taskId: "3", issueNumber: 3 }); // will be assigned
-    await m.assign("3", "w1");
+    await registerBase(m, { taskId: "2", issueNumber: 2 }); // will be assigned
+    await m.assign("2", "w1");
+    await registerBase(m, { taskId: "3", issueNumber: 3 }); // will be complete
+    await m.assign("3", "w2");
+    await m.complete("3");
     const result = await m.getPendingAndBlockedTasks();
     expect(result.map((t) => t.taskId)).toEqual(expect.arrayContaining(["1", "2"]));
     expect(result.map((t) => t.taskId)).not.toContain("3");
   });
 
-  it("getTaskSnapshots includes blocked status", async () => {
-    await registerBase(m);
-    await m.block("42");
-    const snapshots = await m.getTaskSnapshots(new Map());
+  it("getTaskSnapshots derives blocked status from dependency graph", async () => {
+    await registerBase(m); // issueNumber: 42
+    const graph = new Map<number, Set<number>>([[42, new Set([100])]]);
+    m.setIssueOpenState(100, true); // blocker is open (not closed)
+
+    const snapshots = await m.getTaskSnapshots(graph);
     expect(snapshots[0].status).toBe("blocked");
+  });
+
+  it("getTaskSnapshots derives pending status when no blockers", async () => {
+    await registerBase(m); // issueNumber: 42
+    const graph = new Map<number, Set<number>>();
+
+    const snapshots = await m.getTaskSnapshots(graph);
+    expect(snapshots[0].status).toBe("pending");
   });
 });
 
@@ -226,9 +193,8 @@ describe("TaskModel — cancel (removeTask behavior)", () => {
     expect(await m.nextPending()).toBeNull();
   });
 
-  it("removes a blocked task (label was removed while task was blocked)", async () => {
+  it("removes a pending task (label was removed while task was pending)", async () => {
     await registerBase(m);
-    await m.block("42");
     await m.cancel("42");
     expect(await m.get("42")).toBeNull();
   });
