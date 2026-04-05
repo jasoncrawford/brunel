@@ -260,6 +260,12 @@ export interface TaskStore {
   updateTaskPr(taskId: string, prNumber: number | null, branch: string | null): Promise<void>;
   /** Fetch a single task by ID, or null if not found. */
   getTask(taskId: string): Promise<TaskRow | null>;
+  /** Find a task by issue number, or null if not found. */
+  getTaskByIssue(issueNumber: number): Promise<TaskRow | null>;
+  /** Find a task by PR number, or null if not found. */
+  getTaskByPr(prNumber: number): Promise<TaskRow | null>;
+  /** Find the assigned task for a worker, or null if none. */
+  getTaskByWorker(workerId: string): Promise<TaskRow | null>;
   /** List tasks, optionally filtered by status. */
   listTasks(opts?: ListTasksOpts): Promise<TaskRow[]>;
 }
@@ -367,6 +373,34 @@ export function createTaskStore(supabase: SupabaseClient): TaskStore {
       return data ? rowToTaskRow(data as Record<string, unknown>) : null;
     },
 
+    async getTaskByIssue(issueNumber) {
+      const { data, error } = await supabase.from("tasks")
+        .select("task_id, issue_number, repo, title, body, labels, status, worker_id, pr_number, branch, created_at, assigned_at, completed_at")
+        .eq("issue_number", issueNumber)
+        .maybeSingle();
+      if (error) throw error;
+      return data ? rowToTaskRow(data as Record<string, unknown>) : null;
+    },
+
+    async getTaskByPr(prNumber) {
+      const { data, error } = await supabase.from("tasks")
+        .select("task_id, issue_number, repo, title, body, labels, status, worker_id, pr_number, branch, created_at, assigned_at, completed_at")
+        .eq("pr_number", prNumber)
+        .maybeSingle();
+      if (error) throw error;
+      return data ? rowToTaskRow(data as Record<string, unknown>) : null;
+    },
+
+    async getTaskByWorker(workerId) {
+      const { data, error } = await supabase.from("tasks")
+        .select("task_id, issue_number, repo, title, body, labels, status, worker_id, pr_number, branch, created_at, assigned_at, completed_at")
+        .eq("worker_id", workerId)
+        .eq("status", "assigned")
+        .maybeSingle();
+      if (error) throw error;
+      return data ? rowToTaskRow(data as Record<string, unknown>) : null;
+    },
+
     async listTasks(opts) {
       const limit = opts?.limit ?? 200;
       let q = supabase.from("tasks").select(
@@ -380,17 +414,77 @@ export function createTaskStore(supabase: SupabaseClient): TaskStore {
   };
 }
 
-export function createNullTaskStore(): TaskStore {
+/** In-memory implementation of TaskStore — used when no Supabase is configured
+ *  and as the backing store for tests. This is NOT a cache; it's the sole source
+ *  of truth when used (no dual-write, no drift). */
+export function createMemoryTaskStore(): TaskStore {
+  const tasks = new Map<string, TaskRow>();
+
   return {
-    async upsertTask() {},
-    async updateTaskContent() {},
-    async markAssigned() {},
-    async markComplete() {},
-    async markPending() {},
-    async markBlocked() {},
-    async deleteTask() {},
-    async updateTaskPr() {},
-    async getTask() { return null; },
-    async listTasks() { return []; },
+    async upsertTask(taskId, issueNumber, repo, title, body, labels) {
+      tasks.set(taskId, {
+        taskId, issueNumber, repo, title, body, labels,
+        status: "pending" as TaskStatus,
+        workerId: null, prNumber: null, branch: null,
+        createdAt: new Date().toISOString(),
+        assignedAt: null, completedAt: null,
+      });
+    },
+    async updateTaskContent(taskId, title, body, labels) {
+      const t = tasks.get(taskId);
+      if (t) { t.title = title; t.body = body; t.labels = labels; }
+    },
+    async markAssigned(taskId, workerId) {
+      const t = tasks.get(taskId);
+      if (t) { t.status = "assigned"; t.workerId = workerId; t.assignedAt = new Date().toISOString(); }
+    },
+    async markComplete(taskId) {
+      const t = tasks.get(taskId);
+      if (t) { t.status = "complete"; t.completedAt = new Date().toISOString(); }
+    },
+    async markPending(taskId) {
+      const t = tasks.get(taskId);
+      if (t) { t.status = "pending"; t.workerId = null; }
+    },
+    async markBlocked(taskId) {
+      const t = tasks.get(taskId);
+      if (t) { t.status = "blocked"; t.workerId = null; }
+    },
+    async deleteTask(taskId) {
+      const t = tasks.get(taskId);
+      if (t && t.assignedAt === null) tasks.delete(taskId);
+    },
+    async updateTaskPr(taskId, prNumber, branch) {
+      const t = tasks.get(taskId);
+      if (t) { t.prNumber = prNumber; t.branch = branch; }
+    },
+    async getTask(taskId) {
+      return tasks.get(taskId) ?? null;
+    },
+    async getTaskByIssue(issueNumber) {
+      for (const t of tasks.values()) {
+        if (t.issueNumber === issueNumber) return t;
+      }
+      return null;
+    },
+    async getTaskByPr(prNumber) {
+      for (const t of tasks.values()) {
+        if (t.prNumber === prNumber) return t;
+      }
+      return null;
+    },
+    async getTaskByWorker(workerId) {
+      for (const t of tasks.values()) {
+        if (t.status === "assigned" && t.workerId === workerId) return t;
+      }
+      return null;
+    },
+    async listTasks(opts) {
+      let result = [...tasks.values()];
+      if (opts?.status) result = result.filter(t => t.status === opts.status);
+      return result
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        .slice(0, opts?.limit ?? 200);
+    },
   };
 }

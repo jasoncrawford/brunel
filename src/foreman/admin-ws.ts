@@ -51,18 +51,22 @@ export interface AdminWss {
 
 const MAX_RECENT_LOG = 30;
 
-export function createAdminWss(server: http.Server, getSnapshot?: () => AdminSnapshot): AdminWss {
+export function createAdminWss(server: http.Server, getSnapshot?: () => Promise<AdminSnapshot> | AdminSnapshot): AdminWss {
   const clients = new Set<WsSocket>();
   const recentLog: LogEntry[] = []; // newest first, capped at MAX_RECENT_LOG
   const wss = new WebSocketServer({ noServer: true });
 
   wss.on("connection", (ws) => {
     clients.add(ws);
+    const logMsg = JSON.stringify({ type: "initial_log", entries: recentLog.slice() } satisfies AdminMessage);
     if (getSnapshot) {
-      const snapshot = getSnapshot();
-      ws.send(JSON.stringify({ type: "snapshot", ...snapshot } satisfies AdminMessage));
+      void Promise.resolve(getSnapshot()).then((snapshot) => {
+        ws.send(JSON.stringify({ type: "snapshot", ...snapshot } satisfies AdminMessage));
+        ws.send(logMsg);
+      });
+    } else {
+      ws.send(logMsg);
     }
-    ws.send(JSON.stringify({ type: "initial_log", entries: recentLog.slice() } satisfies AdminMessage));
     ws.on("close", () => clients.delete(ws));
   });
 

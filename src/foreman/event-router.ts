@@ -2,8 +2,7 @@ import type { GitHubEvent, ForemanMessage, TaskIssue } from "../types.js";
 import type { DependencyGraph } from "./dependencies.js";
 import { setBlockers, fetchBlockers } from "./dependencies.js";
 import { fetchIssueStates } from "./github.js";
-import type { TaskModel } from "./task-model.js";
-import type { Task } from "./task-queue.js";
+import type { TaskModel, Task } from "./task-model.js";
 import type { WorkerRegistry } from "./worker-registry.js";
 import { shortWorkerId } from "../../shared/utils.js";
 import { fmtError } from "../utils.js";
@@ -129,7 +128,7 @@ export function startDepsLoad(deps: EventRouterDeps, issueNumber: number, body: 
       }
       deps.taskModel.markIssueDepsLoaded(issueNumber);
       // If the task is currently pending and is now blocked, persist blocked status.
-      const task = deps.taskModel.getTaskForIssue(issueNumber);
+      const task = await deps.taskModel.getTaskForIssue(issueNumber);
       if (task && task.status === "pending" && deps.taskModel.isBlocked(issueNumber, deps.graph)) {
         await deps.taskModel.block(task.taskId);
       }
@@ -145,23 +144,23 @@ export async function reconcile(deps: EventRouterDeps): Promise<void> {
 
   // Step 1: materialise tasks for new labeledIssues entries.
   const registerPromises: Promise<void>[] = [];
-  for (const [num, { issue, depsLoaded }] of labeledIssues) {
-    if (!deps.taskModel.getTaskForIssue(num)) {
+  for (const [num, { issue }] of labeledIssues) {
+    if (!(await deps.taskModel.getTaskForIssue(num))) {
       deps.flog(`[task #${num}] reconcile: creating task (title: ${JSON.stringify(issue.title)})`);
       registerPromises.push(
-        deps.taskModel.register(String(num), num, deps.repo, issue.title, issue.body, issue.labels, issue.repoUrl, depsLoaded)
+        deps.taskModel.register(String(num), num, deps.repo, issue.title, issue.body, issue.labels)
           .catch((err: unknown) => deps.flog(`ERROR Failed to persist task #${num}: ${fmtError(err)}`))
       );
     }
   }
 
-  // Step 2: sync title/body/labels/depsLoaded from labeledIssues to existing tasks.
+  // Step 2: sync title/body/labels from labeledIssues to existing tasks.
   const refreshPromises: Promise<void>[] = [];
-  for (const [num, { issue, depsLoaded }] of labeledIssues) {
-    const t = deps.taskModel.getTaskForIssue(num);
+  for (const [num, { issue }] of labeledIssues) {
+    const t = await deps.taskModel.getTaskForIssue(num);
     if (t) {
       refreshPromises.push(
-        deps.taskModel.refreshContent(t.taskId, issue.title, issue.body, issue.labels, depsLoaded)
+        deps.taskModel.refreshContent(t.taskId, issue.title, issue.body, issue.labels)
           .catch((err: unknown) => deps.flog(`ERROR Failed to refresh content for task #${t.taskId}: ${fmtError(err)}`))
       );
     }
@@ -169,7 +168,7 @@ export async function reconcile(deps: EventRouterDeps): Promise<void> {
 
   // Step 3: remove pending/blocked tasks whose issue no longer has the label
   const cancelPromises: Promise<void>[] = [];
-  for (const t of deps.taskModel.getPendingAndBlockedTasks()) {
+  for (const t of await deps.taskModel.getPendingAndBlockedTasks()) {
     if (!labeledIssues.has(t.issueNumber)) {
       cancelPromises.push(
         deps.taskModel.cancel(t.taskId)
@@ -204,13 +203,13 @@ export async function doRouteEvent(deps: EventRouterDeps, name: string, p: Recor
     if (prNumber === null) return result(null);
 
     // Drop synchronize events — the worker pushed these commits itself.
-    if (p.action === "synchronize") return result(taskModel.getTaskForPr(prNumber));
+    if (p.action === "synchronize") return result(await taskModel.getTaskForPr(prNumber));
 
     // When a PR is opened, register it against a task if the body links an issue.
     if (p.action === "opened" && pr) {
       const linkedIssue = extractLinkedIssueNumber(String(pr.body ?? ""));
       if (linkedIssue !== null) {
-        const linkedTask = taskModel.getTaskForIssue(linkedIssue);
+        const linkedTask = await taskModel.getTaskForIssue(linkedIssue);
         if (linkedTask) {
           const branch = strProp(pr.head, "ref");
           if (branch) taskModel.registerBranch(branch, linkedTask.taskId);
@@ -224,7 +223,7 @@ export async function doRouteEvent(deps: EventRouterDeps, name: string, p: Recor
 
     // When a PR is closed without merging, clear it from the task.
     if (p.action === "closed" && pr && !pr.merged) {
-      const task = taskModel.getTaskForPr(prNumber);
+      const task = await taskModel.getTaskForPr(prNumber);
       if (task) {
         flog(`[task #${task.issueNumber}] PR #${prNumber} unregistered (closed without merging)`);
         await taskModel.unregisterPr(prNumber).catch((err: unknown) =>
@@ -236,7 +235,7 @@ export async function doRouteEvent(deps: EventRouterDeps, name: string, p: Recor
       return result(null);
     }
 
-    const task = taskModel.getTaskForPr(prNumber);
+    const task = await taskModel.getTaskForPr(prNumber);
     if (task) forwardEvent(deps, task, evt, `PR #${prNumber}`);
     return result(task);
   }
@@ -245,7 +244,7 @@ export async function doRouteEvent(deps: EventRouterDeps, name: string, p: Recor
     const pr = p.pull_request as Record<string, unknown> | undefined;
     const prNumber = numProp(pr, "number");
     if (prNumber === null) return result(null);
-    const task = taskModel.getTaskForPr(prNumber);
+    const task = await taskModel.getTaskForPr(prNumber);
     if (task) forwardEvent(deps, task, evt, `PR #${prNumber}`);
     return result(task);
   }
@@ -255,7 +254,7 @@ export async function doRouteEvent(deps: EventRouterDeps, name: string, p: Recor
     const prs = inner?.pull_requests as Array<{ number: number }> | undefined;
 
     if (prs && prs.length > 0) {
-      const task = taskModel.getTaskForPr(prs[0].number);
+      const task = await taskModel.getTaskForPr(prs[0].number);
       if (task) { forwardEvent(deps, task, evt, `PR #${prs[0].number}`); return result(task); }
     }
 
@@ -263,7 +262,7 @@ export async function doRouteEvent(deps: EventRouterDeps, name: string, p: Recor
       ? strProp(inner?.check_suite, "head_branch") ?? ""
       : strProp(inner, "head_branch") ?? "";
     if (headBranch) {
-      const task = taskModel.getTaskForBranch(headBranch);
+      const task = await taskModel.getTaskForBranch(headBranch);
       if (task) { forwardEvent(deps, task, evt, `branch ${headBranch}`); return result(task); }
     }
     return result(null);
@@ -275,10 +274,10 @@ export async function doRouteEvent(deps: EventRouterDeps, name: string, p: Recor
   const issueNumber = numProp(issue, "number");
   if (issueNumber === null) return result(null);
 
-  let task = taskModel.getTaskForIssue(issueNumber);
+  let task = await taskModel.getTaskForIssue(issueNumber);
 
   // GitHub issue_comment events on PRs have the PR number in issue.number.
-  if (!task) task = taskModel.getTaskForPr(issueNumber);
+  if (!task) task = await taskModel.getTaskForPr(issueNumber);
 
   // If the issue isn't queued yet, check if this webhook should enqueue it.
   if (!task && name === "issues" && issue) {
@@ -338,7 +337,7 @@ export async function doRouteEvent(deps: EventRouterDeps, name: string, p: Recor
       const unblockPromises: Promise<void>[] = [];
       for (const [depIssueNum, blockers] of deps.graph) {
         if (blockers.has(issueNumber)) {
-          const blockedTask = taskModel.getTaskForIssue(depIssueNum);
+          const blockedTask = await taskModel.getTaskForIssue(depIssueNum);
           if (blockedTask && blockedTask.status === "blocked") {
             if (!taskModel.isBlocked(depIssueNum, deps.graph)) {
               unblockPromises.push(

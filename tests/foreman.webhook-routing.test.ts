@@ -19,6 +19,23 @@ import { waitUntil } from "./helpers.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+/** Register a task and mark its deps as loaded so tryAssignWork will pick it up. */
+async function registerReady(
+  tm: TaskModel,
+  taskId: string,
+  issueNumber: number,
+  repoSlug: string,
+  title: string,
+  body: string,
+  labels: string[],
+): Promise<void> {
+  await tm.register(taskId, issueNumber, repoSlug, title, body, labels);
+  tm.trackIssue(issueNumber, {
+    number: issueNumber, title, body, labels,
+    repoUrl: `https://github.com/${repoSlug}`,
+  }, true);
+}
+
 function connectWorker(port: number): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(`ws://localhost:${port}/worker`);
@@ -196,7 +213,7 @@ let taskModel: TaskModel;
 let registry: WorkerRegistry;
 let httpServer: http.Server;
 let wss: WebSocketServer;
-let routeEvent: (id: string, name: string, payload: unknown) => void;
+let routeEvent: (id: string, name: string, payload: unknown) => Promise<void>;
 let port: number;
 const openClients: WebSocket[] = [];
 
@@ -266,7 +283,7 @@ describe("webhook-triggered task routing", () => {
     expect((msg as any).issue.number).toBe(42);
     expect((msg as any).issue.title).toBe("Issue 42");
     expect((msg as any).issue.repoUrl).toBe("https://github.com/owner/repo");
-    expect(taskModel.get("42")?.status).toBe("assigned");
+    expect((await taskModel.get("42"))?.status).toBe("assigned");
     expect(registry.get("w1")?.status).toBe("busy");
   });
 
@@ -284,14 +301,17 @@ describe("webhook-triggered task routing", () => {
     ]);
 
     expect(raceResult).toBe("timeout");
-    expect(taskModel.getTaskForIssue(42)).toBeUndefined();
+    expect(await taskModel.getTaskForIssue(42)).toBeNull();
   });
 
-  it("issues/labeled with task label enqueues task when no idle worker available", () => {
+  it("issues/labeled with task label enqueues task when no idle worker available", async () => {
     // No worker connected at all
     routeEvent("evt-1", "issues", labeledPayload(42, "brunel:ready"));
 
-    const task = taskModel.getTaskForIssue(42);
+    // Allow async processing to complete
+    await new Promise((r) => setTimeout(r, 50));
+
+    const task = await taskModel.getTaskForIssue(42);
     expect(task).toBeDefined();
     expect(task?.status).toBe("pending");
     expect(task?.issueNumber).toBe(42);
@@ -301,7 +321,10 @@ describe("webhook-triggered task routing", () => {
   it("pending task from webhook gets assigned when worker later connects", async () => {
     // Webhook fires before any worker is available
     routeEvent("evt-1", "issues", labeledPayload(42, "brunel:ready"));
-    expect(taskModel.getTaskForIssue(42)?.status).toBe("pending");
+
+    // Allow async processing to complete
+    await new Promise((r) => setTimeout(r, 50));
+    expect((await taskModel.getTaskForIssue(42))?.status).toBe("pending");
 
     // Worker connects afterwards — use nextMsgWhere to skip hello_ack and get task_assigned
     const ws = await connect();
@@ -311,26 +334,20 @@ describe("webhook-triggered task routing", () => {
     const msg = await reply;
     expect(msg.type).toBe("task_assigned");
     expect((msg as any).issue.number).toBe(42);
-    expect(taskModel.get("42")?.status).toBe("assigned");
+    expect((await taskModel.get("42"))?.status).toBe("assigned");
   });
 
   it("issues/labeled does not enqueue duplicate if issue already in queue", async () => {
-    // Pre-populate the queue with this issue
-    taskModel.loadTask({
-      taskId: "42",
-      issueNumber: 42,
-      title: "Existing Issue",
-      body: "Body",
-      labels: ["brunel:ready"],
-      repoUrl: "https://github.com/owner/repo",
-    });
+    // Pre-populate the queue with this issue (with deps loaded so it's assignable)
+    await registerReady(taskModel, "42", 42, "owner/repo", "Existing Issue", "Body", ["brunel:ready"]);
 
     routeEvent("evt-1", "issues", labeledPayload(42, "brunel:ready"));
 
+    // Allow async processing to complete
+    await new Promise((r) => setTimeout(r, 50));
+
     // Only one task should exist, and it should still be pending
-    expect(taskModel.get("42")?.status).toBe("pending");
-    // Confirm it's really the same task (title unchanged from original)
-    expect(taskModel.get("42")?.title).toBe("Existing Issue");
+    expect((await taskModel.get("42"))?.status).toBe("pending");
   });
 
   it("issues/opened with task label in issue labels assigns task to idle worker", async () => {
@@ -347,7 +364,7 @@ describe("webhook-triggered task routing", () => {
     const msg = await reply;
     expect(msg.type).toBe("task_assigned");
     expect((msg as any).issue.number).toBe(99);
-    expect(taskModel.get("99")?.status).toBe("assigned");
+    expect((await taskModel.get("99"))?.status).toBe("assigned");
     expect(registry.get("w1")?.status).toBe("busy");
   });
 
@@ -364,22 +381,15 @@ describe("webhook-triggered task routing", () => {
     ]);
 
     expect(raceResult).toBe("timeout");
-    expect(taskModel.getTaskForIssue(99)).toBeUndefined();
+    expect(await taskModel.getTaskForIssue(99)).toBeNull();
   });
 
   it("busy worker is not interrupted when new task arrives via webhook", async () => {
     // Give worker an existing task
-    taskModel.loadTask({
-      taskId: "1",
-      issueNumber: 1,
-      title: "First Issue",
-      body: "Body",
-      labels: ["brunel:ready"],
-      repoUrl: "https://github.com/owner/repo",
-    });
+    await registerReady(taskModel, "1", 1, "owner/repo", "First Issue", "Body", ["brunel:ready"]);
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
-    await nextMsg(ws); // task_assigned for issue 1
+    await nextMsgWhere(ws, (m) => m.type === "task_assigned"); // task_assigned for issue 1
 
     // New issue arrives via webhook
     routeEvent("evt-1", "issues", labeledPayload(2, "brunel:ready"));
@@ -392,29 +402,22 @@ describe("webhook-triggered task routing", () => {
     expect(raceResult).toBe("timeout");
 
     // But issue 2 should be pending, ready for when the worker finishes
-    expect(taskModel.getTaskForIssue(2)?.status).toBe("pending");
+    expect((await taskModel.getTaskForIssue(2))?.status).toBe("pending");
   });
 });
 
 describe("PR event forwarding to workers", () => {
   it("pull_request/opened with closing keyword registers PR and routes check_run to worker", async () => {
     // Set up a task for issue 42
-    taskModel.loadTask({
-      taskId: "42",
-      issueNumber: 42,
-      title: "Issue 42",
-      body: "Body",
-      labels: ["brunel:ready"],
-      repoUrl: "https://github.com/owner/repo",
-    });
+    await registerReady(taskModel, "42", 42, "owner/repo", "Issue 42", "Body", ["brunel:ready"]);
 
     // Worker connects and receives the task
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
-    await nextMsg(ws); // task_assigned
+    await nextMsgWhere(ws, (m) => m.type === "task_assigned");
 
     // Worker opens a PR that closes issue #42
-    routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Fixes #42\n\nSome description."));
+    await routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Fixes #42\n\nSome description."));
 
     // check_run for that PR should now be forwarded to the worker
     const reply = nextMsgWhere(ws, m => m.type === "event_notification" && (m as any).event.name === "check_run");
@@ -426,20 +429,13 @@ describe("PR event forwarding to workers", () => {
   });
 
   it("pull_request_review for a registered PR is forwarded to the worker", async () => {
-    taskModel.loadTask({
-      taskId: "42",
-      issueNumber: 42,
-      title: "Issue 42",
-      body: "Body",
-      labels: ["brunel:ready"],
-      repoUrl: "https://github.com/owner/repo",
-    });
+    await registerReady(taskModel, "42", 42, "owner/repo", "Issue 42", "Body", ["brunel:ready"]);
 
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
-    await nextMsg(ws); // task_assigned
+    await nextMsgWhere(ws, (m) => m.type === "task_assigned");
 
-    routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Closes #42"));
+    await routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Closes #42"));
 
     const reply = nextMsgWhere(ws, m => m.type === "event_notification" && (m as any).event.name === "pull_request_review");
     routeEvent("evt-rev", "pull_request_review", prReviewPayload(10));
@@ -450,20 +446,13 @@ describe("PR event forwarding to workers", () => {
   });
 
   it("pull_request_review_comment for a registered PR is forwarded to the worker", async () => {
-    taskModel.loadTask({
-      taskId: "42",
-      issueNumber: 42,
-      title: "Issue 42",
-      body: "Body",
-      labels: ["brunel:ready"],
-      repoUrl: "https://github.com/owner/repo",
-    });
+    await registerReady(taskModel, "42", 42, "owner/repo", "Issue 42", "Body", ["brunel:ready"]);
 
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
-    await nextMsg(ws); // task_assigned
+    await nextMsgWhere(ws, (m) => m.type === "task_assigned");
 
-    routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Resolves #42"));
+    await routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Resolves #42"));
 
     const reply = nextMsgWhere(ws, m => m.type === "event_notification" && (m as any).event.name === "pull_request_review_comment");
     routeEvent("evt-cmt", "pull_request_review_comment", prReviewCommentPayload(10));
@@ -474,18 +463,11 @@ describe("PR event forwarding to workers", () => {
   });
 
   it("pull_request/opened without linked issue does not crash and is not forwarded", async () => {
-    taskModel.loadTask({
-      taskId: "42",
-      issueNumber: 42,
-      title: "Issue 42",
-      body: "Body",
-      labels: ["brunel:ready"],
-      repoUrl: "https://github.com/owner/repo",
-    });
+    await registerReady(taskModel, "42", 42, "owner/repo", "Issue 42", "Body", ["brunel:ready"]);
 
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
-    await nextMsg(ws); // task_assigned
+    await nextMsgWhere(ws, (m) => m.type === "task_assigned");
 
     // PR with no linked issue — should be silently ignored
     routeEvent("evt-pr", "pull_request", prOpenedPayload(99, "A new PR with no issue reference."));
@@ -514,20 +496,13 @@ describe("PR event forwarding to workers", () => {
   });
 
   it("check_suite/completed for a registered PR is forwarded to the worker", async () => {
-    taskModel.loadTask({
-      taskId: "42",
-      issueNumber: 42,
-      title: "Issue 42",
-      body: "Body",
-      labels: ["brunel:ready"],
-      repoUrl: "https://github.com/owner/repo",
-    });
+    await registerReady(taskModel, "42", 42, "owner/repo", "Issue 42", "Body", ["brunel:ready"]);
 
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
-    await nextMsg(ws); // task_assigned
+    await nextMsgWhere(ws, (m) => m.type === "task_assigned");
 
-    routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Closes #42"));
+    await routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Closes #42"));
 
     const reply = nextMsgWhere(ws, m => m.type === "event_notification" && (m as any).event.name === "check_suite");
     routeEvent("evt-cs", "check_suite", checkSuitePayload(10, "failure"));
@@ -552,15 +527,12 @@ describe("PR event forwarding to workers", () => {
   });
 
   it("check_suite with empty pull_requests is routed by head_branch", async () => {
-    taskModel.loadTask({
-      taskId: "42", issueNumber: 42, title: "Issue 42", body: "Body",
-      labels: ["brunel:ready"], repoUrl: "https://github.com/owner/repo",
-    });
+    await registerReady(taskModel, "42", 42, "owner/repo", "Issue 42", "Body", ["brunel:ready"]);
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
-    await nextMsg(ws); // task_assigned
+    await nextMsgWhere(ws, (m) => m.type === "task_assigned");
 
-    routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Closes #42", "fix-issue-42"));
+    await routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Closes #42", "fix-issue-42"));
 
     const reply = nextMsgWhere(ws, m => m.type === "event_notification" && (m as any).event.name === "check_suite");
     routeEvent("evt-cs", "check_suite", checkSuitePayloadByBranch("fix-issue-42", "failure"));
@@ -571,15 +543,12 @@ describe("PR event forwarding to workers", () => {
   });
 
   it("check_run with empty pull_requests is routed by head_branch", async () => {
-    taskModel.loadTask({
-      taskId: "42", issueNumber: 42, title: "Issue 42", body: "Body",
-      labels: ["brunel:ready"], repoUrl: "https://github.com/owner/repo",
-    });
+    await registerReady(taskModel, "42", 42, "owner/repo", "Issue 42", "Body", ["brunel:ready"]);
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
-    await nextMsg(ws); // task_assigned
+    await nextMsgWhere(ws, (m) => m.type === "task_assigned");
 
-    routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Closes #42", "fix-issue-42"));
+    await routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Closes #42", "fix-issue-42"));
 
     const reply = nextMsgWhere(ws, m => m.type === "event_notification" && (m as any).event.name === "check_run");
     routeEvent("evt-cr", "check_run", checkRunPayloadByBranch("fix-issue-42", "failure"));
@@ -604,41 +573,31 @@ describe("PR event forwarding to workers", () => {
   });
 
   it("pull_request/closed without merging clears PR from task in TaskQueue", async () => {
-    taskModel.loadTask({
-      taskId: "42",
-      issueNumber: 42,
-      title: "Issue 42",
-      body: "Body",
-      labels: ["brunel:ready"],
-      repoUrl: "https://github.com/owner/repo",
-    });
+    await registerReady(taskModel, "42", 42, "owner/repo", "Issue 42", "Body", ["brunel:ready"]);
 
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
-    await nextMsg(ws); // task_assigned
+    await nextMsgWhere(ws, (m) => m.type === "task_assigned");
 
     routeEvent("evt-pr-open", "pull_request", prOpenedPayload(10, "Closes #42"));
-    expect(taskModel.getTaskForPr(10)?.taskId).toBe("42");
-    expect(taskModel.get("42")?.prNumber).toBe(10);
+    // Wait for async PR registration
+    await new Promise((r) => setTimeout(r, 50));
+    expect((await taskModel.getTaskForPr(10))?.taskId).toBe("42");
+    expect((await taskModel.get("42"))?.prNumber).toBe(10);
 
     routeEvent("evt-pr-close", "pull_request", prClosedPayload(10, false));
-    expect(taskModel.getTaskForPr(10)).toBeUndefined();
-    expect(taskModel.get("42")?.prNumber).toBeUndefined();
+    // Wait for async PR unregistration
+    await new Promise((r) => setTimeout(r, 50));
+    expect(await taskModel.getTaskForPr(10)).toBeNull();
+    expect((await taskModel.get("42"))?.prNumber).toBeUndefined();
   });
 
   it("pull_request/closed without merging still forwards the event to the worker", async () => {
-    taskModel.loadTask({
-      taskId: "42",
-      issueNumber: 42,
-      title: "Issue 42",
-      body: "Body",
-      labels: ["brunel:ready"],
-      repoUrl: "https://github.com/owner/repo",
-    });
+    await registerReady(taskModel, "42", 42, "owner/repo", "Issue 42", "Body", ["brunel:ready"]);
 
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
-    await nextMsg(ws); // task_assigned
+    await nextMsgWhere(ws, (m) => m.type === "task_assigned");
 
     routeEvent("evt-pr-open", "pull_request", prOpenedPayload(10, "Closes #42"));
     await nextMsgWhere(ws, m => m.type === "event_notification" && (m as any).event.name === "pull_request");
@@ -650,45 +609,35 @@ describe("PR event forwarding to workers", () => {
   });
 
   it("pull_request/closed with merge does NOT clear PR from task in TaskQueue", async () => {
-    taskModel.loadTask({
-      taskId: "42",
-      issueNumber: 42,
-      title: "Issue 42",
-      body: "Body",
-      labels: ["brunel:ready"],
-      repoUrl: "https://github.com/owner/repo",
-    });
+    await registerReady(taskModel, "42", 42, "owner/repo", "Issue 42", "Body", ["brunel:ready"]);
 
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
-    await nextMsg(ws); // task_assigned
+    await nextMsgWhere(ws, (m) => m.type === "task_assigned");
 
     routeEvent("evt-pr-open", "pull_request", prOpenedPayload(10, "Closes #42"));
-    expect(taskModel.get("42")?.prNumber).toBe(10);
+    // Wait for async PR registration
+    await new Promise((r) => setTimeout(r, 50));
+    expect((await taskModel.get("42"))?.prNumber).toBe(10);
 
     routeEvent("evt-pr-close", "pull_request", prClosedPayload(10, true));
+    // Wait for async processing
+    await new Promise((r) => setTimeout(r, 50));
     // Merged PR: keep the association (issue will close → task completes)
-    expect(taskModel.get("42")?.prNumber).toBe(10);
-    expect(taskModel.getTaskForPr(10)?.taskId).toBe("42");
+    expect((await taskModel.get("42"))?.prNumber).toBe(10);
+    expect((await taskModel.getTaskForPr(10))?.taskId).toBe("42");
   });
 });
 
   it("issue_comment/created on a PR is forwarded to the worker handling that issue", async () => {
-    taskModel.loadTask({
-      taskId: "42",
-      issueNumber: 42,
-      title: "Issue 42",
-      body: "Body",
-      labels: ["brunel:ready"],
-      repoUrl: "https://github.com/owner/repo",
-    });
+    await registerReady(taskModel, "42", 42, "owner/repo", "Issue 42", "Body", ["brunel:ready"]);
 
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
-    await nextMsg(ws); // task_assigned
+    await nextMsgWhere(ws, (m) => m.type === "task_assigned");
 
     // Worker opens PR #10 that closes issue #42
-    routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Closes #42"));
+    await routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Closes #42"));
 
     // User posts a top-level comment on PR #10 — issue.number = 10 (the PR number)
     const reply = nextMsgWhere(ws, m => m.type === "event_notification" && (m as any).event.name === "issue_comment");
@@ -701,18 +650,11 @@ describe("PR event forwarding to workers", () => {
 
 describe("foreman event filtering", () => {
   it("pull_request/synchronize is dropped and not forwarded to worker", async () => {
-    taskModel.loadTask({
-      taskId: "42",
-      issueNumber: 42,
-      title: "Issue 42",
-      body: "Body",
-      labels: ["brunel:ready"],
-      repoUrl: "https://github.com/owner/repo",
-    });
+    await registerReady(taskModel, "42", 42, "owner/repo", "Issue 42", "Body", ["brunel:ready"]);
 
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
-    await nextMsg(ws); // task_assigned
+    await nextMsgWhere(ws, (m) => m.type === "task_assigned");
 
     // Register PR for the task (now also forwarded as event_notification — consume it)
     routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Closes #42"));
@@ -735,7 +677,9 @@ describe("foreman event filtering", () => {
   it('issues/unlabeled with task label removes a pending task from the queue', async () => {
     // Enqueue task via webhook (no worker connected, so it stays pending)
     routeEvent("evt-labeled", "issues", labeledPayload(42, "brunel:ready"));
-    expect(taskModel.getTaskForIssue(42)?.status).toBe("pending");
+    // Allow async processing to complete
+    await new Promise((r) => setTimeout(r, 50));
+    expect((await taskModel.getTaskForIssue(42))?.status).toBe("pending");
 
     // Remove the label — pending task should be dequeued
     routeEvent("evt-unlabeled", "issues", {
@@ -744,8 +688,10 @@ describe("foreman event filtering", () => {
       issue: { number: 42, title: "Issue 42", body: "Body", labels: [] },
       repository: { html_url: "https://github.com/owner/repo" },
     });
+    // Allow async processing to complete
+    await new Promise((r) => setTimeout(r, 50));
 
-    expect(taskModel.getTaskForIssue(42)).toBeUndefined();
+    expect(await taskModel.getTaskForIssue(42)).toBeNull();
   });
 
   it('issues/unlabeled with task label does not remove an already-assigned task', async () => {
@@ -753,11 +699,11 @@ describe("foreman event filtering", () => {
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
     await waitUntil(() => !!registry.get("w1"));
 
-    const reply = nextMsg(ws);
+    const reply = nextMsgWhere(ws, (m) => m.type === "task_assigned");
     routeEvent("evt-labeled", "issues", labeledPayload(42, "brunel:ready"));
     await reply; // task_assigned
 
-    expect(taskModel.getTaskForIssue(42)?.status).toBe("assigned");
+    expect((await taskModel.getTaskForIssue(42))?.status).toBe("assigned");
 
     // Removing the label should leave the assigned task intact
     routeEvent("evt-unlabeled", "issues", {
@@ -766,13 +712,17 @@ describe("foreman event filtering", () => {
       issue: { number: 42, title: "Issue 42", body: "Body", labels: [] },
       repository: { html_url: "https://github.com/owner/repo" },
     });
+    // Allow async processing
+    await new Promise((r) => setTimeout(r, 50));
 
-    expect(taskModel.getTaskForIssue(42)?.status).toBe("assigned");
+    expect((await taskModel.getTaskForIssue(42))?.status).toBe("assigned");
   });
 
   it('issues/unlabeled with non-task label does not remove a pending task', async () => {
     routeEvent("evt-labeled", "issues", labeledPayload(42, "brunel:ready"));
-    expect(taskModel.getTaskForIssue(42)?.status).toBe("pending");
+    // Allow async processing to complete
+    await new Promise((r) => setTimeout(r, 50));
+    expect((await taskModel.getTaskForIssue(42))?.status).toBe("pending");
 
     routeEvent("evt-unlabeled", "issues", {
       action: "unlabeled",
@@ -780,11 +730,13 @@ describe("foreman event filtering", () => {
       issue: { number: 42, title: "Issue 42", body: "Body", labels: [{ name: "brunel:ready" }] },
       repository: { html_url: "https://github.com/owner/repo" },
     });
+    // Allow async processing
+    await new Promise((r) => setTimeout(r, 50));
 
-    expect(taskModel.getTaskForIssue(42)).toBeDefined();
+    expect(await taskModel.getTaskForIssue(42)).toBeDefined();
   });
 
-  it("issues/labeled with task label does not enqueue if issue is closed", () => {
+  it("issues/labeled with task label does not enqueue if issue is closed", async () => {
     // Bug #489: delayed/retried webhooks for closed issues should not create tasks.
     // A closed issue re-labeled brunel:ready would otherwise upsert the DB row,
     // resetting status to pending and potentially overwriting title with a blank.
@@ -800,7 +752,9 @@ describe("foreman event filtering", () => {
       },
       repository: { html_url: "https://github.com/owner/repo" },
     });
+    // Allow async processing
+    await new Promise((r) => setTimeout(r, 50));
 
-    expect(taskModel.getTaskForIssue(42)).toBeUndefined();
+    expect(await taskModel.getTaskForIssue(42)).toBeNull();
   });
 });

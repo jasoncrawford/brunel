@@ -91,5 +91,5 @@ test("task detail page: live events appear as webhooks arrive for that task", as
   // The event should appear in the events table on the task detail page
   // fmtEvent for issue_comment/created with body "LGTM":
   // "issue_comment/created — "LGTM""
-  await expect(page.getByText(/issue_comment/)).toBeVisible();
+  await expect(page.getByText(/issue_comment\/created/).first()).toBeVisible();
 });

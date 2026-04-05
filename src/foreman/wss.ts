@@ -15,11 +15,11 @@ import type { EventRouterDeps } from "./event-router.js";
 
 type R = Record<string, unknown>;
 
-function debounce(fn: () => void, delayMs: number): () => void {
+function debounce(fn: () => void | Promise<void>, delayMs: number): () => void {
   let timer: ReturnType<typeof setTimeout> | null = null;
   return () => {
     if (timer !== null) clearTimeout(timer);
-    timer = setTimeout(() => { timer = null; fn(); }, delayMs);
+    timer = setTimeout(() => { timer = null; void fn(); }, delayMs);
   };
 }
 
@@ -86,10 +86,10 @@ export function createForemanWss(
     flog(`[worker ${shortWorkerId(wid)}] ${line}`);
   }
 
-  function broadcastSnapshot() {
+  async function broadcastSnapshot() {
     if (!adminWss) return;
     adminWss.broadcastSnapshot({
-      tasks: taskModel.getTaskSnapshots(graph),
+      tasks: await taskModel.getTaskSnapshots(graph),
       workers: registry.getWorkerSnapshots(),
     });
   }
@@ -107,8 +107,8 @@ export function createForemanWss(
   }
 
   async function tryAssignWork(workerId: string): Promise<void> {
-    const task = taskModel.nextPending(
-      (t) => t.depsLoaded && !taskModel.isBlocked(t.issueNumber, graph),
+    const task = await taskModel.nextPending(
+      (t) => taskModel.isDepsLoaded(t.issueNumber) && !taskModel.isBlocked(t.issueNumber, graph),
     );
     if (task) {
       registry.assignTask(workerId, task.taskId);
@@ -222,40 +222,36 @@ export function createForemanWss(
         sendMsg(workerId, { type: "hello_ack", workerId, status: "cancelled" }, taskId);
       }
 
-      function reclaimWorker(taskId: string, issueRef: string | number) {
+      async function reclaimWorker(taskId: string, issueRef: string | number) {
         registry.register(workerId, ws, "busy", taskId);
-        taskModel.assignInMemory(taskId, workerId);
+        await taskModel.assign(taskId, workerId);
         sendMsg(workerId, { type: "hello_ack", workerId, status: "busy" }, taskId);
         flushQueuedEvents(taskId, issueRef);
       }
 
       if (msg.status === "busy" && msg.taskId) {
-        const existing = taskModel.get(msg.taskId);
+        const existing = await taskModel.get(msg.taskId);
 
         if (!existing) {
+          log(workerId, `hello busy task=#${msg.taskId} — unknown task, respecting busy status`);
+          // Create a placeholder so the worker can complete normally
           const issueNumber = parseInt(msg.taskId, 10);
           if (!isNaN(issueNumber)) {
-            log(workerId, `hello busy task=#${msg.taskId} — task not in queue, restoring from DB for event forwarding`);
-            await taskModel.restoreFromDb(msg.taskId, issueNumber);
-          } else {
-            log(workerId, `hello busy task=#${msg.taskId} — unknown task, respecting busy status`);
+            await taskModel.register(msg.taskId, issueNumber, "", "", "", []);
           }
-          reclaimWorker(msg.taskId, msg.taskId);
+          await reclaimWorker(msg.taskId, msg.taskId);
         } else if (existing.status === "complete") {
           log(workerId, `hello busy task=#${msg.taskId} — task complete (issue closed), cancelling`);
-          await taskModel.complete(msg.taskId).catch((err: unknown) =>
-            flog(`ERROR Failed to mark task #${msg.taskId} complete: ${fmtError(err)}`)
-          );
           cancelWorker(msg.taskId);
         } else if (existing.assignedWorkerId && existing.assignedWorkerId !== workerId) {
           log(workerId, `hello busy task=#${msg.taskId} — task taken by another worker`);
           cancelWorker(msg.taskId);
         } else {
           log(workerId, `hello busy task=#${msg.taskId} — reclaimed`);
-          reclaimWorker(msg.taskId, existing.issueNumber);
+          await reclaimWorker(msg.taskId, existing.issueNumber);
         }
       } else {
-        const priorTask = taskModel.getAssignedTaskForWorker(workerId);
+        const priorTask = await taskModel.getAssignedTaskForWorker(workerId);
         if (priorTask) {
           await taskModel.revert(priorTask.taskId).catch((err: unknown) =>
             flog(`ERROR Failed to revert task #${priorTask.taskId} to pending: ${fmtError(err)}`)
@@ -271,7 +267,7 @@ export function createForemanWss(
 
     async function handleTaskComplete(msg: Extract<WorkerMessage, { type: "task_complete" }>) {
       log(workerId, `task_complete #${msg.taskId}`);
-      const task = taskModel.get(msg.taskId);
+      const task = await taskModel.get(msg.taskId);
       if (task && task.assignedWorkerId !== workerId) {
         log(workerId, `task_complete #${msg.taskId} ignored — owned by ${task.assignedWorkerId ?? "nobody"}`);
         return;
