@@ -4,7 +4,8 @@ A GitHub-driven autonomous agent. Labels a GitHub issue `brunel:ready` → the f
 
 ## Architecture
 
-- **`src/foreman.ts`** — HTTP server + WebSocket server. Polls GitHub for `brunel:ready` issues, queues them, and assigns them to idle workers over WebSocket. Contains `TaskQueue` (in-memory task state), `TaskModel` (paired in-memory + DB operations, plus `labeledIssues`/`openIssues` ownership), and `WorkerRegistry`.
+- **`src/task-model.ts`** — Task domain model. Exports `TaskModel`, the single entry point for all task state: in-memory queue, persistent DB store, `labeledIssues`/`openIssues` tracking. `TaskQueue` and `TaskStore` are internal implementation details — the foreman interacts exclusively through `TaskModel` methods.
+- **`src/foreman.ts`** — HTTP server + WebSocket server (controller layer). Polls GitHub for `brunel:ready` issues, routes webhooks, and assigns tasks to idle workers over WebSocket. Contains `WorkerRegistry` and the `createForemanWss` factory. Re-exports `TaskModel` from `task-model.ts` for convenience.
 - **`src/repl.ts`** — Interactive REPL (default) or worker process (`--worker-mode`). Workers connect to the foreman, receive tasks, run Claude Agent SDK sessions, and report completion.
 - **`src/config.ts`** — Unified config loader. Merges CLI flags, `BRUNEL_*` env vars, `brunel.config.ts` file, legacy env vars, and built-in defaults via zod schema.
 - **`src/display.ts`** — Shared display/rendering engine used by both foreman and worker.
@@ -83,10 +84,10 @@ Workers buffer any `task_complete` messages sent during the `hello_sent` state a
 
 A task moves through states: **pending → assigned → complete**.
 
-- `TaskQueue` is in-memory state; `taskStore` (Supabase) is the persistent record. **The DB is the authoritative source of truth; in-memory state is a derived cache.**
+- `TaskModel` encapsulates both in-memory state (internal `TaskQueue`) and the persistent store (`TaskStore`/Supabase). **The DB is the authoritative source of truth; in-memory state is a derived cache.**
 - The `tasks` table stores `task_id`, `issue_number` (unique), `repo`, `title`, `body`, `labels`, `status`, `worker_id`, `assigned_at`, `completed_at`. There is no separate `task_assignments` table.
 - `upsertTask` conflicts on `task_id`. If an issue is re-labeled `brunel:ready` (e.g. after completing), it resets `status` back to `pending` and refreshes `title`, `body`, `labels` — it does **not** ignore duplicates.
-- When a worker sends `worker_goodbye`, the foreman calls `taskStore.markPending()` to reset the DB row, not just in-memory state.
+- When a worker sends `worker_goodbye`, the foreman calls `taskModel.revert()` which resets both memory and the DB row.
 - When a GitHub issue is closed while a worker is still active, the foreman marks the task `complete` in both memory and the DB immediately. The worker stays assigned and will call `task_complete` to release itself when done.
 - On foreman restart, `loadIssuesToQueue` fetches only **open** GitHub issues. Tasks whose issues were closed mid-task are `complete` in the DB and skipped by startup. When the worker reconnects (busy hello for a task not in the queue), `taskModel.restoreFromDb()` fetches the DB row and re-adds it to the in-memory queue with the original title/body/labels preserved.
 - `reconcile()` only removes **pending** tasks that are no longer in `labeledIssues`. Assigned and complete tasks are never removed by reconcile. Removal calls `taskModel.cancel()`, which deletes the DB row — but only if `assigned_at IS NULL`. `markPending()` (called on `worker_goodbye`) leaves `assigned_at` intact, so rows that ever had a worker are preserved even if the task reverts to pending before the label is removed.

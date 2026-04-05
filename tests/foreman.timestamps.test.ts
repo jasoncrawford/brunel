@@ -5,7 +5,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import http from "http";
 import { WebSocket, WebSocketServer } from "ws";
 import type { AddressInfo } from "net";
-import { TaskQueue, WorkerRegistry, createForemanWss } from "../src/foreman.js";
+import { WorkerRegistry, createForemanWss } from "../src/foreman.js";
+import { TaskModel } from "../src/task-model.js";
 import { loadDefaultConfig } from "../src/config.js";
 const defaultCfg = await loadDefaultConfig();
 import type { ForemanMessage } from "../src/types.js";
@@ -36,7 +37,7 @@ const ISO_TIMESTAMP_PREFIX = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z /;
 
 // ── Test harness ──────────────────────────────────────────────────────────────
 
-let queue: TaskQueue;
+let taskModel: TaskModel;
 let registry: WorkerRegistry;
 let httpServer: http.Server;
 let wss: WebSocketServer;
@@ -59,10 +60,10 @@ beforeEach(() => {
     logLines.push(args.join(" "));
   });
 
-  queue = new TaskQueue();
+  taskModel = new TaskModel();
   registry = new WorkerRegistry();
   httpServer = http.createServer();
-  ({ wss, routeEvent } = createForemanWss(queue, registry, httpServer, { taskLabel: defaultCfg.taskLabel, reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs, pingIntervalMs: defaultCfg.pingIntervalMs }));
+  ({ wss, routeEvent } = createForemanWss(taskModel, registry, httpServer, { taskLabel: defaultCfg.taskLabel, reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs, pingIntervalMs: defaultCfg.pingIntervalMs }));
 
   return new Promise<void>((resolve) => {
     httpServer.listen(0, () => {
@@ -110,7 +111,7 @@ describe("foreman log timestamps", () => {
   });
 
   it("task_assigned log line starts with ISO 8601 timestamp", async () => {
-    queue.addTask({
+    taskModel.loadTask({
       taskId: "1",
       issueNumber: 1,
       title: "Fix the thing",
@@ -130,7 +131,7 @@ describe("foreman log timestamps", () => {
   });
 
   it("event_notification log line starts with ISO 8601 timestamp", async () => {
-    queue.addTask({
+    taskModel.loadTask({
       taskId: "1",
       issueNumber: 1,
       title: "Fix the thing",

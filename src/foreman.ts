@@ -9,13 +9,15 @@ import { EventEmitter } from "events";
 import type { WorkerMessage, ForemanMessage, GitHubEvent, TaskIssue, LabeledIssueState, TaskStatus } from "./types.js";
 import { fmtTimestamp, fmtEvent, setVerbose } from "./display.js";
 import { loadConfig } from "./config.js";
-import { isBlocked, setBlockers, fetchBlockers } from "./dependencies.js";
+import { setBlockers, fetchBlockers } from "./dependencies.js";
 import { fetchIssueStates } from "./github.js";
 import type { DependencyGraph } from "./dependencies.js";
 import { type DbLogger, type TaskStore, createDbLogger, createTaskStore, createNullDbLogger, createNullTaskStore, buildMessageSummary } from "./db.js";
-import type { AdminWss, TaskSnapshot, WorkerSnapshot } from "./admin-ws.js";
+import type { AdminWss, WorkerSnapshot } from "./admin-ws.js";
 import { fmtError } from "./utils.js";
 import { shortWorkerId } from "../shared/utils.js";
+import { TaskModel } from "./task-model.js";
+import type { Task } from "./task-model.js";
 
 function flog(msg: string) {
   console.log(`${fmtTimestamp()} ${msg}`);
@@ -124,369 +126,8 @@ export class WorkerRegistry extends EventEmitter {
   }
 }
 
-// ── TaskQueue ─────────────────────────────────────────────────────────────────
-
-interface Task {
-  taskId: string;
-  issueNumber: number;
-  title: string;
-  body: string;
-  labels: string[];
-  repoUrl: string;
-  status: TaskStatus;
-  assignedWorkerId?: string;
-  prNumber?: number;
-  eventQueue: GitHubEvent[];
-  /** True once fetchBlockers has resolved and the dependency graph is populated. */
-  depsLoaded: boolean;
-}
-
-export class TaskQueue extends EventEmitter {
-  private tasks = new Map<string, Task>();
-  private prToTaskId = new Map<number, string>();
-  private branchToTaskId = new Map<string, string>();
-
-  addTask(t: Omit<Task, "status" | "assignedWorkerId" | "eventQueue" | "depsLoaded"> & Partial<Pick<Task, "status" | "eventQueue" | "depsLoaded">>) {
-    this.tasks.set(t.taskId, {
-      ...t,
-      status: t.status ?? "pending",
-      eventQueue: t.eventQueue ?? [],
-      depsLoaded: t.depsLoaded ?? true,
-    });
-    this.emit("changed");
-  }
-
-  get(taskId: string): Task | undefined {
-    return this.tasks.get(taskId);
-  }
-
-  getTaskForIssue(issueNumber: number): Task | undefined {
-    for (const t of this.tasks.values()) {
-      if (t.issueNumber === issueNumber) return t;
-    }
-    return undefined;
-  }
-
-  nextPending(isReady?: (t: Task) => boolean): Task | null {
-    for (const t of this.tasks.values()) {
-      if (t.status === "pending" && (isReady === undefined || isReady(t))) return t;
-    }
-    return null;
-  }
-
-  assignTask(taskId: string, workerId: string) {
-    const t = this.tasks.get(taskId);
-    if (!t) return;
-    t.status = "assigned";
-    t.assignedWorkerId = workerId;
-    this.emit("changed");
-  }
-
-  completeTask(taskId: string) {
-    const t = this.tasks.get(taskId);
-    if (t) {
-      t.status = "complete";
-      this.emit("changed");
-    }
-  }
-
-  revertTask(taskId: string) {
-    const t = this.tasks.get(taskId);
-    if (!t || t.status !== "assigned") return;
-    t.status = "pending";
-    t.assignedWorkerId = undefined;
-    this.emit("changed");
-  }
-
-  setBlocked(taskId: string) {
-    const t = this.tasks.get(taskId);
-    if (!t || t.status !== "pending") return;
-    t.status = "blocked";
-    this.emit("changed");
-  }
-
-  setUnblocked(taskId: string) {
-    const t = this.tasks.get(taskId);
-    if (!t || t.status !== "blocked") return;
-    t.status = "pending";
-    this.emit("changed");
-  }
-
-  queueEvent(taskId: string, event: GitHubEvent) {
-    const t = this.tasks.get(taskId);
-    if (t) t.eventQueue.push(event);
-  }
-
-  drainEvents(taskId: string): GitHubEvent[] {
-    const t = this.tasks.get(taskId);
-    if (!t) return [];
-    const events = t.eventQueue.slice();
-    t.eventQueue = [];
-    return events;
-  }
-
-  registerPr(prNumber: number, taskId: string) {
-    this.prToTaskId.set(prNumber, taskId);
-    const t = this.tasks.get(taskId);
-    if (t) t.prNumber = prNumber;
-    this.emit("changed");
-  }
-
-  unregisterPr(prNumber: number) {
-    const taskId = this.prToTaskId.get(prNumber);
-    this.prToTaskId.delete(prNumber);
-    if (taskId) {
-      const t = this.tasks.get(taskId);
-      if (t) t.prNumber = undefined;
-    }
-    this.emit("changed");
-  }
-
-  getTaskForPr(prNumber: number): Task | undefined {
-    const taskId = this.prToTaskId.get(prNumber);
-    return taskId ? this.tasks.get(taskId) : undefined;
-  }
-
-  registerBranch(branch: string, taskId: string) {
-    this.branchToTaskId.set(branch, taskId);
-  }
-
-  getTaskForBranch(branch: string): Task | undefined {
-    const taskId = this.branchToTaskId.get(branch);
-    return taskId ? this.tasks.get(taskId) : undefined;
-  }
-
-  removeTask(taskId: string) {
-    const t = this.tasks.get(taskId);
-    if (!t || (t.status !== "pending" && t.status !== "blocked")) return;
-    this.tasks.delete(taskId);
-    this.emit("changed");
-  }
-
-  getPendingTasks(): Task[] {
-    return [...this.tasks.values()].filter((t) => t.status === "pending");
-  }
-
-  getPendingAndBlockedTasks(): Task[] {
-    return [...this.tasks.values()].filter((t) => t.status === "pending" || t.status === "blocked");
-  }
-
-  markDepsLoaded(issueNumbers: number[]) {
-    for (const n of issueNumbers) {
-      const t = this.tasks.get(String(n));
-      if (t) t.depsLoaded = true;
-    }
-    this.emit("changed");
-  }
-
-  getAssignedTaskForWorker(workerId: string): Task | undefined {
-    for (const t of this.tasks.values()) {
-      if (t.status === "assigned" && t.assignedWorkerId === workerId) return t;
-    }
-    return undefined;
-  }
-
-  getTaskSnapshots(graph?: DependencyGraph, openIssues?: Set<number>): TaskSnapshot[] {
-    return [...this.tasks.values()].map((t) => {
-      const snapshot: TaskSnapshot = {
-        taskId: t.taskId,
-        issueNumber: t.issueNumber,
-        title: t.title,
-        status: t.status,
-        assignedWorkerId: t.assignedWorkerId,
-        prNumber: t.prNumber,
-        prUrl: t.prNumber !== undefined ? `${t.repoUrl}/pull/${t.prNumber}` : undefined,
-      };
-      if (graph !== undefined && openIssues !== undefined) {
-        const blockerSet = graph.get(t.issueNumber) ?? new Set<number>();
-        snapshot.blockers = Array.from(blockerSet).map((n) => ({
-          issueNumber: n,
-          isOpen: openIssues.has(n),
-        }));
-      }
-      return snapshot;
-    });
-  }
-}
-
-
-// ── TaskModel ─────────────────────────────────────────────────────────────────
-// Encapsulates paired in-memory (TaskQueue) + persistent (TaskStore) updates so
-// every state transition touches both stores atomically.
-//
-// Also owns labeledIssues and openIssues — the cached mirrors of GitHub issue
-// state — and exposes atomic issue-lifecycle methods so callers never have to
-// keep these two maps in sync manually.
-
-export class TaskModel {
-  private _labeledIssues: Map<number, LabeledIssueState>;
-  private _openIssues: Set<number>;
-
-  constructor(
-    readonly queue: TaskQueue,
-    private store: TaskStore,
-    labeledIssues = new Map<number, LabeledIssueState>(),
-    openIssues = new Set<number>(),
-  ) {
-    this._labeledIssues = labeledIssues;
-    this._openIssues = openIssues;
-  }
-
-  /** Whether the issue is currently tracked (has the brunel:ready label). */
-  isTracked(issueNumber: number): boolean { return this._labeledIssues.has(issueNumber); }
-
-  /** Read-only view of tracked labeled issues — used by reconcile() for iteration. */
-  getLabeledIssues(): ReadonlyMap<number, LabeledIssueState> { return this._labeledIssues; }
-
-  /** Whether the issue is blocked by an open dependency. */
-  isBlocked(issueNumber: number, graph: DependencyGraph): boolean {
-    return isBlocked(issueNumber, graph, this._openIssues);
-  }
-
-  /** Task snapshots with open-issue state baked in — for admin broadcasts. */
-  getTaskSnapshots(graph: DependencyGraph): TaskSnapshot[] {
-    return this.queue.getTaskSnapshots(graph, this._openIssues);
-  }
-
-  // ── Issue-lifecycle methods ────────────────────────────────────────────────
-
-  /** Called when issues/labeled fires: begin tracking the issue. */
-  trackIssue(issueNumber: number, issue: TaskIssue, depsLoaded = false): void {
-    this._labeledIssues.set(issueNumber, { issue, depsLoaded });
-    this._openIssues.add(issueNumber);
-  }
-
-  /** Called when the brunel:ready label is removed: stop tracking the issue. */
-  untrackIssue(issueNumber: number): void {
-    this._labeledIssues.delete(issueNumber);
-    this._openIssues.delete(issueNumber);
-  }
-
-  /** Called when issues/closed fires: stop tracking and mark any active task complete.
-   *  Handles pending and blocked tasks too — not just assigned ones — so that DB rows
-   *  are always finalised regardless of whether a worker was active. (Bug #489) */
-  async closeIssue(issueNumber: number): Promise<void> {
-    this._labeledIssues.delete(issueNumber);
-    this._openIssues.delete(issueNumber);
-    const task = this.queue.getTaskForIssue(issueNumber);
-    if (task && task.status !== "complete") {
-      await this.complete(task.taskId);
-    }
-  }
-
-  /** Called when issues/reopened fires: mark the issue open again. */
-  reopenIssue(issueNumber: number): void {
-    this._openIssues.add(issueNumber);
-  }
-
-  /** Called when issues/edited fires with a body change: reset deps and update body. */
-  resetIssueDeps(issueNumber: number, newBody: string): void {
-    const entry = this._labeledIssues.get(issueNumber);
-    if (entry) {
-      entry.depsLoaded = false;
-      entry.issue = { ...entry.issue, body: newBody };
-    }
-  }
-
-  /** Called after fetchBlockers resolves: mark deps as fully loaded. */
-  markIssueDepsLoaded(issueNumber: number): void {
-    const entry = this._labeledIssues.get(issueNumber);
-    if (entry) entry.depsLoaded = true;
-  }
-
-  /** Update the open/closed state of any referenced issue (used by fetchBlockers). */
-  setIssueOpenState(issueNumber: number, isOpen: boolean): void {
-    if (isOpen) this._openIssues.add(issueNumber);
-    else this._openIssues.delete(issueNumber);
-  }
-
-  // ── Task-lifecycle methods ─────────────────────────────────────────────────
-
-  async complete(taskId: string): Promise<void> {
-    this.queue.completeTask(taskId);
-    await this.store.markComplete(taskId);
-  }
-
-  async revert(taskId: string): Promise<void> {
-    this.queue.revertTask(taskId);
-    await this.store.markPending(taskId);
-  }
-
-  async block(taskId: string): Promise<void> {
-    this.queue.setBlocked(taskId);
-    await this.store.markBlocked(taskId);
-  }
-
-  async unblock(taskId: string): Promise<void> {
-    this.queue.setUnblocked(taskId);
-    await this.store.markPending(taskId);
-  }
-
-  async refreshContent(taskId: string, title: string, body: string, labels: string[]): Promise<void> {
-    await this.store.updateTaskContent(taskId, title, body, labels);
-  }
-
-  async register(
-    taskId: string,
-    issueNumber: number,
-    repoSlug: string,
-    title: string,
-    body: string,
-    labels: string[],
-    repoUrl: string,
-    depsLoaded?: boolean,
-  ): Promise<void> {
-    this.queue.addTask({ taskId, issueNumber, title, body, labels, repoUrl, depsLoaded });
-    await this.store.upsertTask(taskId, issueNumber, repoSlug, title, body, labels);
-  }
-
-  async cancel(taskId: string): Promise<void> {
-    this.queue.removeTask(taskId);
-    await this.store.deleteTask(taskId);
-  }
-
-  async registerPr(taskId: string, prNumber: number, branch: string | null): Promise<void> {
-    this.queue.registerPr(prNumber, taskId);
-    await this.store.updateTaskPr(taskId, prNumber, branch);
-  }
-
-  async unregisterPr(prNumber: number): Promise<void> {
-    const task = this.queue.getTaskForPr(prNumber);
-    this.queue.unregisterPr(prNumber);
-    if (task) {
-      await this.store.updateTaskPr(task.taskId, null, null);
-    }
-  }
-
-  /** Restore a task into the in-memory queue from the DB record.
-   *  Used when a worker reconnects claiming a task that's not in memory (e.g. issue
-   *  was closed mid-task, marking the DB row complete, which startup skips).
-   *  Falls back to empty placeholder if the DB row is missing. */
-  async restoreFromDb(taskId: string, issueNumber: number): Promise<void> {
-    const row = await this.store.getTask(taskId);
-    this.queue.addTask({
-      taskId,
-      issueNumber: row?.issueNumber ?? issueNumber,
-      title: row?.title ?? "",
-      body: row?.body ?? "",
-      labels: row?.labels ?? [],
-      repoUrl: row ? `https://github.com/${row.repo}` : "",
-    });
-  }
-
-  /** Assigns a task to a worker. Awaits the DB write; reverts memory and returns
-   *  false if the write fails so the caller can release the worker. */
-  async assign(taskId: string, workerId: string): Promise<boolean> {
-    this.queue.assignTask(taskId, workerId);
-    try {
-      await this.store.markAssigned(taskId, workerId);
-      return true;
-    } catch {
-      this.queue.revertTask(taskId);
-      return false;
-    }
-  }
-}
+// TaskModel and Task are re-exported from src/task-model.ts for backwards compatibility.
+export { TaskModel, type Task } from "./task-model.js";
 
 
 function debounce(fn: () => void, delayMs: number): () => void {
@@ -694,7 +335,6 @@ export function createHttpServer(
 
 export interface ForemanWss {
   wss: WebSocketServer;
-  taskModel: TaskModel;
   routeEvent(id: string, name: string, payload: unknown): Promise<void>;
   reconcile(): Promise<void>;
   /** Close all connected worker clients with code 1001 and wait for their close events to fire. */
@@ -702,22 +342,19 @@ export interface ForemanWss {
 }
 
 export function createForemanWss(
-  taskQueue: TaskQueue,
+  taskModel: TaskModel,
   registry: WorkerRegistry,
   server: http.Server,
   options: {
     taskLabel: string;
     graph?: DependencyGraph;
-    openIssues?: Set<number>;
     repo?: string;
     token?: string;
     githubApiUrl?: string;
     dbLogger?: DbLogger;
     adminWss?: AdminWss;
     workerSecret?: string;
-    labeledIssues?: Map<number, LabeledIssueState>;
     pingIntervalMs: number;
-    taskStore?: TaskStore;
     reclaimTimeoutMs: number;
   },
 ): ForemanWss {
@@ -730,14 +367,7 @@ export function createForemanWss(
   const dbLogger = options.dbLogger;
   const adminWss = options.adminWss;
   const workerSecret = options.workerSecret;
-  const taskStore: TaskStore = options.taskStore ?? createNullTaskStore();
   const reclaimTimeoutMs = options.reclaimTimeoutMs;
-  const taskModel = new TaskModel(
-    taskQueue,
-    taskStore,
-    options.labeledIssues,
-    options.openIssues,
-  );
 
   // Incrementing counter for unique broadcast IDs (React uses these as keys).
   let nextBroadcastId = 1;
@@ -776,7 +406,7 @@ export function createForemanWss(
   }
 
   const debouncedBroadcast = debounce(broadcastSnapshot, 10);
-  taskQueue.on("changed", debouncedBroadcast);
+  taskModel.on("changed", debouncedBroadcast);
   registry.on("changed", debouncedBroadcast);
 
   function extractLinkedIssueNumber(body: string): number | null {
@@ -788,7 +418,7 @@ export function createForemanWss(
     if (task.status === "assigned" && task.assignedWorkerId) {
       const worker = registry.get(task.assignedWorkerId);
       if (worker?.status === "disconnected") {
-        taskQueue.queueEvent(task.taskId, evt);
+        taskModel.queueEvent(task.taskId, evt);
         flog(`[task ${ref}] ${evt.name} queued (worker ${shortWorkerId(task.assignedWorkerId)} disconnected)`);
       } else if (worker) {
         const evtMsg: ForemanMessage = { type: "event_notification", taskId: task.taskId, event: evt };
@@ -798,7 +428,7 @@ export function createForemanWss(
         flog(`[task ${ref}] ${evt.name} DROPPED — worker ${shortWorkerId(task.assignedWorkerId)} not in registry (disconnected?)`);
       }
     } else if (task.status === "pending") {
-      taskQueue.queueEvent(task.taskId, evt);
+      taskModel.queueEvent(task.taskId, evt);
       flog(`[task ${ref}] ${evt.name} queued (no worker assigned)`);
     }
   }
@@ -821,17 +451,17 @@ export function createForemanWss(
       if (prNumber === null) return result(null);
 
       // Drop synchronize events — the worker pushed these commits itself.
-      if (p.action === "synchronize") return result(taskQueue.getTaskForPr(prNumber));
+      if (p.action === "synchronize") return result(taskModel.getTaskForPr(prNumber));
 
       // When a PR is opened, register it against a task if the body links an issue.
       // The worker opened the PR itself, so don't forward this event back to it.
       if (p.action === "opened" && pr) {
         const linkedIssue = extractLinkedIssueNumber(String(pr.body ?? ""));
         if (linkedIssue !== null) {
-          const linkedTask = taskQueue.getTaskForIssue(linkedIssue);
+          const linkedTask = taskModel.getTaskForIssue(linkedIssue);
           if (linkedTask) {
             const branch = strProp(pr.head, "ref");
-            if (branch) taskQueue.registerBranch(branch, linkedTask.taskId);
+            if (branch) taskModel.registerBranch(branch, linkedTask.taskId);
             await taskModel.registerPr(linkedTask.taskId, prNumber, branch ?? null).catch((err: unknown) =>
               flog(`ERROR Failed to register PR for task #${linkedTask.taskId}: ${fmtError(err)}`)
             );
@@ -845,7 +475,7 @@ export function createForemanWss(
       // When a PR is closed without merging, clear it from the task so the issue
       // goes back to having no PR associated.
       if (p.action === "closed" && pr && !pr.merged) {
-        const task = taskQueue.getTaskForPr(prNumber);
+        const task = taskModel.getTaskForPr(prNumber);
         if (task) {
           flog(`[task #${task.issueNumber}] PR #${prNumber} unregistered (closed without merging)`);
           await taskModel.unregisterPr(prNumber).catch((err: unknown) =>
@@ -857,7 +487,7 @@ export function createForemanWss(
         return result(null);
       }
 
-      const task = taskQueue.getTaskForPr(prNumber);
+      const task = taskModel.getTaskForPr(prNumber);
       if (task) forwardEvent(task, evt, `PR #${prNumber}`);
       return result(task);
     }
@@ -866,7 +496,7 @@ export function createForemanWss(
       const pr = p.pull_request as Record<string, unknown> | undefined;
       const prNumber = numProp(pr, "number");
       if (prNumber === null) return result(null);
-      const task = taskQueue.getTaskForPr(prNumber);
+      const task = taskModel.getTaskForPr(prNumber);
       if (task) forwardEvent(task, evt, `PR #${prNumber}`);
       return result(task);
     }
@@ -877,7 +507,7 @@ export function createForemanWss(
 
       // Try PR-number lookup first (sometimes populated), fall back to head_branch
       if (prs && prs.length > 0) {
-        const task = taskQueue.getTaskForPr(prs[0].number);
+        const task = taskModel.getTaskForPr(prs[0].number);
         if (task) { forwardEvent(task, evt, `PR #${prs[0].number}`); return result(task); }
       }
 
@@ -887,7 +517,7 @@ export function createForemanWss(
         ? strProp(inner?.check_suite, "head_branch") ?? ""
         : strProp(inner, "head_branch") ?? "";
       if (headBranch) {
-        const task = taskQueue.getTaskForBranch(headBranch);
+        const task = taskModel.getTaskForBranch(headBranch);
         if (task) { forwardEvent(task, evt, `branch ${headBranch}`); return result(task); }
       }
       return result(null);
@@ -899,11 +529,11 @@ export function createForemanWss(
     const issueNumber = numProp(issue, "number");
     if (issueNumber === null) return result(null);
 
-    let task = taskQueue.getTaskForIssue(issueNumber);
+    let task = taskModel.getTaskForIssue(issueNumber);
 
     // GitHub issue_comment events on PRs have the PR number in issue.number.
     // Fall back to PR lookup so comments on worker-opened PRs are forwarded.
-    if (!task) task = taskQueue.getTaskForPr(issueNumber);
+    if (!task) task = taskModel.getTaskForPr(issueNumber);
 
     // If the issue isn't queued yet, check if this webhook should enqueue it.
     if (!task && name === "issues" && issue) {
@@ -970,7 +600,7 @@ export function createForemanWss(
         const unblockPromises: Promise<void>[] = [];
         for (const [depIssueNum, blockers] of graph) {
           if (blockers.has(issueNumber)) {
-            const blockedTask = taskQueue.getTaskForIssue(depIssueNum);
+            const blockedTask = taskModel.getTaskForIssue(depIssueNum);
             if (blockedTask && blockedTask.status === "blocked") {
               if (!taskModel.isBlocked(depIssueNum, graph)) {
                 unblockPromises.push(
@@ -1055,7 +685,7 @@ export function createForemanWss(
   }
 
   async function tryAssignWork(workerId: string): Promise<void> {
-    const task = taskQueue.nextPending(
+    const task = taskModel.nextPending(
       (t) => t.depsLoaded && !taskModel.isBlocked(t.issueNumber, graph),
     );
     if (task) {
@@ -1070,7 +700,7 @@ export function createForemanWss(
         return;
       }
 
-      const queued = taskQueue.drainEvents(task.taskId);
+      const queued = taskModel.drainEvents(task.taskId);
       const assignMsg: ForemanMessage = {
         type: "task_assigned",
         taskId: task.taskId,
@@ -1118,7 +748,7 @@ export function createForemanWss(
       registry.cancelReclaimTimer(workerId);
 
       function flushQueuedEvents(taskId: string, issueRef: string | number) {
-        for (const evt of taskQueue.drainEvents(taskId)) {
+        for (const evt of taskModel.drainEvents(taskId)) {
           sendMsg(workerId, { type: "event_notification", taskId, event: evt });
           log(workerId, `→ event_notification #${issueRef} ${evt.name} (queued)`);
         }
@@ -1131,13 +761,13 @@ export function createForemanWss(
 
       function reclaimWorker(taskId: string, issueRef: string | number) {
         registry.register(workerId, ws, "busy", taskId);
-        taskQueue.assignTask(taskId, workerId);
+        taskModel.assignInMemory(taskId, workerId);
         sendMsg(workerId, { type: "hello_ack", workerId, status: "busy" }, taskId);
         flushQueuedEvents(taskId, issueRef);
       }
 
       if (msg.status === "busy" && msg.taskId) {
-        const existing = taskQueue.get(msg.taskId);
+        const existing = taskModel.get(msg.taskId);
 
         if (!existing) {
           // Task not in queue — issue may have been closed (marking the task complete in DB,
@@ -1172,7 +802,7 @@ export function createForemanWss(
       } else {
         // If the queue has a task assigned to this worker (from a prior foreman
         // session loaded from DB, or a disconnect during this session), revert it.
-        const priorTask = taskQueue.getAssignedTaskForWorker(workerId);
+        const priorTask = taskModel.getAssignedTaskForWorker(workerId);
         if (priorTask) {
           await taskModel.revert(priorTask.taskId).catch((err: unknown) =>
             flog(`ERROR Failed to revert task #${priorTask.taskId} to pending: ${fmtError(err)}`)
@@ -1188,7 +818,7 @@ export function createForemanWss(
 
     async function handleTaskComplete(msg: Extract<WorkerMessage, { type: "task_complete" }>) {
       log(workerId, `task_complete #${msg.taskId}`);
-      const task = taskQueue.get(msg.taskId);
+      const task = taskModel.get(msg.taskId);
       // Belt-and-suspenders ownership check: ignore if this worker doesn't own the task.
       if (task && task.assignedWorkerId !== workerId) {
         log(workerId, `task_complete #${msg.taskId} ignored — owned by ${task.assignedWorkerId ?? "nobody"}`);
@@ -1302,7 +932,7 @@ export function createForemanWss(
         }
         taskModel.markIssueDepsLoaded(issueNumber);
         // If the task is currently pending and is now blocked, persist blocked status.
-        const task = taskQueue.getTaskForIssue(issueNumber);
+        const task = taskModel.getTaskForIssue(issueNumber);
         if (task && task.status === "pending" && taskModel.isBlocked(issueNumber, graph)) {
           await taskModel.block(task.taskId);
         }
@@ -1319,7 +949,7 @@ export function createForemanWss(
     // DB before assignIdleWorkers can markAssigned on the same row.
     const registerPromises: Promise<void>[] = [];
     for (const [num, { issue, depsLoaded }] of labeledIssues) {
-      if (!taskQueue.getTaskForIssue(num)) {
+      if (!taskModel.getTaskForIssue(num)) {
         // Persist task record; on re-label of a completed issue, resets to pending.
         flog(`[task #${num}] reconcile: creating task (title: ${JSON.stringify(issue.title)})`);
         registerPromises.push(
@@ -1334,14 +964,10 @@ export function createForemanWss(
     // data once loadIssuesToQueue has run.
     const refreshPromises: Promise<void>[] = [];
     for (const [num, { issue, depsLoaded }] of labeledIssues) {
-      const t = taskQueue.getTaskForIssue(num);
+      const t = taskModel.getTaskForIssue(num);
       if (t) {
-        t.depsLoaded = depsLoaded;
-        t.title = issue.title;
-        t.body = issue.body;
-        t.labels = issue.labels;
         refreshPromises.push(
-          taskModel.refreshContent(t.taskId, issue.title, issue.body, issue.labels)
+          taskModel.refreshContent(t.taskId, issue.title, issue.body, issue.labels, depsLoaded)
             .catch((err: unknown) => flog(`ERROR Failed to refresh content for task #${t.taskId}: ${fmtError(err)}`))
         );
       }
@@ -1349,7 +975,7 @@ export function createForemanWss(
 
     // Step 3: remove pending/blocked tasks whose issue no longer has the label
     const cancelPromises: Promise<void>[] = [];
-    for (const t of taskQueue.getPendingAndBlockedTasks()) {
+    for (const t of taskModel.getPendingAndBlockedTasks()) {
       if (!labeledIssues.has(t.issueNumber)) {
         cancelPromises.push(
           taskModel.cancel(t.taskId)
@@ -1377,7 +1003,7 @@ export function createForemanWss(
     });
   }
 
-  return { wss, taskModel, routeEvent, reconcile, shutdown };
+  return { wss, routeEvent, reconcile, shutdown };
 }
 
 // Only start listening when run directly (not when imported by tests)
@@ -1389,7 +1015,6 @@ if (isMain) {
   setVerbose(config.verbose);
 
   const registry = new WorkerRegistry();
-  const taskQueue = new TaskQueue();
   const graph: DependencyGraph = new Map();
   const openIssues = new Set<number>();
   const labeledIssues = new Map<number, LabeledIssueState>();
@@ -1411,22 +1036,22 @@ if (isMain) {
     taskStore = createNullTaskStore();
   }
 
+  const taskModel = new TaskModel(taskStore, labeledIssues, openIssues);
+
   let foremanWss: ForemanWss;
   const server = createHttpServer(webhooks, (id, name, payload) => foremanWss.routeEvent(id, name, payload), dbLogger, taskStore);
 
   // Admin WebSocket broadcaster
   const { createAdminWss } = await import("./admin-ws.js");
   const adminWss = createAdminWss(server, () => ({
-    tasks: foremanWss.taskModel.getTaskSnapshots(graph),
+    tasks: taskModel.getTaskSnapshots(graph),
     workers: registry.getWorkerSnapshots(),
   }));
 
   foremanWss = createForemanWss(
-    taskQueue, registry, server,
+    taskModel, registry, server,
     {
       graph,
-      openIssues,
-      labeledIssues,
       taskLabel: config.taskLabel,
       repo: config.githubRepo,
       token: config.githubToken,
@@ -1434,7 +1059,6 @@ if (isMain) {
       dbLogger,
       adminWss,
       workerSecret: config.workerSecret,
-      taskStore,
       reclaimTimeoutMs: config.workerReclaimTimeoutMs,
       pingIntervalMs: config.pingIntervalMs,
     },
@@ -1456,7 +1080,7 @@ if (isMain) {
     const activeTasks = await taskStore.listTasks();
     for (const row of activeTasks) {
       if (row.status === "complete") continue;
-      taskQueue.addTask({
+      taskModel.loadTask({
         taskId: row.taskId,
         issueNumber: row.issueNumber,
         title: row.title,
@@ -1464,11 +1088,11 @@ if (isMain) {
         labels: row.labels,
         repoUrl: `https://github.com/${row.repo}`,
         status: row.status as TaskStatus,
+        workerId: row.workerId,
+        prNumber: row.prNumber,
+        branch: row.branch,
         depsLoaded: true,
       });
-      if (row.workerId) taskQueue.assignTask(row.taskId, row.workerId);
-      if (row.prNumber !== null) taskQueue.registerPr(row.prNumber, row.taskId);
-      if (row.branch) taskQueue.registerBranch(row.branch, row.taskId);
       flog(`[startup] restored task #${row.taskId} (${row.status})`);
     }
   } catch (err) {
@@ -1492,17 +1116,17 @@ if (isMain) {
     // that were loaded from DB. If a blocker closed while the foreman was down,
     // the DB still shows 'blocked' but the graph no longer reflects it.
     const startupPromises: Promise<void>[] = [];
-    for (const t of taskQueue.getPendingAndBlockedTasks()) {
-      const shouldBeBlocked = foremanWss.taskModel.isBlocked(t.issueNumber, graph);
+    for (const t of taskModel.getPendingAndBlockedTasks()) {
+      const shouldBeBlocked = taskModel.isBlocked(t.issueNumber, graph);
       if (t.status === "blocked" && !shouldBeBlocked) {
         startupPromises.push(
-          foremanWss.taskModel.unblock(t.taskId).catch((err) =>
+          taskModel.unblock(t.taskId).catch((err) =>
             flog(`ERROR Failed to mark task #${t.taskId} pending on startup: ${fmtError(err)}`)
           )
         );
       } else if (t.status === "pending" && shouldBeBlocked) {
         startupPromises.push(
-          foremanWss.taskModel.block(t.taskId).catch((err) =>
+          taskModel.block(t.taskId).catch((err) =>
             flog(`ERROR Failed to mark task #${t.taskId} blocked on startup: ${fmtError(err)}`)
           )
         );

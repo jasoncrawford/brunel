@@ -37,11 +37,11 @@ import http from "http";
 import type { AddressInfo } from "net";
 import { WebSocket } from "ws";
 import {
-  TaskQueue,
   WorkerRegistry,
   createForemanWss,
   createHttpServer,
 } from "../../src/foreman.js";
+import { TaskModel } from "../../src/task-model.js";
 import { createAdminWss } from "../../src/admin-ws.js";
 import { loadDefaultConfig } from "../../src/config.js";
 import type { DependencyGraph } from "../../src/dependencies.js";
@@ -53,11 +53,11 @@ const cfg = await loadDefaultConfig();
 
 // ── Foreman state ─────────────────────────────────────────────────────────────
 
-const queue = new TaskQueue();
 const registry = new WorkerRegistry();
 const graph: DependencyGraph = new Map();
 const openIssues = new Set<number>();
 const labeledIssues = new Map<number, LabeledIssueState>();
+const taskModel = new TaskModel(undefined, labeledIssues, openIssues);
 
 // Mock workers managed by /test/connect-worker and /test/workers/:id
 const mockWorkers = new Map<string, WebSocket>();
@@ -144,19 +144,17 @@ async function handleTestRoute(
 // ── Admin WebSocket ───────────────────────────────────────────────────────────
 
 const adminWss = createAdminWss(server, () => ({
-  tasks: queue.getTaskSnapshots(graph, openIssues),
+  tasks: taskModel.getTaskSnapshots(graph),
   workers: registry.getWorkerSnapshots(),
 }));
 
 // ── Foreman WebSocket ─────────────────────────────────────────────────────────
 
-foremanWss = createForemanWss(queue, registry, server, {
+foremanWss = createForemanWss(taskModel, registry, server, {
   taskLabel: cfg.taskLabel,
   reclaimTimeoutMs: cfg.workerReclaimTimeoutMs,
   pingIntervalMs: cfg.pingIntervalMs,
   graph,
-  openIssues,
-  labeledIssues,
   adminWss,
 });
 

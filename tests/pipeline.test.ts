@@ -19,7 +19,8 @@ import http from "http";
 import { WebSocket, WebSocketServer } from "ws";
 import type { AddressInfo } from "net";
 import type { ForemanMessage } from "../src/types.js";
-import { TaskQueue, WorkerRegistry, createForemanWss } from "../src/foreman.js";
+import { WorkerRegistry, createForemanWss } from "../src/foreman.js";
+import { TaskModel } from "../src/task-model.js";
 import type { DbLogger } from "../src/db.js";
 import {
   createDbLogger,
@@ -211,7 +212,7 @@ function buildForeman(opts: {
   reclaimTimeoutMs?: number;
   dbLogger?: DbLogger;
 } = {}): {
-  queue: TaskQueue;
+  taskModel: TaskModel;
   registry: WorkerRegistry;
   httpServer: http.Server;
   wss: WebSocketServer;
@@ -221,17 +222,16 @@ function buildForeman(opts: {
   connect: () => Promise<WebSocket>;
   teardown: () => Promise<void>;
 } {
-  const queue = new TaskQueue();
+  const taskModel = new TaskModel(taskStore);
   const registry = new WorkerRegistry();
   const httpServer = http.createServer();
   const openClients: WebSocket[] = [];
 
-  const { wss, routeEvent } = createForemanWss(queue, registry, httpServer, {
+  const { wss, routeEvent } = createForemanWss(taskModel, registry, httpServer, {
     taskLabel: defaultCfg.taskLabel,
     reclaimTimeoutMs: opts.reclaimTimeoutMs ?? defaultCfg.workerReclaimTimeoutMs,
     pingIntervalMs: defaultCfg.pingIntervalMs,
     dbLogger: opts.dbLogger ?? nullDbLogger,
-    taskStore,
     repo: "owner/repo",
     token: "token",
   });
@@ -273,7 +273,7 @@ function buildForeman(opts: {
   }
 
   // Expose everything; caller must await `ready` before using `port`.
-  const result = { queue, registry, httpServer, wss, routeEvent, port, openClients, connect, teardown };
+  const result = { taskModel, registry, httpServer, wss, routeEvent, port, openClients, connect, teardown };
   // Patch port lazily via a getter so callers don't have to await ready separately
   Object.defineProperty(result, "port", { get: () => port });
   void ready; // ensure listen is called (it is already)
@@ -306,7 +306,7 @@ describe("pipeline: happy path and queued-then-assigned", () => {
   });
 
   it("webhook → task pending in DB → worker → task_assigned → task_complete → complete in DB", async () => {
-    const { queue, routeEvent, connect } = foreman;
+    const { taskModel, routeEvent, connect } = foreman;
 
     // 1. Webhook fires; foreman enqueues the task
     await routeEvent("evt-1", "issues", labeledPayload(42));
@@ -344,7 +344,7 @@ describe("pipeline: happy path and queued-then-assigned", () => {
     });
 
     // 7. In-memory queue reflects complete status
-    expect(queue.get("42")?.status).toBe("complete");
+    expect(taskModel.get("42")?.status).toBe("complete");
   });
 
   it("webhook with no worker → task pending in DB → worker connects → task assigned", async () => {
@@ -475,7 +475,7 @@ describe("pipeline: worker disconnect/expire (reclaim timer fires)", () => {
   });
 
   it("worker disconnects → reclaim timer fires → task reverted to pending in DB → new worker gets it", async () => {
-    const { queue, routeEvent, connect, openClients } = foreman;
+    const { taskModel, routeEvent, connect, openClients } = foreman;
 
     // 1. Assign task to first worker
     await routeEvent("evt-1", "issues", labeledPayload(80));
@@ -506,7 +506,7 @@ describe("pipeline: worker disconnect/expire (reclaim timer fires)", () => {
     });
 
     // 4. In-memory queue also shows pending
-    expect(queue.get("80")?.status).toBe("pending");
+    expect(taskModel.get("80")?.status).toBe("pending");
 
     // 5. New worker connects and receives the task
     const ws2 = await connect();

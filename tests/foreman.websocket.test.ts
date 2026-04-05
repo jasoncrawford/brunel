@@ -3,7 +3,8 @@ import assert from "node:assert";
 import http from "http";
 import { WebSocket, WebSocketServer } from "ws";
 import type { AddressInfo } from "net";
-import { TaskQueue, WorkerRegistry, TaskModel, createForemanWss } from "../src/foreman.js";
+import { WorkerRegistry, createForemanWss } from "../src/foreman.js";
+import { TaskModel } from "../src/task-model.js";
 import { loadDefaultConfig } from "../src/config.js";
 const defaultCfg = await loadDefaultConfig();
 import type { ForemanMessage } from "../src/types.js";
@@ -71,9 +72,8 @@ function closeClient(ws: WebSocket): Promise<void> {
 
 // ── Test harness ──────────────────────────────────────────────────────────────
 
-let queue: TaskQueue;
-let registry: WorkerRegistry;
 let taskModel: TaskModel;
+let registry: WorkerRegistry;
 let httpServer: http.Server;
 let wss: WebSocketServer;
 let routeEvent: (id: string, name: string, payload: unknown) => void;
@@ -87,11 +87,11 @@ function connect(): Promise<WebSocket> {
 }
 
 beforeEach(() => {
-  queue = new TaskQueue();
+  taskModel = new TaskModel();
   registry = new WorkerRegistry();
   graph = new Map();
   httpServer = http.createServer();
-  ({ wss, taskModel, routeEvent, shutdown } = createForemanWss(queue, registry, httpServer, { taskLabel: defaultCfg.taskLabel, reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs, pingIntervalMs: defaultCfg.pingIntervalMs, graph }));
+  ({ wss, routeEvent, shutdown } = createForemanWss(taskModel, registry, httpServer, { taskLabel: defaultCfg.taskLabel, reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs, pingIntervalMs: defaultCfg.pingIntervalMs, graph }));
 
   return new Promise<void>((resolve) => {
     httpServer.listen(0, () => {
@@ -137,7 +137,7 @@ describe("foreman WebSocket protocol", () => {
   });
 
   it("idle worker with pending task receives task_assigned", async () => {
-    queue.addTask(makeTask(1));
+    taskModel.loadTask(makeTask(1));
     const ws = await connect();
     const q = makeQueue(ws);
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
@@ -146,12 +146,12 @@ describe("foreman WebSocket protocol", () => {
     assert(msg.type === "task_assigned");
     expect(msg.issue.number).toBe(1);
     expect(msg.taskId).toBe("1");
-    expect(queue.get("1")?.status).toBe("assigned");
+    expect(taskModel.get("1")?.status).toBe("assigned");
     expect(registry.get("w1")?.status).toBe("busy");
   });
 
   it("second idle worker gets no message when only task is already assigned", async () => {
-    queue.addTask(makeTask(1));
+    taskModel.loadTask(makeTask(1));
     const ws1 = await connect();
     const ws2 = await connect();
     const q1 = makeQueue(ws1);
@@ -169,8 +169,8 @@ describe("foreman WebSocket protocol", () => {
   });
 
   it("task_complete completes task and assigns next task", async () => {
-    queue.addTask(makeTask(1));
-    queue.addTask(makeTask(2));
+    taskModel.loadTask(makeTask(1));
+    taskModel.loadTask(makeTask(2));
     const ws = await connect();
     const q = makeQueue(ws);
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
@@ -185,11 +185,11 @@ describe("foreman WebSocket protocol", () => {
     assert(msg.type === "task_assigned");
     expect(msg.issue.number).toBe(2);
 
-    expect(queue.get("1")?.status).toBe("complete");
+    expect(taskModel.get("1")?.status).toBe("complete");
   });
 
   it("task_complete with no further tasks sends no message", async () => {
-    queue.addTask(makeTask(1));
+    taskModel.loadTask(makeTask(1));
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
     await nextMsg(ws); // task_assigned
@@ -202,7 +202,7 @@ describe("foreman WebSocket protocol", () => {
   });
 
   it("worker reconnects as busy and reclaims its own task (no task_assigned sent)", async () => {
-    queue.addTask(makeTask(1));
+    taskModel.loadTask(makeTask(1));
     const ws1 = await connect();
     const q1 = makeQueue(ws1);
     send(ws1, { type: "worker_hello", workerId: "w1", status: "idle" });
@@ -222,7 +222,7 @@ describe("foreman WebSocket protocol", () => {
     expect(raceResult).toBe("timeout"); // no task_assigned (would reset in-progress session)
     expect(registry.get("w1")?.status).toBe("busy");
     expect(registry.get("w1")?.currentTaskId).toBe("1");
-    expect(queue.get("1")?.status).toBe("assigned");
+    expect(taskModel.get("1")?.status).toBe("assigned");
   });
 
   it("worker reconnects as busy with unknown taskId is registered busy and not interrupted", async () => {
@@ -240,7 +240,7 @@ describe("foreman WebSocket protocol", () => {
   });
 
   it("worker with pending tasks reconnects as busy with unknown taskId does not receive task_assigned", async () => {
-    queue.addTask(makeTask(1));
+    taskModel.loadTask(makeTask(1));
     const ws = await connect();
     const ackP = nextMsg(ws);
     send(ws, { type: "worker_hello", workerId: "w1", taskId: "nonexistent", status: "busy" });
@@ -252,11 +252,11 @@ describe("foreman WebSocket protocol", () => {
     expect(raceResult).toBe("timeout"); // must NOT receive task_assigned
     expect(registry.get("w1")?.status).toBe("busy");
     // pending task remains available for other workers
-    expect(queue.get("1")?.status).toBe("pending");
+    expect(taskModel.get("1")?.status).toBe("pending");
   });
 
   it("routeEvent sends event_notification to assigned worker", async () => {
-    queue.addTask(makeTask(1));
+    taskModel.loadTask(makeTask(1));
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
     await nextMsg(ws); // task_assigned
@@ -270,9 +270,9 @@ describe("foreman WebSocket protocol", () => {
   });
 
   it("routeEvent queues event when no worker is assigned", () => {
-    queue.addTask(makeTask(1));
+    taskModel.loadTask(makeTask(1));
     routeEvent("evt-1", "issue_comment", { issue: { number: 1 } });
-    const events = queue.drainEvents("1");
+    const events = taskModel.drainEvents("1");
     expect(events).toHaveLength(1);
     expect(events[0].name).toBe("issue_comment");
   });
@@ -293,7 +293,7 @@ describe("foreman WebSocket protocol", () => {
   });
 
   it("only the task's original owner can reclaim it on reconnect", async () => {
-    queue.addTask(makeTask(1));
+    taskModel.loadTask(makeTask(1));
     // Worker A gets assigned
     const wsA = await connect();
     const qA = makeQueue(wsA);
@@ -327,20 +327,20 @@ describe("foreman WebSocket protocol", () => {
   });
 
   it("task_complete releases worker to idle", async () => {
-    queue.addTask(makeTask(1));
+    taskModel.loadTask(makeTask(1));
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
     await nextMsg(ws); // task_assigned
     send(ws, { type: "task_complete", workerId: "w1", taskId: "1" });
     await waitUntil(() => registry.get("w1")?.status === "idle");
-    expect(queue.get("1")?.status).toBe("complete");
+    expect(taskModel.get("1")?.status).toBe("complete");
   });
 
   it("worker reconnects as busy with its own completed taskId is registered idle and cancelled (issue closed)", async () => {
-    queue.addTask(makeTask(1));
+    taskModel.loadTask(makeTask(1));
     // Simulate: issue was closed, foreman marked task complete, worker briefly disconnects
-    queue.assignTask("1", "w1");
-    queue.completeTask("1");
+    taskModel.assignInMemory("1", "w1");
+    await taskModel.complete("1");
 
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "w1", taskId: "1", status: "busy" });
@@ -352,8 +352,8 @@ describe("foreman WebSocket protocol", () => {
 
   it("events are routed to the correct worker when multiple workers have different tasks", async () => {
     // Two tasks pre-loaded
-    queue.addTask(makeTask(53));
-    queue.addTask(makeTask(55));
+    taskModel.loadTask(makeTask(53));
+    taskModel.loadTask(makeTask(55));
 
     // Worker A connects and gets task 53
     const wsA = await connect();
@@ -405,7 +405,7 @@ describe("hello_ack handshake", () => {
   });
 
   it("sends hello_ack with status busy when worker reclaims its own task", async () => {
-    queue.addTask(makeTask(1));
+    taskModel.loadTask(makeTask(1));
     const ws1 = await connect();
     const q1 = makeQueue(ws1);
     send(ws1, { type: "worker_hello", workerId: "w1", status: "idle" });
@@ -422,7 +422,7 @@ describe("hello_ack handshake", () => {
   });
 
   it("sends hello_ack with status cancelled when task was taken by another worker", async () => {
-    queue.addTask(makeTask(1));
+    taskModel.loadTask(makeTask(1));
     const wsA = await connect();
     const qA = makeQueue(wsA);
     send(wsA, { type: "worker_hello", workerId: "worker-a", status: "idle" });
@@ -465,9 +465,9 @@ describe("hello_ack handshake", () => {
   });
 
   it("sends hello_ack with status cancelled when worker's task is complete (issue closed)", async () => {
-    queue.addTask(makeTask(1));
-    queue.assignTask("1", "w1");
-    queue.completeTask("1");
+    taskModel.loadTask(makeTask(1));
+    taskModel.assignInMemory("1", "w1");
+    await taskModel.complete("1");
 
     const ws = await connect();
     const ackPromise = nextMsg(ws);
@@ -478,8 +478,8 @@ describe("hello_ack handshake", () => {
   });
 
   it("queued events are sent after hello_ack on reclaim", async () => {
-    queue.addTask(makeTask(1));
-    queue.assignTask("1", "w1");
+    taskModel.loadTask(makeTask(1));
+    taskModel.assignInMemory("1", "w1");
     registry.register("w1", {} as ReturnType<typeof connect> extends Promise<infer T> ? T : never, "busy", "1");
     registry.markDisconnected("w1");
     routeEvent("evt-1", "issue_comment", { issue: { number: 1 } });
@@ -494,7 +494,7 @@ describe("hello_ack handshake", () => {
   });
 
   it("ignores task_complete from a worker that does not own the task", async () => {
-    queue.addTask(makeTask(1));
+    taskModel.loadTask(makeTask(1));
     const wsA = await connect();
     const qA = makeQueue(wsA);
     send(wsA, { type: "worker_hello", workerId: "worker-a", status: "idle" });
@@ -508,14 +508,14 @@ describe("hello_ack handshake", () => {
     send(wsB, { type: "task_complete", workerId: "worker-b", taskId: "1" });
     await new Promise((r) => setTimeout(r, 20));
 
-    expect(queue.get("1")?.status).toBe("assigned");
-    expect(queue.get("1")?.assignedWorkerId).toBe("worker-a");
+    expect(taskModel.get("1")?.status).toBe("assigned");
+    expect(taskModel.get("1")?.assignedWorkerId).toBe("worker-a");
   });
 });
 
 describe("dependency-aware task assignment", () => {
   it("idle worker gets no message when the only pending task is blocked", async () => {
-    queue.addTask(makeTask(42));
+    taskModel.loadTask(makeTask(42));
     taskModel.setIssueOpenState(10, true); // blocker is open
     setBlockers(42, [10], graph);
 
@@ -531,7 +531,7 @@ describe("dependency-aware task assignment", () => {
   });
 
   it("idle worker gets task_assigned when task has no open blockers", async () => {
-    queue.addTask(makeTask(42));
+    taskModel.loadTask(makeTask(42));
     setBlockers(42, [10], graph);
     // openIssues does NOT contain 10 — blocker is closed
 
@@ -546,7 +546,7 @@ describe("dependency-aware task assignment", () => {
   it("issues/closed event unblocks a waiting task and sends task_assigned to idle worker", async () => {
     const task42 = makeTask(42);
     taskModel.trackIssue(42, { number: 42, title: task42.title, body: task42.body, labels: task42.labels, repoUrl: task42.repoUrl }, true);
-    queue.addTask(task42);
+    taskModel.loadTask(task42);
     taskModel.setIssueOpenState(10, true);
     setBlockers(42, [10], graph);
 
@@ -564,7 +564,7 @@ describe("dependency-aware task assignment", () => {
   });
 
   it("issues/reopened re-blocks subsequent task assignments", async () => {
-    queue.addTask(makeTask(43));
+    taskModel.loadTask(makeTask(43));
     setBlockers(43, [10], graph);
     // openIssues does not have 10 — starts unblocked
 
@@ -587,8 +587,8 @@ describe("dependency-aware task assignment", () => {
   });
 
   it("worker gets first unblocked task when queue has mixed blocked/unblocked tasks", async () => {
-    queue.addTask(makeTask(1)); // blocked
-    queue.addTask(makeTask(2)); // unblocked
+    taskModel.loadTask(makeTask(1)); // blocked
+    taskModel.loadTask(makeTask(2)); // unblocked
     taskModel.setIssueOpenState(99, true);
     setBlockers(1, [99], graph);
     // task 2 has no blockers
@@ -607,7 +607,7 @@ describe("worker secret enforcement", () => {
   async function makeSecretServer(secret: string): Promise<{ server: http.Server; secretWss: WebSocketServer; port: number }> {
     const server = http.createServer();
     const { wss: secretWss } = createForemanWss(
-      new TaskQueue(), new WorkerRegistry(), server,
+      new TaskModel(), new WorkerRegistry(), server,
       { taskLabel: defaultCfg.taskLabel, reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs, pingIntervalMs: defaultCfg.pingIntervalMs, workerSecret: secret },
     );
     const p = await new Promise<number>((r) => server.listen(0, () => r((server.address() as AddressInfo).port)));
@@ -665,7 +665,7 @@ function makeConnectToForeman(port: number) {
 describe("worker WebSocket connection", () => {
   it("worker client connects to foreman successfully", async () => {
     const server = http.createServer();
-    const { wss } = createForemanWss(new TaskQueue(), new WorkerRegistry(), server, { taskLabel: defaultCfg.taskLabel, reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs, pingIntervalMs: defaultCfg.pingIntervalMs });
+    const { wss } = createForemanWss(new TaskModel(), new WorkerRegistry(), server, { taskLabel: defaultCfg.taskLabel, reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs, pingIntervalMs: defaultCfg.pingIntervalMs });
     const testPort = await new Promise<number>((resolve) => {
       server.listen(0, () => resolve((server.address() as AddressInfo).port));
     });
@@ -691,7 +691,7 @@ describe("worker WebSocket connection", () => {
 
   it("foreman rejects connections not at /worker path (regression guard)", async () => {
     const server = http.createServer();
-    const { wss } = createForemanWss(new TaskQueue(), new WorkerRegistry(), server, { taskLabel: defaultCfg.taskLabel, reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs, pingIntervalMs: defaultCfg.pingIntervalMs });
+    const { wss } = createForemanWss(new TaskModel(), new WorkerRegistry(), server, { taskLabel: defaultCfg.taskLabel, reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs, pingIntervalMs: defaultCfg.pingIntervalMs });
     const testPort = await new Promise<number>((resolve) => {
       server.listen(0, () => resolve((server.address() as AddressInfo).port));
     });
@@ -723,7 +723,7 @@ describe("worker disconnect DB logging", () => {
     const localRegistry1 = new WorkerRegistry();
     const server = http.createServer();
     const { wss: testWss } = createForemanWss(
-      new TaskQueue(), localRegistry1, server,
+      new TaskModel(), localRegistry1, server,
       { taskLabel: defaultCfg.taskLabel, reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs, pingIntervalMs: defaultCfg.pingIntervalMs, dbLogger: mockDbLogger },
     );
     const testPort = await new Promise<number>((r) => server.listen(0, () => r((server.address() as AddressInfo).port)));
@@ -762,8 +762,8 @@ describe("worker disconnect DB logging", () => {
       queryWorkerMessages: vi.fn().mockResolvedValue([]),
     };
 
-    const taskQueue = new TaskQueue();
-    taskQueue.addTask({
+    const localTaskModel = new TaskModel();
+    localTaskModel.loadTask({
       taskId: "42",
       issueNumber: 42,
       title: "Some task",
@@ -775,7 +775,7 @@ describe("worker disconnect DB logging", () => {
     const localRegistry2 = new WorkerRegistry();
     const server = http.createServer();
     const { wss: testWss } = createForemanWss(
-      taskQueue, localRegistry2, server,
+      localTaskModel, localRegistry2, server,
       { taskLabel: defaultCfg.taskLabel, reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs, pingIntervalMs: defaultCfg.pingIntervalMs, dbLogger: mockDbLogger },
     );
     const testPort = await new Promise<number>((r) => server.listen(0, () => r((server.address() as AddressInfo).port)));
@@ -805,7 +805,7 @@ describe("worker disconnect DB logging", () => {
 
 describe("disconnected worker state", () => {
   it("worker with active task is marked disconnected (not removed) on close", async () => {
-    queue.addTask(makeTask(1));
+    taskModel.loadTask(makeTask(1));
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
     await nextMsg(ws); // task_assigned
@@ -817,7 +817,7 @@ describe("disconnected worker state", () => {
     expect(entry).toBeDefined();
     expect(entry!.status).toBe("disconnected");
     expect(entry!.currentTaskId).toBe("1");
-    expect(queue.get("1")?.status).toBe("assigned");
+    expect(taskModel.get("1")?.status).toBe("assigned");
   });
 
   it("idle worker is removed from registry on close", async () => {
@@ -832,7 +832,7 @@ describe("disconnected worker state", () => {
   });
 
   it("events are queued (not dropped) when assigned worker is disconnected", async () => {
-    queue.addTask(makeTask(1));
+    taskModel.loadTask(makeTask(1));
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
     await nextMsg(ws); // task_assigned
@@ -844,13 +844,13 @@ describe("disconnected worker state", () => {
     routeEvent("evt-1", "issue_comment", { issue: { number: 1 }, comment: { body: "hi" } });
 
     // Event should be in the task queue, not dropped
-    const queued = queue.drainEvents("1");
+    const queued = taskModel.drainEvents("1");
     expect(queued).toHaveLength(1);
     expect(queued[0].name).toBe("issue_comment");
   });
 
   it("reconnecting worker (busy) from disconnected state drains queued events", async () => {
-    queue.addTask(makeTask(1));
+    taskModel.loadTask(makeTask(1));
     const ws1 = await connect();
     send(ws1, { type: "worker_hello", workerId: "w1", status: "idle" });
     await nextMsg(ws1); // hello_ack (task is assigned server-side regardless)
@@ -874,11 +874,11 @@ describe("disconnected worker state", () => {
     }
 
     expect(registry.get("w1")?.status).toBe("busy");
-    expect(queue.get("1")?.status).toBe("assigned");
+    expect(taskModel.get("1")?.status).toBe("assigned");
   });
 
   it("reconnecting worker (idle) from disconnected state reverts task to pending", async () => {
-    queue.addTask(makeTask(1));
+    taskModel.loadTask(makeTask(1));
     const ws1 = await connect();
     send(ws1, { type: "worker_hello", workerId: "w1", status: "idle" });
     await nextMsg(ws1); // hello_ack (task is assigned server-side regardless)
@@ -897,12 +897,12 @@ describe("disconnected worker state", () => {
     if (msg.type === "task_assigned") expect(msg.taskId).toBe("1");
 
     expect(registry.get("w1")?.status).toBe("busy");
-    expect(queue.get("1")?.status).toBe("assigned");
-    expect(queue.get("1")?.assignedWorkerId).toBe("w1");
+    expect(taskModel.get("1")?.status).toBe("assigned");
+    expect(taskModel.get("1")?.assignedWorkerId).toBe("w1");
   });
 
   it("a different idle worker can pick up the reverted task when disconnected worker reconnects as idle", async () => {
-    queue.addTask(makeTask(1));
+    taskModel.loadTask(makeTask(1));
 
     // Worker A gets the task
     const wsA = await connect();
@@ -925,7 +925,7 @@ describe("disconnected worker state", () => {
     await qA2.next(); // hello_ack
     const msg = await qA2.next();
     expect(msg.type).toBe("task_assigned");
-    expect(queue.get("1")?.status).toBe("assigned");
+    expect(taskModel.get("1")?.status).toBe("assigned");
   });
 });
 
@@ -933,7 +933,7 @@ describe("disconnected worker state", () => {
 
 describe("worker_goodbye", () => {
   it("removes worker from registry and reverts task to pending", async () => {
-    queue.addTask(makeTask(1));
+    taskModel.loadTask(makeTask(1));
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
     await nextMsg(ws); // task_assigned
@@ -942,7 +942,7 @@ describe("worker_goodbye", () => {
     await waitUntil(() => !registry.get("w1"));
 
     expect(registry.get("w1")).toBeUndefined();
-    expect(queue.get("1")?.status).toBe("pending");
+    expect(taskModel.get("1")?.status).toBe("pending");
   });
 
   it("removes idle worker from registry when goodbye has no taskId", async () => {
@@ -957,7 +957,7 @@ describe("worker_goodbye", () => {
   });
 
   it("reverted task is immediately assigned to a waiting idle worker", async () => {
-    queue.addTask(makeTask(1));
+    taskModel.loadTask(makeTask(1));
 
     // Worker A gets task 1
     const wsA = await connect();
@@ -980,8 +980,8 @@ describe("worker_goodbye", () => {
     if (msg.type === "task_assigned") expect(msg.taskId).toBe("1");
 
     expect(registry.get("worker-a")).toBeUndefined();
-    expect(queue.get("1")?.status).toBe("assigned");
-    expect(queue.get("1")?.assignedWorkerId).toBe("worker-b");
+    expect(taskModel.get("1")?.status).toBe("assigned");
+    expect(taskModel.get("1")?.assignedWorkerId).toBe("worker-b");
   });
 });
 
@@ -997,20 +997,21 @@ describe("worker_goodbye — DB persistence", () => {
       markPending: vi.fn().mockResolvedValue(undefined),
       markBlocked: vi.fn().mockResolvedValue(undefined),
       updateTaskPr: vi.fn().mockResolvedValue(undefined),
+      deleteTask: vi.fn().mockResolvedValue(undefined),
+      getTask: vi.fn().mockResolvedValue(null),
       listTasks: vi.fn().mockResolvedValue([]),
     };
 
-    const q = new TaskQueue();
+    const q = new TaskModel(taskStore);
     const r = new WorkerRegistry();
     const srv = http.createServer();
     const { wss: testWss } = createForemanWss(q, r, srv, {
       taskLabel: defaultCfg.taskLabel,
       reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs,
       pingIntervalMs: defaultCfg.pingIntervalMs,
-      taskStore,
     });
 
-    q.addTask({ taskId: "1", issueNumber: 1, title: "T", body: "b", labels: [], repoUrl: "r" });
+    q.loadTask({ taskId: "1", issueNumber: 1, title: "T", body: "b", labels: [], repoUrl: "r" });
 
     await new Promise<void>((resolve) => srv.listen(0, resolve));
     const testPort = (srv.address() as AddressInfo).port;
@@ -1044,17 +1045,18 @@ describe("worker_goodbye — DB persistence", () => {
       markPending: vi.fn().mockResolvedValue(undefined),
       markBlocked: vi.fn().mockResolvedValue(undefined),
       updateTaskPr: vi.fn().mockResolvedValue(undefined),
+      deleteTask: vi.fn().mockResolvedValue(undefined),
+      getTask: vi.fn().mockResolvedValue(null),
       listTasks: vi.fn().mockResolvedValue([]),
     };
 
-    const q = new TaskQueue();
+    const q = new TaskModel(taskStore);
     const r = new WorkerRegistry();
     const srv = http.createServer();
     const { wss: testWss } = createForemanWss(q, r, srv, {
       taskLabel: defaultCfg.taskLabel,
       reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs,
       pingIntervalMs: defaultCfg.pingIntervalMs,
-      taskStore,
     });
 
     await new Promise<void>((resolve) => srv.listen(0, resolve));
@@ -1092,21 +1094,22 @@ describe("issues/closed — DB persistence", () => {
       markPending: vi.fn().mockResolvedValue(undefined),
       markBlocked: vi.fn().mockResolvedValue(undefined),
       updateTaskPr: vi.fn().mockResolvedValue(undefined),
+      deleteTask: vi.fn().mockResolvedValue(undefined),
+      getTask: vi.fn().mockResolvedValue(null),
       listTasks: vi.fn().mockResolvedValue([]),
     };
 
-    const q = new TaskQueue();
+    const q = new TaskModel(taskStore);
     const r = new WorkerRegistry();
     const srv = http.createServer();
     const { wss: testWss, routeEvent: testRouteEvent } = createForemanWss(q, r, srv, {
       taskLabel: defaultCfg.taskLabel,
       reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs,
       pingIntervalMs: defaultCfg.pingIntervalMs,
-      taskStore,
     });
 
-    q.addTask({ taskId: "1", issueNumber: 1, title: "T", body: "b", labels: [], repoUrl: "r" });
-    q.assignTask("1", "w1");
+    q.loadTask({ taskId: "1", issueNumber: 1, title: "T", body: "b", labels: [], repoUrl: "r" });
+    q.assignInMemory("1", "w1");
 
     testRouteEvent("evt-1", "issues", { action: "closed", issue: { number: 1, title: "T", body: "", labels: [] } });
 
@@ -1128,22 +1131,23 @@ describe("worker_hello — DB persistence", () => {
       markPending: vi.fn().mockResolvedValue(undefined),
       markBlocked: vi.fn().mockResolvedValue(undefined),
       updateTaskPr: vi.fn().mockResolvedValue(undefined),
+      deleteTask: vi.fn().mockResolvedValue(undefined),
+      getTask: vi.fn().mockResolvedValue(null),
       listTasks: vi.fn().mockResolvedValue([]),
     };
 
-    const q = new TaskQueue();
+    const q = new TaskModel(taskStore);
     const r = new WorkerRegistry();
     const srv = http.createServer();
     const { wss: testWss } = createForemanWss(q, r, srv, {
       taskLabel: defaultCfg.taskLabel,
       reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs,
       pingIntervalMs: defaultCfg.pingIntervalMs,
-      taskStore,
     });
 
-    q.addTask({ taskId: "1", issueNumber: 1, title: "T", body: "b", labels: [], repoUrl: "r" });
-    q.assignTask("1", "w1");
-    q.completeTask("1");
+    q.loadTask({ taskId: "1", issueNumber: 1, title: "T", body: "b", labels: [], repoUrl: "r" });
+    q.assignInMemory("1", "w1");
+    await q.complete("1");
 
     await new Promise<void>((resolve) => srv.listen(0, resolve));
     const testPort = (srv.address() as AddressInfo).port;
@@ -1170,7 +1174,7 @@ describe("worker_hello — DB persistence", () => {
 
 describe("keepalive ping", () => {
   it("sends WebSocket ping to connected clients on interval", async () => {
-    const q = new TaskQueue();
+    const q = new TaskModel();
     const r = new WorkerRegistry();
     const srv = http.createServer();
     const { wss: testWss } = createForemanWss(q, r, srv, {
@@ -1207,7 +1211,7 @@ describe("reclaim timer (fake timers)", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const reclaimTimeoutMs = 500;
 
-    const q = new TaskQueue();
+    const q = new TaskModel();
     const r = new WorkerRegistry();
     const srv = http.createServer();
     const { wss: testWss } = createForemanWss(q, r, srv, {
@@ -1219,7 +1223,7 @@ describe("reclaim timer (fake timers)", () => {
     const testPort = (srv.address() as AddressInfo).port;
 
     // Add a task and assign it via worker A
-    q.addTask(makeTask(1));
+    q.loadTask(makeTask(1));
     const wsA = new WebSocket(`ws://localhost:${testPort}/worker`);
     await new Promise<void>((resolve, reject) => { wsA.once("open", resolve); wsA.once("error", reject); });
     send(wsA, { type: "worker_hello", workerId: "worker-a", status: "idle" });
@@ -1265,7 +1269,7 @@ describe("reclaim timer (fake timers)", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const reclaimTimeoutMs = 5000;
 
-    const q = new TaskQueue();
+    const q = new TaskModel();
     const r = new WorkerRegistry();
     const srv = http.createServer();
     const { wss: testWss } = createForemanWss(q, r, srv, {
@@ -1276,7 +1280,7 @@ describe("reclaim timer (fake timers)", () => {
     await new Promise<void>((resolve) => srv.listen(0, resolve));
     const testPort = (srv.address() as AddressInfo).port;
 
-    q.addTask(makeTask(1));
+    q.loadTask(makeTask(1));
     const wsA = new WebSocket(`ws://localhost:${testPort}/worker`);
     await new Promise<void>((resolve, reject) => { wsA.once("open", resolve); wsA.once("error", reject); });
     send(wsA, { type: "worker_hello", workerId: "worker-a", status: "idle" });
@@ -1309,7 +1313,7 @@ describe("reclaim timer (fake timers)", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const reclaimTimeoutMs = 500;
 
-    const q = new TaskQueue();
+    const q = new TaskModel();
     const r = new WorkerRegistry();
     const srv = http.createServer();
     const { wss: testWss } = createForemanWss(q, r, srv, {
@@ -1320,7 +1324,7 @@ describe("reclaim timer (fake timers)", () => {
     await new Promise<void>((resolve) => srv.listen(0, resolve));
     const testPort = (srv.address() as AddressInfo).port;
 
-    q.addTask(makeTask(1));
+    q.loadTask(makeTask(1));
     const wsA = new WebSocket(`ws://localhost:${testPort}/worker`);
     await new Promise<void>((resolve, reject) => { wsA.once("open", resolve); wsA.once("error", reject); });
     send(wsA, { type: "worker_hello", workerId: "worker-a", status: "idle" });
@@ -1366,7 +1370,7 @@ describe("reclaim timer (fake timers)", () => {
 
     // Connect wsA and get a task
     const wsA = await connect();
-    queue.addTask(makeTask(1));
+    taskModel.loadTask(makeTask(1));
     const qA = makeQueue(wsA);
     send(wsA, { type: "worker_hello", workerId: "worker-a", status: "idle" });
     await qA.next(); // hello_ack
@@ -1431,7 +1435,7 @@ describe("graceful shutdown", () => {
     const localRegistry = new WorkerRegistry();
     const srv = http.createServer();
     const { wss: testWss, shutdown: localShutdown } = createForemanWss(
-      new TaskQueue(), localRegistry, srv,
+      new TaskModel(), localRegistry, srv,
       { taskLabel: defaultCfg.taskLabel, reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs, pingIntervalMs: defaultCfg.pingIntervalMs, dbLogger: mockDbLogger },
     );
     const testPort = await new Promise<number>((r) => srv.listen(0, () => r((srv.address() as AddressInfo).port)));

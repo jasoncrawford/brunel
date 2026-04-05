@@ -9,7 +9,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import http from "http";
 import { WebSocket, WebSocketServer } from "ws";
 import type { AddressInfo } from "net";
-import { TaskQueue, WorkerRegistry, createForemanWss } from "../src/foreman.js";
+import { WorkerRegistry, createForemanWss } from "../src/foreman.js";
+import { TaskModel } from "../src/task-model.js";
 import { loadDefaultConfig } from "../src/config.js";
 const defaultCfg = await loadDefaultConfig();
 import type { ForemanMessage } from "../src/types.js";
@@ -190,7 +191,7 @@ function checkSuitePayload(prNumber: number, conclusion: string) {
 
 // ── Test harness ──────────────────────────────────────────────────────────────
 
-let queue: TaskQueue;
+let taskModel: TaskModel;
 let registry: WorkerRegistry;
 let httpServer: http.Server;
 let wss: WebSocketServer;
@@ -208,10 +209,10 @@ beforeEach(() => {
   process.env.GITHUB_TOKEN = "token";
   process.env.TASK_LABEL = "brunel:ready";
 
-  queue = new TaskQueue();
+  taskModel = new TaskModel();
   registry = new WorkerRegistry();
   httpServer = http.createServer();
-  ({ wss, routeEvent } = createForemanWss(queue, registry, httpServer, { taskLabel: defaultCfg.taskLabel, reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs, pingIntervalMs: defaultCfg.pingIntervalMs }));
+  ({ wss, routeEvent } = createForemanWss(taskModel, registry, httpServer, { taskLabel: defaultCfg.taskLabel, reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs, pingIntervalMs: defaultCfg.pingIntervalMs }));
 
   return new Promise<void>((resolve) => {
     httpServer.listen(0, () => {
@@ -264,7 +265,7 @@ describe("webhook-triggered task routing", () => {
     expect((msg as any).issue.number).toBe(42);
     expect((msg as any).issue.title).toBe("Issue 42");
     expect((msg as any).issue.repoUrl).toBe("https://github.com/owner/repo");
-    expect(queue.get("42")?.status).toBe("assigned");
+    expect(taskModel.get("42")?.status).toBe("assigned");
     expect(registry.get("w1")?.status).toBe("busy");
   });
 
@@ -282,14 +283,14 @@ describe("webhook-triggered task routing", () => {
     ]);
 
     expect(raceResult).toBe("timeout");
-    expect(queue.getTaskForIssue(42)).toBeUndefined();
+    expect(taskModel.getTaskForIssue(42)).toBeUndefined();
   });
 
   it("issues/labeled with task label enqueues task when no idle worker available", () => {
     // No worker connected at all
     routeEvent("evt-1", "issues", labeledPayload(42, "brunel:ready"));
 
-    const task = queue.getTaskForIssue(42);
+    const task = taskModel.getTaskForIssue(42);
     expect(task).toBeDefined();
     expect(task?.status).toBe("pending");
     expect(task?.issueNumber).toBe(42);
@@ -299,7 +300,7 @@ describe("webhook-triggered task routing", () => {
   it("pending task from webhook gets assigned when worker later connects", async () => {
     // Webhook fires before any worker is available
     routeEvent("evt-1", "issues", labeledPayload(42, "brunel:ready"));
-    expect(queue.getTaskForIssue(42)?.status).toBe("pending");
+    expect(taskModel.getTaskForIssue(42)?.status).toBe("pending");
 
     // Worker connects afterwards — use nextMsgWhere to skip hello_ack and get task_assigned
     const ws = await connect();
@@ -309,12 +310,12 @@ describe("webhook-triggered task routing", () => {
     const msg = await reply;
     expect(msg.type).toBe("task_assigned");
     expect((msg as any).issue.number).toBe(42);
-    expect(queue.get("42")?.status).toBe("assigned");
+    expect(taskModel.get("42")?.status).toBe("assigned");
   });
 
   it("issues/labeled does not enqueue duplicate if issue already in queue", async () => {
     // Pre-populate the queue with this issue
-    queue.addTask({
+    taskModel.loadTask({
       taskId: "42",
       issueNumber: 42,
       title: "Existing Issue",
@@ -326,9 +327,9 @@ describe("webhook-triggered task routing", () => {
     routeEvent("evt-1", "issues", labeledPayload(42, "brunel:ready"));
 
     // Only one task should exist, and it should still be pending
-    expect(queue.get("42")?.status).toBe("pending");
+    expect(taskModel.get("42")?.status).toBe("pending");
     // Confirm it's really the same task (title unchanged from original)
-    expect(queue.get("42")?.title).toBe("Existing Issue");
+    expect(taskModel.get("42")?.title).toBe("Existing Issue");
   });
 
   it("issues/opened with task label in issue labels assigns task to idle worker", async () => {
@@ -345,7 +346,7 @@ describe("webhook-triggered task routing", () => {
     const msg = await reply;
     expect(msg.type).toBe("task_assigned");
     expect((msg as any).issue.number).toBe(99);
-    expect(queue.get("99")?.status).toBe("assigned");
+    expect(taskModel.get("99")?.status).toBe("assigned");
     expect(registry.get("w1")?.status).toBe("busy");
   });
 
@@ -362,12 +363,12 @@ describe("webhook-triggered task routing", () => {
     ]);
 
     expect(raceResult).toBe("timeout");
-    expect(queue.getTaskForIssue(99)).toBeUndefined();
+    expect(taskModel.getTaskForIssue(99)).toBeUndefined();
   });
 
   it("busy worker is not interrupted when new task arrives via webhook", async () => {
     // Give worker an existing task
-    queue.addTask({
+    taskModel.loadTask({
       taskId: "1",
       issueNumber: 1,
       title: "First Issue",
@@ -390,14 +391,14 @@ describe("webhook-triggered task routing", () => {
     expect(raceResult).toBe("timeout");
 
     // But issue 2 should be pending, ready for when the worker finishes
-    expect(queue.getTaskForIssue(2)?.status).toBe("pending");
+    expect(taskModel.getTaskForIssue(2)?.status).toBe("pending");
   });
 });
 
 describe("PR event forwarding to workers", () => {
   it("pull_request/opened with closing keyword registers PR and routes check_run to worker", async () => {
     // Set up a task for issue 42
-    queue.addTask({
+    taskModel.loadTask({
       taskId: "42",
       issueNumber: 42,
       title: "Issue 42",
@@ -424,7 +425,7 @@ describe("PR event forwarding to workers", () => {
   });
 
   it("pull_request_review for a registered PR is forwarded to the worker", async () => {
-    queue.addTask({
+    taskModel.loadTask({
       taskId: "42",
       issueNumber: 42,
       title: "Issue 42",
@@ -448,7 +449,7 @@ describe("PR event forwarding to workers", () => {
   });
 
   it("pull_request_review_comment for a registered PR is forwarded to the worker", async () => {
-    queue.addTask({
+    taskModel.loadTask({
       taskId: "42",
       issueNumber: 42,
       title: "Issue 42",
@@ -472,7 +473,7 @@ describe("PR event forwarding to workers", () => {
   });
 
   it("pull_request/opened without linked issue does not crash and is not forwarded", async () => {
-    queue.addTask({
+    taskModel.loadTask({
       taskId: "42",
       issueNumber: 42,
       title: "Issue 42",
@@ -512,7 +513,7 @@ describe("PR event forwarding to workers", () => {
   });
 
   it("check_suite/completed for a registered PR is forwarded to the worker", async () => {
-    queue.addTask({
+    taskModel.loadTask({
       taskId: "42",
       issueNumber: 42,
       title: "Issue 42",
@@ -550,7 +551,7 @@ describe("PR event forwarding to workers", () => {
   });
 
   it("check_suite with empty pull_requests is routed by head_branch", async () => {
-    queue.addTask({
+    taskModel.loadTask({
       taskId: "42", issueNumber: 42, title: "Issue 42", body: "Body",
       labels: ["brunel:ready"], repoUrl: "https://github.com/owner/repo",
     });
@@ -569,7 +570,7 @@ describe("PR event forwarding to workers", () => {
   });
 
   it("check_run with empty pull_requests is routed by head_branch", async () => {
-    queue.addTask({
+    taskModel.loadTask({
       taskId: "42", issueNumber: 42, title: "Issue 42", body: "Body",
       labels: ["brunel:ready"], repoUrl: "https://github.com/owner/repo",
     });
@@ -602,7 +603,7 @@ describe("PR event forwarding to workers", () => {
   });
 
   it("pull_request/closed without merging clears PR from task in TaskQueue", async () => {
-    queue.addTask({
+    taskModel.loadTask({
       taskId: "42",
       issueNumber: 42,
       title: "Issue 42",
@@ -616,16 +617,16 @@ describe("PR event forwarding to workers", () => {
     await nextMsg(ws); // task_assigned
 
     routeEvent("evt-pr-open", "pull_request", prOpenedPayload(10, "Closes #42"));
-    expect(queue.getTaskForPr(10)?.taskId).toBe("42");
-    expect(queue.get("42")?.prNumber).toBe(10);
+    expect(taskModel.getTaskForPr(10)?.taskId).toBe("42");
+    expect(taskModel.get("42")?.prNumber).toBe(10);
 
     routeEvent("evt-pr-close", "pull_request", prClosedPayload(10, false));
-    expect(queue.getTaskForPr(10)).toBeUndefined();
-    expect(queue.get("42")?.prNumber).toBeUndefined();
+    expect(taskModel.getTaskForPr(10)).toBeUndefined();
+    expect(taskModel.get("42")?.prNumber).toBeUndefined();
   });
 
   it("pull_request/closed without merging still forwards the event to the worker", async () => {
-    queue.addTask({
+    taskModel.loadTask({
       taskId: "42",
       issueNumber: 42,
       title: "Issue 42",
@@ -648,7 +649,7 @@ describe("PR event forwarding to workers", () => {
   });
 
   it("pull_request/closed with merge does NOT clear PR from task in TaskQueue", async () => {
-    queue.addTask({
+    taskModel.loadTask({
       taskId: "42",
       issueNumber: 42,
       title: "Issue 42",
@@ -662,17 +663,17 @@ describe("PR event forwarding to workers", () => {
     await nextMsg(ws); // task_assigned
 
     routeEvent("evt-pr-open", "pull_request", prOpenedPayload(10, "Closes #42"));
-    expect(queue.get("42")?.prNumber).toBe(10);
+    expect(taskModel.get("42")?.prNumber).toBe(10);
 
     routeEvent("evt-pr-close", "pull_request", prClosedPayload(10, true));
     // Merged PR: keep the association (issue will close → task completes)
-    expect(queue.get("42")?.prNumber).toBe(10);
-    expect(queue.getTaskForPr(10)?.taskId).toBe("42");
+    expect(taskModel.get("42")?.prNumber).toBe(10);
+    expect(taskModel.getTaskForPr(10)?.taskId).toBe("42");
   });
 });
 
   it("issue_comment/created on a PR is forwarded to the worker handling that issue", async () => {
-    queue.addTask({
+    taskModel.loadTask({
       taskId: "42",
       issueNumber: 42,
       title: "Issue 42",
@@ -699,7 +700,7 @@ describe("PR event forwarding to workers", () => {
 
 describe("foreman event filtering", () => {
   it("pull_request/synchronize is dropped and not forwarded to worker", async () => {
-    queue.addTask({
+    taskModel.loadTask({
       taskId: "42",
       issueNumber: 42,
       title: "Issue 42",
@@ -733,7 +734,7 @@ describe("foreman event filtering", () => {
   it('issues/unlabeled with task label removes a pending task from the queue', async () => {
     // Enqueue task via webhook (no worker connected, so it stays pending)
     routeEvent("evt-labeled", "issues", labeledPayload(42, "brunel:ready"));
-    expect(queue.getTaskForIssue(42)?.status).toBe("pending");
+    expect(taskModel.getTaskForIssue(42)?.status).toBe("pending");
 
     // Remove the label — pending task should be dequeued
     routeEvent("evt-unlabeled", "issues", {
@@ -743,7 +744,7 @@ describe("foreman event filtering", () => {
       repository: { html_url: "https://github.com/owner/repo" },
     });
 
-    expect(queue.getTaskForIssue(42)).toBeUndefined();
+    expect(taskModel.getTaskForIssue(42)).toBeUndefined();
   });
 
   it('issues/unlabeled with task label does not remove an already-assigned task', async () => {
@@ -755,7 +756,7 @@ describe("foreman event filtering", () => {
     routeEvent("evt-labeled", "issues", labeledPayload(42, "brunel:ready"));
     await reply; // task_assigned
 
-    expect(queue.getTaskForIssue(42)?.status).toBe("assigned");
+    expect(taskModel.getTaskForIssue(42)?.status).toBe("assigned");
 
     // Removing the label should leave the assigned task intact
     routeEvent("evt-unlabeled", "issues", {
@@ -765,12 +766,12 @@ describe("foreman event filtering", () => {
       repository: { html_url: "https://github.com/owner/repo" },
     });
 
-    expect(queue.getTaskForIssue(42)?.status).toBe("assigned");
+    expect(taskModel.getTaskForIssue(42)?.status).toBe("assigned");
   });
 
   it('issues/unlabeled with non-task label does not remove a pending task', async () => {
     routeEvent("evt-labeled", "issues", labeledPayload(42, "brunel:ready"));
-    expect(queue.getTaskForIssue(42)?.status).toBe("pending");
+    expect(taskModel.getTaskForIssue(42)?.status).toBe("pending");
 
     routeEvent("evt-unlabeled", "issues", {
       action: "unlabeled",
@@ -779,7 +780,7 @@ describe("foreman event filtering", () => {
       repository: { html_url: "https://github.com/owner/repo" },
     });
 
-    expect(queue.getTaskForIssue(42)).toBeDefined();
+    expect(taskModel.getTaskForIssue(42)).toBeDefined();
   });
 
   it("issues/labeled with task label does not enqueue if issue is closed", () => {
@@ -799,6 +800,6 @@ describe("foreman event filtering", () => {
       repository: { html_url: "https://github.com/owner/repo" },
     });
 
-    expect(queue.getTaskForIssue(42)).toBeUndefined();
+    expect(taskModel.getTaskForIssue(42)).toBeUndefined();
   });
 });
