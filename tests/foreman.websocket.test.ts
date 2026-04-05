@@ -1159,159 +1159,11 @@ describe("keepalive ping", () => {
 
 // ── Reclaim timer ──────────────────────────────────────────────────────────────
 
-describe("reclaim timer (fake timers)", () => {
-  // Use fake timers within each test; reset after
-  afterEach(() => { vi.useRealTimers(); });
-
-  it("task reverts to pending and idle worker picks it up when reclaim timer fires", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    const reclaimTimeoutMs = 500;
-
-    const q = new TaskModel();
-    const r = new WorkerRegistry();
-    const srv = http.createServer();
-    const { wss: testWss } = createForemanWss(q, r, srv, { ...defaultCfg, workerReclaimTimeoutMs: reclaimTimeoutMs });
-    await new Promise<void>((resolve) => srv.listen(0, resolve));
-    const testPort = (srv.address() as AddressInfo).port;
-
-    // Add a task and assign it via worker A
-    await makeTask(q, 1);
-    const wsA = new WebSocket(`ws://localhost:${testPort}/worker`);
-    await new Promise<void>((resolve, reject) => { wsA.once("open", resolve); wsA.once("error", reject); });
-    send(wsA, { type: "worker_hello", workerId: "worker-a", status: "idle" });
-    await new Promise<void>((resolve) => wsA.once("message", resolve)); // task_assigned
-
-    // Worker A disconnects (crash)
-    await new Promise<void>((resolve) => { wsA.once("close", resolve); wsA.close(); });
-    await waitUntil(() => r.get("worker-a")?.status === "disconnected");
-
-    // Task should still be assigned (timer hasn't fired)
-    expect((await q.get("1"))?.status).toBe("assigned");
-    expect(r.get("worker-a")?.status).toBe("disconnected");
-
-    // Connect worker B (idle) — task is still assigned to A, so B gets no message yet
-    const wsB = new WebSocket(`ws://localhost:${testPort}/worker`);
-    await new Promise<void>((resolve, reject) => { wsB.once("open", resolve); wsB.once("error", reject); });
-    const qB = makeQueue(wsB);
-    send(wsB, { type: "worker_hello", workerId: "worker-b", status: "idle" });
-    await waitUntil(() => r.get("worker-b")?.status === "idle");
-    await qB.next(); // hello_ack (no task yet — still assigned to disconnected worker-a)
-
-    // Advance time past the reclaim timeout
-    vi.advanceTimersByTime(reclaimTimeoutMs + 100);
-
-    // Worker B should get a task_assigned after the reclaim
-    const msgB2 = await qB.next();
-    expect(msgB2.type).toBe("task_assigned");
-    if (msgB2.type === "task_assigned") expect(msgB2.taskId).toBe("1");
-
-    // Worker A should be removed from registry
-    expect(r.get("worker-a")).toBeUndefined();
-
-    // Task is now assigned to worker B
-    expect((await q.get("1"))?.status).toBe("assigned");
-    expect((await q.get("1"))?.assignedWorkerId).toBe("worker-b");
-
-    wsB.close();
-    await new Promise<void>((r) => wsB.once("close", r));
-    await new Promise<void>((r) => testWss.close(() => srv.close(r)));
-  });
-
-  it("reconnecting before timer fires cancels the timer and keeps the task", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    const reclaimTimeoutMs = 5000;
-
-    const q = new TaskModel();
-    const r = new WorkerRegistry();
-    const srv = http.createServer();
-    const { wss: testWss } = createForemanWss(q, r, srv, { ...defaultCfg, workerReclaimTimeoutMs: reclaimTimeoutMs });
-    await new Promise<void>((resolve) => srv.listen(0, resolve));
-    const testPort = (srv.address() as AddressInfo).port;
-
-    await makeTask(q, 1);
-    const wsA = new WebSocket(`ws://localhost:${testPort}/worker`);
-    await new Promise<void>((resolve, reject) => { wsA.once("open", resolve); wsA.once("error", reject); });
-    send(wsA, { type: "worker_hello", workerId: "worker-a", status: "idle" });
-    await new Promise<void>((resolve) => wsA.once("message", resolve)); // task_assigned
-
-    // Disconnect
-    await new Promise<void>((resolve) => { wsA.once("close", resolve); wsA.close(); });
-    await waitUntil(() => r.get("worker-a")?.status === "disconnected");
-
-    // Reconnect before timer fires
-    const wsA2 = new WebSocket(`ws://localhost:${testPort}/worker`);
-    await new Promise<void>((resolve, reject) => { wsA2.once("open", resolve); wsA2.once("error", reject); });
-    send(wsA2, { type: "worker_hello", workerId: "worker-a", taskId: "1", status: "busy" });
-    await waitUntil(() => r.get("worker-a")?.status === "busy");
-
-    // Advance time past original timeout — timer should have been cancelled
-    vi.advanceTimersByTime(reclaimTimeoutMs + 100);
-    await new Promise((r) => setTimeout(r, 20));
-
-    // Task should still be assigned to worker-a
-    expect((await q.get("1"))?.status).toBe("assigned");
-    expect(r.get("worker-a")?.status).toBe("busy");
-
-    wsA2.close();
-    await new Promise<void>((r) => wsA2.once("close", r));
-    await new Promise<void>((r) => testWss.close(() => srv.close(r)));
-  });
-
-  it("late reconnect after timer fires can reclaim pending task", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    const reclaimTimeoutMs = 500;
-
-    const q = new TaskModel();
-    const r = new WorkerRegistry();
-    const srv = http.createServer();
-    const { wss: testWss } = createForemanWss(q, r, srv, { ...defaultCfg, workerReclaimTimeoutMs: reclaimTimeoutMs });
-    await new Promise<void>((resolve) => srv.listen(0, resolve));
-    const testPort = (srv.address() as AddressInfo).port;
-
-    await makeTask(q, 1);
-    const wsA = new WebSocket(`ws://localhost:${testPort}/worker`);
-    await new Promise<void>((resolve, reject) => { wsA.once("open", resolve); wsA.once("error", reject); });
-    send(wsA, { type: "worker_hello", workerId: "worker-a", status: "idle" });
-    await new Promise<void>((resolve) => wsA.once("message", resolve)); // task_assigned
-
-    // Disconnect
-    await new Promise<void>((resolve) => { wsA.once("close", resolve); wsA.close(); });
-    await waitUntil(() => r.get("worker-a")?.status === "disconnected");
-
-    // Let the timer fire
-    vi.advanceTimersByTime(reclaimTimeoutMs + 100);
-    // Wait for the reclaim to process (worker-a removed from registry)
-    await waitUntil(() => r.get("worker-a") === undefined);
-
-    // Task is now pending
-    expect((await q.get("1"))?.status).toBe("pending");
-
-    // Original worker reconnects as busy (late reconnect)
-    const wsA2 = new WebSocket(`ws://localhost:${testPort}/worker`);
-    await new Promise<void>((resolve, reject) => { wsA2.once("open", resolve); wsA2.once("error", reject); });
-    // Consume hello_ack before checking for no further messages
-    const ackPA2 = new Promise<void>((res) => wsA2.once("message", () => res()));
-    send(wsA2, { type: "worker_hello", workerId: "worker-a", taskId: "1", status: "busy" });
-    await ackPA2; // hello_ack
-    const raceResult = await Promise.race([
-      new Promise<ForemanMessage>((resolve) => wsA2.once("message", (d) => resolve(JSON.parse(d.toString())))).then(() => "message" as const),
-      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 100)),
-    ]);
-
-    // No message sent — reclaimed silently
-    expect(raceResult).toBe("timeout");
-    expect((await q.get("1"))?.status).toBe("assigned");
-    expect(r.get("worker-a")?.status).toBe("busy");
-
-    wsA2.close();
-    await new Promise<void>((r) => wsA2.once("close", r));
-    await new Promise<void>((r) => testWss.close(() => srv.close(r)));
-  });
-
-  it("stale close from old connection does not corrupt registry when worker has already reconnected", async () => {
+describe("stale close from old connection", () => {
+  it("does not corrupt registry when worker has already reconnected", async () => {
     // Bug: if ws1's close event fires AFTER ws2 has already reconnected and registered,
-    // the foreman was incorrectly marking ws2's registry entry as "disconnected" and
-    // starting a reclaim timer. This would eventually cancel a legitimately working worker.
+    // the foreman was incorrectly handling the stale close. This test ensures a stale
+    // close doesn't mark a working worker as disconnected or otherwise corrupt state.
 
     // Connect wsA and get a task
     const wsA = await connect();
@@ -1337,7 +1189,7 @@ describe("reclaim timer (fake timers)", () => {
     // Give server a few event-loop ticks to process the close
     for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));
 
-    // The stale close must be ignored — registry stays "busy", no reclaim timer
+    // The stale close must be ignored — registry stays "busy"
     expect(registry.get("worker-a")?.status).toBe("busy");
     expect(registry.get("worker-a")?.currentTaskId).toBe("1");
 

@@ -9,7 +9,6 @@ export interface WorkerState {
   status: "idle" | "busy" | "disconnected";
   currentTaskId?: string;
   disconnectedAt?: Date;
-  disconnectTimer?: ReturnType<typeof setTimeout>;
 }
 
 export class WorkerRegistry extends EventEmitter {
@@ -71,19 +70,6 @@ export class WorkerRegistry extends EventEmitter {
     this.emit("changed");
   }
 
-  startReclaimTimer(workerId: string, timeoutMs: number, onReclaim: () => void): void {
-    const w = this.workers.get(workerId);
-    if (!w) return;
-    if (w.disconnectTimer) clearTimeout(w.disconnectTimer);
-    w.disconnectTimer = setTimeout(onReclaim, timeoutMs);
-  }
-
-  cancelReclaimTimer(workerId: string): void {
-    const w = this.workers.get(workerId);
-    if (!w?.disconnectTimer) return;
-    clearTimeout(w.disconnectTimer);
-    w.disconnectTimer = undefined;
-  }
 
   send(workerId: string, msg: ForemanMessage) {
     const w = this.workers.get(workerId);

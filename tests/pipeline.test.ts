@@ -9,9 +9,8 @@
  *  1. Happy path: webhook → pending in DB → worker → assigned → task_complete → complete in DB
  *  2. Queued then assigned: webhook with no worker → pending → worker connects → assigned
  *  3. Worker disconnect/reclaim: disconnects → reconnects as busy → task still assigned in DB
- *  4. Worker disconnect/expire: reclaim timer fires → task reverted to pending → new worker gets it
- *  5. Dependency blocking: open blocker → worker doesn't get task → blocker closed → assigned
- *  6. PR events forwarded: worker gets task → PR opened → check_run fires → event_notification
+ *  4. Dependency blocking: open blocker → worker doesn't get task → blocker closed → assigned
+ *  5. PR events forwarded: worker gets task → PR opened → check_run fires → event_notification
  *     sent to worker and webhook_events row in DB has correct task_id
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -210,7 +209,6 @@ function stubFetchNoBlockers() {
  * The caller is responsible for closing any open WebSocket clients first.
  */
 function buildForeman(opts: {
-  reclaimTimeoutMs?: number;
   dbLogger?: DbLogger;
 } = {}): {
   taskModel: TaskModel;
@@ -230,7 +228,6 @@ function buildForeman(opts: {
 
   const { wss, routeEvent } = createForemanWss(taskModel, registry, httpServer, {
     ...defaultCfg,
-    workerReclaimTimeoutMs: opts.reclaimTimeoutMs ?? defaultCfg.workerReclaimTimeoutMs,
     githubRepo: "owner/repo",
     githubToken: "token",
   }, {
@@ -381,7 +378,7 @@ describe("pipeline: happy path and queued-then-assigned", () => {
 // Scenario 3 — worker disconnect and reclaim within window
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("pipeline: worker disconnect/reclaim (within reclaim window)", () => {
+describe("pipeline: worker disconnect/reclaim", () => {
   let foreman: ReturnType<typeof buildForeman>;
 
   beforeEach(async () => {
@@ -389,8 +386,7 @@ describe("pipeline: worker disconnect/reclaim (within reclaim window)", () => {
     process.env.GITHUB_REPO = "owner/repo";
     process.env.GITHUB_TOKEN = "token";
     await supabase.from("tasks").delete().in("task_id", ["70"]);
-    // Long enough reclaim window that the reconnect happens before it expires
-    foreman = buildForeman({ reclaimTimeoutMs: 30_000 });
+    foreman = buildForeman();
     await new Promise<void>((resolve) =>
       foreman.httpServer.once("listening", resolve),
     );
@@ -450,90 +446,7 @@ describe("pipeline: worker disconnect/reclaim (within reclaim window)", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Scenario 4 — worker disconnect, reclaim timer expires
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe("pipeline: worker disconnect/expire (reclaim timer fires)", () => {
-  let foreman: ReturnType<typeof buildForeman>;
-
-  beforeEach(async () => {
-    stubFetchNoBlockers();
-    process.env.GITHUB_REPO = "owner/repo";
-    process.env.GITHUB_TOKEN = "token";
-    await supabase.from("tasks").delete().in("task_id", ["80"]);
-    // Very short reclaim window so the timer fires quickly
-    foreman = buildForeman({ reclaimTimeoutMs: 80 });
-    await new Promise<void>((resolve) =>
-      foreman.httpServer.once("listening", resolve),
-    );
-  });
-
-  afterEach(async () => {
-    vi.unstubAllGlobals();
-    delete process.env.GITHUB_REPO;
-    delete process.env.GITHUB_TOKEN;
-    await foreman.teardown();
-  });
-
-  it("worker disconnects → reclaim timer fires → task reverted to pending in DB → new worker gets it", async () => {
-    const { taskModel, routeEvent, connect, openClients } = foreman;
-
-    // 1. Assign task to first worker
-    await routeEvent("evt-1", "issues", labeledPayload(80));
-    const ws1 = await connect();
-    const q1 = makeQueue(ws1);
-    send(ws1, { type: "worker_hello", workerId: "w-expire", status: "idle" });
-    await q1.next(); // hello_ack
-    await q1.next(); // task_assigned
-
-    await pollUntil(async () => {
-      const row = await getDbTask("80");
-      return row?.status === "assigned" ? row : null;
-    });
-
-    // 2. Worker disconnects; do not reconnect
-    const closed = new Promise<void>((resolve) =>
-      ws1.once("close", resolve),
-    );
-    ws1.terminate();
-    await closed;
-    const idx = openClients.indexOf(ws1);
-    if (idx >= 0) openClients.splice(idx, 1);
-
-    // 3. Wait for the reclaim timer to fire and revert the task to pending in DB
-    await pollUntil(async () => {
-      const row = await getDbTask("80");
-      return row?.status === "pending" ? row : null;
-    });
-
-    // 4. Store also shows pending
-    expect((await taskModel.get("80"))?.status).toBe("pending");
-
-    // 5. New worker connects and receives the task
-    const ws2 = await connect();
-    const q2 = makeQueue(ws2);
-    send(ws2, {
-      type: "worker_hello",
-      workerId: "w-expire-new",
-      status: "idle",
-    });
-    await q2.next(); // hello_ack
-    const assigned = await q2.next();
-    expect(assigned.type).toBe("task_assigned");
-    expect((assigned as any).issue.number).toBe(80);
-
-    // 6. DB shows assigned to new worker
-    await pollUntil(async () => {
-      const row = await getDbTask("80");
-      return row?.status === "assigned" && row.workerId === "w-expire-new"
-        ? row
-        : null;
-    });
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Scenario 5 — dependency blocking
+// Scenario 4 — dependency blocking
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("pipeline: dependency blocking", () => {

@@ -313,7 +313,7 @@ describe("issues/closed — task lifecycle", () => {
     const tm2 = new TaskModel(mockStore as any);
     const r2 = new WorkerRegistry();
     const s2 = http.createServer();
-    const { routeEvent: re2 } = createForemanWss(tm2, r2, s2, { ...defaultCfg, taskLabel: TASK_LABEL, workerReclaimTimeoutMs: 30000 });
+    const { routeEvent: re2 } = createForemanWss(tm2, r2, s2, { ...defaultCfg, taskLabel: TASK_LABEL });
 
     tm2.trackIssue(42, makeIssue(42), true);
 
