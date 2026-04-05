@@ -71,7 +71,9 @@ describe("reconcile()", () => {
       markAssigned: vi.fn().mockResolvedValue(undefined),
       markComplete: vi.fn().mockResolvedValue(undefined),
       markPending: vi.fn().mockResolvedValue(undefined),
-      markBlocked: vi.fn().mockResolvedValue(undefined),
+      setIssueClosed: vi.fn().mockResolvedValue(undefined),
+      clearIssueClosed: vi.fn().mockResolvedValue(undefined),
+      setPrMerged: vi.fn().mockResolvedValue(undefined),
       updateTaskContent: vi.fn().mockResolvedValue(undefined),
       updateTaskPr: vi.fn().mockResolvedValue(undefined),
       deleteTask: vi.fn().mockResolvedValue(undefined),
@@ -85,9 +87,9 @@ describe("reconcile()", () => {
     // Make getTaskByIssue return a row after register so reconcile sees the existing task
     const storedRow = {
       taskId: "42", issueNumber: 42, repo: "test/repo", title: "Old Title",
-      body: "old", labels: [], status: "pending" as const,
-      workerId: null, assignedAt: null, completedAt: null,
-      prNumber: null, branch: null,
+      body: "old", labels: [],
+      workerId: null, assignedAt: null, completedAt: null, issueClosedAt: null, prMergedAt: null,
+      prNumber: null, branch: null, createdAt: new Date().toISOString(),
     };
     mockStore.getTaskByIssue.mockResolvedValue(storedRow);
     mockStore.getTask.mockResolvedValue(storedRow);
@@ -168,16 +170,18 @@ describe("reconcile()", () => {
     const deleteTask = vi.fn().mockResolvedValue(undefined);
     const storedRow = {
       taskId: "9", issueNumber: 9, repo: "test/repo", title: "T",
-      body: "b", labels: [], status: "pending" as const,
-      workerId: null, assignedAt: null, completedAt: null,
-      prNumber: null, branch: null,
+      body: "b", labels: [],
+      workerId: null, assignedAt: null, completedAt: null, issueClosedAt: null, prMergedAt: null,
+      prNumber: null, branch: null, createdAt: new Date().toISOString(),
     };
     const mockStore: TaskStore = {
       upsertTask: vi.fn().mockResolvedValue(undefined),
       markAssigned: vi.fn().mockResolvedValue(undefined),
       markComplete: vi.fn().mockResolvedValue(undefined),
       markPending: vi.fn().mockResolvedValue(undefined),
-      markBlocked: vi.fn().mockResolvedValue(undefined),
+      setIssueClosed: vi.fn().mockResolvedValue(undefined),
+      clearIssueClosed: vi.fn().mockResolvedValue(undefined),
+      setPrMerged: vi.fn().mockResolvedValue(undefined),
       deleteTask,
       getTask: vi.fn().mockResolvedValue(null),
       getTaskByIssue: vi.fn().mockResolvedValue(null),
@@ -232,7 +236,7 @@ describe("reconcile()", () => {
 });
 
 describe("issues/closed — task lifecycle", () => {
-  it("marks an assigned task complete when its issue is closed", async () => {
+  it("marks an assigned task closed when its issue is closed", async () => {
     taskModel.trackIssue(42, makeIssue(42), true);
     await taskModel.register("42", 42, "test/repo", "T", "b", []);
     await taskModel.assign("42", "worker-1");
@@ -242,7 +246,7 @@ describe("issues/closed — task lifecycle", () => {
       issue: { number: 42, title: "T", body: "", labels: [] },
     });
 
-    expect((await taskModel.get("42"))?.status).toBe("complete");
+    expect((await taskModel.get("42"))?.status).toBe("closed");
   });
 
   it("leaves a complete task complete when its issue is closed again", async () => {
@@ -258,11 +262,9 @@ describe("issues/closed — task lifecycle", () => {
     expect((await taskModel.get("42"))?.status).toBe("complete");
   });
 
-  it("marks a pending task complete when its issue is closed", async () => {
-    // Bug #489: closing an issue with a pending task should mark it complete in DB.
-    // Previously, only assigned tasks were marked complete; pending tasks were cancelled
-    // via reconcile, but deleteTask silently skips rows where assigned_at IS NOT NULL
-    // (tasks that previously had a worker), leaving stale pending rows in the DB.
+  it("marks a pending task closed when its issue is closed", async () => {
+    // When an issue is closed, the task's issueClosedAt timestamp is set, deriving status as 'closed'.
+    // The worker will later call task_complete to finalize it as 'complete'.
     taskModel.trackIssue(42, makeIssue(42), true);
     await taskModel.register("42", 42, "test/repo", "T", "b", []);
 
@@ -271,36 +273,46 @@ describe("issues/closed — task lifecycle", () => {
       issue: { number: 42, title: "T", body: "", labels: [] },
     });
 
-    expect((await taskModel.get("42"))?.status).toBe("complete");
+    expect((await taskModel.get("42"))?.status).toBe("closed");
   });
 
-  it("marks a blocked task complete when its issue is closed", async () => {
-    taskModel.trackIssue(42, makeIssue(42), true);
-    await taskModel.register("42", 42, "test/repo", "T", "b", []);
-    await taskModel.block("42");
+  it("marks a blocked task closed when its issue is closed", async () => {
+    const server = http.createServer();
+    const { routeEvent: re } = createForemanWss(taskModel, new WorkerRegistry(), server, { ...defaultCfg, taskLabel: TASK_LABEL }, { graph: new Map([[42, new Set([99])]]) });
 
-    await routeEvent("evt-1", "issues", {
+    taskModel.trackIssue(42, makeIssue(42), true);
+    taskModel.setIssueOpenState(99, true); // blocker is open
+    await taskModel.register("42", 42, "test/repo", "T", "b", []);
+
+    // Verify it's blocked
+    expect((await taskModel.get("42"))?.status).toBe("blocked");
+
+    // Close the issue
+    await re("evt-1", "issues", {
       action: "closed",
       issue: { number: 42, title: "T", body: "", labels: [] },
     });
 
-    expect((await taskModel.get("42"))?.status).toBe("complete");
+    // Now it should be closed (not complete, until worker sends task_complete)
+    expect((await taskModel.get("42"))?.status).toBe("closed");
+    server.close();
   });
 
-  it("calls store.markComplete for a pending task when its issue is closed", async () => {
+  it("calls store.setIssueClosed for a pending task when its issue is closed", async () => {
     const storedRow = {
       taskId: "42", issueNumber: 42, repo: "test/repo", title: "T",
-      body: "b", labels: [], status: "pending" as const,
-      workerId: null, assignedAt: null, completedAt: null,
-      prNumber: null, branch: null,
+      body: "b", labels: [],
+      workerId: null, assignedAt: null, completedAt: null, issueClosedAt: null, prMergedAt: null,
+      prNumber: null, branch: null, createdAt: new Date().toISOString(),
     };
-    const completeRow = { ...storedRow, status: "complete" as const };
     const mockStore = {
       upsertTask: vi.fn().mockResolvedValue(undefined),
       markAssigned: vi.fn().mockResolvedValue(undefined),
-      markComplete: vi.fn(async () => { storedRow.status = "complete" as any; }),
+      markComplete: vi.fn().mockResolvedValue(undefined),
       markPending: vi.fn().mockResolvedValue(undefined),
-      markBlocked: vi.fn().mockResolvedValue(undefined),
+      setIssueClosed: vi.fn(async () => { storedRow.issueClosedAt = new Date().toISOString(); }),
+      clearIssueClosed: vi.fn().mockResolvedValue(undefined),
+      setPrMerged: vi.fn().mockResolvedValue(undefined),
       deleteTask: vi.fn().mockResolvedValue(undefined),
       getTask: vi.fn().mockImplementation(async () => storedRow),
       getTaskByIssue: vi.fn().mockImplementation(async () => storedRow),
@@ -323,7 +335,7 @@ describe("issues/closed — task lifecycle", () => {
     });
 
     await new Promise((r) => setImmediate(r));
-    expect(mockStore.markComplete).toHaveBeenCalledWith("42");
+    expect(mockStore.setIssueClosed).toHaveBeenCalledWith("42");
     expect(mockStore.deleteTask).not.toHaveBeenCalled();
   });
 });

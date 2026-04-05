@@ -136,8 +136,9 @@ export class TaskModel extends EventEmitter {
   }
 
   async getPendingAndBlockedTasks(): Promise<Task[]> {
-    const rows = await this.store.listTasks({ cancelable: true });
-    return rows.map(rowToTask);
+    const rows = await this.store.listTasks();
+    // Filter out complete tasks (those with completedAt set)
+    return rows.filter(r => !r.completedAt).map(rowToTask);
   }
 
   // ── Memory-only write operations (ephemeral data) ─────────────────────────
