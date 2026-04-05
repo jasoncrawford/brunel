@@ -15,6 +15,23 @@ import { waitUntil } from "./helpers.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+/** Register a task and mark its deps as loaded so tryAssignWork will pick it up. */
+async function registerReady(
+  tm: TaskModel,
+  taskId: string,
+  issueNumber: number,
+  repoSlug: string,
+  title: string,
+  body: string,
+  labels: string[],
+): Promise<void> {
+  await tm.register(taskId, issueNumber, repoSlug, title, body, labels);
+  tm.trackIssue(issueNumber, {
+    number: issueNumber, title, body, labels,
+    repoUrl: `https://github.com/${repoSlug}`,
+  }, true);
+}
+
 function connectWorker(port: number): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(`ws://localhost:${port}/worker`);
@@ -33,6 +50,20 @@ function send(ws: WebSocket, msg: object) {
   ws.send(JSON.stringify(msg));
 }
 
+/** Collects messages until predicate returns true; resolves with the matching message. */
+function nextMsgWhere(ws: WebSocket, predicate: (msg: ForemanMessage) => boolean): Promise<ForemanMessage> {
+  return new Promise((resolve) => {
+    const handler = (data: Buffer | string) => {
+      const msg: ForemanMessage = JSON.parse(data.toString());
+      if (predicate(msg)) {
+        ws.off("message", handler);
+        resolve(msg);
+      }
+    };
+    ws.on("message", handler);
+  });
+}
+
 // ISO 8601 timestamp prefix: e.g. "2026-03-17T22:48:59.123Z "
 const ISO_TIMESTAMP_PREFIX = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z /;
 
@@ -42,7 +73,7 @@ let taskModel: TaskModel;
 let registry: WorkerRegistry;
 let httpServer: http.Server;
 let wss: WebSocketServer;
-let routeEvent: (id: string, name: string, payload: unknown) => void;
+let routeEvent: (id: string, name: string, payload: unknown) => Promise<void>;
 let port: number;
 let logLines: string[];
 const openClients: WebSocket[] = [];
@@ -112,17 +143,10 @@ describe("foreman log timestamps", () => {
   });
 
   it("task_assigned log line starts with ISO 8601 timestamp", async () => {
-    taskModel.loadTask({
-      taskId: "1",
-      issueNumber: 1,
-      title: "Fix the thing",
-      body: "Body",
-      labels: [],
-      repoUrl: "https://github.com/owner/repo",
-    });
+    await registerReady(taskModel, "1", 1, "owner/repo", "Fix the thing", "Body", []);
 
     const ws = await connect();
-    const reply = nextMsg(ws);
+    const reply = nextMsgWhere(ws, (m) => m.type === "task_assigned");
     send(ws, { type: "worker_hello", workerId: "worker-abc123", status: "idle" });
     await reply;
 
@@ -132,18 +156,11 @@ describe("foreman log timestamps", () => {
   });
 
   it("event_notification log line starts with ISO 8601 timestamp", async () => {
-    taskModel.loadTask({
-      taskId: "1",
-      issueNumber: 1,
-      title: "Fix the thing",
-      body: "Body",
-      labels: [],
-      repoUrl: "https://github.com/owner/repo",
-    });
+    await registerReady(taskModel, "1", 1, "owner/repo", "Fix the thing", "Body", []);
 
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "worker-abc123", status: "idle" });
-    await nextMsg(ws); // task_assigned
+    await nextMsgWhere(ws, (m) => m.type === "task_assigned");
 
     logLines.length = 0;
     const reply = nextMsg(ws);

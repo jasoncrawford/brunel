@@ -54,8 +54,8 @@ if (isMain) {
   const server = createHttpServer(webhooks, (id, name, payload) => foremanWss.routeEvent(id, name, payload), dbLogger, taskModel);
 
   // Admin WebSocket broadcaster
-  const adminWss = createAdminWss(server, () => ({
-    tasks: taskModel.getTaskSnapshots(graph),
+  const adminWss = createAdminWss(server, async () => ({
+    tasks: await taskModel.getTaskSnapshots(graph),
     workers: registry.getWorkerSnapshots(),
   }));
 

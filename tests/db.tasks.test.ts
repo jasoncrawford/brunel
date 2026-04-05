@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { createTaskStore, createNullTaskStore } from "../src/foreman/db.js";
+import { createTaskStore, createMemoryTaskStore } from "../src/foreman/db.js";
 import { createTestSupabase } from "./helpers/db.js";
 
 const supabase = createTestSupabase();
@@ -265,46 +265,117 @@ describe("createTaskStore — blocked status", () => {
   });
 });
 
-// ── Tests: createNullTaskStore ─────────────────────────────────────────────────
+// ── Tests: createMemoryTaskStore ───────────────────────────────────────────────
 
-describe("createNullTaskStore", () => {
-  it("upsertTask resolves without error", async () => {
-    const store = createNullTaskStore();
-    await expect(store.upsertTask("dbt-42", 42, "r/r", "title", "", [])).resolves.toBeUndefined();
+describe("createMemoryTaskStore", () => {
+  it("upsertTask stores a task that can be retrieved", async () => {
+    const store = createMemoryTaskStore();
+    await store.upsertTask("dbt-42", 42, "r/r", "title", "", []);
+    const task = await store.getTask("dbt-42");
+    expect(task).not.toBeNull();
+    expect(task?.taskId).toBe("dbt-42");
+    expect(task?.status).toBe("pending");
   });
 
-  it("markAssigned resolves without error", async () => {
-    const store = createNullTaskStore();
-    await expect(store.markAssigned("dbt-42", "w1")).resolves.toBeUndefined();
+  it("markAssigned updates status and workerId", async () => {
+    const store = createMemoryTaskStore();
+    await store.upsertTask("dbt-42", 42, "r/r", "title", "", []);
+    await store.markAssigned("dbt-42", "w1");
+    const task = await store.getTask("dbt-42");
+    expect(task?.status).toBe("assigned");
+    expect(task?.workerId).toBe("w1");
   });
 
-  it("markComplete resolves without error", async () => {
-    const store = createNullTaskStore();
-    await expect(store.markComplete("dbt-42")).resolves.toBeUndefined();
+  it("markComplete updates status", async () => {
+    const store = createMemoryTaskStore();
+    await store.upsertTask("dbt-42", 42, "r/r", "title", "", []);
+    await store.markComplete("dbt-42");
+    const task = await store.getTask("dbt-42");
+    expect(task?.status).toBe("complete");
   });
 
-  it("markPending resolves without error", async () => {
-    const store = createNullTaskStore();
-    await expect(store.markPending("dbt-42")).resolves.toBeUndefined();
+  it("markPending reverts status and clears workerId", async () => {
+    const store = createMemoryTaskStore();
+    await store.upsertTask("dbt-42", 42, "r/r", "title", "", []);
+    await store.markAssigned("dbt-42", "w1");
+    await store.markPending("dbt-42");
+    const task = await store.getTask("dbt-42");
+    expect(task?.status).toBe("pending");
+    expect(task?.workerId).toBeNull();
   });
 
-  it("markBlocked resolves without error", async () => {
-    const store = createNullTaskStore();
-    await expect(store.markBlocked("dbt-42")).resolves.toBeUndefined();
+  it("markBlocked updates status", async () => {
+    const store = createMemoryTaskStore();
+    await store.upsertTask("dbt-42", 42, "r/r", "title", "", []);
+    await store.markBlocked("dbt-42");
+    const task = await store.getTask("dbt-42");
+    expect(task?.status).toBe("blocked");
   });
 
-  it("updateTaskPr resolves without error", async () => {
-    const store = createNullTaskStore();
-    await expect(store.updateTaskPr("dbt-42", 10, "fix")).resolves.toBeUndefined();
+  it("updateTaskPr stores prNumber and branch", async () => {
+    const store = createMemoryTaskStore();
+    await store.upsertTask("dbt-42", 42, "r/r", "title", "", []);
+    await store.updateTaskPr("dbt-42", 10, "fix");
+    const task = await store.getTask("dbt-42");
+    expect(task?.prNumber).toBe(10);
+    expect(task?.branch).toBe("fix");
   });
 
-  it("deleteTask resolves without error", async () => {
-    const store = createNullTaskStore();
-    await expect(store.deleteTask("dbt-42")).resolves.toBeUndefined();
+  it("deleteTask removes a never-assigned task", async () => {
+    const store = createMemoryTaskStore();
+    await store.upsertTask("dbt-42", 42, "r/r", "title", "", []);
+    await store.deleteTask("dbt-42");
+    expect(await store.getTask("dbt-42")).toBeNull();
   });
 
-  it("listTasks returns empty array", async () => {
-    const store = createNullTaskStore();
-    expect(await store.listTasks()).toEqual([]);
+  it("deleteTask preserves a previously-assigned task", async () => {
+    const store = createMemoryTaskStore();
+    await store.upsertTask("dbt-42", 42, "r/r", "title", "", []);
+    await store.markAssigned("dbt-42", "w1");
+    await store.markPending("dbt-42");
+    await store.deleteTask("dbt-42");
+    // Row must still exist because it has history (assignedAt is set)
+    expect(await store.getTask("dbt-42")).not.toBeNull();
+  });
+
+  it("listTasks returns stored tasks", async () => {
+    const store = createMemoryTaskStore();
+    await store.upsertTask("dbt-1", 1, "r/r", "T1", "", []);
+    await store.upsertTask("dbt-2", 2, "r/r", "T2", "", []);
+    const tasks = await store.listTasks();
+    expect(tasks).toHaveLength(2);
+  });
+
+  it("listTasks filters by status", async () => {
+    const store = createMemoryTaskStore();
+    await store.upsertTask("dbt-1", 1, "r/r", "T1", "", []);
+    await store.upsertTask("dbt-2", 2, "r/r", "T2", "", []);
+    await store.markBlocked("dbt-2");
+    const pending = await store.listTasks({ status: "pending" });
+    expect(pending).toHaveLength(1);
+    expect(pending[0].taskId).toBe("dbt-1");
+  });
+
+  it("getTaskByIssue finds task by issue number", async () => {
+    const store = createMemoryTaskStore();
+    await store.upsertTask("dbt-42", 42, "r/r", "title", "", []);
+    const task = await store.getTaskByIssue(42);
+    expect(task?.taskId).toBe("dbt-42");
+  });
+
+  it("getTaskByPr finds task by PR number", async () => {
+    const store = createMemoryTaskStore();
+    await store.upsertTask("dbt-42", 42, "r/r", "title", "", []);
+    await store.updateTaskPr("dbt-42", 10, "fix");
+    const task = await store.getTaskByPr(10);
+    expect(task?.taskId).toBe("dbt-42");
+  });
+
+  it("getTaskByWorker finds assigned task for worker", async () => {
+    const store = createMemoryTaskStore();
+    await store.upsertTask("dbt-42", 42, "r/r", "title", "", []);
+    await store.markAssigned("dbt-42", "w1");
+    const task = await store.getTaskByWorker("w1");
+    expect(task?.taskId).toBe("dbt-42");
   });
 });

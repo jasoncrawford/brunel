@@ -35,6 +35,23 @@ function makeMockAdminWss(): AdminWss {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+/** Register a task and mark its deps as loaded so tryAssignWork will pick it up. */
+async function registerReady(
+  tm: TaskModel,
+  taskId: string,
+  issueNumber: number,
+  repoSlug: string,
+  title: string,
+  body: string,
+  labels: string[],
+): Promise<void> {
+  await tm.register(taskId, issueNumber, repoSlug, title, body, labels);
+  tm.trackIssue(issueNumber, {
+    number: issueNumber, title, body, labels,
+    repoUrl: `https://github.com/${repoSlug}`,
+  }, true);
+}
+
 function connectWorker(port: number): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(`ws://localhost:${port}/worker`);
@@ -54,7 +71,7 @@ let registry: WorkerRegistry;
 let httpServer: http.Server;
 let wss: WebSocketServer;
 let adminWss: AdminWss;
-let routeEvent: (id: string, name: string, payload: unknown) => void;
+let routeEvent: (id: string, name: string, payload: unknown) => Promise<void>;
 let port: number;
 const openClients: WebSocket[] = [];
 
@@ -107,7 +124,7 @@ afterEach(() => {
 
 describe("foreman admin broadcast — snapshot on PR registration", () => {
   it("broadcasts updated snapshot with prNumber when a PR is opened for a task", async () => {
-    taskModel.loadTask({ taskId: "42", issueNumber: 42, title: "Fix the bug", body: "", labels: [], repoUrl: "https://github.com/owner/repo" });
+    await registerReady(taskModel, "42", 42, "owner/repo", "Fix the bug", "", []);
 
     const snapshots: AdminSnapshot[] = [];
     adminWss.broadcastSnapshot = (snapshot) => snapshots.push(snapshot);
@@ -145,12 +162,12 @@ describe("foreman admin broadcast — reactive snapshot pipeline", () => {
     const snapshots: AdminSnapshot[] = [];
     adminWss.broadcastSnapshot = (snapshot) => snapshots.push(snapshot);
 
-    taskModel.loadTask({ taskId: "1", issueNumber: 1, title: "T1", body: "", labels: [], repoUrl: "https://github.com/owner/repo" });
-    taskModel.loadTask({ taskId: "2", issueNumber: 2, title: "T2", body: "", labels: [], repoUrl: "https://github.com/owner/repo" });
-    taskModel.loadTask({ taskId: "3", issueNumber: 3, title: "T3", body: "", labels: [], repoUrl: "https://github.com/owner/repo" });
+    await taskModel.register("1", 1, "owner/repo", "T1", "", []);
+    await taskModel.register("2", 2, "owner/repo", "T2", "", []);
+    await taskModel.register("3", 3, "owner/repo", "T3", "", []);
 
     await waitUntil(() => snapshots.length > 0);
-    // All three addTask calls are within the same tick, so debounce collapses them
+    // All three register calls are within the same tick, so debounce collapses them
     expect(snapshots.length).toBe(1);
     expect(snapshots[0].tasks).toHaveLength(3);
   });
@@ -170,7 +187,8 @@ describe("foreman admin broadcast — hello_ack log event summary", () => {
   });
 
   it("hello_ack busy includes status and taskId in summary", async () => {
-    taskModel.loadTask({ taskId: "42", issueNumber: 42, title: "Fix the bug", body: "", labels: [], repoUrl: "https://github.com/owner/repo" });
+    await registerReady(taskModel, "42", 42, "owner/repo", "Fix the bug", "", []);
+    await taskModel.assign("42", "worker-abc");
 
     const logEntries: LogEntry[] = [];
     adminWss.broadcastLogEvent = (entry) => logEntries.push(entry);
@@ -185,7 +203,7 @@ describe("foreman admin broadcast — hello_ack log event summary", () => {
   });
 
   it("hello_ack cancelled includes status and taskId in summary", async () => {
-    taskModel.loadTask({ taskId: "42", issueNumber: 42, title: "Fix the bug", body: "", labels: [], repoUrl: "https://github.com/owner/repo" });
+    await registerReady(taskModel, "42", 42, "owner/repo", "Fix the bug", "", []);
     await taskModel.complete("42");
 
     const logEntries: LogEntry[] = [];

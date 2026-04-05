@@ -1,7 +1,7 @@
 import { EventEmitter } from "events";
 import type { GitHubEvent, LabeledIssueState, TaskIssue, TaskStatus } from "../types.js";
 import type { TaskStore, TaskRow, ListTasksOpts } from "./db.js";
-import { createNullTaskStore, createTaskStore } from "./db.js";
+import { createMemoryTaskStore, createTaskStore } from "./db.js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isBlocked } from "./dependencies.js";
 import type { DependencyGraph } from "./dependencies.js";
@@ -11,6 +11,8 @@ import { fmtError } from "../utils.js";
 
 
 // ── Task ──────────────────────────────────────────────────────────────────────
+// Read-only view of a task, constructed from a TaskRow.  Callers receive this
+// from TaskModel read methods; mutations go through TaskModel write methods.
 
 export interface Task {
   taskId: string;
@@ -22,208 +24,128 @@ export interface Task {
   status: TaskStatus;
   assignedWorkerId?: string;
   prNumber?: number;
-  eventQueue: GitHubEvent[];
-  /** True once fetchBlockers has resolved and the dependency graph is populated. */
-  depsLoaded: boolean;
+  branch?: string;
+}
+
+function rowToTask(row: TaskRow): Task {
+  return {
+    taskId: row.taskId,
+    issueNumber: row.issueNumber,
+    title: row.title,
+    body: row.body,
+    labels: row.labels,
+    repoUrl: `https://github.com/${row.repo}`,
+    status: row.status,
+    assignedWorkerId: row.workerId ?? undefined,
+    prNumber: row.prNumber ?? undefined,
+    branch: row.branch ?? undefined,
+  };
 }
 
 
 // ── TaskModel ─────────────────────────────────────────────────────────────────
-// Single owner of all task state — both the in-memory cache and the persistent
-// DB store.  Every state transition updates both atomically.
+// Single owner of all task state.  Reads and writes go through the TaskStore
+// (Supabase in production, in-memory store for local dev / tests).  There is no
+// in-memory cache — the store IS the source of truth.
 //
-// The in-memory cache exists for three reasons:
-//   1. Sync lookups in hot paths (event routing does 8+ lookups per webhook).
-//   2. Ephemeral data that has no DB backing (event queues, branch mappings).
-//   3. "changed" events that drive the reactive admin dashboard.
+// The only in-memory state is ephemeral data with no DB backing:
+//   - Event queues: buffered GitHub events for pending/disconnected workers
+//   - Branch mappings: branch→taskId for routing check_run/check_suite events
+//   - GitHub issue tracking: labeledIssues + openIssues for dependency resolution
 //
-// The DB is the authoritative source of truth; in-memory state is a derived
-// cache that is populated from the DB at startup.
-//
-// Also owns labeledIssues and openIssues — the cached mirrors of GitHub issue
-// state — and exposes atomic issue-lifecycle methods so callers never have to
-// keep these two maps in sync manually.
+// Emits "changed" after every write so the admin dashboard can refresh.
 
 export class TaskModel extends EventEmitter {
-  // ── In-memory task cache ──────────────────────────────────────────────────
-  private tasks = new Map<string, Task>();
-  private prToTaskId = new Map<number, string>();
-  private branchToTaskId = new Map<string, string>();
-
-  // ── Persistent store ──────────────────────────────────────────────────────
+  // ── Persistent store (sole source of truth for task data) ─────────────────
   private store: TaskStore;
+
+  // ── Ephemeral in-memory state (no DB backing) ────────────────────────────
+  private eventQueues = new Map<string, GitHubEvent[]>();
+  private branchToTaskId = new Map<string, string>();
 
   // ── GitHub issue state ────────────────────────────────────────────────────
   private _labeledIssues: Map<number, LabeledIssueState>;
   private _openIssues: Set<number>;
 
   static create(supabase?: SupabaseClient): TaskModel {
-    const store = supabase ? createTaskStore(supabase) : createNullTaskStore();
+    const store = supabase ? createTaskStore(supabase) : createMemoryTaskStore();
     return new TaskModel(store);
   }
 
   constructor(store?: TaskStore) {
     super();
-    this.store = store ?? createNullTaskStore();
+    this.store = store ?? createMemoryTaskStore();
     this._labeledIssues = new Map();
     this._openIssues = new Set();
   }
 
-  // ── In-memory helpers (private) ───────────────────────────────────────────
+  // ── Read operations (async — always reads from store) ─────────────────────
 
-  private addTaskToCache(t: Omit<Task, "status" | "assignedWorkerId" | "eventQueue" | "depsLoaded"> & Partial<Pick<Task, "status" | "eventQueue" | "depsLoaded">>): void {
-    this.tasks.set(t.taskId, {
-      ...t,
-      status: t.status ?? "pending",
-      eventQueue: t.eventQueue ?? [],
-      depsLoaded: t.depsLoaded ?? true,
-    });
-    this.emit("changed");
+  async get(taskId: string): Promise<Task | null> {
+    const row = await this.store.getTask(taskId);
+    return row ? rowToTask(row) : null;
   }
 
-  private assignTaskInCache(taskId: string, workerId: string): void {
-    const t = this.tasks.get(taskId);
-    if (!t) return;
-    t.status = "assigned";
-    t.assignedWorkerId = workerId;
-    this.emit("changed");
+  async getTaskForIssue(issueNumber: number): Promise<Task | null> {
+    const row = await this.store.getTaskByIssue(issueNumber);
+    return row ? rowToTask(row) : null;
   }
 
-  private completeTaskInCache(taskId: string): void {
-    const t = this.tasks.get(taskId);
-    if (t) {
-      t.status = "complete";
-      this.emit("changed");
-    }
+  async getTaskForPr(prNumber: number): Promise<Task | null> {
+    const row = await this.store.getTaskByPr(prNumber);
+    return row ? rowToTask(row) : null;
   }
 
-  private revertTaskInCache(taskId: string): void {
-    const t = this.tasks.get(taskId);
-    if (!t || t.status !== "assigned") return;
-    t.status = "pending";
-    t.assignedWorkerId = undefined;
-    this.emit("changed");
-  }
-
-  private setBlockedInCache(taskId: string): void {
-    const t = this.tasks.get(taskId);
-    if (!t || t.status !== "pending") return;
-    t.status = "blocked";
-    this.emit("changed");
-  }
-
-  private setUnblockedInCache(taskId: string): void {
-    const t = this.tasks.get(taskId);
-    if (!t || t.status !== "blocked") return;
-    t.status = "pending";
-    this.emit("changed");
-  }
-
-  private removeTaskFromCache(taskId: string): void {
-    const t = this.tasks.get(taskId);
-    if (!t || (t.status !== "pending" && t.status !== "blocked")) return;
-    this.tasks.delete(taskId);
-    this.emit("changed");
-  }
-
-  // ── Read operations ───────────────────────────────────────────────────────
-
-  get(taskId: string): Task | undefined {
-    return this.tasks.get(taskId);
-  }
-
-  getTaskForIssue(issueNumber: number): Task | undefined {
-    for (const t of this.tasks.values()) {
-      if (t.issueNumber === issueNumber) return t;
-    }
-    return undefined;
-  }
-
-  getTaskForPr(prNumber: number): Task | undefined {
-    const taskId = this.prToTaskId.get(prNumber);
-    return taskId ? this.tasks.get(taskId) : undefined;
-  }
-
-  getTaskForBranch(branch: string): Task | undefined {
+  async getTaskForBranch(branch: string): Promise<Task | null> {
+    // Branch mapping is ephemeral (set before DB write completes).
+    // Check ephemeral map first, fall back to DB query.
     const taskId = this.branchToTaskId.get(branch);
-    return taskId ? this.tasks.get(taskId) : undefined;
-  }
-
-  getAssignedTaskForWorker(workerId: string): Task | undefined {
-    for (const t of this.tasks.values()) {
-      if (t.status === "assigned" && t.assignedWorkerId === workerId) return t;
-    }
-    return undefined;
-  }
-
-  nextPending(isReady?: (t: Task) => boolean): Task | null {
-    for (const t of this.tasks.values()) {
-      if (t.status === "pending" && (isReady === undefined || isReady(t))) return t;
+    if (taskId) {
+      const row = await this.store.getTask(taskId);
+      return row ? rowToTask(row) : null;
     }
     return null;
   }
 
-  getPendingAndBlockedTasks(): Task[] {
-    return [...this.tasks.values()].filter((t) => t.status === "pending" || t.status === "blocked");
+  async getAssignedTaskForWorker(workerId: string): Promise<Task | null> {
+    const row = await this.store.getTaskByWorker(workerId);
+    return row ? rowToTask(row) : null;
   }
 
-  // ── Memory-only write operations ──────────────────────────────────────────
+  async nextPending(isReady?: (t: Task) => boolean): Promise<Task | null> {
+    const rows = await this.store.listTasks({ status: "pending" });
+    for (const row of rows) {
+      const task = rowToTask(row);
+      if (isReady === undefined || isReady(task)) return task;
+    }
+    return null;
+  }
+
+  async getPendingAndBlockedTasks(): Promise<Task[]> {
+    const [pending, blocked] = await Promise.all([
+      this.store.listTasks({ status: "pending" }),
+      this.store.listTasks({ status: "blocked" }),
+    ]);
+    return [...pending, ...blocked].map(rowToTask);
+  }
+
+  // ── Memory-only write operations (ephemeral data) ─────────────────────────
 
   queueEvent(taskId: string, event: GitHubEvent): void {
-    const t = this.tasks.get(taskId);
-    if (t) t.eventQueue.push(event);
+    let queue = this.eventQueues.get(taskId);
+    if (!queue) { queue = []; this.eventQueues.set(taskId, queue); }
+    queue.push(event);
   }
 
   drainEvents(taskId: string): GitHubEvent[] {
-    const t = this.tasks.get(taskId);
-    if (!t) return [];
-    const events = t.eventQueue.slice();
-    t.eventQueue = [];
-    return events;
+    const queue = this.eventQueues.get(taskId);
+    if (!queue || queue.length === 0) return [];
+    this.eventQueues.delete(taskId);
+    return queue;
   }
 
   registerBranch(branch: string, taskId: string): void {
     this.branchToTaskId.set(branch, taskId);
-  }
-
-  /** Update in-memory assignment without touching DB (used for reconnection reclaim). */
-  assignInMemory(taskId: string, workerId: string): void {
-    this.assignTaskInCache(taskId, workerId);
-  }
-
-  /** Load a task from a DB row into the in-memory cache (used at startup).
-   *  Does NOT write to the DB — the row already exists. */
-  loadTask(row: {
-    taskId: string;
-    issueNumber: number;
-    title: string;
-    body: string;
-    labels: string[];
-    repoUrl: string;
-    status?: TaskStatus;
-    workerId?: string | null;
-    prNumber?: number | null;
-    branch?: string | null;
-    depsLoaded?: boolean;
-  }): void {
-    this.addTaskToCache({
-      taskId: row.taskId,
-      issueNumber: row.issueNumber,
-      title: row.title,
-      body: row.body,
-      labels: row.labels,
-      repoUrl: row.repoUrl,
-      status: row.status,
-      depsLoaded: row.depsLoaded,
-    });
-    if (row.workerId) this.assignTaskInCache(row.taskId, row.workerId);
-    if (row.prNumber != null) {
-      this.prToTaskId.set(row.prNumber, row.taskId);
-      const t = this.tasks.get(row.taskId);
-      if (t) t.prNumber = row.prNumber;
-      this.emit("changed");
-    }
-    if (row.branch) this.branchToTaskId.set(row.branch, row.taskId);
   }
 
   // ── Issue-lifecycle methods ───────────────────────────────────────────────
@@ -234,25 +156,32 @@ export class TaskModel extends EventEmitter {
   /** Read-only view of tracked labeled issues — used by reconcile() for iteration. */
   getLabeledIssues(): ReadonlyMap<number, LabeledIssueState> { return this._labeledIssues; }
 
+  /** Whether deps have been loaded for this issue. */
+  isDepsLoaded(issueNumber: number): boolean {
+    const entry = this._labeledIssues.get(issueNumber);
+    return entry?.depsLoaded ?? false;
+  }
+
   /** Whether the issue is blocked by an open dependency. */
   isBlocked(issueNumber: number, graph: DependencyGraph): boolean {
     return isBlocked(issueNumber, graph, this._openIssues);
   }
 
   /** Task snapshots with open-issue state baked in — for admin broadcasts. */
-  getTaskSnapshots(graph: DependencyGraph): TaskSnapshot[] {
-    return [...this.tasks.values()].map((t) => {
+  async getTaskSnapshots(graph: DependencyGraph): Promise<TaskSnapshot[]> {
+    const rows = await this.store.listTasks();
+    return rows.map((row) => {
       const snapshot: TaskSnapshot = {
-        taskId: t.taskId,
-        issueNumber: t.issueNumber,
-        title: t.title,
-        status: t.status,
-        assignedWorkerId: t.assignedWorkerId,
-        prNumber: t.prNumber,
-        prUrl: t.prNumber !== undefined ? `${t.repoUrl}/pull/${t.prNumber}` : undefined,
+        taskId: row.taskId,
+        issueNumber: row.issueNumber,
+        title: row.title,
+        status: row.status,
+        assignedWorkerId: row.workerId ?? undefined,
+        prNumber: row.prNumber ?? undefined,
+        prUrl: row.prNumber != null ? `https://github.com/${row.repo}/pull/${row.prNumber}` : undefined,
       };
       if (graph !== undefined) {
-        const blockerSet = graph.get(t.issueNumber) ?? new Set<number>();
+        const blockerSet = graph.get(row.issueNumber) ?? new Set<number>();
         snapshot.blockers = Array.from(blockerSet).map((n) => ({
           issueNumber: n,
           isOpen: this._openIssues.has(n),
@@ -280,7 +209,7 @@ export class TaskModel extends EventEmitter {
   async closeIssue(issueNumber: number): Promise<void> {
     this._labeledIssues.delete(issueNumber);
     this._openIssues.delete(issueNumber);
-    const task = this.getTaskForIssue(issueNumber);
+    const task = await this.getTaskForIssue(issueNumber);
     if (task && task.status !== "complete") {
       await this.complete(task.taskId);
     }
@@ -314,25 +243,12 @@ export class TaskModel extends EventEmitter {
 
   // ── Startup methods ────────────────────────────────────────────────────────
 
-  /** Load active (non-complete) tasks from the DB into memory.
-   *  Called once at foreman startup before accepting connections. */
+  /** Register ephemeral branch mappings from DB at startup. */
   async loadActiveTasksFromDb(flog: (msg: string) => void): Promise<void> {
     const activeTasks = await this.listTasks();
     for (const row of activeTasks) {
       if (row.status === "complete") continue;
-      this.loadTask({
-        taskId: row.taskId,
-        issueNumber: row.issueNumber,
-        title: row.title,
-        body: row.body,
-        labels: row.labels,
-        repoUrl: `https://github.com/${row.repo}`,
-        status: row.status as TaskStatus,
-        workerId: row.workerId,
-        prNumber: row.prNumber,
-        branch: row.branch,
-        depsLoaded: true,
-      });
+      if (row.branch) this.branchToTaskId.set(row.branch, row.taskId);
       flog(`[startup] restored task #${row.taskId} (${row.status})`);
     }
   }
@@ -347,7 +263,7 @@ export class TaskModel extends EventEmitter {
     await loadIssuesToQueue(this, graph, config);
 
     const startupPromises: Promise<void>[] = [];
-    for (const t of this.getPendingAndBlockedTasks()) {
+    for (const t of await this.getPendingAndBlockedTasks()) {
       const shouldBeBlocked = this.isBlocked(t.issueNumber, graph);
       if (t.status === "blocked" && !shouldBeBlocked) {
         startupPromises.push(
@@ -366,37 +282,31 @@ export class TaskModel extends EventEmitter {
     await Promise.all(startupPromises);
   }
 
-  // ── Task-lifecycle methods (memory + DB) ──────────────────────────────────
+  // ── Task-lifecycle methods (write to store, emit changed) ─────────────────
 
   async complete(taskId: string): Promise<void> {
-    this.completeTaskInCache(taskId);
     await this.store.markComplete(taskId);
+    this.emit("changed");
   }
 
   async revert(taskId: string): Promise<void> {
-    this.revertTaskInCache(taskId);
     await this.store.markPending(taskId);
+    this.emit("changed");
   }
 
   async block(taskId: string): Promise<void> {
-    this.setBlockedInCache(taskId);
     await this.store.markBlocked(taskId);
+    this.emit("changed");
   }
 
   async unblock(taskId: string): Promise<void> {
-    this.setUnblockedInCache(taskId);
     await this.store.markPending(taskId);
+    this.emit("changed");
   }
 
-  async refreshContent(taskId: string, title: string, body: string, labels: string[], depsLoaded?: boolean): Promise<void> {
-    const t = this.tasks.get(taskId);
-    if (t) {
-      t.title = title;
-      t.body = body;
-      t.labels = labels;
-      if (depsLoaded !== undefined) t.depsLoaded = depsLoaded;
-    }
+  async refreshContent(taskId: string, title: string, body: string, labels: string[]): Promise<void> {
     await this.store.updateTaskContent(taskId, title, body, labels);
+    this.emit("changed");
   }
 
   async register(
@@ -406,69 +316,40 @@ export class TaskModel extends EventEmitter {
     title: string,
     body: string,
     labels: string[],
-    repoUrl: string,
-    depsLoaded?: boolean,
   ): Promise<void> {
-    this.addTaskToCache({ taskId, issueNumber, title, body, labels, repoUrl, depsLoaded });
     await this.store.upsertTask(taskId, issueNumber, repoSlug, title, body, labels);
+    this.emit("changed");
   }
 
   async cancel(taskId: string): Promise<void> {
-    this.removeTaskFromCache(taskId);
     await this.store.deleteTask(taskId);
+    this.emit("changed");
   }
 
   async registerPr(taskId: string, prNumber: number, branch: string | null): Promise<void> {
-    this.prToTaskId.set(prNumber, taskId);
-    const t = this.tasks.get(taskId);
-    if (t) t.prNumber = prNumber;
-    this.emit("changed");
     await this.store.updateTaskPr(taskId, prNumber, branch);
+    this.emit("changed");
   }
 
   async unregisterPr(prNumber: number): Promise<void> {
-    const task = this.getTaskForPr(prNumber);
-    const taskId = this.prToTaskId.get(prNumber);
-    this.prToTaskId.delete(prNumber);
-    if (taskId) {
-      const t = this.tasks.get(taskId);
-      if (t) t.prNumber = undefined;
-    }
-    this.emit("changed");
+    const task = await this.getTaskForPr(prNumber);
     if (task) {
       await this.store.updateTaskPr(task.taskId, null, null);
+      this.emit("changed");
     }
-  }
-
-  /** Restore a task into the in-memory cache from the DB record.
-   *  Used when a worker reconnects claiming a task that's not in memory (e.g. issue
-   *  was closed mid-task, marking the DB row complete, which startup skips).
-   *  Falls back to empty placeholder if the DB row is missing. */
-  async restoreFromDb(taskId: string, issueNumber: number): Promise<void> {
-    const row = await this.store.getTask(taskId);
-    this.addTaskToCache({
-      taskId,
-      issueNumber: row?.issueNumber ?? issueNumber,
-      title: row?.title ?? "",
-      body: row?.body ?? "",
-      labels: row?.labels ?? [],
-      repoUrl: row ? `https://github.com/${row.repo}` : "",
-    });
   }
 
   async listTasks(opts?: ListTasksOpts): Promise<TaskRow[]> {
     return this.store.listTasks(opts);
   }
 
-  /** Assigns a task to a worker. Awaits the DB write; reverts memory and returns
-   *  false if the write fails so the caller can release the worker. */
+  /** Assigns a task to a worker. Returns false if the DB write fails. */
   async assign(taskId: string, workerId: string): Promise<boolean> {
-    this.assignTaskInCache(taskId, workerId);
     try {
       await this.store.markAssigned(taskId, workerId);
+      this.emit("changed");
       return true;
     } catch {
-      this.revertTaskInCache(taskId);
       return false;
     }
   }
