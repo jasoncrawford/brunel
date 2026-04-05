@@ -5,7 +5,7 @@ A GitHub-driven autonomous agent. Labels a GitHub issue `brunel:ready` → the f
 ## Architecture
 
 - **`src/task-model.ts`** — Task domain model. Exports `TaskModel`, the single entry point for all task state: in-memory queue, persistent DB store, `labeledIssues`/`openIssues` tracking. `TaskQueue` and `TaskStore` are internal implementation details — the foreman interacts exclusively through `TaskModel` methods.
-- **`src/foreman.ts`** — HTTP server + WebSocket server (controller layer). Polls GitHub for `brunel:ready` issues, routes webhooks, and assigns tasks to idle workers over WebSocket. Contains `WorkerRegistry` and the `createForemanWss` factory. Re-exports `TaskModel` from `task-model.ts` for convenience.
+- **`src/foreman.ts`** — HTTP server + WebSocket server (controller layer). Polls GitHub for `brunel:ready` issues, routes webhooks, and assigns tasks to idle workers over WebSocket. Contains `WorkerRegistry` and the `createForemanWss` factory.
 - **`src/repl.ts`** — Interactive REPL (default) or worker process (`--worker-mode`). Workers connect to the foreman, receive tasks, run Claude Agent SDK sessions, and report completion.
 - **`src/config.ts`** — Unified config loader. Merges CLI flags, `BRUNEL_*` env vars, `brunel.config.ts` file, legacy env vars, and built-in defaults via zod schema.
 - **`src/display.ts`** — Shared display/rendering engine used by both foreman and worker.
