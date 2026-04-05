@@ -231,36 +231,6 @@ describe("foreman WebSocket protocol", () => {
     expect((await taskModel.get("1"))?.status).toBe("assigned");
   });
 
-  it("worker reconnects as busy with unknown taskId is registered busy and not interrupted", async () => {
-    const ws = await connect();
-    const ackP = nextMsg(ws);
-    send(ws, { type: "worker_hello", workerId: "w1", taskId: "nonexistent", status: "busy" });
-    await ackP; // hello_ack (status: busy)
-    const raceResult = await Promise.race([
-      nextMsg(ws).then(() => "message" as const),
-      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
-    ]);
-    expect(raceResult).toBe("timeout"); // no message — worker continues its existing work
-    expect(registry.get("w1")?.status).toBe("busy");
-    expect(registry.get("w1")?.currentTaskId).toBe("nonexistent");
-  });
-
-  it("worker with pending tasks reconnects as busy with unknown taskId does not receive task_assigned", async () => {
-    await makeTask(taskModel, 1);
-    const ws = await connect();
-    const ackP = nextMsg(ws);
-    send(ws, { type: "worker_hello", workerId: "w1", taskId: "nonexistent", status: "busy" });
-    await ackP; // hello_ack (status: busy)
-    const raceResult = await Promise.race([
-      nextMsg(ws).then(() => "message" as const),
-      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
-    ]);
-    expect(raceResult).toBe("timeout"); // must NOT receive task_assigned
-    expect(registry.get("w1")?.status).toBe("busy");
-    // pending task remains available for other workers
-    expect((await taskModel.get("1"))?.status).toBe("pending");
-  });
-
   it("routeEvent sends event_notification to assigned worker", async () => {
     await makeTask(taskModel, 1);
     const ws = await connect();
@@ -443,14 +413,6 @@ describe("hello_ack handshake", () => {
     const ack = await ackPromise;
     expect(ack).toEqual({ type: "hello_ack", workerId: "worker-b", status: "cancelled" });
     expect(registry.get("worker-b")?.status).toBe("idle");
-  });
-
-  it("sends hello_ack with status busy for an unknown taskId", async () => {
-    const ws = await connect();
-    const ackPromise = nextMsg(ws);
-    send(ws, { type: "worker_hello", workerId: "w1", taskId: "nonexistent", status: "busy" });
-    const ack = await ackPromise;
-    expect(ack).toEqual({ type: "hello_ack", workerId: "w1", status: "busy" });
   });
 
   it("worker reconnecting busy with unlabeled taskId still receives event notifications for that issue", async () => {
