@@ -1,8 +1,8 @@
 // ── Foreman entry point — wires components and starts server ─────────────────
 
 import "dotenv/config";
+import { createClient } from "@supabase/supabase-js";
 import { Webhooks } from "@octokit/webhooks";
-import type { LabeledIssueState, TaskStatus } from "../types.js";
 import type { DependencyGraph } from "./dependencies.js";
 import { loadConfig } from "../config.js";
 import { createDbLogger, createNullDbLogger } from "./db.js";
@@ -13,7 +13,6 @@ import { createHttpServer } from "./http-server.js";
 import { createForemanWss } from "./wss.js";
 import type { ForemanWss } from "./wss.js";
 import { createAdminWss } from "./admin-ws.js";
-import { loadIssuesToQueue } from "./github.js";
 import { isMutedEvent, summaryEvent } from "./event-router.js";
 import { fmtError } from "../utils.js";
 
@@ -34,25 +33,22 @@ if (isMain) {
 
   const registry = new WorkerRegistry();
   const graph: DependencyGraph = new Map();
-  const openIssues = new Set<number>();
-  const labeledIssues = new Map<number, LabeledIssueState>();
   const webhooks = config.webhookSecret
     ? new Webhooks({ secret: config.webhookSecret })
     : null;
 
   // Setup DB logger and task model (share the same Supabase client if configured)
   let dbLogger: DbLogger;
-  let supabase: import("@supabase/supabase-js").SupabaseClient | undefined;
+  let taskModel: TaskModel;
   if (config.supabaseUrl && config.supabaseSecretKey) {
-    const { createClient } = await import("@supabase/supabase-js");
-    supabase = createClient(config.supabaseUrl, config.supabaseSecretKey);
+    const supabase = createClient(config.supabaseUrl, config.supabaseSecretKey);
     dbLogger = createDbLogger(supabase);
+    taskModel = TaskModel.create(supabase);
     flog("Supabase logging enabled");
   } else {
     dbLogger = createNullDbLogger();
+    taskModel = TaskModel.create();
   }
-
-  const taskModel = TaskModel.create(supabase, labeledIssues, openIssues);
 
   let foremanWss: ForemanWss;
   const server = createHttpServer(webhooks, (id, name, payload) => foremanWss.routeEvent(id, name, payload), dbLogger, taskModel);
@@ -63,21 +59,11 @@ if (isMain) {
     workers: registry.getWorkerSnapshots(),
   }));
 
-  foremanWss = createForemanWss(
-    taskModel, registry, server,
-    {
-      graph,
-      taskLabel: config.taskLabel,
-      repo: config.githubRepo,
-      token: config.githubToken,
-      githubApiUrl: config.githubApiUrl,
-      dbLogger,
-      adminWss,
-      workerSecret: config.workerSecret,
-      reclaimTimeoutMs: config.workerReclaimTimeoutMs,
-      pingIntervalMs: config.pingIntervalMs,
-    },
-  );
+  foremanWss = createForemanWss(taskModel, registry, server, config, {
+    graph,
+    dbLogger,
+    adminWss,
+  });
 
   if (webhooks) {
     webhooks.onAny(async ({ id, name, payload }) => {
@@ -91,24 +77,7 @@ if (isMain) {
   // Step 1: Load active tasks from DB (primary source of truth).
   flog("[startup] step 1: loading active tasks from DB...");
   try {
-    const activeTasks = await taskModel.listTasks();
-    for (const row of activeTasks) {
-      if (row.status === "complete") continue;
-      taskModel.loadTask({
-        taskId: row.taskId,
-        issueNumber: row.issueNumber,
-        title: row.title,
-        body: row.body,
-        labels: row.labels,
-        repoUrl: `https://github.com/${row.repo}`,
-        status: row.status as TaskStatus,
-        workerId: row.workerId,
-        prNumber: row.prNumber,
-        branch: row.branch,
-        depsLoaded: true,
-      });
-      flog(`[startup] restored task #${row.taskId} (${row.status})`);
-    }
+    await taskModel.loadActiveTasksFromDb(flog);
   } catch (err) {
     flog(`ERROR Failed to load tasks from DB: ${fmtError(err)}`);
     process.exit(1);
@@ -117,31 +86,7 @@ if (isMain) {
   // Step 2: Fetch brunel:ready issues from GitHub for reconciliation.
   flog("[startup] step 2: fetching brunel:ready issues from GitHub for reconciliation...");
   try {
-    await loadIssuesToQueue(labeledIssues, graph, openIssues, {
-      repo: config.githubRepo,
-      token: config.githubToken,
-      taskLabel: config.taskLabel,
-      apiUrl: config.githubApiUrl,
-    });
-
-    const startupPromises: Promise<void>[] = [];
-    for (const t of taskModel.getPendingAndBlockedTasks()) {
-      const shouldBeBlocked = taskModel.isBlocked(t.issueNumber, graph);
-      if (t.status === "blocked" && !shouldBeBlocked) {
-        startupPromises.push(
-          taskModel.unblock(t.taskId).catch((err) =>
-            flog(`ERROR Failed to mark task #${t.taskId} pending on startup: ${fmtError(err)}`)
-          )
-        );
-      } else if (t.status === "pending" && shouldBeBlocked) {
-        startupPromises.push(
-          taskModel.block(t.taskId).catch((err) =>
-            flog(`ERROR Failed to mark task #${t.taskId} blocked on startup: ${fmtError(err)}`)
-          )
-        );
-      }
-    }
-    await Promise.all(startupPromises);
+    await taskModel.loadIssuesFromGithub(graph, config, flog);
     await foremanWss.reconcile();
   } catch (err) {
     flog(`ERROR Failed to load issues from GitHub: ${fmtError(err)}`);
@@ -168,14 +113,3 @@ if (isMain) {
     });
   });
 }
-
-// ── Re-exports for backward compatibility ────────────────────────────────────
-// These allow existing test files and consumers to import from this module.
-
-export { WorkerRegistry } from "./worker-registry.js";
-export { createForemanWss } from "./wss.js";
-export type { ForemanWss } from "./wss.js";
-export { createHttpServer } from "./http-server.js";
-export { summaryEvent, isMutedEvent } from "./event-router.js";
-export { TaskModel } from "./task-model.js";
-export type { Task } from "./task-queue.js";

@@ -7,6 +7,7 @@ import type { AdminWss } from "./admin-ws.js";
 import { fmtEvent } from "./event-fmt.js";
 import { fmtError } from "../utils.js";
 import { shortWorkerId } from "../../shared/utils.js";
+import type { BrunelConfig } from "../config.js";
 import type { TaskModel } from "./task-model.js";
 import type { WorkerRegistry } from "./worker-registry.js";
 import { doRouteEvent, reconcile, isMutedEvent, summaryEvent, forwardEvent } from "./event-router.js";
@@ -36,28 +37,22 @@ export function createForemanWss(
   taskModel: TaskModel,
   registry: WorkerRegistry,
   server: http.Server,
-  options: {
-    taskLabel: string;
+  config: Pick<BrunelConfig, "taskLabel" | "githubRepo" | "githubToken" | "githubApiUrl" | "workerSecret" | "pingIntervalMs" | "workerReclaimTimeoutMs">,
+  deps?: {
     graph?: DependencyGraph;
-    repo?: string;
-    token?: string;
-    githubApiUrl?: string;
     dbLogger?: DbLogger;
     adminWss?: AdminWss;
-    workerSecret?: string;
-    pingIntervalMs: number;
-    reclaimTimeoutMs: number;
   },
 ): ForemanWss {
-  const taskLabel = options.taskLabel;
-  const graph = options.graph ?? new Map<number, Set<number>>();
-  const repo = options.repo ?? "";
-  const token = options.token ?? "";
-  const githubApiUrl = options.githubApiUrl;
-  const dbLogger = options.dbLogger;
-  const adminWss = options.adminWss;
-  const workerSecret = options.workerSecret;
-  const reclaimTimeoutMs = options.reclaimTimeoutMs;
+  const taskLabel = config.taskLabel;
+  const graph = deps?.graph ?? new Map<number, Set<number>>();
+  const repo = config.githubRepo;
+  const token = config.githubToken;
+  const githubApiUrl = config.githubApiUrl;
+  const dbLogger = deps?.dbLogger;
+  const adminWss = deps?.adminWss;
+  const workerSecret = config.workerSecret;
+  const reclaimTimeoutMs = config.workerReclaimTimeoutMs;
 
   // Incrementing counter for unique broadcast IDs (React uses these as keys).
   let nextBroadcastId = 1;
@@ -200,7 +195,7 @@ export function createForemanWss(
     for (const client of wss.clients) {
       if (client.readyState === WebSocket.OPEN) client.ping();
     }
-  }, options.pingIntervalMs);
+  }, config.pingIntervalMs);
   wss.on("close", () => clearInterval(pingTimer));
 
   wss.on("connection", (ws) => {

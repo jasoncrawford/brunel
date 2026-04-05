@@ -36,11 +36,9 @@ const _realFetch = globalThis.fetch;
 import http from "http";
 import type { AddressInfo } from "net";
 import { WebSocket } from "ws";
-import {
-  WorkerRegistry,
-  createForemanWss,
-  createHttpServer,
-} from "../../src/foreman/index.js";
+import { WorkerRegistry } from "../../src/foreman/worker-registry.js";
+import { createForemanWss } from "../../src/foreman/wss.js";
+import { createHttpServer } from "../../src/foreman/http-server.js";
 import { TaskModel } from "../../src/foreman/task-model.js";
 import { createAdminWss } from "../../src/foreman/admin-ws.js";
 import { loadDefaultConfig } from "../../src/config.js";
@@ -150,13 +148,7 @@ const adminWss = createAdminWss(server, () => ({
 
 // ── Foreman WebSocket ─────────────────────────────────────────────────────────
 
-foremanWss = createForemanWss(taskModel, registry, server, {
-  taskLabel: cfg.taskLabel,
-  reclaimTimeoutMs: cfg.workerReclaimTimeoutMs,
-  pingIntervalMs: cfg.pingIntervalMs,
-  graph,
-  adminWss,
-});
+foremanWss = createForemanWss(taskModel, registry, server, cfg, { graph, adminWss });
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 

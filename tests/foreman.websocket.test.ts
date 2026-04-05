@@ -3,7 +3,8 @@ import assert from "node:assert";
 import http from "http";
 import { WebSocket, WebSocketServer } from "ws";
 import type { AddressInfo } from "net";
-import { WorkerRegistry, createForemanWss } from "../src/foreman/index.js";
+import { WorkerRegistry } from "../src/foreman/worker-registry.js";
+import { createForemanWss } from "../src/foreman/wss.js";
 import { TaskModel } from "../src/foreman/task-model.js";
 import { loadDefaultConfig } from "../src/config.js";
 const defaultCfg = await loadDefaultConfig();
@@ -91,7 +92,7 @@ beforeEach(() => {
   registry = new WorkerRegistry();
   graph = new Map();
   httpServer = http.createServer();
-  ({ wss, routeEvent, shutdown } = createForemanWss(taskModel, registry, httpServer, { taskLabel: defaultCfg.taskLabel, reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs, pingIntervalMs: defaultCfg.pingIntervalMs, graph }));
+  ({ wss, routeEvent, shutdown } = createForemanWss(taskModel, registry, httpServer, defaultCfg, { graph }));
 
   return new Promise<void>((resolve) => {
     httpServer.listen(0, () => {
@@ -608,7 +609,7 @@ describe("worker secret enforcement", () => {
     const server = http.createServer();
     const { wss: secretWss } = createForemanWss(
       new TaskModel(), new WorkerRegistry(), server,
-      { taskLabel: defaultCfg.taskLabel, reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs, pingIntervalMs: defaultCfg.pingIntervalMs, workerSecret: secret },
+      { ...defaultCfg, workerSecret: secret },
     );
     const p = await new Promise<number>((r) => server.listen(0, () => r((server.address() as AddressInfo).port)));
     return { server, secretWss, port: p };
@@ -665,7 +666,7 @@ function makeConnectToForeman(port: number) {
 describe("worker WebSocket connection", () => {
   it("worker client connects to foreman successfully", async () => {
     const server = http.createServer();
-    const { wss } = createForemanWss(new TaskModel(), new WorkerRegistry(), server, { taskLabel: defaultCfg.taskLabel, reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs, pingIntervalMs: defaultCfg.pingIntervalMs });
+    const { wss } = createForemanWss(new TaskModel(), new WorkerRegistry(), server, defaultCfg);
     const testPort = await new Promise<number>((resolve) => {
       server.listen(0, () => resolve((server.address() as AddressInfo).port));
     });
@@ -691,7 +692,7 @@ describe("worker WebSocket connection", () => {
 
   it("foreman rejects connections not at /worker path (regression guard)", async () => {
     const server = http.createServer();
-    const { wss } = createForemanWss(new TaskModel(), new WorkerRegistry(), server, { taskLabel: defaultCfg.taskLabel, reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs, pingIntervalMs: defaultCfg.pingIntervalMs });
+    const { wss } = createForemanWss(new TaskModel(), new WorkerRegistry(), server, defaultCfg);
     const testPort = await new Promise<number>((resolve) => {
       server.listen(0, () => resolve((server.address() as AddressInfo).port));
     });
@@ -724,7 +725,7 @@ describe("worker disconnect DB logging", () => {
     const server = http.createServer();
     const { wss: testWss } = createForemanWss(
       new TaskModel(), localRegistry1, server,
-      { taskLabel: defaultCfg.taskLabel, reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs, pingIntervalMs: defaultCfg.pingIntervalMs, dbLogger: mockDbLogger },
+      defaultCfg, { dbLogger: mockDbLogger },
     );
     const testPort = await new Promise<number>((r) => server.listen(0, () => r((server.address() as AddressInfo).port)));
 
@@ -776,7 +777,7 @@ describe("worker disconnect DB logging", () => {
     const server = http.createServer();
     const { wss: testWss } = createForemanWss(
       localTaskModel, localRegistry2, server,
-      { taskLabel: defaultCfg.taskLabel, reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs, pingIntervalMs: defaultCfg.pingIntervalMs, dbLogger: mockDbLogger },
+      defaultCfg, { dbLogger: mockDbLogger },
     );
     const testPort = await new Promise<number>((r) => server.listen(0, () => r((server.address() as AddressInfo).port)));
 
@@ -1005,11 +1006,7 @@ describe("worker_goodbye — DB persistence", () => {
     const q = new TaskModel(taskStore);
     const r = new WorkerRegistry();
     const srv = http.createServer();
-    const { wss: testWss } = createForemanWss(q, r, srv, {
-      taskLabel: defaultCfg.taskLabel,
-      reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs,
-      pingIntervalMs: defaultCfg.pingIntervalMs,
-    });
+    const { wss: testWss } = createForemanWss(q, r, srv, defaultCfg);
 
     q.loadTask({ taskId: "1", issueNumber: 1, title: "T", body: "b", labels: [], repoUrl: "r" });
 
@@ -1053,11 +1050,7 @@ describe("worker_goodbye — DB persistence", () => {
     const q = new TaskModel(taskStore);
     const r = new WorkerRegistry();
     const srv = http.createServer();
-    const { wss: testWss } = createForemanWss(q, r, srv, {
-      taskLabel: defaultCfg.taskLabel,
-      reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs,
-      pingIntervalMs: defaultCfg.pingIntervalMs,
-    });
+    const { wss: testWss } = createForemanWss(q, r, srv, defaultCfg);
 
     await new Promise<void>((resolve) => srv.listen(0, resolve));
     const testPort = (srv.address() as AddressInfo).port;
@@ -1102,11 +1095,7 @@ describe("issues/closed — DB persistence", () => {
     const q = new TaskModel(taskStore);
     const r = new WorkerRegistry();
     const srv = http.createServer();
-    const { wss: testWss, routeEvent: testRouteEvent } = createForemanWss(q, r, srv, {
-      taskLabel: defaultCfg.taskLabel,
-      reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs,
-      pingIntervalMs: defaultCfg.pingIntervalMs,
-    });
+    const { wss: testWss, routeEvent: testRouteEvent } = createForemanWss(q, r, srv, defaultCfg);
 
     q.loadTask({ taskId: "1", issueNumber: 1, title: "T", body: "b", labels: [], repoUrl: "r" });
     q.assignInMemory("1", "w1");
@@ -1139,11 +1128,7 @@ describe("worker_hello — DB persistence", () => {
     const q = new TaskModel(taskStore);
     const r = new WorkerRegistry();
     const srv = http.createServer();
-    const { wss: testWss } = createForemanWss(q, r, srv, {
-      taskLabel: defaultCfg.taskLabel,
-      reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs,
-      pingIntervalMs: defaultCfg.pingIntervalMs,
-    });
+    const { wss: testWss } = createForemanWss(q, r, srv, defaultCfg);
 
     q.loadTask({ taskId: "1", issueNumber: 1, title: "T", body: "b", labels: [], repoUrl: "r" });
     q.assignInMemory("1", "w1");
@@ -1177,12 +1162,7 @@ describe("keepalive ping", () => {
     const q = new TaskModel();
     const r = new WorkerRegistry();
     const srv = http.createServer();
-    const { wss: testWss } = createForemanWss(q, r, srv, {
-      taskLabel: defaultCfg.taskLabel,
-      reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs,
-
-      pingIntervalMs: 50,
-    });
+    const { wss: testWss } = createForemanWss(q, r, srv, { ...defaultCfg, pingIntervalMs: 50 });
     await new Promise<void>((resolve) => srv.listen(0, resolve));
     const testPort = (srv.address() as AddressInfo).port;
 
@@ -1214,11 +1194,7 @@ describe("reclaim timer (fake timers)", () => {
     const q = new TaskModel();
     const r = new WorkerRegistry();
     const srv = http.createServer();
-    const { wss: testWss } = createForemanWss(q, r, srv, {
-      taskLabel: defaultCfg.taskLabel,
-      pingIntervalMs: defaultCfg.pingIntervalMs,
-      reclaimTimeoutMs,
-    });
+    const { wss: testWss } = createForemanWss(q, r, srv, { ...defaultCfg, workerReclaimTimeoutMs: reclaimTimeoutMs });
     await new Promise<void>((resolve) => srv.listen(0, resolve));
     const testPort = (srv.address() as AddressInfo).port;
 
@@ -1272,11 +1248,7 @@ describe("reclaim timer (fake timers)", () => {
     const q = new TaskModel();
     const r = new WorkerRegistry();
     const srv = http.createServer();
-    const { wss: testWss } = createForemanWss(q, r, srv, {
-      taskLabel: defaultCfg.taskLabel,
-      pingIntervalMs: defaultCfg.pingIntervalMs,
-      reclaimTimeoutMs,
-    });
+    const { wss: testWss } = createForemanWss(q, r, srv, { ...defaultCfg, workerReclaimTimeoutMs: reclaimTimeoutMs });
     await new Promise<void>((resolve) => srv.listen(0, resolve));
     const testPort = (srv.address() as AddressInfo).port;
 
@@ -1316,11 +1288,7 @@ describe("reclaim timer (fake timers)", () => {
     const q = new TaskModel();
     const r = new WorkerRegistry();
     const srv = http.createServer();
-    const { wss: testWss } = createForemanWss(q, r, srv, {
-      taskLabel: defaultCfg.taskLabel,
-      pingIntervalMs: defaultCfg.pingIntervalMs,
-      reclaimTimeoutMs,
-    });
+    const { wss: testWss } = createForemanWss(q, r, srv, { ...defaultCfg, workerReclaimTimeoutMs: reclaimTimeoutMs });
     await new Promise<void>((resolve) => srv.listen(0, resolve));
     const testPort = (srv.address() as AddressInfo).port;
 
@@ -1436,7 +1404,7 @@ describe("graceful shutdown", () => {
     const srv = http.createServer();
     const { wss: testWss, shutdown: localShutdown } = createForemanWss(
       new TaskModel(), localRegistry, srv,
-      { taskLabel: defaultCfg.taskLabel, reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs, pingIntervalMs: defaultCfg.pingIntervalMs, dbLogger: mockDbLogger },
+      defaultCfg, { dbLogger: mockDbLogger },
     );
     const testPort = await new Promise<number>((r) => srv.listen(0, () => r((srv.address() as AddressInfo).port)));
 

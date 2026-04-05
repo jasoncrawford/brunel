@@ -22,7 +22,7 @@ function trunc(s: string, n = 80) {
   return s.length > n ? s.slice(0, n - 1) + "…" : s;
 }
 
-export function fmtEventDetails(event: GitHubEvent): string {
+function fmtEventDetails(event: GitHubEvent): string {
   const p = event.payload;
   switch (event.name) {
     case "check_run": {

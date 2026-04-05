@@ -8,6 +8,8 @@ import type { DependencyGraph } from "./dependencies.js";
 import type { TaskSnapshot } from "./admin-ws.js";
 import { TaskQueue } from "./task-queue.js";
 import type { Task } from "./task-queue.js";
+import { loadIssuesToQueue } from "./github.js";
+import { fmtError } from "../utils.js";
 
 export type { Task };
 
@@ -29,25 +31,17 @@ export class TaskModel extends EventEmitter {
   private _labeledIssues: Map<number, LabeledIssueState>;
   private _openIssues: Set<number>;
 
-  static create(
-    supabase?: SupabaseClient,
-    labeledIssues?: Map<number, LabeledIssueState>,
-    openIssues?: Set<number>,
-  ): TaskModel {
+  static create(supabase?: SupabaseClient): TaskModel {
     const store = supabase ? createTaskStore(supabase) : createNullTaskStore();
-    return new TaskModel(store, labeledIssues, openIssues);
+    return new TaskModel(store);
   }
 
-  constructor(
-    store?: TaskStore,
-    labeledIssues = new Map<number, LabeledIssueState>(),
-    openIssues = new Set<number>(),
-  ) {
+  constructor(store?: TaskStore) {
     super();
     this.queue = new TaskQueue();
     this.store = store ?? createNullTaskStore();
-    this._labeledIssues = labeledIssues;
-    this._openIssues = openIssues;
+    this._labeledIssues = new Map();
+    this._openIssues = new Set();
 
     // Forward "changed" events from the internal queue
     this.queue.on("changed", () => this.emit("changed"));
@@ -198,6 +192,60 @@ export class TaskModel extends EventEmitter {
   setIssueOpenState(issueNumber: number, isOpen: boolean): void {
     if (isOpen) this._openIssues.add(issueNumber);
     else this._openIssues.delete(issueNumber);
+  }
+
+  // ── Startup methods ────────────────────────────────────────────────────────
+
+  /** Load active (non-complete) tasks from the DB into memory.
+   *  Called once at foreman startup before accepting connections. */
+  async loadActiveTasksFromDb(flog: (msg: string) => void): Promise<void> {
+    const activeTasks = await this.listTasks();
+    for (const row of activeTasks) {
+      if (row.status === "complete") continue;
+      this.loadTask({
+        taskId: row.taskId,
+        issueNumber: row.issueNumber,
+        title: row.title,
+        body: row.body,
+        labels: row.labels,
+        repoUrl: `https://github.com/${row.repo}`,
+        status: row.status as TaskStatus,
+        workerId: row.workerId,
+        prNumber: row.prNumber,
+        branch: row.branch,
+        depsLoaded: true,
+      });
+      flog(`[startup] restored task #${row.taskId} (${row.status})`);
+    }
+  }
+
+  /** Fetch brunel:ready issues from GitHub, load deps, and reconcile
+   *  blocked/unblocked state. Called at startup after loadActiveTasksFromDb. */
+  async loadIssuesFromGithub(
+    graph: DependencyGraph,
+    config: { githubRepo: string; githubToken: string; taskLabel: string; githubApiUrl?: string },
+    flog: (msg: string) => void,
+  ): Promise<void> {
+    await loadIssuesToQueue(this, graph, config);
+
+    const startupPromises: Promise<void>[] = [];
+    for (const t of this.getPendingAndBlockedTasks()) {
+      const shouldBeBlocked = this.isBlocked(t.issueNumber, graph);
+      if (t.status === "blocked" && !shouldBeBlocked) {
+        startupPromises.push(
+          this.unblock(t.taskId).catch((err) =>
+            flog(`ERROR Failed to mark task #${t.taskId} pending on startup: ${fmtError(err)}`)
+          )
+        );
+      } else if (t.status === "pending" && shouldBeBlocked) {
+        startupPromises.push(
+          this.block(t.taskId).catch((err) =>
+            flog(`ERROR Failed to mark task #${t.taskId} blocked on startup: ${fmtError(err)}`)
+          )
+        );
+      }
+    }
+    await Promise.all(startupPromises);
   }
 
   // ── Task-lifecycle methods (memory + DB) ──────────────────────────────────

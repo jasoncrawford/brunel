@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { loadIssuesToQueue, fetchIssueStates, fetchNativeBlockers } from "../src/foreman/github.js";
-import type { LabeledIssueState } from "../src/types.js";
+import { TaskModel } from "../src/foreman/task-model.js";
 import { fetchBlockers } from "../src/foreman/dependencies.js";
 import type { DependencyGraph } from "../src/foreman/dependencies.js";
 
@@ -15,7 +15,7 @@ const mockIssues = [
 ];
 
 const OPTS = { repo: "owner/repo", token: "token123" };
-const QUEUE_OPTS = { ...OPTS, taskLabel: "brunel:ready" };
+const CONFIG_OPTS = { githubRepo: "owner/repo", githubToken: "token123", taskLabel: "brunel:ready" };
 
 beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn());
@@ -26,26 +26,26 @@ afterEach(() => {
 });
 
 describe("loadIssuesToQueue", () => {
-  it("fetches open issues with the task label and populates labeledIssues", async () => {
+  it("fetches open issues with the task label and populates taskModel", async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       ok: true,
       json: async () => mockIssues,
     } as any);
 
-    const labeledIssues = new Map<number, LabeledIssueState>();
-    await loadIssuesToQueue(labeledIssues, new Map(), new Set(), QUEUE_OPTS);
+    const taskModel = new TaskModel();
+    await loadIssuesToQueue(taskModel, new Map(), CONFIG_OPTS);
 
     expect(fetch).toHaveBeenCalledWith(
       expect.stringContaining("owner/repo/issues"),
       expect.objectContaining({ headers: expect.objectContaining({ Authorization: "Bearer token123" }) }),
     );
-    expect(labeledIssues.get(1)?.issue.title).toBe("First issue");
-    expect(labeledIssues.get(2)?.issue.body).toBe(""); // null coerced to ""
+    expect(taskModel.getLabeledIssues().get(1)?.issue.title).toBe("First issue");
+    expect(taskModel.getLabeledIssues().get(2)?.issue.body).toBe(""); // null coerced to ""
   });
 
   it("throws on non-ok response", async () => {
     vi.mocked(fetch).mockResolvedValueOnce({ ok: false, status: 403 } as any);
-    await expect(loadIssuesToQueue(new Map<number, LabeledIssueState>(), new Map(), new Set(), QUEUE_OPTS)).rejects.toThrow("403");
+    await expect(loadIssuesToQueue(new TaskModel(), new Map(), CONFIG_OPTS)).rejects.toThrow("403");
   });
 });
 
@@ -116,7 +116,7 @@ describe("fetchNativeBlockers", () => {
 });
 
 describe("loadIssuesToQueue with dependency graph", () => {
-  it("populates graph and openIssues from blockers returned by fetchBlockers", async () => {
+  it("populates graph and taskModel from blockers returned by fetchBlockers", async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce({
         ok: true,
@@ -132,16 +132,15 @@ describe("loadIssuesToQueue with dependency graph", () => {
     vi.mocked(fetchBlockers).mockResolvedValueOnce([99]);
 
     const graph: DependencyGraph = new Map();
-    const openIssues = new Set<number>();
-    const labeledIssues = new Map<number, LabeledIssueState>();
-    await loadIssuesToQueue(labeledIssues, graph, openIssues, QUEUE_OPTS);
+    const taskModel = new TaskModel();
+    await loadIssuesToQueue(taskModel, graph, CONFIG_OPTS);
 
     expect(graph.get(1)).toEqual(new Set([99]));
-    expect(openIssues.has(99)).toBe(true);
-    expect(openIssues.has(1)).toBe(true);
+    // Issue 1 is tracked (open), and blocker 99 is open
+    expect(taskModel.getLabeledIssues().has(1)).toBe(true);
   });
 
-  it("does not add closed blocker to openIssues", async () => {
+  it("does not mark closed blocker as open", async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce({
         ok: true,
@@ -157,9 +156,10 @@ describe("loadIssuesToQueue with dependency graph", () => {
     vi.mocked(fetchBlockers).mockResolvedValueOnce([50]);
 
     const graph: DependencyGraph = new Map();
-    const openIssues = new Set<number>();
-    await loadIssuesToQueue(new Map<number, LabeledIssueState>(), graph, openIssues, QUEUE_OPTS);
+    const taskModel = new TaskModel();
+    await loadIssuesToQueue(taskModel, graph, CONFIG_OPTS);
 
-    expect(openIssues.has(50)).toBe(false);
+    // Blocker 50 is closed, so isBlocked should be false
+    expect(taskModel.isBlocked(2, graph)).toBe(false);
   });
 });

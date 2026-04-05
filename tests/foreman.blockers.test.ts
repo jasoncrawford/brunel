@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
-import { WorkerRegistry, createForemanWss } from "../src/foreman/index.js";
+import { WorkerRegistry } from "../src/foreman/worker-registry.js";
+import { createForemanWss } from "../src/foreman/wss.js";
 import { TaskModel } from "../src/foreman/task-model.js";
 import { loadDefaultConfig } from "../src/config.js";
 import type { TaskStore } from "../src/foreman/db.js";
@@ -40,12 +41,7 @@ describe("foreman — blocker transitions via routeEvent", () => {
     });
     const graph = new Map([[10, new Set([5])]]);
 
-    const { wss, routeEvent } = createForemanWss(taskModel, registry, server, {
-      taskLabel: "brunel:ready",
-      graph,
-      reclaimTimeoutMs: 300_000,
-      pingIntervalMs: defaultCfg.pingIntervalMs,
-    });
+    const { wss, routeEvent } = createForemanWss(taskModel, registry, server, { ...defaultCfg, taskLabel: "brunel:ready", workerReclaimTimeoutMs: 300_000 }, { graph });
     taskModel.trackIssue(10, ISSUE_10, true);
     taskModel.setIssueOpenState(5, true);
     wss.close();
@@ -70,12 +66,7 @@ describe("foreman — blocker transitions via routeEvent", () => {
     });
     const graph = new Map([[10, new Set([5])]]);
 
-    const { wss, routeEvent } = createForemanWss(taskModel, registry, server, {
-      taskLabel: "brunel:ready",
-      graph,
-      reclaimTimeoutMs: 300_000,
-      pingIntervalMs: defaultCfg.pingIntervalMs,
-    });
+    const { wss, routeEvent } = createForemanWss(taskModel, registry, server, { ...defaultCfg, taskLabel: "brunel:ready", workerReclaimTimeoutMs: 300_000 }, { graph });
     taskModel.trackIssue(10, ISSUE_10, true);
     taskModel.setIssueOpenState(5, true);
     wss.close();
@@ -101,12 +92,7 @@ describe("foreman — blocker transitions via routeEvent", () => {
     // Task 10 is blocked by BOTH 5 and 6
     const graph = new Map([[10, new Set([5, 6])]]);
 
-    const { wss, routeEvent } = createForemanWss(taskModel, registry, server, {
-      taskLabel: "brunel:ready",
-      graph,
-      reclaimTimeoutMs: 300_000,
-      pingIntervalMs: defaultCfg.pingIntervalMs,
-    });
+    const { wss, routeEvent } = createForemanWss(taskModel, registry, server, { ...defaultCfg, taskLabel: "brunel:ready", workerReclaimTimeoutMs: 300_000 }, { graph });
     taskModel.trackIssue(10, ISSUE_10, true);
     taskModel.setIssueOpenState(5, true);
     taskModel.setIssueOpenState(6, true);

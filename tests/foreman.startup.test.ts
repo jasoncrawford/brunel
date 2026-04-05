@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { WorkerRegistry, createForemanWss } from "../src/foreman/index.js";
+import { WorkerRegistry } from "../src/foreman/worker-registry.js";
+import { createForemanWss } from "../src/foreman/wss.js";
 import { TaskModel } from "../src/foreman/task-model.js";
 import { loadDefaultConfig } from "../src/config.js";
 import { isBlocked } from "../src/foreman/dependencies.js";
@@ -141,10 +142,7 @@ describe("tryAssignWork — DB persistence", () => {
 
     taskModel = new TaskModel(taskStore);
     taskModel.loadTask(baseTask);
-    ({ wss } = createForemanWss(taskModel, registry, httpServer, {
-      taskLabel: "brunel:ready",
-      pingIntervalMs: defaultCfg.pingIntervalMs,
-    }));
+    ({ wss } = createForemanWss(taskModel, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
 
     port = await startServer();
     const ws = await connect({ type: "worker_hello", workerId: "w1", status: "idle" });
@@ -164,10 +162,7 @@ describe("tryAssignWork — DB persistence", () => {
 
     taskModel = new TaskModel(taskStore);
     taskModel.loadTask(baseTask);
-    ({ wss } = createForemanWss(taskModel, registry, httpServer, {
-      taskLabel: "brunel:ready",
-      pingIntervalMs: defaultCfg.pingIntervalMs,
-    }));
+    ({ wss } = createForemanWss(taskModel, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
 
     port = await startServer();
     const ws = await connect({ type: "worker_hello", workerId: "w1", status: "idle" });
@@ -179,7 +174,7 @@ describe("tryAssignWork — DB persistence", () => {
   it("works transparently without taskStore (null store)", async () => {
     taskModel = new TaskModel();
     taskModel.loadTask(baseTask);
-    ({ wss } = createForemanWss(taskModel, registry, httpServer, { taskLabel: "brunel:ready", pingIntervalMs: defaultCfg.pingIntervalMs }));
+    ({ wss } = createForemanWss(taskModel, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
 
     port = await startServer();
     const ws = await connect({ type: "worker_hello", workerId: "w1", status: "idle" });
@@ -201,10 +196,7 @@ describe("startup reconnect behaviour", () => {
     taskModel.loadTask(baseTask);
     taskModel.assignInMemory("42", "w1"); // simulate what main block does after startup restore
 
-    ({ wss } = createForemanWss(taskModel, registry, httpServer, {
-      taskLabel: "brunel:ready",
-      pingIntervalMs: defaultCfg.pingIntervalMs,
-    }));
+    ({ wss } = createForemanWss(taskModel, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
 
     port = await startServer();
     const ws = await connect({ type: "worker_hello", workerId: "w1", status: "idle" });
@@ -224,10 +216,7 @@ describe("startup reconnect behaviour", () => {
     taskModel.loadTask(baseTask);
     taskModel.assignInMemory("42", "original-worker"); // simulate startup loading
 
-    ({ wss } = createForemanWss(taskModel, registry, httpServer, {
-      taskLabel: "brunel:ready",
-      pingIntervalMs: defaultCfg.pingIntervalMs,
-    }));
+    ({ wss } = createForemanWss(taskModel, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
 
     port = await startServer();
     const ws = await connect({ type: "worker_hello", workerId: "new-worker", status: "idle" });
@@ -244,10 +233,7 @@ describe("startup reconnect behaviour", () => {
     taskModel.loadTask(baseTask);
     taskModel.assignInMemory("42", "w1");
 
-    ({ wss } = createForemanWss(taskModel, registry, httpServer, {
-      taskLabel: "brunel:ready",
-      pingIntervalMs: defaultCfg.pingIntervalMs,
-    }));
+    ({ wss } = createForemanWss(taskModel, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
 
     port = await startServer();
     await connect({ type: "worker_hello", workerId: "w1", status: "busy", taskId: "42" });
@@ -269,10 +255,7 @@ describe("PR tracking persistence", () => {
     taskModel.loadTask(baseTask);
     taskModel.assignInMemory("42", "w1");
 
-    const result = createForemanWss(taskModel, registry, httpServer, {
-      taskLabel: "brunel:ready",
-      pingIntervalMs: defaultCfg.pingIntervalMs,
-    });
+    const result = createForemanWss(taskModel, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" });
     ({ wss } = result);
 
     result.routeEvent("evt-1", "pull_request", {
@@ -293,10 +276,7 @@ describe("PR tracking persistence", () => {
     taskModel.loadTask(baseTask);
     taskModel.assignInMemory("42", "w1");
 
-    const result = createForemanWss(taskModel, registry, httpServer, {
-      taskLabel: "brunel:ready",
-      pingIntervalMs: defaultCfg.pingIntervalMs,
-    });
+    const result = createForemanWss(taskModel, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" });
     ({ wss } = result);
 
     result.routeEvent("evt-1", "pull_request", {
@@ -339,11 +319,7 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
     const taskStore = makeTaskStore([{ taskId: "42", workerId: "w1", status: "assigned" }]);
     taskModel = new TaskModel(taskStore);
 
-    ({ wss } = createForemanWss(taskModel, registry, httpServer, {
-      taskLabel: "brunel:ready",
-      reclaimTimeoutMs: 1000,
-      pingIntervalMs: defaultCfg.pingIntervalMs,
-    }));
+    ({ wss } = createForemanWss(taskModel, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready", workerReclaimTimeoutMs: 1000 }));
 
     port = await startServer();
 
@@ -360,11 +336,7 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
     const taskStore = makeTaskStore([{ taskId: "42", workerId: null, status: "blocked" }]);
     taskModel = new TaskModel(taskStore);
 
-    ({ wss } = createForemanWss(taskModel, registry, httpServer, {
-      taskLabel: "brunel:ready",
-      reclaimTimeoutMs: 1000,
-      pingIntervalMs: defaultCfg.pingIntervalMs,
-    }));
+    ({ wss } = createForemanWss(taskModel, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready", workerReclaimTimeoutMs: 1000 }));
 
     port = await startServer();
 
@@ -382,11 +354,7 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
     }]);
     taskModel = new TaskModel(taskStore);
 
-    ({ wss } = createForemanWss(taskModel, registry, httpServer, {
-      taskLabel: "brunel:ready",
-      reclaimTimeoutMs: 1000,
-      pingIntervalMs: defaultCfg.pingIntervalMs,
-    }));
+    ({ wss } = createForemanWss(taskModel, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready", workerReclaimTimeoutMs: 1000 }));
 
     port = await startServer();
 
@@ -401,11 +369,7 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
     const taskStore = makeTaskStore([{ taskId: "42", workerId: null, status: "complete" }]);
     taskModel = new TaskModel(taskStore);
 
-    ({ wss } = createForemanWss(taskModel, registry, httpServer, {
-      taskLabel: "brunel:ready",
-      reclaimTimeoutMs: 1000,
-      pingIntervalMs: defaultCfg.pingIntervalMs,
-    }));
+    ({ wss } = createForemanWss(taskModel, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready", workerReclaimTimeoutMs: 1000 }));
 
     port = await startServer();
 
@@ -424,11 +388,7 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
     const taskStore = makeTaskStore([{ taskId: "42", workerId: null, status: "pending" }]);
     taskModel = new TaskModel(taskStore);
 
-    const { wss: fwss, reconcile } = createForemanWss(taskModel, registry, httpServer, {
-      taskLabel: "brunel:ready",
-      reclaimTimeoutMs: 1000,
-      pingIntervalMs: defaultCfg.pingIntervalMs,
-    });
+    const { wss: fwss, reconcile } = createForemanWss(taskModel, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready", workerReclaimTimeoutMs: 1000 });
     wss = fwss;
 
     port = await startServer();
@@ -479,11 +439,7 @@ describe("startup — blocked status reconciliation after graph rebuild", () => 
     const graph = new Map([[42, new Set([5])]]);
     const openIssues = new Set<number>(); // issue 5 is closed — not in openIssues
 
-    const { wss: fwss } = createForemanWss(taskModel, registry, httpServer, {
-      taskLabel: "brunel:ready",
-      reclaimTimeoutMs: 1000,
-      pingIntervalMs: defaultCfg.pingIntervalMs,
-    });
+    const { wss: fwss } = createForemanWss(taskModel, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready", workerReclaimTimeoutMs: 1000 });
     wss = fwss;
 
     for (const t of taskModel.getPendingAndBlockedTasks()) {
@@ -509,11 +465,7 @@ describe("startup — blocked status reconciliation after graph rebuild", () => 
     const graph = new Map([[42, new Set([5])]]);
     const openIssues = new Set([5]);
 
-    const { wss: fwss } = createForemanWss(taskModel, registry, httpServer, {
-      taskLabel: "brunel:ready",
-      reclaimTimeoutMs: 1000,
-      pingIntervalMs: defaultCfg.pingIntervalMs,
-    });
+    const { wss: fwss } = createForemanWss(taskModel, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready", workerReclaimTimeoutMs: 1000 });
     wss = fwss;
 
     for (const t of taskModel.getPendingAndBlockedTasks()) {
@@ -538,11 +490,7 @@ describe("startup reconnect — worker reconnects to complete task", () => {
     taskModel.assignInMemory("42", "w1");
     await taskModel.complete("42"); // issue closed while worker was active
 
-    ({ wss } = createForemanWss(taskModel, registry, httpServer, {
-      taskLabel: "brunel:ready",
-      reclaimTimeoutMs: 1000,
-      pingIntervalMs: defaultCfg.pingIntervalMs,
-    }));
+    ({ wss } = createForemanWss(taskModel, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready", workerReclaimTimeoutMs: 1000 }));
 
     port = await startServer();
     await connect({ type: "worker_hello", workerId: "w1", status: "busy", taskId: "42" });
@@ -561,11 +509,7 @@ describe("startup reconnect — worker reconnects to complete task", () => {
     taskModel.assignInMemory("42", "w1");
     await taskModel.complete("42");
 
-    ({ wss } = createForemanWss(taskModel, registry, httpServer, {
-      taskLabel: "brunel:ready",
-      reclaimTimeoutMs: 1000,
-      pingIntervalMs: defaultCfg.pingIntervalMs,
-    }));
+    ({ wss } = createForemanWss(taskModel, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready", workerReclaimTimeoutMs: 1000 }));
 
     port = await startServer();
     const ws = await connect({ type: "worker_hello", workerId: "w1", status: "busy", taskId: "42" });
@@ -587,10 +531,7 @@ describe("task_complete marks task complete in DB", () => {
     taskModel.loadTask(baseTask);
     taskModel.assignInMemory("42", "w1");
 
-    ({ wss } = createForemanWss(taskModel, registry, httpServer, {
-      taskLabel: "brunel:ready",
-      pingIntervalMs: defaultCfg.pingIntervalMs,
-    }));
+    ({ wss } = createForemanWss(taskModel, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
 
     port = await startServer();
     const ws = await connect({ type: "worker_hello", workerId: "w1", status: "busy", taskId: "42" });

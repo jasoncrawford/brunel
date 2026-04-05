@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import http from "http";
-import { WorkerRegistry, createForemanWss } from "../src/foreman/index.js";
+import { WorkerRegistry } from "../src/foreman/worker-registry.js";
+import { createForemanWss } from "../src/foreman/wss.js";
 import { TaskModel } from "../src/foreman/task-model.js";
 import { loadDefaultConfig } from "../src/config.js";
 const defaultCfg = await loadDefaultConfig();
@@ -22,11 +23,7 @@ beforeEach(() => {
   taskModel = new TaskModel();
   registry = new WorkerRegistry();
   const server = http.createServer();
-  ({ reconcile, routeEvent } = createForemanWss(taskModel, registry, server, {
-    taskLabel: TASK_LABEL,
-    reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs,
-    pingIntervalMs: defaultCfg.pingIntervalMs,
-  }));
+  ({ reconcile, routeEvent } = createForemanWss(taskModel, registry, server, { ...defaultCfg, taskLabel: TASK_LABEL }));
 });
 
 describe("reconcile()", () => {
@@ -83,11 +80,7 @@ describe("reconcile()", () => {
     };
     const taskModel2 = new TaskModel(mockStore as any);
     const server2 = http.createServer();
-    const { reconcile: rec2 } = createForemanWss(taskModel2, registry, server2, {
-      taskLabel: TASK_LABEL,
-      reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs,
-      pingIntervalMs: defaultCfg.pingIntervalMs,
-    });
+    const { reconcile: rec2 } = createForemanWss(taskModel2, registry, server2, { ...defaultCfg, taskLabel: TASK_LABEL });
 
     // Existing task in queue
     taskModel2.loadTask({ taskId: "42", issueNumber: 42, title: "Old Title", body: "old", labels: [], repoUrl: "", depsLoaded: true });
@@ -174,11 +167,7 @@ describe("reconcile()", () => {
     const spyTaskModel = new TaskModel(mockStore);
     const spyRegistry = new WorkerRegistry();
     const spyServer = http.createServer();
-    const { reconcile: spyReconcile } = createForemanWss(spyTaskModel, spyRegistry, spyServer, {
-      taskLabel: TASK_LABEL,
-      reclaimTimeoutMs: defaultCfg.workerReclaimTimeoutMs,
-      pingIntervalMs: defaultCfg.pingIntervalMs,
-    });
+    const { reconcile: spyReconcile } = createForemanWss(spyTaskModel, spyRegistry, spyServer, { ...defaultCfg, taskLabel: TASK_LABEL });
 
     spyTaskModel.loadTask({ taskId: "9", issueNumber: 9, title: "T", body: "b", labels: [], repoUrl: "" });
     spyReconcile();
@@ -292,11 +281,7 @@ describe("issues/closed — task lifecycle", () => {
     const tm2 = new TaskModel(mockStore as any);
     const r2 = new WorkerRegistry();
     const s2 = http.createServer();
-    const { routeEvent: re2 } = createForemanWss(tm2, r2, s2, {
-      taskLabel: TASK_LABEL,
-      reclaimTimeoutMs: 30000,
-      pingIntervalMs: defaultCfg.pingIntervalMs,
-    });
+    const { routeEvent: re2 } = createForemanWss(tm2, r2, s2, { ...defaultCfg, taskLabel: TASK_LABEL, workerReclaimTimeoutMs: 30000 });
 
     tm2.trackIssue(42, makeIssue(42), true);
     tm2.loadTask({ taskId: "42", issueNumber: 42, title: "T", body: "b", labels: [], repoUrl: "" });
