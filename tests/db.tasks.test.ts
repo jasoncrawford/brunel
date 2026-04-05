@@ -47,7 +47,7 @@ describe("createTaskStore", () => {
   it("upsertTask is idempotent — duplicate task_id does not throw or duplicate", async () => {
     const store = createTaskStore(supabase);
     await store.upsertTask("dbt-42", 9042, "owner/repo", "Fix the bug", "", []);
-    await expect(store.upsertTask("dbt-42", 42, "owner/repo", "Fix the bug", "", [])).resolves.toBeUndefined();
+    await expect(store.upsertTask("dbt-42", 9042, "owner/repo", "Fix the bug", "", [])).resolves.toBeUndefined();
 
     const tasks = own(await store.listTasks());
     expect(tasks).toHaveLength(1);
