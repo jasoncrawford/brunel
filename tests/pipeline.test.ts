@@ -344,8 +344,8 @@ describe("pipeline: happy path and queued-then-assigned", () => {
       return row?.status === "complete" ? row : null;
     });
 
-    // 7. In-memory queue reflects complete status
-    expect(taskModel.get("42")?.status).toBe("complete");
+    // 7. Store reflects complete status
+    expect((await taskModel.get("42"))?.status).toBe("complete");
   });
 
   it("webhook with no worker → task pending in DB → worker connects → task assigned", async () => {
@@ -506,8 +506,8 @@ describe("pipeline: worker disconnect/expire (reclaim timer fires)", () => {
       return row?.status === "pending" ? row : null;
     });
 
-    // 4. In-memory queue also shows pending
-    expect(taskModel.get("80")?.status).toBe("pending");
+    // 4. Store also shows pending
+    expect((await taskModel.get("80"))?.status).toBe("pending");
 
     // 5. New worker connects and receives the task
     const ws2 = await connect();
