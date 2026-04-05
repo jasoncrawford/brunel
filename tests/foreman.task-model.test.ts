@@ -298,3 +298,15 @@ describe("TaskModel.unregisterPr", () => {
     await expect(model.unregisterPr(10)).rejects.toThrow("DB down");
   });
 });
+
+describe("TaskModel.listTasks", () => {
+  it("delegates to store.listTasks", async () => {
+    const rows = [{ taskId: "1", issueNumber: 1, status: "pending" }];
+    const store = makeStore();
+    (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue(rows);
+    const model = new TaskModel(store);
+    const result = await model.listTasks({ status: "pending" });
+    expect(result).toEqual(rows);
+    expect(store.listTasks).toHaveBeenCalledWith({ status: "pending" });
+  });
+});

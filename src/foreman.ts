@@ -126,8 +126,6 @@ export class WorkerRegistry extends EventEmitter {
   }
 }
 
-// TaskModel and Task are re-exported from src/task-model.ts for backwards compatibility.
-export { TaskModel, type Task } from "./task-model.js";
 
 
 function debounce(fn: () => void, delayMs: number): () => void {
@@ -211,7 +209,7 @@ export function createHttpServer(
   webhooks: InstanceType<typeof Webhooks> | null,
   routeEvent: (id: string, name: string, payload: unknown) => void | Promise<void>,
   dbLogger?: DbLogger,
-  taskStore?: TaskStore,
+  taskModel?: TaskModel,
 ): http.Server {
   const app = new Hono();
 
@@ -288,7 +286,7 @@ export function createHttpServer(
   app.get("/api/tasks", async (c) => {
     try {
       const status = c.req.query("status") as "pending" | "assigned" | "complete" | undefined;
-      const tasks = taskStore ? await taskStore.listTasks(status ? { status } : undefined) : [];
+      const tasks = taskModel ? await taskModel.listTasks(status ? { status } : undefined) : [];
       return c.json(tasks);
     } catch (err) {
       flog(`ERROR API query failed: ${fmtError(err)}`);
@@ -1039,7 +1037,7 @@ if (isMain) {
   const taskModel = new TaskModel(taskStore, labeledIssues, openIssues);
 
   let foremanWss: ForemanWss;
-  const server = createHttpServer(webhooks, (id, name, payload) => foremanWss.routeEvent(id, name, payload), dbLogger, taskStore);
+  const server = createHttpServer(webhooks, (id, name, payload) => foremanWss.routeEvent(id, name, payload), dbLogger, taskModel);
 
   // Admin WebSocket broadcaster
   const { createAdminWss } = await import("./admin-ws.js");
@@ -1077,7 +1075,7 @@ if (isMain) {
   // Restores pending, assigned, and blocked tasks; skips complete.
   flog("[startup] step 1: loading active tasks from DB...");
   try {
-    const activeTasks = await taskStore.listTasks();
+    const activeTasks = await taskModel.listTasks();
     for (const row of activeTasks) {
       if (row.status === "complete") continue;
       taskModel.loadTask({

@@ -1,6 +1,6 @@
 import { EventEmitter } from "events";
 import type { GitHubEvent, LabeledIssueState, TaskIssue, TaskStatus } from "./types.js";
-import type { TaskStore } from "./db.js";
+import type { TaskStore, TaskRow, ListTasksOpts } from "./db.js";
 import { createNullTaskStore } from "./db.js";
 import { isBlocked } from "./dependencies.js";
 import type { DependencyGraph } from "./dependencies.js";
@@ -454,6 +454,10 @@ export class TaskModel extends EventEmitter {
       labels: row?.labels ?? [],
       repoUrl: row ? `https://github.com/${row.repo}` : "",
     });
+  }
+
+  async listTasks(opts?: ListTasksOpts): Promise<TaskRow[]> {
+    return this.store.listTasks(opts);
   }
 
   /** Assigns a task to a worker. Awaits the DB write; reverts memory and returns
