@@ -660,6 +660,35 @@ describe("waitUntilIdle", () => {
     await expect(p2).resolves.toBeUndefined();
   });
 
+  it("waits while debounce timer is pending (does not resolve early)", async () => {
+    vi.useFakeTimers();
+    try {
+      const issue = makeIssue();
+      sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+
+      // Send an actionable event while query is idle — triggers debounce
+      sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
+
+      // waitUntilIdle should NOT resolve while debounce is pending
+      const idlePromise = session.waitUntilIdle();
+      let resolved = false;
+      void idlePromise.then(() => { resolved = true; });
+
+      // Let microtasks drain — promise should still be pending
+      await Promise.resolve();
+      expect(resolved).toBe(false);
+
+      // Advance past debounce + let query run
+      await vi.runAllTimersAsync();
+      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledTimes(2));
+
+      expect(resolved).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("resolves after runQuery is aborted (^C interrupt)", async () => {
     let resolveQuery!: (v: string | undefined) => void;
     let capturedAc!: AbortController;
@@ -685,6 +714,71 @@ describe("waitUntilIdle", () => {
       new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 100)),
     ]);
     expect(result).toBe("idle");
+  });
+});
+
+// ── Debounce race condition (issue #554) ──────────────────────────────────────
+//
+// When an actionable event arrives while idle, a debounce timer is set. The
+// main worker loop calls waitUntilIdle() after the abort fires. Before the
+// fix, waitUntilIdle() returned immediately (debounce pending ≠ query
+// running), causing showPrompt=true and the prompt to reappear while the
+// debounced query ran, corrupting the display with repeated "[worker] > "
+// prompts and misplaced status bars.
+
+describe("debounce race condition (issue #554)", () => {
+  it("waitUntilIdle resolves only after the debounced query completes", async () => {
+    vi.useFakeTimers();
+    try {
+      const issue = makeIssue();
+      sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+
+      // Actionable event while idle → debounce timer starts, no query yet
+      sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
+      expect(runQuery).toHaveBeenCalledOnce(); // still only the initial query
+
+      const idlePromise = session.waitUntilIdle();
+
+      // Fire the debounce timer
+      await vi.runAllTimersAsync();
+      // Second query should start
+      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledTimes(2));
+
+      // Idle promise should resolve after the debounced query finishes
+      await expect(idlePromise).resolves.toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("waitUntilIdle resolves immediately when debounce fires but no task is assigned", async () => {
+    vi.useFakeTimers();
+    try {
+      // Assign a task, then complete it so there is no current task
+      const issue = makeIssue();
+      sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+      await session.handleUserInput("/task-complete");
+
+      // Deliver an actionable event with no active task — debounce fires but no query starts
+      sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
+
+      const idlePromise = session.waitUntilIdle();
+
+      // Advance time so the debounce fires — no query should start
+      await vi.runAllTimersAsync();
+
+      // waitUntilIdle should resolve (debounce fired, no query was needed)
+      const result = await Promise.race([
+        idlePromise.then(() => "idle"),
+        new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 100)),
+      ]);
+      expect(result).toBe("idle");
+      expect(runQuery).toHaveBeenCalledOnce(); // no second query
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
