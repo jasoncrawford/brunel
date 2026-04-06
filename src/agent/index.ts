@@ -93,15 +93,26 @@ export async function runQuery(
   effort?: EffortValue,
 ): Promise<string | undefined> {
   logFull("QUERY", { prompt, sessionId });
-  // Save and clear the input print callback while the query runs. In worker
-  // mode, ask() registers drawFresh() as the callback so the prompt redraws
-  // after background WebSocket messages — but during a query run the callback
-  // fires on every display.print() call, adding an extra \r\n after each piece
-  // of output and causing double-spacing. After the query finishes we restore
-  // and invoke the callback so the prompt redraws once (fixes issue #108).
-  const savedInputCallback = display.getInputPrintCallback();
+  // Save and clear all ask() input callbacks while the query runs. In worker
+  // mode, ask() registers drawFresh() as the print callback so the prompt
+  // redraws after background WebSocket messages. But if those callbacks are
+  // left active during query execution:
+  //   - _inputPrintCallback (drawFresh) fires on every display.print(), adding
+  //     an extra prompt redraw after each piece of output (double-spacing).
+  //   - _inputStatusCallback (redrawFromCurrent) is checked by _drawStatus(),
+  //     which is called after every print() — causing fullRedraw() to write the
+  //     prompt and status bar inline with query output (issue #554).
+  //   - _inputClearCallback (clearForPrint) would interfere similarly.
+  // Clearing all three lets the normal _clearStatus/_drawStatus cursor
+  // mechanics run during the query. After the query finishes we restore all
+  // three and invoke the print callback once to redraw the prompt (issue #108).
+  const savedPrintCallback   = display.getInputPrintCallback();
+  const savedStatusCallback  = display.getInputStatusCallback();
+  const savedClearCallback   = display.getInputClearCallback();
   display.setInputPrintCallback(null);
-  if (savedInputCallback) {
+  display.setInputStatusCallback(null);
+  display.setInputClearCallback(null);
+  if (savedPrintCallback) {
     // ask() was active when this query started (e.g., debounce-triggered while the
     // worker prompt was showing). Clear from cursor to end of screen so the prompt
     // area is wiped and _clearStatus/_drawStatus can track the cursor correctly.
@@ -216,10 +227,12 @@ export async function runQuery(
     display.print(display.c.darkGray("\nInterrupted. What should the agent do instead?"));
   }
 
-  // Restore the callback and redraw the prompt. In worker mode this redraws
+  // Restore all callbacks and redraw the prompt. In worker mode this redraws
   // the waiting "[worker] > " prompt after query output has scrolled past it.
-  display.setInputPrintCallback(savedInputCallback);
-  savedInputCallback?.();
+  display.setInputPrintCallback(savedPrintCallback);
+  display.setInputStatusCallback(savedStatusCallback);
+  display.setInputClearCallback(savedClearCallback);
+  savedPrintCallback?.();
 
   return capturedSessionId;
 }

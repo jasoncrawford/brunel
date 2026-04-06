@@ -736,6 +736,14 @@ export function getInputPrintCallback(): (() => void) | null {
   return _inputPrintCallback;
 }
 
+export function getInputStatusCallback(): (() => void) | null {
+  return _inputStatusCallback;
+}
+
+export function getInputClearCallback(): (() => void) | null {
+  return _inputClearCallback;
+}
+
 // Callback invoked when the status bar changes while ask() is active.
 // Unlike _inputPrintCallback (which assumes the cursor is at a fresh new line
 // after display.print()), this callback is called while the cursor is at the
@@ -762,7 +770,14 @@ function _lineCount(): number {
   return n === 2 ? 3 : n; // blank separator between the two bars when both are active
 }
 function _clearStatus() {
-  if (_inputPrintCallback || _inputStatusCallback) return; // ask() owns the screen; drawFresh handles redraws
+  // Guard on _inputPrintCallback only: it is the canonical indicator that ask()
+  // fully owns the screen (cursor is inside the prompt/buffer area and relative
+  // cursor moves would corrupt it).  _inputStatusCallback can be set without
+  // _inputPrintCallback when runQuery() clears only the print callback while
+  // ask() is concurrently waiting for stdin; in that case runQuery's \r\n\x1b[J
+  // has already moved the cursor to the blank-separator row, so _clearStatus()
+  // is safe to run normally (see issue #554).
+  if (_inputPrintCallback) return;
   const n = _lineCount();
   if (n === 0) return;
   // Cursor rests on the blank separator row above the status lines.
@@ -776,15 +791,18 @@ function _clearStatus() {
 }
 
 function _drawStatus() {
-  if (_inputStatusCallback) {
-    // ask() is active and cursor is in the buffer area — use the status-aware
-    // redraw that navigates back to the prompt line before redrawing.
-    _inputStatusCallback();
-    return;
-  }
   if (_inputPrintCallback) {
-    // ask() is active after display.print() — cursor is at a fresh new line.
-    _inputPrintCallback();
+    // ask() is fully active. Use the status-aware callback when cursor is in the
+    // buffer area (_inputStatusCallback), or the fresh-line callback otherwise.
+    // Both require ask() to be fully active (i.e. _inputPrintCallback set); if
+    // only _inputStatusCallback is set (runQuery cleared _inputPrintCallback
+    // while ask() is concurrently waiting), we fall through to the normal drawing
+    // path so the status bars are redrawn without corrupting the display (#554).
+    if (_inputStatusCallback) {
+      _inputStatusCallback();
+    } else {
+      _inputPrintCallback();
+    }
     return;
   }
   const n = _lineCount();

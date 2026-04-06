@@ -27,7 +27,12 @@ import { PassThrough } from "stream";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { runQuery, getCachedModels, _resetCachedModels } from "../src/agent/index.js";
 import { ask, pick, pickMultiple, pickQuestion } from "../src/agent/input.js";
-import { toolUseNames, stopStatus, setVerbose } from "../src/agent/display.js";
+import {
+  toolUseNames, stopStatus, setVerbose,
+  startPersistentStatus, stopPersistentStatus, updatePersistentStatus,
+  getInputPrintCallback, getInputStatusCallback, getInputClearCallback,
+  setInputPrintCallback, setInputStatusCallback, setInputClearCallback,
+} from "../src/agent/display.js";
 
 const defaultPermConfig = {
   permissionMode: "default" as const,
@@ -74,6 +79,10 @@ beforeEach(() => {
 
 afterEach(() => {
   stopStatus();
+  stopPersistentStatus();
+  setInputPrintCallback(null);
+  setInputStatusCallback(null);
+  setInputClearCallback(null);
   vi.restoreAllMocks();
 });
 
@@ -683,6 +692,114 @@ describe("runQuery - model option", () => {
     }
     const models = getCachedModels();
     expect(models).toEqual(FAKE_MODELS);
+  });
+});
+
+describe("runQuery - input callback lifecycle (issue #554)", () => {
+  it("clears status and clear callbacks during query, restores them after", async () => {
+    // When ask() is active (worker prompt visible) and runQuery is called in the
+    // background (e.g. from a debounce timer), all three input callbacks must be
+    // cleared for the duration of the query. Leaving _inputStatusCallback active
+    // causes _drawStatus() → redrawFromCurrent() → fullRedraw() to fire on every
+    // print(), writing the prompt and status bar inline with query output (#554).
+    let statusCallbackDuringQuery: (() => void) | null = undefined!;
+    let clearCallbackDuringQuery:  (() => void) | null = undefined!;
+    let printCallbackDuringQuery:  (() => void) | null = undefined!;
+
+    (query as any).mockImplementation(async function* () {
+      // Capture callback state mid-query (before any output)
+      statusCallbackDuringQuery = getInputStatusCallback();
+      clearCallbackDuringQuery  = getInputClearCallback();
+      printCallbackDuringQuery  = getInputPrintCallback();
+      yield { type: "result", duration_ms: 50, num_turns: 1, usage: { input_tokens: 5, output_tokens: 5 } };
+    });
+
+    const origStdin = process.stdin;
+    const fakeStdin = new PassThrough();
+    fakeStdin.setEncoding("utf8");
+    (fakeStdin as any).setRawMode = vi.fn();
+    Object.defineProperty(process, "stdin", { value: fakeStdin, configurable: true });
+
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+
+    try {
+      // Start ask() — registers all three callbacks
+      const askPromise = ask("[worker] > ", () => []);
+
+      // Verify callbacks are set before query
+      expect(getInputPrintCallback()).not.toBeNull();
+      expect(getInputStatusCallback()).not.toBeNull();
+      expect(getInputClearCallback()).not.toBeNull();
+
+      await runQuery(defaultPermConfig, "test", undefined);
+
+      // During query: all three must have been null
+      expect(statusCallbackDuringQuery).toBeNull();
+      expect(clearCallbackDuringQuery).toBeNull();
+      expect(printCallbackDuringQuery).toBeNull();
+
+      // After query: callbacks restored
+      expect(getInputPrintCallback()).not.toBeNull();
+      expect(getInputStatusCallback()).not.toBeNull();
+      expect(getInputClearCallback()).not.toBeNull();
+
+      fakeStdin.push("\r");
+      await askPromise;
+    } finally {
+      Object.defineProperty(process, "stdin", { value: origStdin, configurable: true });
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("status bar update during query does not write prompt inline with output", async () => {
+    // Regression test for issue #554: status bar updates (e.g. branch refresh)
+    // during query execution must not call fullRedraw(), which would write the
+    // "[worker] > " prompt inline with query output.
+    (query as any).mockImplementation(async function* () {
+      yield { type: "assistant", message: { content: [{ type: "text", text: "assistant output" }] } };
+      // Simulate a status bar update mid-query (e.g., branch refreshed after a Bash call)
+      updatePersistentStatus();
+      yield { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } };
+    });
+
+    const written: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((s: any) => written.push(String(s)));
+    vi.spyOn(process.stdout, "write").mockImplementation((s: any) => { written.push(String(s)); return true; });
+
+    const origStdin = process.stdin;
+    const fakeStdin = new PassThrough();
+    fakeStdin.setEncoding("utf8");
+    (fakeStdin as any).setRawMode = vi.fn();
+    Object.defineProperty(process, "stdin", { value: fakeStdin, configurable: true });
+
+    try {
+      startPersistentStatus(() => "worker connected");
+      const askPromise = ask("[worker] > ", () => []);
+
+      await runQuery(defaultPermConfig, "test", undefined);
+
+      // Find position of assistant output and final prompt redraw
+      const assistantIdx = written.findIndex(s => stripAnsi(s).includes("assistant output"));
+      const lastPromptIdx = written.map((s, i) => s.includes("[worker] > ") ? i : -1).filter(i => i >= 0).at(-1)!;
+
+      expect(assistantIdx).toBeGreaterThan(-1);  // assistant output appeared
+      expect(lastPromptIdx).toBeGreaterThan(-1); // prompt drawn at least once
+
+      // The prompt must NOT appear BETWEEN startStatus() and the final restore:
+      // i.e., all "[worker] > " writes must come either before the assistant output
+      // (the initial ask() draw) or after (the final restore redraw), not inline.
+      const promptsBetween = written
+        .slice(assistantIdx + 1, lastPromptIdx)
+        .filter(s => s.includes("[worker] > "));
+      expect(promptsBetween).toHaveLength(0);
+
+      fakeStdin.push("\r");
+      await askPromise;
+    } finally {
+      Object.defineProperty(process, "stdin", { value: origStdin, configurable: true });
+      vi.restoreAllMocks();
+    }
   });
 });
 
