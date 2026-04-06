@@ -5,12 +5,16 @@ import {
   printMessage,
   startStatus,
   stopStatus,
+  startPersistentStatus,
+  stopPersistentStatus,
+  updatePersistentStatus,
   print,
   toolUseNames,
   setVerbose,
   setThinkOutLoud,
   _statusActive,
   setInputPrintCallback,
+  setInputStatusCallback,
 } from "../src/agent/display.js";
 
 function captureOutput(fn: () => void): string {
@@ -387,5 +391,83 @@ describe("Status line", () => {
     vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     stopStatus();
     stopStatus();
+  });
+});
+
+// ── Bug #554: display corruption when runQuery starts while ask() is waiting ──
+//
+// runQuery() clears _inputPrintCallback but not _inputStatusCallback. This
+// leaves _drawStatus() in a broken state where it calls redrawFromCurrent()
+// (via _inputStatusCallback) from the wrong cursor position, writing spurious
+// "[worker] > " copies and status bars into the output feed.
+//
+// Fix: _clearStatus() now guards only on _inputPrintCallback (the canonical
+// "ask() owns the screen" indicator). _drawStatus() only calls
+// _inputStatusCallback when _inputPrintCallback is also set. When only
+// _inputStatusCallback is set (the runQuery case), both functions operate
+// normally so status bars are drawn/erased without corrupting the display.
+
+describe("_clearStatus/_drawStatus with only _inputStatusCallback set (issue #554)", () => {
+  afterEach(() => {
+    stopStatus();
+    stopPersistentStatus();
+    setInputStatusCallback(null);
+    setInputPrintCallback(null);
+    vi.restoreAllMocks();
+  });
+
+  it("startStatus() does NOT call _inputStatusCallback when _inputPrintCallback is null", () => {
+    vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const statusCb = vi.fn();
+    setInputStatusCallback(statusCb);
+    // _inputPrintCallback is null (simulates runQuery clearing it while ask() waits)
+    startStatus(() => "Working...");
+    expect(statusCb).not.toHaveBeenCalled();
+  });
+
+  it("startStatus() writes status bar content when _inputStatusCallback set but _inputPrintCallback null", () => {
+    let output = "";
+    vi.spyOn(process.stdout, "write").mockImplementation((s: unknown) => { output += String(s); return true; });
+    setInputStatusCallback(vi.fn());
+    startStatus(() => "Running query...");
+    // The status bar text must appear in stdout output, not via a callback
+    expect(output).toContain("Running query...");
+  });
+
+  it("updatePersistentStatus() does NOT call _inputStatusCallback when _inputPrintCallback is null", () => {
+    vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const statusCb = vi.fn();
+    setInputStatusCallback(statusCb);
+    startPersistentStatus(() => "worker connected");
+    updatePersistentStatus();
+    expect(statusCb).not.toHaveBeenCalled();
+  });
+
+  it("print() uses normal output path when only _inputStatusCallback is set", () => {
+    let written = "";
+    const logSpy = vi.spyOn(console, "log").mockImplementation((s: unknown) => { written += String(s) + "\n"; });
+    vi.spyOn(process.stdout, "write").mockImplementation((s: unknown) => { written += String(s); return true; });
+    setInputStatusCallback(vi.fn());
+    // _inputPrintCallback is null → should use normal path (no clear-to-end-of-screen before the text)
+    print("hello from query");
+    logSpy.mockRestore();
+    // The text must appear in output
+    expect(stripAnsi(written)).toContain("hello from query");
+    // And the _inputStatusCallback should NOT have been called
+    // (it would be called by _drawStatus if the guard was wrong)
+  });
+
+  it("when both callbacks are set, _inputStatusCallback IS called by _drawStatus", () => {
+    vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const printCb = vi.fn();
+    const statusCb = vi.fn();
+    setInputPrintCallback(printCb);
+    setInputStatusCallback(statusCb);
+    startPersistentStatus(() => "worker connected");
+    updatePersistentStatus();
+    // _drawStatus should delegate to _inputStatusCallback when both are set
+    expect(statusCb).toHaveBeenCalled();
+    setInputPrintCallback(null);
+    setInputStatusCallback(null);
   });
 });
