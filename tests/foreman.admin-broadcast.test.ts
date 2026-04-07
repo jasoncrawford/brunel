@@ -171,6 +171,20 @@ describe("foreman admin broadcast — reactive snapshot pipeline", () => {
     expect(snapshots.length).toBe(1);
     expect(snapshots[0].tasks).toHaveLength(3);
   });
+
+  it("excludes complete tasks from the snapshot", async () => {
+    const snapshots: AdminSnapshot[] = [];
+    adminWss.broadcastSnapshot = (snapshot) => snapshots.push(snapshot);
+
+    await taskModel.register("10", 10, "owner/repo", "Active", "", []);
+    await taskModel.register("11", 11, "owner/repo", "Done", "", []);
+    await taskModel.complete("11");
+
+    await waitUntil(() => snapshots.length > 0);
+    const last = snapshots[snapshots.length - 1];
+    expect(last.tasks.map((t) => t.taskId)).toContain("10");
+    expect(last.tasks.map((t) => t.taskId)).not.toContain("11");
+  });
 });
 
 describe("foreman admin broadcast — hello_ack log event summary", () => {

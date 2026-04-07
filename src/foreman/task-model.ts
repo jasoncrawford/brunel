@@ -141,6 +141,12 @@ export class TaskModel extends EventEmitter {
     return rows.filter(r => !r.completedAt).map(rowToTask);
   }
 
+  /** All active (non-complete) tasks — used by the dashboard task list API. */
+  async listActiveTasks(): Promise<Task[]> {
+    const rows = await this.store.listTasks();
+    return rows.filter((row) => !row.completedAt).map(rowToTask);
+  }
+
   // ── Memory-only write operations (ephemeral data) ─────────────────────────
 
   queueEvent(taskId: string, event: GitHubEvent): void {
@@ -179,10 +185,11 @@ export class TaskModel extends EventEmitter {
     return isBlocked(issueNumber, graph, this._openIssues);
   }
 
-  /** Task snapshots with open-issue state baked in — for admin broadcasts. */
+  /** Task snapshots with open-issue state baked in — for admin broadcasts.
+   *  Complete tasks are excluded: the dashboard only shows active tasks. */
   async getTaskSnapshots(graph: DependencyGraph): Promise<TaskSnapshot[]> {
     const rows = await this.store.listTasks();
-    return rows.map((row) => {
+    return rows.filter((row) => !row.completedAt).map((row) => {
       const isBlockedByDeps = graph !== undefined && this.isBlocked(row.issueNumber, graph);
       const snapshot: TaskSnapshot = {
         taskId: row.taskId,
