@@ -80,6 +80,7 @@ let registry: WorkerRegistry;
 let httpServer: http.Server;
 let wss: WebSocketServer;
 let routeEvent: (id: string, name: string, payload: unknown) => Promise<void>;
+let reconcile: () => Promise<void>;
 let shutdown: () => Promise<void>;
 let port: number;
 let graph: DependencyGraph;
@@ -94,7 +95,7 @@ beforeEach(() => {
   registry = new WorkerRegistry();
   graph = new Map();
   httpServer = http.createServer();
-  ({ wss, routeEvent, shutdown } = createForemanWss(taskModel, registry, httpServer, defaultCfg, { graph }));
+  ({ wss, routeEvent, reconcile, shutdown } = createForemanWss(taskModel, registry, httpServer, defaultCfg, { graph }));
 
   return new Promise<void>((resolve) => {
     httpServer.listen(0, () => {
@@ -169,6 +170,34 @@ describe("foreman WebSocket protocol", () => {
       new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
     ]);
     expect(raceResult).toBe("timeout");
+  });
+
+  it("two idle workers: only one gets task_assigned when reconcile runs (no double-assignment)", async () => {
+    // Regression test for issue #563: two idle workers both receiving task_assigned for the same task.
+    // Setup: both workers are already idle before any task exists.
+    const ws1 = await connect();
+    const ws2 = await connect();
+    const q1 = makeQueue(ws1);
+    const q2 = makeQueue(ws2);
+    send(ws1, { type: "worker_hello", workerId: "w1", status: "idle" });
+    await q1.next(); // hello_ack (no task yet)
+    send(ws2, { type: "worker_hello", workerId: "w2", status: "idle" });
+    await q2.next(); // hello_ack (no task yet)
+
+    // Both workers are now idle. Create a task and trigger reconcile.
+    await makeTask(taskModel, 42);
+    await reconcile();
+
+    // Exactly one worker should be busy; the other should remain idle.
+    const w1Status = registry.get("w1")?.status;
+    const w2Status = registry.get("w2")?.status;
+    const busyCount = [w1Status, w2Status].filter((s) => s === "busy").length;
+    expect(busyCount).toBe(1);
+
+    // The task should be assigned to exactly one worker in the store.
+    const task = await taskModel.get("42");
+    expect(task?.status).toBe("assigned");
+    expect(task?.assignedWorkerId).toBeTruthy();
   });
 
   it("task_complete completes task and assigns next task", async () => {

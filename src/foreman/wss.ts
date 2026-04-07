@@ -98,11 +98,12 @@ export function createForemanWss(
   registry.on("changed", debouncedBroadcast);
 
   async function assignIdleWorkers(): Promise<void> {
-    await Promise.all(
-      registry.getIdleWorkers().map(w =>
-        tryAssignWork(w.workerId).catch(err => flog(`ERROR tryAssignWork: ${fmtError(err)}`))
-      )
-    );
+    // Sequential (not concurrent) to prevent double-assignment: each tryAssignWork
+    // must complete its DB write before the next one calls nextPending(), otherwise
+    // two workers can both see the same pending task. (Issue #563)
+    for (const w of registry.getIdleWorkers()) {
+      await tryAssignWork(w.workerId).catch(err => flog(`ERROR tryAssignWork: ${fmtError(err)}`));
+    }
   }
 
   async function tryAssignWork(workerId: string): Promise<void> {
