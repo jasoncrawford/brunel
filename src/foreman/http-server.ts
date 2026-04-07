@@ -99,15 +99,12 @@ export function createHttpServer(
   app.get("/api/tasks", async (c) => {
     try {
       const statusFilter = c.req.query("status") as TaskStatus | undefined;
-      const rows = taskModel ? await taskModel.listTasks() : [];
-
-      const tasks = rows.map((row) => rowToTask(row));
-
       if (statusFilter) {
-        return c.json(tasks.filter((t) => t.status === statusFilter));
+        const rows = taskModel ? await taskModel.listTasks() : [];
+        return c.json(rows.map(rowToTask).filter((t) => t.status === statusFilter));
       }
-      // By default, exclude complete tasks — the dashboard shows only active tasks.
-      return c.json(tasks.filter((t) => t.status !== "complete"));
+      const tasks = taskModel ? await taskModel.listActiveTasks() : [];
+      return c.json(tasks);
     } catch (err) {
       flog(`ERROR API query failed: ${fmtError(err)}`);
       return c.json({ error: "internal error" }, 500);

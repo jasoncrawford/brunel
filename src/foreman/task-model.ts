@@ -141,6 +141,12 @@ export class TaskModel extends EventEmitter {
     return rows.filter(r => !r.completedAt).map(rowToTask);
   }
 
+  /** All active (non-complete) tasks — used by the dashboard task list API. */
+  async listActiveTasks(): Promise<Task[]> {
+    const rows = await this.store.listTasks();
+    return rows.filter((row) => !row.completedAt).map(rowToTask);
+  }
+
   // ── Memory-only write operations (ephemeral data) ─────────────────────────
 
   queueEvent(taskId: string, event: GitHubEvent): void {
