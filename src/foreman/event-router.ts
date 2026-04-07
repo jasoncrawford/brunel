@@ -163,7 +163,7 @@ export async function reconcile(deps: EventRouterDeps): Promise<void> {
 
   // Step 3: remove pending/blocked tasks whose issue no longer has the label
   const cancelPromises: Promise<void>[] = [];
-  for (const t of await deps.taskModel.getPendingAndBlockedTasks()) {
+  for (const t of await deps.taskModel.listActiveTasks()) {
     if (!labeledIssues.has(t.issueNumber)) {
       cancelPromises.push(
         deps.taskModel.cancel(t.taskId)
