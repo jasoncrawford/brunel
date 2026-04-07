@@ -193,18 +193,19 @@ describe("GET /api/tasks", () => {
     expect(JSON.parse(res.body)).toEqual([]);
   });
 
-  it("returns active tasks from taskModel with derived status, excluding complete", async () => {
+  it("returns active tasks from taskModel with derived status and date fields, excluding complete", async () => {
+    const createdAt = "2026-01-01T00:00:00.000Z";
     const pendingRow = {
       taskId: "1", issueNumber: 1, repo: "test/repo", title: "Pending bug",
       body: "Description", labels: [],
       workerId: null, assignedAt: null, completedAt: null, issueClosedAt: null, prMergedAt: null,
-      prNumber: null, branch: null, createdAt: new Date().toISOString(),
+      prNumber: null, branch: null, createdAt,
     };
     const completeRow = {
       taskId: "2", issueNumber: 2, repo: "test/repo", title: "Done bug",
       body: "Description", labels: [],
-      workerId: null, assignedAt: null, completedAt: new Date().toISOString(), issueClosedAt: null, prMergedAt: null,
-      prNumber: null, branch: null, createdAt: new Date().toISOString(),
+      workerId: null, assignedAt: null, completedAt: "2026-01-02T00:00:00.000Z", issueClosedAt: null, prMergedAt: null,
+      prNumber: null, branch: null, createdAt,
     };
     const store = { listTasks: vi.fn().mockResolvedValue([pendingRow, completeRow]) } as never;
     const tm = new TaskModel(store);
@@ -216,7 +217,14 @@ describe("GET /api/tasks", () => {
       const body = JSON.parse(res.body);
       // complete task is excluded by default
       expect(body).toHaveLength(1);
-      expect(body[0]).toMatchObject({ taskId: "1", status: "pending" });
+      expect(body[0]).toMatchObject({
+        taskId: "1",
+        repo: "test/repo",
+        status: "pending",
+        workerId: null,
+        createdAt,
+        completedAt: null,
+      });
       expect(store.listTasks).toHaveBeenCalled();
     } finally {
       await stopServer(s);
