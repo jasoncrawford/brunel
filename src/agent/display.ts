@@ -736,6 +736,14 @@ export function getInputPrintCallback(): (() => void) | null {
   return _inputPrintCallback;
 }
 
+export function getInputStatusCallback(): (() => void) | null {
+  return _inputStatusCallback;
+}
+
+export function getInputClearCallback(): (() => void) | null {
+  return _inputClearCallback;
+}
+
 // Callback invoked when the status bar changes while ask() is active.
 // Unlike _inputPrintCallback (which assumes the cursor is at a fresh new line
 // after display.print()), this callback is called while the cursor is at the

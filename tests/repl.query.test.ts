@@ -729,4 +729,49 @@ describe("runQuery - prompt redraw after query (worker mode integration)", () =>
       vi.restoreAllMocks();
     }
   });
+
+  it("prompt does not appear between output lines when ask() is active during query (issue #554)", async () => {
+    // Regression test: when a debounce-triggered query runs while ask() is still
+    // active, the status bar callbacks must be cleared so _drawStatus() does not
+    // call the ask() redraw handler after every display.print(), which was causing
+    // "[worker] > " to appear between every line of Claude's output.
+    (query as any).mockImplementation(async function* () {
+      yield { type: "assistant", message: { content: [{ type: "text", text: "First line" }] } };
+      yield { type: "assistant", message: { content: [{ type: "text", text: "Second line" }] } };
+      yield { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 5, output_tokens: 10 } };
+    });
+
+    const written: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((s: any) => written.push(String(s)));
+    vi.spyOn(process.stdout, "write").mockImplementation((s: any) => { written.push(String(s)); return true; });
+
+    const origStdin = process.stdin;
+    const fakeStdin = new PassThrough();
+    fakeStdin.setEncoding("utf8");
+    (fakeStdin as any).setRawMode = vi.fn();
+    Object.defineProperty(process, "stdin", { value: fakeStdin, configurable: true });
+
+    try {
+      // ask() registers all three display callbacks (print, status, clear)
+      const askPromise = ask("\n[worker] > ", () => []);
+
+      await runQuery(defaultPermConfig, "test", undefined);
+
+      const allOutput = written.join("");
+      const firstIdx  = allOutput.indexOf("First line");
+      const secondIdx = allOutput.indexOf("Second line");
+      expect(firstIdx).toBeGreaterThan(-1);
+      expect(secondIdx).toBeGreaterThan(firstIdx);
+
+      // Nothing between the two output lines should contain the prompt string
+      const between = allOutput.slice(firstIdx + "First line".length, secondIdx);
+      expect(between).not.toContain("[worker] > ");
+
+      fakeStdin.push("\r");
+      await askPromise;
+    } finally {
+      Object.defineProperty(process, "stdin", { value: origStdin, configurable: true });
+      vi.restoreAllMocks();
+    }
+  });
 });

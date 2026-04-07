@@ -100,7 +100,11 @@ export async function runQuery(
   // of output and causing double-spacing. After the query finishes we restore
   // and invoke the callback so the prompt redraws once (fixes issue #108).
   const savedInputCallback = display.getInputPrintCallback();
+  const savedStatusCallback = display.getInputStatusCallback();
+  const savedClearCallback = display.getInputClearCallback();
   display.setInputPrintCallback(null);
+  display.setInputStatusCallback(null);
+  display.setInputClearCallback(null);
   if (savedInputCallback) {
     // ask() was active when this query started (e.g., debounce-triggered while the
     // worker prompt was showing). Clear from cursor to end of screen so the prompt
@@ -216,9 +220,11 @@ export async function runQuery(
     display.print(display.c.darkGray("\nInterrupted. What should the agent do instead?"));
   }
 
-  // Restore the callback and redraw the prompt. In worker mode this redraws
+  // Restore the callbacks and redraw the prompt. In worker mode this redraws
   // the waiting "[worker] > " prompt after query output has scrolled past it.
   display.setInputPrintCallback(savedInputCallback);
+  display.setInputStatusCallback(savedStatusCallback);
+  display.setInputClearCallback(savedClearCallback);
   savedInputCallback?.();
 
   return capturedSessionId;
