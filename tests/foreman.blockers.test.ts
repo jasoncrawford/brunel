@@ -20,7 +20,9 @@ function makeSpiedStore(): TaskStore {
   vi.spyOn(store, "markAssigned");
   vi.spyOn(store, "markComplete");
   vi.spyOn(store, "markPending");
-  vi.spyOn(store, "markBlocked");
+  vi.spyOn(store, "setIssueClosed");
+  vi.spyOn(store, "clearIssueClosed");
+  vi.spyOn(store, "setPrMerged");
   vi.spyOn(store, "updateTaskPr");
   vi.spyOn(store, "deleteTask");
   vi.spyOn(store, "getTask");
@@ -28,16 +30,32 @@ function makeSpiedStore(): TaskStore {
   return store;
 }
 
-// ── Issue close → markPending ─────────────────────────────────────────────────
+// ── Derived blocked status from dependency graph ────────────────────────────────
 
 describe("foreman — blocker transitions via routeEvent", () => {
-  it("issue close unblocks task in memory when no open blockers remain", async () => {
+  it("task derives blocked status when blocker is open", async () => {
     const taskModel = new TaskModel();
     const registry = new WorkerRegistry();
     const server = http.createServer();
 
     await taskModel.register("10", 10, "owner/repo", "T", "b", []);
-    await taskModel.block("10");
+    const graph = new Map([[10, new Set([5])]]);
+
+    const { wss } = createForemanWss(taskModel, registry, server, { ...defaultCfg, taskLabel: "brunel:ready", workerReclaimTimeoutMs: 300_000 }, { graph });
+    taskModel.trackIssue(10, ISSUE_10, true);
+    taskModel.setIssueOpenState(5, true); // blocker is open
+    wss.close();
+
+    const snapshots = await taskModel.getTaskSnapshots(graph);
+    expect(snapshots[0].status).toBe("blocked");
+  });
+
+  it("task derives pending status when blocker is closed", async () => {
+    const taskModel = new TaskModel();
+    const registry = new WorkerRegistry();
+    const server = http.createServer();
+
+    await taskModel.register("10", 10, "owner/repo", "T", "b", []);
     const graph = new Map([[10, new Set([5])]]);
 
     const { wss, routeEvent } = createForemanWss(taskModel, registry, server, { ...defaultCfg, taskLabel: "brunel:ready" }, { graph });
@@ -45,45 +63,27 @@ describe("foreman — blocker transitions via routeEvent", () => {
     taskModel.setIssueOpenState(5, true);
     wss.close();
 
+    // Initially blocked
+    const snapshots1 = await taskModel.getTaskSnapshots(graph);
+    expect(snapshots1[0].status).toBe("blocked");
+
+    // Close the blocker
     await routeEvent("evt-1", "issues", {
       action: "closed",
       issue: { number: 5, title: "Blocker", labels: [] },
     });
 
-    expect((await taskModel.get("10"))?.status).toBe("pending");
+    // Now pending
+    const snapshots2 = await taskModel.getTaskSnapshots(graph);
+    expect(snapshots2[0].status).toBe("pending");
   });
 
-  it("issue close calls markPending on taskStore when task is fully unblocked", async () => {
-    const taskStore = makeSpiedStore();
-    const taskModel = new TaskModel(taskStore);
+  it("task remains blocked when other blockers are still open", async () => {
+    const taskModel = new TaskModel();
     const registry = new WorkerRegistry();
     const server = http.createServer();
 
     await taskModel.register("10", 10, "owner/repo", "T", "b", []);
-    await taskModel.block("10");
-    const graph = new Map([[10, new Set([5])]]);
-
-    const { wss, routeEvent } = createForemanWss(taskModel, registry, server, { ...defaultCfg, taskLabel: "brunel:ready" }, { graph });
-    taskModel.trackIssue(10, ISSUE_10, true);
-    taskModel.setIssueOpenState(5, true);
-    wss.close();
-
-    await routeEvent("evt-1", "issues", {
-      action: "closed",
-      issue: { number: 5, title: "Blocker", labels: [] },
-    });
-
-    expect(taskStore.markPending).toHaveBeenCalledWith("10");
-  });
-
-  it("issue close does NOT unblock task when other blockers are still open", async () => {
-    const taskStore = makeSpiedStore();
-    const taskModel = new TaskModel(taskStore);
-    const registry = new WorkerRegistry();
-    const server = http.createServer();
-
-    await taskModel.register("10", 10, "owner/repo", "T", "b", []);
-    await taskModel.block("10");
     // Task 10 is blocked by BOTH 5 and 6
     const graph = new Map([[10, new Set([5, 6])]]);
 
@@ -93,6 +93,10 @@ describe("foreman — blocker transitions via routeEvent", () => {
     taskModel.setIssueOpenState(6, true);
     wss.close();
 
+    // Initially blocked
+    const snapshots1 = await taskModel.getTaskSnapshots(graph);
+    expect(snapshots1[0].status).toBe("blocked");
+
     // Close issue 5 — but 6 is still open
     await routeEvent("evt-1", "issues", {
       action: "closed",
@@ -100,7 +104,7 @@ describe("foreman — blocker transitions via routeEvent", () => {
     });
 
     // Task remains blocked (6 is still open)
-    expect((await taskModel.get("10"))?.status).toBe("blocked");
-    expect(taskStore.markPending).not.toHaveBeenCalled();
+    const snapshots2 = await taskModel.getTaskSnapshots(graph);
+    expect(snapshots2[0].status).toBe("blocked");
   });
 });

@@ -10,6 +10,20 @@ import { loadIssuesToQueue } from "./github.js";
 import { fmtError } from "../utils.js";
 
 
+// ── Status derivation ─────────────────────────────────────────────────────────
+// Status is derived from timestamps and task properties, not stored in DB.
+
+export function deriveStatus(row: TaskRow, isBlockedByDeps = false): TaskStatus {
+  if (row.completedAt) return "complete";
+  if (row.issueClosedAt) return "closed";
+  if (row.prMergedAt) return "merged";
+  if (row.workerId) return "assigned";
+  if (row.prNumber) return "pushed";
+  if (isBlockedByDeps) return "blocked";
+  return "pending";
+}
+
+
 // ── Task ──────────────────────────────────────────────────────────────────────
 // Read-only view of a task, constructed from a TaskRow.  Callers receive this
 // from TaskModel read methods; mutations go through TaskModel write methods.
@@ -27,7 +41,7 @@ export interface Task {
   branch?: string;
 }
 
-function rowToTask(row: TaskRow): Task {
+export function rowToTask(row: TaskRow): Task {
   return {
     taskId: row.taskId,
     issueNumber: row.issueNumber,
@@ -35,7 +49,7 @@ function rowToTask(row: TaskRow): Task {
     body: row.body,
     labels: row.labels,
     repoUrl: `https://github.com/${row.repo}`,
-    status: row.status,
+    status: deriveStatus(row),
     assignedWorkerId: row.workerId ?? undefined,
     prNumber: row.prNumber ?? undefined,
     branch: row.branch ?? undefined,
@@ -113,7 +127,7 @@ export class TaskModel extends EventEmitter {
   }
 
   async nextPending(isReady?: (t: Task) => boolean): Promise<Task | null> {
-    const rows = await this.store.listTasks({ status: "pending" });
+    const rows = await this.store.listTasks({ cancelable: true });
     for (const row of rows) {
       const task = rowToTask(row);
       if (isReady === undefined || isReady(task)) return task;
@@ -122,11 +136,9 @@ export class TaskModel extends EventEmitter {
   }
 
   async getPendingAndBlockedTasks(): Promise<Task[]> {
-    const [pending, blocked] = await Promise.all([
-      this.store.listTasks({ status: "pending" }),
-      this.store.listTasks({ status: "blocked" }),
-    ]);
-    return [...pending, ...blocked].map(rowToTask);
+    const rows = await this.store.listTasks();
+    // Filter out complete tasks (those with completedAt set)
+    return rows.filter(r => !r.completedAt).map(rowToTask);
   }
 
   // ── Memory-only write operations (ephemeral data) ─────────────────────────
@@ -171,11 +183,12 @@ export class TaskModel extends EventEmitter {
   async getTaskSnapshots(graph: DependencyGraph): Promise<TaskSnapshot[]> {
     const rows = await this.store.listTasks();
     return rows.map((row) => {
+      const isBlockedByDeps = graph !== undefined && this.isBlocked(row.issueNumber, graph);
       const snapshot: TaskSnapshot = {
         taskId: row.taskId,
         issueNumber: row.issueNumber,
         title: row.title,
-        status: row.status,
+        status: deriveStatus(row, isBlockedByDeps),
         assignedWorkerId: row.workerId ?? undefined,
         prNumber: row.prNumber ?? undefined,
         prUrl: row.prNumber != null ? `https://github.com/${row.repo}/pull/${row.prNumber}` : undefined,
@@ -203,7 +216,7 @@ export class TaskModel extends EventEmitter {
     this._openIssues.delete(issueNumber);
   }
 
-  /** Called when issues/closed fires: stop tracking and mark any active task complete.
+  /** Called when issues/closed fires: mark the issue as closed.
    *  Handles pending and blocked tasks too — not just assigned ones — so that DB rows
    *  are always finalised regardless of whether a worker was active. (Bug #489) */
   async closeIssue(issueNumber: number): Promise<void> {
@@ -211,13 +224,19 @@ export class TaskModel extends EventEmitter {
     this._openIssues.delete(issueNumber);
     const task = await this.getTaskForIssue(issueNumber);
     if (task && task.status !== "complete") {
-      await this.complete(task.taskId);
+      await this.store.setIssueClosed(task.taskId);
+      this.emit("changed");
     }
   }
 
   /** Called when issues/reopened fires: mark the issue open again. */
-  reopenIssue(issueNumber: number): void {
+  async reopenIssue(issueNumber: number): Promise<void> {
     this._openIssues.add(issueNumber);
+    const task = await this.getTaskForIssue(issueNumber);
+    if (task) {
+      await this.store.clearIssueClosed(task.taskId);
+      this.emit("changed");
+    }
   }
 
   /** Called when issues/edited fires with a body change: reset deps and update body. */
@@ -247,39 +266,21 @@ export class TaskModel extends EventEmitter {
   async loadActiveTasksFromDb(flog: (msg: string) => void): Promise<void> {
     const activeTasks = await this.listTasks();
     for (const row of activeTasks) {
-      if (row.status === "complete") continue;
+      if (row.completedAt) continue;
       if (row.branch) this.branchToTaskId.set(row.branch, row.taskId);
-      flog(`[startup] restored task #${row.taskId} (${row.status})`);
+      const status = deriveStatus(row);
+      flog(`[startup] restored task #${row.taskId} (${status})`);
     }
   }
 
-  /** Fetch brunel:ready issues from GitHub, load deps, and reconcile
-   *  blocked/unblocked state. Called at startup after loadActiveTasksFromDb. */
+  /** Fetch brunel:ready issues from GitHub and load deps.
+   *  Called at startup after loadActiveTasksFromDb. */
   async loadIssuesFromGithub(
     graph: DependencyGraph,
     config: { githubRepo: string; githubToken: string; taskLabel: string; githubApiUrl?: string },
     flog: (msg: string) => void,
   ): Promise<void> {
     await loadIssuesToQueue(this, graph, config);
-
-    const startupPromises: Promise<void>[] = [];
-    for (const t of await this.getPendingAndBlockedTasks()) {
-      const shouldBeBlocked = this.isBlocked(t.issueNumber, graph);
-      if (t.status === "blocked" && !shouldBeBlocked) {
-        startupPromises.push(
-          this.unblock(t.taskId).catch((err) =>
-            flog(`ERROR Failed to mark task #${t.taskId} pending on startup: ${fmtError(err)}`)
-          )
-        );
-      } else if (t.status === "pending" && shouldBeBlocked) {
-        startupPromises.push(
-          this.block(t.taskId).catch((err) =>
-            flog(`ERROR Failed to mark task #${t.taskId} blocked on startup: ${fmtError(err)}`)
-          )
-        );
-      }
-    }
-    await Promise.all(startupPromises);
   }
 
   // ── Task-lifecycle methods (write to store, emit changed) ─────────────────
@@ -290,16 +291,6 @@ export class TaskModel extends EventEmitter {
   }
 
   async revert(taskId: string): Promise<void> {
-    await this.store.markPending(taskId);
-    this.emit("changed");
-  }
-
-  async block(taskId: string): Promise<void> {
-    await this.store.markBlocked(taskId);
-    this.emit("changed");
-  }
-
-  async unblock(taskId: string): Promise<void> {
     await this.store.markPending(taskId);
     this.emit("changed");
   }
@@ -335,6 +326,14 @@ export class TaskModel extends EventEmitter {
     const task = await this.getTaskForPr(prNumber);
     if (task) {
       await this.store.updateTaskPr(task.taskId, null, null);
+      this.emit("changed");
+    }
+  }
+
+  async registerPrMerge(prNumber: number): Promise<void> {
+    const task = await this.getTaskForPr(prNumber);
+    if (task) {
+      await this.store.setPrMerged(task.taskId);
       this.emit("changed");
     }
   }

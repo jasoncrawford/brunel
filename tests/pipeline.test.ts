@@ -20,7 +20,7 @@ import type { AddressInfo } from "net";
 import type { ForemanMessage } from "../src/types.js";
 import { WorkerRegistry } from "../src/foreman/worker-registry.js";
 import { createForemanWss } from "../src/foreman/wss.js";
-import { TaskModel } from "../src/foreman/task-model.js";
+import { TaskModel, rowToTask } from "../src/foreman/task-model.js";
 import type { DbLogger } from "../src/foreman/db.js";
 import {
   createDbLogger,
@@ -91,10 +91,11 @@ async function pollUntil<T>(
   throw new Error(`pollUntil timed out after ${timeoutMs}ms`);
 }
 
-/** Fetch the latest DB row for a task. */
+/** Fetch the latest DB row for a task with derived status. */
 async function getDbTask(taskId: string) {
-  const tasks = await taskStore.listTasks();
-  return tasks.find((t) => t.taskId === taskId);
+  const rows = await taskStore.listTasks();
+  const row = rows.find((t) => t.taskId === taskId);
+  return row ? rowToTask(row) : undefined;
 }
 
 // ── Webhook payload factories ─────────────────────────────────────────────────
@@ -330,7 +331,7 @@ describe("pipeline: happy path and queued-then-assigned", () => {
       const row = await getDbTask("42");
       return row?.status === "assigned" ? row : null;
     });
-    expect(assignedRow.workerId).toBe("w1");
+    expect(assignedRow.assignedWorkerId).toBe("w1");
 
     // 5. Worker completes the task
     send(ws, { type: "task_complete", workerId: "w1", taskId: "42" });

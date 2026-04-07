@@ -14,7 +14,9 @@ function makeStore(): TaskStore {
   vi.spyOn(store, "markAssigned");
   vi.spyOn(store, "markComplete");
   vi.spyOn(store, "markPending");
-  vi.spyOn(store, "markBlocked");
+  vi.spyOn(store, "setIssueClosed");
+  vi.spyOn(store, "clearIssueClosed");
+  vi.spyOn(store, "setPrMerged");
   vi.spyOn(store, "deleteTask");
   vi.spyOn(store, "updateTaskPr");
   vi.spyOn(store, "getTask");
@@ -75,63 +77,6 @@ describe("TaskModel.revert", () => {
   it("propagates store errors to the caller", async () => {
     vi.spyOn(store, "markPending").mockRejectedValue(new Error("DB down"));
     await expect(model.revert("42")).rejects.toThrow("DB down");
-  });
-});
-
-describe("TaskModel.block", () => {
-  let store: TaskStore;
-  let model: TaskModel;
-
-  beforeEach(async () => {
-    store = makeStore();
-    model = new TaskModel(store);
-    await model.register("42", 42, REPO, "Fix the bug", "It is broken", ["brunel:ready"]);
-  });
-
-  it("marks the task blocked and awaits store.markBlocked", async () => {
-    await model.block("42");
-    const t = await model.get("42");
-    expect(t?.status).toBe("blocked");
-    expect(store.markBlocked).toHaveBeenCalledWith("42");
-  });
-
-  it("propagates store errors to the caller", async () => {
-    vi.spyOn(store, "markBlocked").mockRejectedValue(new Error("DB down"));
-    await expect(model.block("42")).rejects.toThrow("DB down");
-  });
-});
-
-describe("TaskModel.unblock", () => {
-  let store: TaskStore;
-  let model: TaskModel;
-
-  beforeEach(async () => {
-    store = makeStore();
-    model = new TaskModel(store);
-    await model.register("42", 42, REPO, "Fix the bug", "It is broken", ["brunel:ready"]);
-    await model.block("42");
-  });
-
-  it("marks the task pending", async () => {
-    await model.unblock("42");
-    const t = await model.get("42");
-    expect(t?.status).toBe("pending");
-  });
-
-  it("awaits store.markPending before resolving", async () => {
-    let resolved = false;
-    vi.spyOn(store, "markPending").mockImplementation(() =>
-      new Promise<void>((r) => setTimeout(() => { resolved = true; r(); }, 10))
-    );
-    const p = model.unblock("42");
-    expect(resolved).toBe(false);
-    await p;
-    expect(resolved).toBe(true);
-  });
-
-  it("propagates store errors to the caller", async () => {
-    vi.spyOn(store, "markPending").mockRejectedValue(new Error("DB down"));
-    await expect(model.unblock("42")).rejects.toThrow("DB down");
   });
 });
 

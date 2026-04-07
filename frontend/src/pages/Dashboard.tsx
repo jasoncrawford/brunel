@@ -22,17 +22,26 @@ export default function Dashboard() {
 
   useAdminWs(handleMessage);
 
-  const blocked = tasks.filter((t) => t.status === "blocked").length;
-  const pending = tasks.filter((t) => t.status === "pending").length;
-  const assigned = tasks.filter((t) => t.status === "assigned").length;
-  const done = tasks.filter((t) => t.status === "complete").length;
+  const stats = [
+    { label: "blocked", count: tasks.filter((t) => t.status === "blocked").length },
+    { label: "pending", count: tasks.filter((t) => t.status === "pending").length },
+    { label: "assigned", count: tasks.filter((t) => t.status === "assigned").length },
+    { label: "pushed", count: tasks.filter((t) => t.status === "pushed").length },
+    { label: "merged", count: tasks.filter((t) => t.status === "merged").length },
+    { label: "closed", count: tasks.filter((t) => t.status === "closed").length },
+    { label: "done", count: tasks.filter((t) => t.status === "complete").length },
+  ].filter((s) => s.count > 0);
+
+  const statsText = stats.length > 0
+    ? stats.map((s) => `${s.count} ${s.label}`).join(" · ")
+    : "none";
 
   return (
     <div>
       <h2>Dashboard</h2>
 
       <section>
-        <h3>Tasks ({blocked} blocked · {pending} pending · {assigned} assigned · {done} done)</h3>
+        <h3>Tasks ({statsText})</h3>
         {tasks.length === 0 ? <p>No tasks.</p> : (
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
