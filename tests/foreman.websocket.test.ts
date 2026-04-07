@@ -418,22 +418,15 @@ describe("hello_ack handshake", () => {
     expect(registry.get("worker-b")?.status).toBe("idle");
   });
 
-  it("worker reconnecting busy with unlabeled taskId still receives event notifications for that issue", async () => {
-    // Simulate: worker was working on issue 42, label was removed (task no longer in queue),
-    // worker disconnects and reconnects claiming busy for taskId "42"
+  it("worker reconnecting busy with nonexistent taskId receives cancelled status", async () => {
+    // Worker tries to reclaim a task that doesn't exist in the DB
+    // This shouldn't happen in normal operation, so we send cancelled status
     const ws = await connect();
-    const q = makeQueue(ws);
-    send(ws, { type: "worker_hello", workerId: "w1", taskId: "42", status: "busy" });
-    const ack = await q.next();
-    expect(ack).toEqual({ type: "hello_ack", workerId: "w1", status: "busy" });
-
-    // A webhook event arrives for that issue — foreman must forward it to the worker
-    routeEvent("evt-1", "issue_comment", { issue: { number: 42 }, comment: { body: "review" } });
-
-    const msg = await q.next();
-    assert(msg.type === "event_notification");
-    expect(msg.taskId).toBe("42");
-    expect(msg.event.name).toBe("issue_comment");
+    const ackPromise = nextMsg(ws);
+    send(ws, { type: "worker_hello", workerId: "w1", taskId: "nonexistent", status: "busy" });
+    const ack = await ackPromise;
+    expect(ack).toEqual({ type: "hello_ack", workerId: "w1", status: "cancelled" });
+    expect(registry.get("w1")?.status).toBe("idle");
   });
 
   it("allows worker to reclaim task even if complete (issue closed, same worker)", async () => {
