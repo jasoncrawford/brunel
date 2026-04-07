@@ -688,6 +688,7 @@ describe("waitUntilIdle", () => {
   });
 });
 
+
 // ── hello_ack handshake — buffering ──────────────────────────────────────────
 
 describe("hello_ack handshake — buffering", () => {

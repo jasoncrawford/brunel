@@ -272,12 +272,15 @@ export class WorkerSession {
   }
 
   /**
-   * Resolves when no query is currently running. If a query is already
-   * running, waits until runQueryLoop completes (including any pending
-   * events it drains). Multiple concurrent callers are all notified.
+   * Resolves when no query is currently running and no debounce timer is
+   * pending. If a query is already running, waits until runQueryLoop
+   * completes (including any pending events it drains). If a debounce timer
+   * is pending (event arrived but query not yet started), waits for the
+   * debounce to fire and the resulting query to complete. Multiple
+   * concurrent callers are all notified.
    */
   async waitUntilIdle(): Promise<void> {
-    while (this.isRunningQuery) {
+    while (this.isRunningQuery || this.debounceTimer != null) {
       await new Promise<void>((resolve) => {
         this.queryDoneResolvers.push(resolve);
       });
@@ -630,6 +633,11 @@ export class WorkerSession {
           if (!this.isRunningQuery && this.currentTaskId && this.currentIssue) {
             const events = this.pendingEvents.splice(0);
             void this.runQueryLoop(this.buildAndLogEventPrompt(events));
+            // runQueryLoop will call notifyQueryDone() when it finishes
+          } else {
+            // No query started — notify any waitUntilIdle() callers so they
+            // can recheck the loop condition and exit if truly idle.
+            this.notifyQueryDone();
           }
         }, debounceMs(this.pendingEvents));
       }
