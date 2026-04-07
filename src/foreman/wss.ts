@@ -222,32 +222,31 @@ export function createForemanWss(
         sendMsg(workerId, { type: "hello_ack", workerId, status: "cancelled" }, taskId);
       }
 
-      async function reclaimWorker(taskId: string, issueRef: string | number, task?: Task) {
-        registry.register(workerId, ws, "busy", taskId);
+      async function reclaimWorker(task: Task) {
+        registry.register(workerId, ws, "busy", task.taskId);
         // Only call assign if task is not already complete (to preserve task status)
-        if (!task || task.status !== "complete") {
-          await taskModel.assign(taskId, workerId);
-        } else {
-          // For complete tasks, just update the worker_id without changing status
-          // This is done implicitly by registering the worker as busy above
-          // The task stays complete while worker finishes cleanup/finalization work
+        if (task.status !== "complete") {
+          await taskModel.assign(task.taskId, workerId);
         }
-        sendMsg(workerId, { type: "hello_ack", workerId, status: "busy" }, taskId);
-        flushQueuedEvents(taskId, issueRef);
+        // For complete tasks, the task stays complete while worker finishes cleanup/finalization work
+        sendMsg(workerId, { type: "hello_ack", workerId, status: "busy" }, task.taskId);
+        flushQueuedEvents(task.taskId, task.issueNumber);
       }
 
       if (msg.status === "busy" && msg.taskId) {
         const existing = await taskModel.get(msg.taskId);
 
-        if (existing && existing.assignedWorkerId && existing.assignedWorkerId !== workerId) {
+        if (!existing) {
+          log(workerId, `hello busy task=#${msg.taskId} — task not found`);
+          registry.register(workerId, ws, "idle");
+          sendMsg(workerId, { type: "hello_ack", workerId, status: "cancelled" }, msg.taskId);
+        } else if (existing.assignedWorkerId && existing.assignedWorkerId !== workerId) {
           log(workerId, `hello busy task=#${msg.taskId} — task taken by another worker`);
           cancelWorker(msg.taskId);
-        } else if (existing) {
+        } else {
           log(workerId, `hello busy task=#${msg.taskId} — reclaimed`);
-          await reclaimWorker(msg.taskId, existing.issueNumber, existing);
+          await reclaimWorker(existing);
         }
-        // If task doesn't exist, worker reconnects with an unknown taskId — don't respond
-        // This shouldn't happen in normal operation (all tasks should exist in the DB)
       } else {
         const priorTask = await taskModel.getAssignedTaskForWorker(workerId);
         if (priorTask) {
