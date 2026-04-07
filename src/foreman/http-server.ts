@@ -106,7 +106,8 @@ export function createHttpServer(
       if (statusFilter) {
         return c.json(tasks.filter((t) => t.status === statusFilter));
       }
-      return c.json(tasks);
+      // By default, exclude complete tasks — the dashboard shows only active tasks.
+      return c.json(tasks.filter((t) => t.status !== "complete"));
     } catch (err) {
       flog(`ERROR API query failed: ${fmtError(err)}`);
       return c.json({ error: "internal error" }, 500);
