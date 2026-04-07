@@ -369,14 +369,13 @@ describe("createMemoryTaskStore", () => {
     expect(tasks).toHaveLength(2);
   });
 
-  it("listTasks filters by status", async () => {
+  it("listTasks returns all rows (status filtering happens at runtime)", async () => {
     const store = createMemoryTaskStore();
     await store.upsertTask("dbt-1", 9001, "r/r", "T1", "", []);
     await store.upsertTask("dbt-2", 9002, "r/r", "T2", "", []);
-    await store.markBlocked("dbt-2");
-    const pending = await store.listTasks({ status: "pending" });
-    expect(pending).toHaveLength(1);
-    expect(pending[0].taskId).toBe("dbt-1");
+    const all = await store.listTasks();
+    expect(all).toHaveLength(2);
+    // Status is derived at runtime, not stored in DB
   });
 
   it("getTaskByIssue finds task by issue number", async () => {
