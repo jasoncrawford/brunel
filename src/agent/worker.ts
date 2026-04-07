@@ -81,6 +81,8 @@ export type WorkerStatusPatch = {
   taskNumber?: number | undefined;
   prNumber?: number | undefined;
   branch?: string;
+  model?: string | undefined;
+  effort?: string | undefined;
 };
 
 /**
@@ -96,6 +98,8 @@ export class WorkerStatusModel extends EventEmitter {
   private _taskNumber: number | undefined;
   private _prNumber: number | undefined;
   private _branch = "";
+  private _model: string | undefined;
+  private _effort: string | undefined;
   private _countdownTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(public readonly workerId: string) {
@@ -108,6 +112,8 @@ export class WorkerStatusModel extends EventEmitter {
   get taskNumber(): number | undefined { return this._taskNumber; }
   get prNumber(): number | undefined { return this._prNumber; }
   get branch(): string { return this._branch; }
+  get model(): string | undefined { return this._model; }
+  get effort(): string | undefined { return this._effort; }
 
   /** Apply a partial update and emit "change". Multiple fields in one call = one event. */
   update(patch: WorkerStatusPatch): void {
@@ -120,6 +126,8 @@ export class WorkerStatusModel extends EventEmitter {
     if ("taskNumber" in patch) this._taskNumber = patch.taskNumber;
     if ("prNumber" in patch) this._prNumber = patch.prNumber;
     if ("branch" in patch) this._branch = patch.branch!;
+    if ("model" in patch) this._model = patch.model;
+    if ("effort" in patch) this._effort = patch.effort;
     this.emit("change");
   }
 
@@ -142,6 +150,8 @@ export class WorkerStatusModel extends EventEmitter {
       : undefined;
     return display.fmtWorkerStatus({
       workerId: this.workerId,
+      model: this._model,
+      effort: this._effort,
       taskNumber: this._taskNumber,
       prNumber: this._prNumber,
       branch: this._branch || undefined,
@@ -225,10 +235,16 @@ export class WorkerSession {
   }
 
   get currentModel(): string | undefined { return this._currentModel; }
-  set currentModel(model: string | undefined) { this._currentModel = model; }
+  set currentModel(model: string | undefined) {
+    this._currentModel = model;
+    this.statusModel.update({ model });
+  }
 
   get currentEffort(): EffortValue | undefined { return this._currentEffort; }
-  set currentEffort(effort: EffortValue | undefined) { this._currentEffort = effort; }
+  set currentEffort(effort: EffortValue | undefined) {
+    this._currentEffort = effort;
+    this.statusModel.update({ effort });
+  }
 
   /** Returns the formatted worker status bar text. Used by startPersistentStatus and tests. */
   getStatusText(): string {
@@ -409,7 +425,7 @@ export class WorkerSession {
       const modelArgs = input.slice("/model".length).trim();
       const pickModelFn = (opts: string[], idx: number) =>
         pick(opts, { currentIdx: idx, escapable: true });
-      this._currentModel = await handleModelCommand(
+      this.currentModel = await handleModelCommand(
         modelArgs, this._currentModel, pickModelFn,
         undefined, // models cached from first query; no fetchModelsFn in worker
         this.display.print,
@@ -421,7 +437,7 @@ export class WorkerSession {
       const effortArgs = input.slice("/effort".length).trim();
       const pickEffortFn = (opts: string[], idx: number) =>
         pick(opts, { currentIdx: idx, escapable: true });
-      this._currentEffort = await handleEffortCommand(
+      this.currentEffort = await handleEffortCommand(
         effortArgs, this._currentEffort, pickEffortFn,
         this.display.print,
       );
