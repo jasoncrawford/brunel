@@ -567,24 +567,29 @@ describe("pipeline: PR events forwarded and logged to DB", () => {
     await q.next(); // hello_ack
     await q.next(); // task_assigned
 
-    // 2. Worker opens a PR that closes issue #100 (now also forwarded as event_notification)
+    // 2. Worker opens a PR that closes issue #100 (forwarded as event_notification)
+    //    and a check_run fires for the PR.  Both are routed before awaiting any
+    //    notifications to avoid a race where the check_run notification arrives
+    //    before the pull_request notification due to async processing order.
     await routeEvent("evt-pr", "pull_request", prOpenedPayload(20, "Closes #100"));
-    await q.next(); // pull_request event_notification
-
-    // 3. A check_run fires for PR #20
     await routeEvent("evt-cr", "check_run", checkRunPayload(20));
 
-    // 4. Worker receives event_notification
-    const evtMsg = await q.next();
-    expect(evtMsg.type).toBe("event_notification");
-    expect((evtMsg as any).event.name).toBe("check_run");
+    // 3. Collect both event_notifications.  Ordering is not guaranteed because
+    //    the two events may be processed at different speeds on the foreman side.
+    const evtMsgs = [await q.next(), await q.next()];
+    expect(evtMsgs.every((m) => m.type === "event_notification")).toBe(true);
+    expect(evtMsgs.map((m) => (m as any).event.name)).toEqual(
+      expect.arrayContaining(["pull_request", "check_run"]),
+    );
 
-    // 5. The check_run webhook_events row in DB must have task_id = "100"
+    // 4. The check_run webhook_events row in DB must have task_id = "100".
+    //    Filter by delivery_id to avoid picking up a stray check_run from a
+    //    concurrent Vitest worker.
     const checkRunRow = await pollUntil(async () => {
       const { data } = await supabase
         .from("webhook_events")
         .select("task_id, event_name")
-        .eq("event_name", "check_run")
+        .eq("delivery_id", "evt-cr")
         .limit(1)
         .single();
       return data?.task_id === "100" ? data : null;
