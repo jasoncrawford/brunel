@@ -128,9 +128,9 @@ describe("fmtWorkerStatus", () => {
       connectionStatus: "connected",
       width: 80,
     }));
-    // Should not have a trailing separator after task
+    // Should not have a trailing separator after task: worker ∙ model ∙ task
     const parts = result.split("∙");
-    expect(parts.length).toBe(2); // "worker abc12345 ", " task #5      Connected"
+    expect(parts.length).toBe(3); // "worker abc12345 ", " sonnet ", " task #5      Connected"
   });
 
   it("result fits within specified width", () => {
@@ -143,6 +143,83 @@ describe("fmtWorkerStatus", () => {
       width: 80,
     }));
     expect(result.length).toBe(79); // width - 1 (last-column wrap avoidance)
+  });
+
+  it("shows 'sonnet' when model is undefined", () => {
+    const result = stripAnsi(display.fmtWorkerStatus({
+      workerId: "abc12345-0000-0000-0000-000000000000",
+      connectionStatus: "connected",
+      width: 80,
+    }));
+    expect(result).toContain("sonnet");
+  });
+
+  it("shows 'sonnet' when model is 'default'", () => {
+    const result = stripAnsi(display.fmtWorkerStatus({
+      workerId: "abc12345-0000-0000-0000-000000000000",
+      model: "default",
+      connectionStatus: "connected",
+      width: 80,
+    }));
+    expect(result).toContain("sonnet");
+    expect(result).not.toContain("default");
+  });
+
+  it("shows model name when model is set to non-default", () => {
+    const result = stripAnsi(display.fmtWorkerStatus({
+      workerId: "abc12345-0000-0000-0000-000000000000",
+      model: "opus",
+      connectionStatus: "connected",
+      width: 80,
+    }));
+    expect(result).toContain("opus");
+  });
+
+  it("shows model after worker id and before task info", () => {
+    const result = stripAnsi(display.fmtWorkerStatus({
+      workerId: "abc12345-0000-0000-0000-000000000000",
+      model: "haiku",
+      taskNumber: 42,
+      connectionStatus: "connected",
+      width: 120,
+    }));
+    const workerIdx = result.indexOf("worker abc12345");
+    const modelIdx = result.indexOf("haiku");
+    const taskIdx = result.indexOf("task #42");
+    expect(workerIdx).toBeLessThan(modelIdx);
+    expect(modelIdx).toBeLessThan(taskIdx);
+  });
+
+  it("omits effort when effort is undefined", () => {
+    const result = stripAnsi(display.fmtWorkerStatus({
+      workerId: "abc12345-0000-0000-0000-000000000000",
+      model: "opus",
+      connectionStatus: "connected",
+      width: 80,
+    }));
+    expect(result).toContain("opus");
+    expect(result).not.toContain("(");
+  });
+
+  it("shows effort in parentheses when effort is set", () => {
+    const result = stripAnsi(display.fmtWorkerStatus({
+      workerId: "abc12345-0000-0000-0000-000000000000",
+      model: "opus",
+      effort: "medium",
+      connectionStatus: "connected",
+      width: 120,
+    }));
+    expect(result).toContain("opus (medium)");
+  });
+
+  it("shows effort with default sonnet model", () => {
+    const result = stripAnsi(display.fmtWorkerStatus({
+      workerId: "abc12345-0000-0000-0000-000000000000",
+      effort: "high",
+      connectionStatus: "connected",
+      width: 120,
+    }));
+    expect(result).toContain("sonnet (high)");
   });
 
   it("uses first 8 chars of workerId for legacy bare UUID IDs", () => {

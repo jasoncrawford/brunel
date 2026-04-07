@@ -660,6 +660,10 @@ export const FOREMAN_MESSAGE_FMT: FmtTable = {
 
 export interface WorkerStatusOpts {
   workerId: string;
+  /** Model alias (e.g. "opus", "haiku"). Undefined or "default" renders as "sonnet". */
+  model?: string;
+  /** Effort level. Omitted from display when undefined (auto/default). */
+  effort?: string;
   taskNumber?: number;
   prNumber?: number;
   branch?: string;
@@ -672,7 +676,7 @@ export interface WorkerStatusOpts {
 }
 
 export function fmtWorkerStatus(opts: WorkerStatusOpts): string {
-  const { workerId, taskNumber, prNumber, branch, connectionStatus, disconnectCode, retryInSeconds } = opts;
+  const { workerId, model, effort, taskNumber, prNumber, branch, connectionStatus, disconnectCode, retryInSeconds } = opts;
   const width = (opts.width ?? (process.stdout.columns ?? W)) - 1; // -1 to avoid last-column wrap
 
   // Right side: connection status
@@ -684,8 +688,10 @@ export function fmtWorkerStatus(opts: WorkerStatusOpts): string {
     retryInSeconds != null              ? `Disconnected${codeStr}. Retrying in ${retryInSeconds}s` :
                                           `Disconnected${codeStr}`;
 
-  // Left side: worker {id8} ∙ {task info}
-  const parts: string[] = [`worker ${shortWorkerId(workerId)}`];
+  // Left side: worker {id8} ∙ {model} ∙ {task info}
+  const modelName = (!model || model === "default") ? "sonnet" : model;
+  const effortStr = effort ? ` (${effort})` : "";
+  const parts: string[] = [`worker ${shortWorkerId(workerId)}`, `${modelName}${effortStr}`];
   if (taskNumber != null) parts.push(`task #${taskNumber}`);
   else parts.push("no current task");
   if (prNumber != null) parts.push(`PR #${prNumber}`);

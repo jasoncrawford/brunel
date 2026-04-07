@@ -158,4 +158,51 @@ describe("WorkerStatusModel", () => {
     model.update({ connectionStatus: "disconnected", reconnectAt: Date.now() + 4000 });
     expect(stripAnsi(model.getStatusText())).toContain("Retrying in 4s");
   });
+
+  it("has undefined model and effort by default", () => {
+    const model = new WorkerStatusModel("test-worker-id");
+    expect(model.model).toBeUndefined();
+    expect(model.effort).toBeUndefined();
+  });
+
+  it("sets and clears model", () => {
+    const model = new WorkerStatusModel("test-worker-id");
+    model.update({ model: "opus" });
+    expect(model.model).toBe("opus");
+    model.update({ model: undefined });
+    expect(model.model).toBeUndefined();
+  });
+
+  it("sets and clears effort", () => {
+    const model = new WorkerStatusModel("test-worker-id");
+    model.update({ effort: "high" });
+    expect(model.effort).toBe("high");
+    model.update({ effort: undefined });
+    expect(model.effort).toBeUndefined();
+  });
+
+  it("emits change when model is updated", () => {
+    const model = new WorkerStatusModel("test-worker-id");
+    const onChange = vi.fn();
+    model.on("change", onChange);
+    model.update({ model: "haiku" });
+    expect(onChange).toHaveBeenCalledOnce();
+  });
+
+  it("getStatusText shows sonnet when model is undefined", () => {
+    const model = new WorkerStatusModel("test-worker-id");
+    expect(stripAnsi(model.getStatusText())).toContain("sonnet");
+  });
+
+  it("getStatusText shows model name when set", () => {
+    const model = new WorkerStatusModel("test-worker-id");
+    model.update({ model: "opus" });
+    expect(stripAnsi(model.getStatusText())).toContain("opus");
+  });
+
+  it("getStatusText shows effort in parens when set", () => {
+    const model = new WorkerStatusModel("test-worker-id");
+    model.update({ model: "opus", effort: "medium" });
+    expect(stripAnsi(model.getStatusText())).toContain("opus (medium)");
+  });
 });
