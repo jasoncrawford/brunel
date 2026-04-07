@@ -41,7 +41,7 @@ export interface Task {
   branch?: string;
 }
 
-function rowToTask(row: TaskRow): Task {
+export function rowToTask(row: TaskRow): Task {
   return {
     taskId: row.taskId,
     issueNumber: row.issueNumber,
