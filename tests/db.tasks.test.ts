@@ -178,22 +178,21 @@ describe("createTaskStore", () => {
 
   it("listTasks with cancelable=true returns only never-assigned, not-closed, not-completed tasks", async () => {
     const store = createTaskStore(supabase);
-    // Create a never-assigned task (cancelable)
-    await store.upsertTask("dbt-1", 9001, "r/r", "Pending task", "", []);
+    // The cancelable=true filter checks worker_id IS NULL (not assigned_at IS NULL).
+    // insertProtected sets assigned_at (making the row immune to reconcile) but
+    // leaves worker_id null, so dbt-1 still satisfies the cancelable filter.
+    await insertProtected("dbt-1", 9001, "r/r", "Pending task");
     // Create a task that was assigned then completed (not cancelable)
     await insertProtected("dbt-2", 9002, "r/r", "Complete task");
     await store.markAssigned("dbt-2", "w1");
     await store.markComplete("dbt-2");
 
     const cancelable = own(await store.listTasks({ cancelable: true }));
-    expect(cancelable).toHaveLength(1);
-    expect(cancelable[0].taskId).toBe("dbt-1");
+    expect(cancelable.map((t) => t.taskId)).toContain("dbt-1");
+    expect(cancelable.map((t) => t.taskId)).not.toContain("dbt-2");
 
-    // Don't assert toHaveLength(2) here: pipeline.test.ts's reconcile() can
-    // concurrently delete dbt-1 (assigned_at IS NULL) before this query runs.
-    // We already verified dbt-1 is visible above; just confirm dbt-2 survives
-    // (it's protected by a non-null assigned_at via insertProtected).
     const all = own(await store.listTasks());
+    expect(all.map((t) => t.taskId)).toContain("dbt-1");
     expect(all.map((t) => t.taskId)).toContain("dbt-2");
   });
 
@@ -370,6 +369,23 @@ describe("createMemoryTaskStore", () => {
     await store.deleteTask("dbt-42");
     // Row must still exist because it has history (assignedAt is set)
     expect(await store.getTask("dbt-42")).not.toBeNull();
+  });
+
+  it("listTasks with cancelable=true returns pending tasks and excludes completed/assigned", async () => {
+    const store = createMemoryTaskStore();
+    // Truly pending (no assignment history) — should appear in cancelable results
+    await store.upsertTask("dbt-1", 9001, "r/r", "Pending", "", []);
+    // Assigned task — worker_id set, should NOT appear
+    await store.upsertTask("dbt-2", 9002, "r/r", "Assigned", "", []);
+    await store.markAssigned("dbt-2", "w1");
+    // Completed task — completedAt set, should NOT appear
+    await store.upsertTask("dbt-3", 9003, "r/r", "Complete", "", []);
+    await store.markComplete("dbt-3");
+
+    const cancelable = await store.listTasks({ cancelable: true });
+    expect(cancelable.map((t) => t.taskId)).toContain("dbt-1");
+    expect(cancelable.map((t) => t.taskId)).not.toContain("dbt-2");
+    expect(cancelable.map((t) => t.taskId)).not.toContain("dbt-3");
   });
 
   it("listTasks returns stored tasks", async () => {
