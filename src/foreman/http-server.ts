@@ -4,7 +4,7 @@ import { Hono } from "hono";
 import { getRequestListener } from "@hono/node-server";
 import type { DbLogger } from "./db.js";
 import type { TaskModel } from "./task-model.js";
-import { rowToTask } from "./task-model.js";
+import { deriveStatus } from "./task-model.js";
 import type { TaskStatus } from "../types.js";
 import { fmtError } from "../utils.js";
 import { summaryEvent, isMutedEvent } from "./event-router.js";
@@ -99,12 +99,24 @@ export function createHttpServer(
   app.get("/api/tasks", async (c) => {
     try {
       const statusFilter = c.req.query("status") as TaskStatus | undefined;
+      const rows = taskModel ? await taskModel.listTasks() : [];
+      const tasks = rows.map((row) => ({
+        taskId: row.taskId,
+        issueNumber: row.issueNumber,
+        repo: row.repo,
+        title: row.title,
+        status: deriveStatus(row),
+        workerId: row.workerId,
+        prNumber: row.prNumber,
+        branch: row.branch,
+        createdAt: row.createdAt,
+        assignedAt: row.assignedAt,
+        completedAt: row.completedAt,
+      }));
       if (statusFilter) {
-        const rows = taskModel ? await taskModel.listTasks() : [];
-        return c.json(rows.map(rowToTask).filter((t) => t.status === statusFilter));
+        return c.json(tasks.filter((t) => t.status === statusFilter));
       }
-      const tasks = taskModel ? await taskModel.listActiveTasks() : [];
-      return c.json(tasks);
+      return c.json(tasks.filter((t) => t.status !== "complete"));
     } catch (err) {
       flog(`ERROR API query failed: ${fmtError(err)}`);
       return c.json({ error: "internal error" }, 500);
