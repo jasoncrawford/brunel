@@ -331,7 +331,7 @@ describe("pipeline: happy path and queued-then-assigned", () => {
       const row = await getDbTask("42");
       return row?.status === "assigned" ? row : null;
     });
-    expect(assignedRow.workerId).toBe("w1");
+    expect(assignedRow.assignedWorkerId).toBe("w1");
 
     // 5. Worker completes the task
     send(ws, { type: "task_complete", workerId: "w1", taskId: "42" });
