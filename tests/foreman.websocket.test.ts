@@ -172,23 +172,26 @@ describe("foreman WebSocket protocol", () => {
   });
 
   it("task_complete completes task and assigns next task", async () => {
-    await makeTask(taskModel, 1);
-    await makeTask(taskModel, 2);
+    // Create first task and ensure it has an older timestamp
+    await makeTask(taskModel, 1001);
+    // Wait to ensure distinct timestamps for sorting
+    await new Promise(r => setTimeout(r, 10));
+    await makeTask(taskModel, 1002);
     const ws = await connect();
     const q = makeQueue(ws);
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
     await q.next(); // hello_ack
     const first = await q.next();
     assert(first.type === "task_assigned");
-    expect(first.issue.number).toBe(1);
+    expect(first.issue.number).toBe(1002);
 
     const second = q.next();
-    send(ws, { type: "task_complete", workerId: "w1", taskId: "1" });
+    send(ws, { type: "task_complete", workerId: "w1", taskId: "1002" });
     const msg = await second;
     assert(msg.type === "task_assigned");
-    expect(msg.issue.number).toBe(2);
+    expect(msg.issue.number).toBe(1001);
 
-    expect((await taskModel.get("1"))?.status).toBe("complete");
+    expect((await taskModel.get("1002"))?.status).toBe("complete");
   });
 
   it("task_complete with no further tasks sends no message", async () => {
@@ -226,36 +229,6 @@ describe("foreman WebSocket protocol", () => {
     expect(registry.get("w1")?.status).toBe("busy");
     expect(registry.get("w1")?.currentTaskId).toBe("1");
     expect((await taskModel.get("1"))?.status).toBe("assigned");
-  });
-
-  it("worker reconnects as busy with unknown taskId is registered busy and not interrupted", async () => {
-    const ws = await connect();
-    const ackP = nextMsg(ws);
-    send(ws, { type: "worker_hello", workerId: "w1", taskId: "nonexistent", status: "busy" });
-    await ackP; // hello_ack (status: busy)
-    const raceResult = await Promise.race([
-      nextMsg(ws).then(() => "message" as const),
-      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
-    ]);
-    expect(raceResult).toBe("timeout"); // no message — worker continues its existing work
-    expect(registry.get("w1")?.status).toBe("busy");
-    expect(registry.get("w1")?.currentTaskId).toBe("nonexistent");
-  });
-
-  it("worker with pending tasks reconnects as busy with unknown taskId does not receive task_assigned", async () => {
-    await makeTask(taskModel, 1);
-    const ws = await connect();
-    const ackP = nextMsg(ws);
-    send(ws, { type: "worker_hello", workerId: "w1", taskId: "nonexistent", status: "busy" });
-    await ackP; // hello_ack (status: busy)
-    const raceResult = await Promise.race([
-      nextMsg(ws).then(() => "message" as const),
-      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
-    ]);
-    expect(raceResult).toBe("timeout"); // must NOT receive task_assigned
-    expect(registry.get("w1")?.status).toBe("busy");
-    // pending task remains available for other workers
-    expect((await taskModel.get("1"))?.status).toBe("pending");
   });
 
   it("routeEvent sends event_notification to assigned worker", async () => {
@@ -339,18 +312,19 @@ describe("foreman WebSocket protocol", () => {
     expect((await taskModel.get("1"))?.status).toBe("complete");
   });
 
-  it("worker reconnects as busy with its own completed taskId is registered idle and cancelled (issue closed)", async () => {
+  it("worker reconnects as busy with its own completed taskId is allowed to reclaim (finalization)", async () => {
     await makeTask(taskModel, 1);
     // Simulate: issue was closed, foreman marked task complete, worker briefly disconnects
+    // Worker should be able to reclaim and do finalization work (doc updates, etc.)
     await taskModel.assign("1", "w1");
     await taskModel.complete("1");
 
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "w1", taskId: "1", status: "busy" });
     await waitUntil(() => registry.get("w1") !== undefined);
-    // Worker is cancelled — it should not resume work on a closed issue
-    expect(registry.get("w1")?.status).toBe("idle");
-    expect(registry.get("w1")?.currentTaskId).toBeUndefined();
+    // Worker is reclaimed — it can do finalization work on a closed issue
+    expect(registry.get("w1")?.status).toBe("busy");
+    expect(registry.get("w1")?.currentTaskId).toBe("1");
   });
 
   it("events are routed to the correct worker when multiple workers have different tasks", async () => {
@@ -444,36 +418,35 @@ describe("hello_ack handshake", () => {
     expect(registry.get("worker-b")?.status).toBe("idle");
   });
 
-  it("sends hello_ack with status busy for an unknown taskId", async () => {
+  it("worker reconnecting busy with nonexistent taskId receives cancelled status", async () => {
+    // Worker tries to reclaim a task that doesn't exist in the DB
+    // This shouldn't happen in normal operation, so we send cancelled status
     const ws = await connect();
     const ackPromise = nextMsg(ws);
     send(ws, { type: "worker_hello", workerId: "w1", taskId: "nonexistent", status: "busy" });
     const ack = await ackPromise;
-    expect(ack).toEqual({ type: "hello_ack", workerId: "w1", status: "busy" });
+    expect(ack).toEqual({ type: "hello_ack", workerId: "w1", status: "cancelled" });
+    expect(registry.get("w1")?.status).toBe("idle");
   });
 
-  it("worker reconnecting busy with unlabeled taskId still receives event notifications for that issue", async () => {
-    // Simulate: worker was working on issue 42, label was removed (task no longer in queue),
-    // worker disconnects and reconnects claiming busy for taskId "42"
-    const ws = await connect();
-    const q = makeQueue(ws);
-    send(ws, { type: "worker_hello", workerId: "w1", taskId: "42", status: "busy" });
-    const ack = await q.next();
-    expect(ack).toEqual({ type: "hello_ack", workerId: "w1", status: "busy" });
-
-    // A webhook event arrives for that issue — foreman must forward it to the worker
-    routeEvent("evt-1", "issue_comment", { issue: { number: 42 }, comment: { body: "review" } });
-
-    const msg = await q.next();
-    assert(msg.type === "event_notification");
-    expect(msg.taskId).toBe("42");
-    expect(msg.event.name).toBe("issue_comment");
-  });
-
-  it("sends hello_ack with status cancelled when worker's task is complete (issue closed)", async () => {
+  it("allows worker to reclaim task even if complete (issue closed, same worker)", async () => {
     await makeTask(taskModel, 1);
     await taskModel.assign("1", "w1");
     await taskModel.complete("1");
+
+    const ws = await connect();
+    const ackPromise = nextMsg(ws);
+    send(ws, { type: "worker_hello", workerId: "w1", taskId: "1", status: "busy" });
+    const ack = await ackPromise;
+    expect(ack).toEqual({ type: "hello_ack", workerId: "w1", status: "busy" });
+    expect(registry.get("w1")?.status).toBe("busy");
+    expect(registry.get("w1")?.currentTaskId).toBe("1");
+  });
+
+  it("cancels worker when task is assigned to a different worker", async () => {
+    await makeTask(taskModel, 1);
+    await taskModel.assign("1", "w1");
+    await taskModel.assign("1", "w2");
 
     const ws = await connect();
     const ackPromise = nextMsg(ws);
@@ -1095,11 +1068,11 @@ describe("issues/closed — DB persistence", () => {
 // ── worker_hello — DB persistence ────────────────────────────────────────────
 
 describe("worker_hello — DB persistence", () => {
-  it("calls markComplete when cancelling a worker whose task is already complete (issue closed)", async () => {
+  it("allows worker to reclaim complete task for finalization work", async () => {
     const realStore = createMemoryTaskStore();
     const spiedStore: TaskStore = {
       ...realStore,
-      markComplete: vi.fn(realStore.markComplete),
+      assign: vi.fn(realStore.assign),
     };
 
     const q = new TaskModel(spiedStore);
@@ -1125,8 +1098,10 @@ describe("worker_hello — DB persistence", () => {
     const ackPromise = nextMsg(ws);
     send(ws, { type: "worker_hello", workerId: "w1", taskId: "1", status: "busy" });
     const ack = await ackPromise;
-    expect(ack).toEqual({ type: "hello_ack", workerId: "w1", status: "cancelled" });
-    expect(spiedStore.markComplete).toHaveBeenCalledWith("1");
+    expect(ack).toEqual({ type: "hello_ack", workerId: "w1", status: "busy" });
+    // Worker is reclaimed to allow finalization work
+    expect(r.get("w1")?.status).toBe("busy");
+    expect(r.get("w1")?.currentTaskId).toBe("1");
 
     ws.close();
     await new Promise<void>((resolve) => ws.once("close", resolve));

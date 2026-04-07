@@ -8,7 +8,7 @@ import { fmtEvent } from "./event-fmt.js";
 import { fmtError } from "../utils.js";
 import { shortWorkerId } from "../../shared/utils.js";
 import type { BrunelConfig } from "../config.js";
-import type { TaskModel } from "./task-model.js";
+import type { TaskModel, Task } from "./task-model.js";
 import type { WorkerRegistry } from "./worker-registry.js";
 import { doRouteEvent, reconcile, isMutedEvent, summaryEvent, forwardEvent } from "./event-router.js";
 import type { EventRouterDeps } from "./event-router.js";
@@ -220,33 +220,29 @@ export function createForemanWss(
         sendMsg(workerId, { type: "hello_ack", workerId, status: "cancelled" }, taskId);
       }
 
-      async function reclaimWorker(taskId: string, issueRef: string | number) {
-        registry.register(workerId, ws, "busy", taskId);
-        await taskModel.assign(taskId, workerId);
-        sendMsg(workerId, { type: "hello_ack", workerId, status: "busy" }, taskId);
-        flushQueuedEvents(taskId, issueRef);
+      async function reclaimWorker(task: Task) {
+        registry.register(workerId, ws, "busy", task.taskId);
+        // Only call assign if task is not already complete (to preserve task status)
+        if (task.status !== "complete") {
+          await taskModel.assign(task.taskId, workerId);
+        }
+        // For complete tasks, the task stays complete while worker finishes cleanup/finalization work
+        sendMsg(workerId, { type: "hello_ack", workerId, status: "busy" }, task.taskId);
+        flushQueuedEvents(task.taskId, task.issueNumber);
       }
 
       if (msg.status === "busy" && msg.taskId) {
         const existing = await taskModel.get(msg.taskId);
 
         if (!existing) {
-          log(workerId, `hello busy task=#${msg.taskId} — unknown task, respecting busy status`);
-          // Create a placeholder so the worker can complete normally
-          const issueNumber = parseInt(msg.taskId, 10);
-          if (!isNaN(issueNumber)) {
-            await taskModel.register(msg.taskId, issueNumber, "", "", "", []);
-          }
-          await reclaimWorker(msg.taskId, msg.taskId);
-        } else if (existing.status === "complete") {
-          log(workerId, `hello busy task=#${msg.taskId} — task complete (issue closed), cancelling`);
+          log(workerId, `hello busy task=#${msg.taskId} — task not found`);
           cancelWorker(msg.taskId);
         } else if (existing.assignedWorkerId && existing.assignedWorkerId !== workerId) {
           log(workerId, `hello busy task=#${msg.taskId} — task taken by another worker`);
           cancelWorker(msg.taskId);
         } else {
           log(workerId, `hello busy task=#${msg.taskId} — reclaimed`);
-          await reclaimWorker(msg.taskId, existing.issueNumber);
+          await reclaimWorker(existing);
         }
       } else {
         const priorTask = await taskModel.getAssignedTaskForWorker(workerId);
