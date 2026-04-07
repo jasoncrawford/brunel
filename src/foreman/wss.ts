@@ -238,8 +238,7 @@ export function createForemanWss(
 
         if (!existing) {
           log(workerId, `hello busy task=#${msg.taskId} — task not found`);
-          registry.register(workerId, ws, "idle");
-          sendMsg(workerId, { type: "hello_ack", workerId, status: "cancelled" }, msg.taskId);
+          cancelWorker(msg.taskId);
         } else if (existing.assignedWorkerId && existing.assignedWorkerId !== workerId) {
           log(workerId, `hello busy task=#${msg.taskId} — task taken by another worker`);
           cancelWorker(msg.taskId);
