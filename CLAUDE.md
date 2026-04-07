@@ -112,14 +112,15 @@ Workers buffer any `task_complete` messages sent during the `hello_sent` state a
 
 ## Task lifecycle
 
-A task moves through states: **pending → assigned → complete**.
+A task moves through states: **pending → assigned → pushed → merged/closed → complete** (derived from timestamps and runtime state).
 
 - `TaskModel` owns all task state via a pluggable `TaskStore` (Supabase in production, `createMemoryTaskStore()` for local dev/tests). **There is no in-memory cache — all reads go through the store.** The only in-memory state is ephemeral data with no DB backing (event queues, branch mappings, `labeledIssues`/`openIssues`).
-- The `tasks` table stores `task_id`, `issue_number` (unique), `repo`, `title`, `body`, `labels`, `status`, `worker_id`, `assigned_at`, `completed_at`. There is no separate `task_assignments` table.
-- `upsertTask` conflicts on `task_id`. If an issue is re-labeled `brunel:ready` (e.g. after completing), it resets `status` back to `pending` and refreshes `title`, `body`, `labels` — it does **not** ignore duplicates.
-- When a worker sends `worker_goodbye`, the foreman calls `taskModel.revert()` which resets the DB row to pending.
-- When a GitHub issue is closed while a worker is still active, the foreman marks the task `complete` in the DB immediately. The worker stays assigned and will call `task_complete` to release itself when done.
-- On foreman restart, `taskModel.loadActiveTasksFromDb()` restores ephemeral branch mappings from DB, then `taskModel.loadIssuesFromGithub()` fetches open issues with the task label and reconciles blocked/unblocked state. Tasks whose issues were closed mid-task are `complete` in the DB and skipped by startup. When a worker reconnects with a busy hello for an unknown task, the foreman creates a placeholder task via `register()` so the worker can complete normally.
+- The `tasks` table stores `task_id`, `issue_number` (unique), `repo`, `title`, `body`, `labels`, `worker_id`, `assigned_at`, `completed_at`, `issue_closed_at`, `pr_merged_at`. There is no separate `task_assignments` table or stored `status` column.
+- **Status is derived** at runtime using `deriveStatus()` based on priorities: `completedAt` → 'complete', `issueClosedAt` → 'closed', `prMergedAt` → 'merged', `workerId` → 'assigned', `prNumber` → 'pushed', `isBlocked()` → 'blocked', else → 'pending'.
+- `upsertTask` conflicts on `task_id`. If an issue is re-labeled `brunel:ready` (e.g. after completing), it resets status fields and refreshes `title`, `body`, `labels` — it does **not** ignore duplicates.
+- When a worker sends `worker_goodbye`, the foreman calls `taskModel.revert()` which clears `worker_id` and `assigned_at` (reverting to pending).
+- When a GitHub issue is closed, `taskModel.closeIssue()` sets `issue_closed_at`. When a PR is merged, `taskModel.registerPrMerge()` sets `pr_merged_at`. When a worker completes, `taskModel.complete()` sets `completed_at`. These timestamp-based markers enable clean derivation of task status without a stored status column.
+- On foreman restart, `taskModel.loadActiveTasksFromDb()` restores ephemeral branch mappings from DB, then `taskModel.loadIssuesFromGithub()` fetches open issues with the task label and reconciles blocked/unblocked state. Tasks with `completedAt` set are skipped by startup. When a worker reconnects with a busy hello for an unknown task, the foreman creates a placeholder task via `register()` so the worker can complete normally and gracefully handles already-complete tasks.
 - `reconcile()` only removes **pending** and **blocked** tasks that are no longer in `labeledIssues`. Assigned and complete tasks are never removed by reconcile. Removal calls `taskModel.cancel()`, which deletes the DB row — but only if `assigned_at IS NULL`. `markPending()` (called on `worker_goodbye`) leaves `assigned_at` intact, so rows that ever had a worker are preserved even if the task reverts to pending before the label is removed.
 - `labeledIssues` and `openIssues` are owned by `TaskModel` (not raw maps in the closure). Use `taskModel.trackIssue()`, `taskModel.untrackIssue()`, `taskModel.closeIssue()` etc. to mutate them. Tests inject state via these methods — not by passing raw maps to `createForemanWss`.
 
