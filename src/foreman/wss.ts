@@ -248,8 +248,13 @@ export function createForemanWss(
             cancelWorker(msg.taskId);
           }
         } else if (existing.status === "complete") {
-          log(workerId, `hello busy task=#${msg.taskId} — task complete (issue closed), cancelling`);
-          cancelWorker(msg.taskId);
+          if (existing.assignedWorkerId && existing.assignedWorkerId !== workerId) {
+            log(workerId, `hello busy task=#${msg.taskId} — task complete but owned by another worker, cancelling`);
+            cancelWorker(msg.taskId);
+          } else {
+            log(workerId, `hello busy task=#${msg.taskId} — task already complete, reclaiming for finalization`);
+            await reclaimWorker(existing);
+          }
         } else if (existing.assignedWorkerId && existing.assignedWorkerId !== workerId) {
           log(workerId, `hello busy task=#${msg.taskId} — task taken by another worker`);
           cancelWorker(msg.taskId);
