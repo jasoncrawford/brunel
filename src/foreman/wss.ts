@@ -97,13 +97,21 @@ export function createForemanWss(
   taskModel.on("changed", debouncedBroadcast);
   registry.on("changed", debouncedBroadcast);
 
+  // Mutex that ensures at most one assignIdleWorkers() runs at a time.
+  // Without this, two concurrent webhook events can each call assignIdleWorkers()
+  // and both see the same pending task before either writes an assignment. (Issue #577)
+  let assignLock = Promise.resolve();
+
   async function assignIdleWorkers(): Promise<void> {
-    // Sequential (not concurrent) to prevent double-assignment: each tryAssignWork
-    // must complete its DB write before the next one calls nextPending(), otherwise
-    // two workers can both see the same pending task. (Issue #563)
-    for (const w of registry.getIdleWorkers()) {
-      await tryAssignWork(w.workerId).catch(err => flog(`ERROR tryAssignWork: ${fmtError(err)}`));
-    }
+    assignLock = assignLock.then(async () => {
+      // Sequential (not concurrent) to prevent double-assignment: each tryAssignWork
+      // must complete its DB write before the next one calls nextPending(), otherwise
+      // two workers can both see the same pending task. (Issue #563)
+      for (const w of registry.getIdleWorkers()) {
+        await tryAssignWork(w.workerId).catch(err => flog(`ERROR tryAssignWork: ${fmtError(err)}`));
+      }
+    });
+    await assignLock;
   }
 
   async function tryAssignWork(workerId: string): Promise<void> {
