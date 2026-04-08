@@ -151,14 +151,14 @@ describe("TaskModel — derived blocked status", () => {
     expect(task2).toBeNull();
   });
 
-  it("getPendingAndBlockedTasks returns pending and assigned but not complete", async () => {
+  it("listActiveTasks returns pending and assigned but not complete", async () => {
     await registerBase(m, { taskId: "1", issueNumber: 1 }); // pending
     await registerBase(m, { taskId: "2", issueNumber: 2 }); // will be assigned
     await m.assign("2", "w1");
     await registerBase(m, { taskId: "3", issueNumber: 3 }); // will be complete
     await m.assign("3", "w2");
     await m.complete("3");
-    const result = await m.getPendingAndBlockedTasks();
+    const result = await m.listActiveTasks();
     expect(result.map((t) => t.taskId)).toEqual(expect.arrayContaining(["1", "2"]));
     expect(result.map((t) => t.taskId)).not.toContain("3");
   });

@@ -135,13 +135,7 @@ export class TaskModel extends EventEmitter {
     return null;
   }
 
-  async getPendingAndBlockedTasks(): Promise<Task[]> {
-    const rows = await this.store.listTasks();
-    // Filter out complete tasks (those with completedAt set)
-    return rows.filter(r => !r.completedAt).map(rowToTask);
-  }
-
-  /** All active (non-complete) tasks — used by the dashboard task list API. */
+  /** All active (non-complete) tasks — used by the dashboard task list API and dependency resolution. */
   async listActiveTasks(): Promise<Task[]> {
     const rows = await this.store.listTasks();
     return rows.filter((row) => !row.completedAt).map(rowToTask);
