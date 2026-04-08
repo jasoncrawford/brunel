@@ -1,7 +1,7 @@
 import type { TaskIssue } from "../types.js";
 import { fetchBlockers, setBlockers } from "./dependencies.js";
 import type { DependencyGraph } from "./dependencies.js";
-import type { TaskModel } from "./task-model.js";
+import type { TaskModel } from "./models/task-model.js";
 
 // ── GitHub API helpers ────────────────────────────────────────────────────────
 

@@ -1,7 +1,7 @@
 import { EventEmitter } from "events";
-import type { ForemanMessage } from "../types.js";
+import type { ForemanMessage } from "../../types.js";
 import type { WebSocket as WsSocket } from "ws";
-import type { WorkerSnapshot } from "./admin-ws.js";
+import type { WorkerSnapshot } from "../admin-ws.js";
 
 export interface WorkerState {
   workerId: string;

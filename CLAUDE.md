@@ -6,14 +6,21 @@ A GitHub-driven autonomous agent. Labels a GitHub issue `brunel:ready` → the f
 
 ### Foreman (`src/foreman/`)
 
-All foreman/server code lives in `src/foreman/` with clean MVC separation:
+All foreman/server code lives in `src/foreman/` with clean MVC separation. Models own state; controllers handle external inputs and orchestrate.
 
+**Entry point:**
 - **`src/foreman/index.ts`** — Entry point and orchestrator. Wires components together, starts HTTP + WSS servers. No re-exports — import each symbol from its own module.
-- **`src/foreman/task-model.ts`** — `TaskModel` class and `Task` interface: the single owner of all task state. There is no in-memory cache — all reads go through the `TaskStore` (Supabase in production, `createMemoryTaskStore()` for local dev/tests). The only in-memory state is ephemeral data with no DB backing: event queues (buffered GitHub events for pending/disconnected workers), branch mappings (branch→taskId for routing check_run/check_suite events), and GitHub issue tracking (`labeledIssues`/`openIssues` for dependency resolution). All read methods are async. Provides startup methods: `loadActiveTasksFromDb()` and `loadIssuesFromGithub()`.
-- **`src/foreman/worker-registry.ts`** — `WorkerRegistry` class. Connected worker map: `register()`, `remove()`, `get()`, `getIdleWorkers()`, `assignTask()`, `releaseWorker()`. No DB or WebSocket knowledge.
-- **`src/foreman/event-router.ts`** — `doRouteEvent()` and related GitHub event routing logic. Takes dependencies via an `EventRouterDeps` interface rather than closing over them. Also contains `reconcile()`, `startDepsLoad()`, `forwardEvent()`, `summaryEvent()`, `isMutedEvent()`, and `extractLinkedIssueNumber()`.
-- **`src/foreman/http-server.ts`** — `createHttpServer()`: webhook handler, health endpoint, REST API, SPA static files.
-- **`src/foreman/wss.ts`** — `createForemanWss()`: WebSocket plumbing + message dispatch. Takes `BrunelConfig` (or a `Pick` of it) directly rather than individual config values. Creates the `EventRouterDeps` and delegates routing to the event router. Contains connection lifecycle handlers (`handleWorkerHello`, `handleTaskComplete`, `handleWorkerGoodbye`) and assignment logic.
+
+**Models (`src/foreman/models/`)** — classes that own and manage application state:
+- **`src/foreman/models/task-model.ts`** — `TaskModel` class and `Task` interface: the single owner of all task state. There is no in-memory cache — all reads go through the `TaskStore` (Supabase in production, `createMemoryTaskStore()` for local dev/tests). The only in-memory state is ephemeral data with no DB backing: event queues (buffered GitHub events for pending/disconnected workers), branch mappings (branch→taskId for routing check_run/check_suite events), and GitHub issue tracking (`labeledIssues`/`openIssues` for dependency resolution). All read methods are async. Provides startup methods: `loadActiveTasksFromDb()` and `loadIssuesFromGithub()`.
+- **`src/foreman/models/worker-registry.ts`** — `WorkerRegistry` class. Connected worker map: `register()`, `remove()`, `get()`, `getIdleWorkers()`, `assignTask()`, `releaseWorker()`. No DB or WebSocket knowledge.
+
+**Controllers (`src/foreman/controllers/`)** — handle external inputs and orchestrate business logic:
+- **`src/foreman/controllers/event-router.ts`** — `doRouteEvent()` and related GitHub event routing logic. Takes dependencies via an `EventRouterDeps` interface rather than closing over them. Also contains `reconcile()`, `startDepsLoad()`, `forwardEvent()`, `summaryEvent()`, `isMutedEvent()`, and `extractLinkedIssueNumber()`.
+- **`src/foreman/controllers/http-server.ts`** — `createHttpServer()`: webhook handler, health endpoint, REST API, SPA static files.
+- **`src/foreman/controllers/wss.ts`** — `createForemanWss()`: WebSocket plumbing + message dispatch. Takes `BrunelConfig` (or a `Pick` of it) directly rather than individual config values. Creates the `EventRouterDeps` and delegates routing to the event router. Contains connection lifecycle handlers (`handleWorkerHello`, `handleTaskComplete`, `handleWorkerGoodbye`) and assignment logic.
+
+**Infrastructure (root `src/foreman/`)** — shared services and utilities used by both models and controllers:
 - **`src/foreman/admin-ws.ts`** — Admin GUI WebSocket broadcaster. Attaches at `/admin/ws` and exposes `broadcastSnapshot` and `broadcastLogEvent`.
 - **`src/foreman/db.ts`** — DB layer: `DbLogger`, `TaskStore`, `buildMessageSummary`, and their Supabase/memory implementations. `createMemoryTaskStore()` is a full in-memory `TaskStore` implementation used for local dev and tests that don't need Supabase.
 - **`src/foreman/github.ts`** — GitHub API: `loadIssuesToQueue`, `fetchIssueStates`, `fetchNativeBlockers`.

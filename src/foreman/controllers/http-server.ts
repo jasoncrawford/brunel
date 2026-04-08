@@ -2,11 +2,11 @@ import { Webhooks } from "@octokit/webhooks";
 import http from "http";
 import { Hono } from "hono";
 import { getRequestListener } from "@hono/node-server";
-import type { DbLogger } from "./db.js";
-import type { TaskModel } from "./task-model.js";
-import { deriveStatus } from "./task-model.js";
-import type { TaskStatus } from "../types.js";
-import { fmtError } from "../utils.js";
+import type { DbLogger } from "../db.js";
+import type { TaskModel } from "../models/task-model.js";
+import { deriveStatus } from "../models/task-model.js";
+import type { TaskStatus } from "../../types.js";
+import { fmtError } from "../../utils.js";
 import { summaryEvent, isMutedEvent } from "./event-router.js";
 
 function flog(msg: string) {
@@ -128,7 +128,7 @@ export function createHttpServer(
     const { createReadStream, existsSync } = await import("fs");
     const { join, extname } = await import("path");
     const { fileURLToPath } = await import("url");
-    const root = join(fileURLToPath(import.meta.url), "../../../dist");
+    const root = join(fileURLToPath(import.meta.url), "../../../../dist");
 
     if (!existsSync(root)) {
       return c.text("Not Found", 404);

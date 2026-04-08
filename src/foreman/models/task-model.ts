@@ -1,13 +1,13 @@
 import { EventEmitter } from "events";
-import type { GitHubEvent, LabeledIssueState, TaskIssue, TaskStatus } from "../types.js";
-import type { TaskStore, TaskRow, ListTasksOpts } from "./db.js";
-import { createMemoryTaskStore, createTaskStore } from "./db.js";
+import type { GitHubEvent, LabeledIssueState, TaskIssue, TaskStatus } from "../../types.js";
+import type { TaskStore, TaskRow, ListTasksOpts } from "../db.js";
+import { createMemoryTaskStore, createTaskStore } from "../db.js";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { isBlocked } from "./dependencies.js";
-import type { DependencyGraph } from "./dependencies.js";
-import type { TaskSnapshot } from "./admin-ws.js";
-import { loadIssuesToQueue } from "./github.js";
-import { fmtError } from "../utils.js";
+import { isBlocked } from "../dependencies.js";
+import type { DependencyGraph } from "../dependencies.js";
+import type { TaskSnapshot } from "../admin-ws.js";
+import { loadIssuesToQueue } from "../github.js";
+import { fmtError } from "../../utils.js";
 
 
 // ── Status derivation ─────────────────────────────────────────────────────────

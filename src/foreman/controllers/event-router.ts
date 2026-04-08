@@ -1,11 +1,11 @@
-import type { GitHubEvent, ForemanMessage, TaskIssue } from "../types.js";
-import type { DependencyGraph } from "./dependencies.js";
-import { setBlockers, fetchBlockers } from "./dependencies.js";
-import { fetchIssueStates } from "./github.js";
-import type { TaskModel, Task } from "./task-model.js";
-import type { WorkerRegistry } from "./worker-registry.js";
-import { shortWorkerId } from "../../shared/utils.js";
-import { fmtError } from "../utils.js";
+import type { GitHubEvent, ForemanMessage, TaskIssue } from "../../types.js";
+import type { DependencyGraph } from "../dependencies.js";
+import { setBlockers, fetchBlockers } from "../dependencies.js";
+import { fetchIssueStates } from "../github.js";
+import type { TaskModel, Task } from "../models/task-model.js";
+import type { WorkerRegistry } from "../models/worker-registry.js";
+import { shortWorkerId } from "../../../shared/utils.js";
+import { fmtError } from "../../utils.js";
 
 // ── Dependencies interface ──────────────────────────────────────────────────
 
