@@ -1,5 +1,6 @@
 import fs from "fs";
 import * as display from "./display.js";
+import { lookup, listAll } from "./commands.js";
 
 // ── Stash ─────────────────────────────────────────────────────────────────────
 
@@ -47,34 +48,22 @@ export function applyArguments(content: string, args: string): string {
 
 // ── Slash commands ────────────────────────────────────────────────────────────
 
-const BUILTIN_COMMANDS = [
-  { name: "clear"            as const, description: "Clear the conversation"                                },
-  { name: "exit"             as const, description: "Exit the REPL"                                         },
-  { name: "task-complete"    as const, description: "Mark the current task as done",      workerOnly: true  },
-  { name: "create-workspace" as const, description: "Create an isolated git checkout for this session"      },
-  { name: "reset-workspace"  as const, description: "Reset workspace to clean main branch"                  },
-  { name: "remove-workspace" as const, description: "Remove the workspace checkout for this session"        },
-  { name: "prune"            as const, description: "Remove orphaned worker workspace directories"          },
-  { name: "model"            as const, description: "Select the Claude model to use"                        },
-  { name: "effort"           as const, description: "Set the effort level for Claude's thinking"             },
-];
-
-type BuiltinCommand = typeof BUILTIN_COMMANDS[number];
-
 export type SlashCommandResult =
-  | { type: BuiltinCommand["name"] }
+  | { type: "command"; name: string }
   | { type: "unknown_command"; command: string };
 
 /**
  * Parse a slash command from raw user input.
  * Returns null if the input is not a slash command.
+ * Looks up the command name (and any aliases) in the registry.
+ * Returns the canonical command name on match.
  */
 export function parseSlashCommand(input: string): SlashCommandResult | null {
   if (!input.startsWith("/")) return null;
   const command = input.slice(1).split(/\s+/)[0];
   if (!command) return null;
-  const builtin = BUILTIN_COMMANDS.find(c => c.name === command);
-  if (builtin) return { type: builtin.name };
+  const entry = lookup(command);
+  if (entry) return { type: "command", name: entry.name };
   return { type: "unknown_command", command };
 }
 
@@ -150,7 +139,8 @@ function defaultReadFile(path: string): string | null {
 }
 
 export type DispatchResult =
-  | SlashCommandResult
+  | { type: "command"; name: string; args: string }
+  | { type: "unknown_command"; command: string }
   | { type: "skip" }
   | { type: "query"; prompt: string };
 
@@ -166,7 +156,12 @@ export async function dispatchInput(
 
   const slash = parseSlashCommand(input);
   if (slash) {
-    if (slash.type !== "unknown_command") return slash;
+    if (slash.type === "command") {
+      // Extract everything after "/commandName" as args
+      const rawCommand = input.slice(1).split(/\s+/)[0];
+      const args = input.slice(1 + rawCommand.length).trim();
+      return { type: "command", name: slash.name, args };
+    }
     // unknown_command: look up command file or skill
     const { command } = slash;
     const content = resolveContent(command, readFile);
@@ -244,8 +239,8 @@ export function listCommands(
 ): CommandSuggestion[] {
   const names = listCommandNames(listDir, readFile, workerMode);
   return names.map(name => {
-    const builtin = BUILTIN_COMMANDS.find(c => c.name === name);
-    if (builtin) return { name, description: builtin.description };
+    const entry = lookup(name);
+    if (entry) return { name, description: entry.description };
     const content = resolveContent(name, readFile);
     return { name, description: content ? extractDescription(content) : "" };
   });
@@ -291,10 +286,10 @@ function defaultListDir(dir: string): Array<{ name: string; isDir: boolean }> | 
 }
 
 /**
- * Return all available command names: builtins plus any .md files under
- * ~/.claude/commands/ (recursively) and skill names.
+ * Return all available command names: builtins (from the registry) plus any
+ * .md files under ~/.claude/commands/ (recursively) and skill names.
  * Subdirectory names become colon-separated prefixes: foo/bar.md → "foo:bar".
- * Worker-only builtins (e.g. "task-complete") are excluded unless workerMode is true.
+ * Worker-only commands (availability "worker") are excluded unless workerMode is true.
  * The listDir and readFile parameters are injectable for testing.
  */
 export function listCommandNames(
@@ -302,7 +297,7 @@ export function listCommandNames(
   readFile: (path: string) => string | null = defaultReadFile,
   workerMode = false,
 ): string[] {
-  const builtins = BUILTIN_COMMANDS.filter(c => workerMode || !c.workerOnly).map(c => c.name);
+  const builtins = listAll(workerMode).map(e => e.name);
   const home = process.env.HOME ?? process.env.USERPROFILE ?? ""; // "" → walks "/.claude/commands" which will silently return null
   const commandsDir = `${home}/.claude/commands`;
   const fileCommands = walkDir(commandsDir, "", listDir);

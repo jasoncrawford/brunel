@@ -317,7 +317,7 @@ describe("listCommandNames", () => {
 
   it("returns only builtins when directory is missing", () => {
     const result = listCommandNames(() => null);
-    expect(result).toEqual(["clear", "create-workspace", "effort", "exit", "model", "prune", "remove-workspace", "reset-workspace"]);
+    expect(result).toEqual(["clear", "effort", "exit", "model", "workspace:create", "workspace:prune", "workspace:remove", "workspace:reset"]);
   });
 
   it("includes a file at root level", () => {
@@ -400,8 +400,9 @@ describe("listCommandNames", () => {
     expect(result).toContain("my-skill");
   });
 
-  it("does not include task-complete (worker-only command)", () => {
+  it("does not include worker:task-complete (worker-only command)", () => {
     const result = listCommandNames(() => null);
+    expect(result).not.toContain("worker:task-complete");
     expect(result).not.toContain("task-complete");
   });
 
@@ -515,9 +516,9 @@ describe("listCommands", () => {
 // ── listWorkerCommandNames ────────────────────────────────────────────────────
 
 describe("listWorkerCommandNames", () => {
-  it("includes task-complete", () => {
+  it("includes worker:task-complete", () => {
     const result = listWorkerCommandNames(() => null);
-    expect(result).toContain("task-complete");
+    expect(result).toContain("worker:task-complete");
   });
 
   it("also includes clear and exit", () => {

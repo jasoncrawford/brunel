@@ -344,103 +344,108 @@ export class WorkerSession {
 
     const action = await dispatchInput(input);
     if (action.type === "skip") return;
-    if (action.type === "exit") return "exit";
     if (action.type === "unknown_command") {
       this.display.print(display.c.boldRed(`Unknown command: /${action.command}`));
       return;
     }
 
-    if (action.type === "task-complete") {
-      if (this.currentTaskId) {
-        if (this.options.afterTask) {
-          try {
-            await this.options.afterTask();
-          } catch {
-            return;
+    if (action.type === "command") {
+      const { name, args } = action;
+
+      if (name === "exit") return "exit";
+
+      if (name === "worker:task-complete") {
+        if (this.currentTaskId) {
+          if (this.options.afterTask) {
+            try {
+              await this.options.afterTask();
+            } catch {
+              return;
+            }
           }
+          this.sendTaskMessage({
+            type: "task_complete",
+            workerId: this.workerId,
+            taskId: this.currentTaskId,
+          });
+          this.currentTaskId = undefined;
+          this.currentIssue = undefined;
+          this.currentSessionId = undefined;
+          this.statusModel.update({ taskNumber: undefined, prNumber: undefined, branch: "" });
+          this.display.print(display.c.sageGreen("Task complete. Waiting for next task..."));
+          return "task-complete";
         }
-        this.sendTaskMessage({
-          type: "task_complete",
-          workerId: this.workerId,
-          taskId: this.currentTaskId,
-        });
-        this.currentTaskId = undefined;
-        this.currentIssue = undefined;
+        return;
+      }
+
+      if (name === "clear") {
         this.currentSessionId = undefined;
-        this.statusModel.update({ taskNumber: undefined, prNumber: undefined, branch: "" });
-        this.display.print(display.c.sageGreen("Task complete. Waiting for next task..."));
-        return "task-complete";
+        this.display.print(display.clearBreak());
+        return;
       }
-      return;
-    }
 
-    if (action.type === "clear") {
-      this.currentSessionId = undefined;
-      this.display.print(display.clearBreak());
-      return;
-    }
-
-    if (action.type === "reset-workspace") {
-      const ctx = this.options.workspaceCtx;
-      if (!ctx) { this.display.print(display.c.boldRed("No workspace in this session.")); return; }
-      const ok = await confirmIfUnsafe(ctx.workspace, ctx.confirm);
-      if (!ok) return;
-      await ctx.workspace.reset();
-      this.display.print(display.c.sageGreen("Workspace reset to main."));
-      return;
-    }
-
-    if (action.type === "remove-workspace") {
-      const ctx = this.options.workspaceCtx;
-      if (!ctx) { this.display.print(display.c.boldRed("No workspace in this session.")); return; }
-      const ok = await confirmIfUnsafe(ctx.workspace, ctx.confirm);
-      if (!ok) return;
-      await ctx.workspace.destroy();
-      process.chdir(ctx.originalCwd);
-      this.options.workspaceCtx = undefined;
-      this.display.print(display.c.sageGreen(`Workspace removed. Now in: ${ctx.originalCwd}`));
-      return;
-    }
-
-    if (action.type === "create-workspace") {
-      this.display.print(display.c.amber("Workspace is managed automatically in worker mode."));
-      return;
-    }
-
-    if (action.type === "prune") {
-      const ctx = this.options.workspaceCtx;
-      const workspaceDir = ctx?.workspaceDir;
-      if (!workspaceDir) { this.display.print(display.c.boldRed("No workspace directory configured.")); return; }
-      const removed = await Workspace.prune(workspaceDir);
-      if (removed.length === 0) {
-        this.display.print(display.c.sageGreen("Nothing to prune."));
-      } else {
-        for (const dir of removed) this.display.print(display.c.darkGray(`  Removed: ${dir}`));
-        this.display.print(display.c.sageGreen(`Pruned ${removed.length} orphaned workspace(s).`));
+      if (name === "workspace:reset") {
+        const ctx = this.options.workspaceCtx;
+        if (!ctx) { this.display.print(display.c.boldRed("No workspace in this session.")); return; }
+        const ok = await confirmIfUnsafe(ctx.workspace, ctx.confirm);
+        if (!ok) return;
+        await ctx.workspace.reset();
+        this.display.print(display.c.sageGreen("Workspace reset to main."));
+        return;
       }
-      return;
-    }
 
-    if (action.type === "model") {
-      const modelArgs = input.slice("/model".length).trim();
-      const pickModelFn = (opts: string[], idx: number) =>
-        pick(opts, { currentIdx: idx, escapable: true });
-      this.currentModel = await handleModelCommand(
-        modelArgs, this._currentModel, pickModelFn,
-        undefined, // models cached from first query; no fetchModelsFn in worker
-        this.display.print,
-      );
-      return;
-    }
+      if (name === "workspace:remove") {
+        const ctx = this.options.workspaceCtx;
+        if (!ctx) { this.display.print(display.c.boldRed("No workspace in this session.")); return; }
+        const ok = await confirmIfUnsafe(ctx.workspace, ctx.confirm);
+        if (!ok) return;
+        await ctx.workspace.destroy();
+        process.chdir(ctx.originalCwd);
+        this.options.workspaceCtx = undefined;
+        this.display.print(display.c.sageGreen(`Workspace removed. Now in: ${ctx.originalCwd}`));
+        return;
+      }
 
-    if (action.type === "effort") {
-      const effortArgs = input.slice("/effort".length).trim();
-      const pickEffortFn = (opts: string[], idx: number) =>
-        pick(opts, { currentIdx: idx, escapable: true });
-      this.currentEffort = await handleEffortCommand(
-        effortArgs, this._currentEffort, pickEffortFn,
-        this.display.print,
-      );
+      if (name === "workspace:create") {
+        this.display.print(display.c.amber("Workspace is managed automatically in worker mode."));
+        return;
+      }
+
+      if (name === "workspace:prune") {
+        const ctx = this.options.workspaceCtx;
+        const workspaceDir = ctx?.workspaceDir;
+        if (!workspaceDir) { this.display.print(display.c.boldRed("No workspace directory configured.")); return; }
+        const removed = await Workspace.prune(workspaceDir);
+        if (removed.length === 0) {
+          this.display.print(display.c.sageGreen("Nothing to prune."));
+        } else {
+          for (const dir of removed) this.display.print(display.c.darkGray(`  Removed: ${dir}`));
+          this.display.print(display.c.sageGreen(`Pruned ${removed.length} orphaned workspace(s).`));
+        }
+        return;
+      }
+
+      if (name === "model") {
+        const pickModelFn = (opts: string[], idx: number) =>
+          pick(opts, { currentIdx: idx, escapable: true });
+        this.currentModel = await handleModelCommand(
+          args, this._currentModel, pickModelFn,
+          undefined, // models cached from first query; no fetchModelsFn in worker
+          this.display.print,
+        );
+        return;
+      }
+
+      if (name === "effort") {
+        const pickEffortFn = (opts: string[], idx: number) =>
+          pick(opts, { currentIdx: idx, escapable: true });
+        this.currentEffort = await handleEffortCommand(
+          args, this._currentEffort, pickEffortFn,
+          this.display.print,
+        );
+        return;
+      }
+
       return;
     }
 

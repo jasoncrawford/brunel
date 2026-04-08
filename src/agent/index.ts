@@ -232,7 +232,7 @@ export async function runQuery(
 
 // ── Workspace action handler ──────────────────────────────────────────────────
 
-export type WorkspaceActionType = "create-workspace" | "reset-workspace" | "remove-workspace" | "prune";
+export type WorkspaceActionType = "workspace:create" | "workspace:reset" | "workspace:remove" | "workspace:prune";
 
 export interface WorkspaceActionParams {
   workspaceCfg: { workspaceDir: string; repoUrl: string } | undefined;
@@ -255,7 +255,7 @@ export async function handleWorkspaceAction(
 ): Promise<Workspace | undefined> {
   const { workspaceCfg, workspace, sessionId_, originalCwd, confirm, print, chdir } = params;
 
-  if (type === "create-workspace") {
+  if (type === "workspace:create") {
     if (!workspaceCfg) {
       print(display.c.boldRed("Cannot create workspace: no GitHub repo configured."));
       return workspace;
@@ -270,7 +270,7 @@ export async function handleWorkspaceAction(
     return ws;
   }
 
-  if (type === "reset-workspace") {
+  if (type === "workspace:reset") {
     if (!workspace) {
       print(display.c.boldRed("No workspace. Use /create-workspace first."));
       return workspace;
@@ -282,7 +282,7 @@ export async function handleWorkspaceAction(
     return workspace;
   }
 
-  if (type === "remove-workspace") {
+  if (type === "workspace:remove") {
     if (!workspace) {
       print(display.c.boldRed("No workspace in this session."));
       return workspace;
@@ -295,7 +295,7 @@ export async function handleWorkspaceAction(
     return undefined;
   }
 
-  // type === "prune"
+  // type === "workspace:prune"
   if (!workspaceCfg) {
     print(display.c.boldRed("Cannot prune: no workspace directory configured."));
     return workspace;
@@ -374,67 +374,71 @@ async function main(
 
     if (action.type === "skip") continue;
 
-    if (action.type === "exit") {
-      if (workspace) {
-        const ok = await confirmIfUnsafe(workspace, confirm);
-        if (ok) await workspace.destroy();
-      }
-      process.stdout.write("\x1b[?2004l\r\n");
-      process.stdin.setRawMode(false);
-      process.stdin.pause();
-      break;
-    }
-
-    if (action.type === "clear") {
-      sessionId = undefined;
-      display.print(display.clearBreak());
-      continue;
-    }
-
     if (action.type === "unknown_command") {
       display.print(display.c.boldRed(`Unknown command: /${action.command}`));
       continue;
     }
 
-    if (action.type === "task-complete") {
-      display.print(display.c.boldRed("Not in worker mode."));
-      continue;
-    }
+    if (action.type === "command") {
+      const { name, args } = action;
 
-    if (action.type === "model") {
-      const modelArgs = input.slice("/model".length).trim();
-      const pickModelFn = (opts: string[], idx: number) =>
-        pick(opts, { currentIdx: idx, escapable: true });
-      currentModel = await handleModelCommand(
-        modelArgs, currentModel, pickModelFn,
-        fetchModelsFn,
-        display.print,
-      );
-      continue;
-    }
+      if (name === "exit") {
+        if (workspace) {
+          const ok = await confirmIfUnsafe(workspace, confirm);
+          if (ok) await workspace.destroy();
+        }
+        process.stdout.write("\x1b[?2004l\r\n");
+        process.stdin.setRawMode(false);
+        process.stdin.pause();
+        break;
+      }
 
-    if (action.type === "effort") {
-      const effortArgs = input.slice("/effort".length).trim();
-      const pickEffortFn = (opts: string[], idx: number) =>
-        pick(opts, { currentIdx: idx, escapable: true });
-      currentEffort = await handleEffortCommand(
-        effortArgs, currentEffort, pickEffortFn,
-        display.print,
-      );
-      continue;
-    }
+      if (name === "clear") {
+        sessionId = undefined;
+        display.print(display.clearBreak());
+        continue;
+      }
 
-    if (
-      action.type === "create-workspace" ||
-      action.type === "reset-workspace" ||
-      action.type === "remove-workspace" ||
-      action.type === "prune"
-    ) {
-      workspace = await handleWorkspaceAction(action.type, {
-        workspaceCfg, workspace, sessionId_, originalCwd, confirm,
-        print: display.print,
-        chdir: (dir) => process.chdir(dir),
-      });
+      if (name === "worker:task-complete") {
+        display.print(display.c.boldRed("Not in worker mode."));
+        continue;
+      }
+
+      if (name === "model") {
+        const pickModelFn = (opts: string[], idx: number) =>
+          pick(opts, { currentIdx: idx, escapable: true });
+        currentModel = await handleModelCommand(
+          args, currentModel, pickModelFn,
+          fetchModelsFn,
+          display.print,
+        );
+        continue;
+      }
+
+      if (name === "effort") {
+        const pickEffortFn = (opts: string[], idx: number) =>
+          pick(opts, { currentIdx: idx, escapable: true });
+        currentEffort = await handleEffortCommand(
+          args, currentEffort, pickEffortFn,
+          display.print,
+        );
+        continue;
+      }
+
+      if (
+        name === "workspace:create" ||
+        name === "workspace:reset" ||
+        name === "workspace:remove" ||
+        name === "workspace:prune"
+      ) {
+        workspace = await handleWorkspaceAction(name, {
+          workspaceCfg, workspace, sessionId_, originalCwd, confirm,
+          print: display.print,
+          chdir: (dir) => process.chdir(dir),
+        });
+        continue;
+      }
+
       continue;
     }
 
