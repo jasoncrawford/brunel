@@ -200,6 +200,34 @@ describe("foreman WebSocket protocol", () => {
     expect(task?.assignedWorkerId).toBeTruthy();
   });
 
+  it("two concurrent reconcile() calls don't double-assign the same task (issue #577)", async () => {
+    // Regression test for issue #577: concurrent assignIdleWorkers() calls (triggered by
+    // two webhook events arriving near-simultaneously) could both see the same pending task
+    // before either writes an assignment. The mutex in assignIdleWorkers() prevents this.
+    const ws1 = await connect();
+    const ws2 = await connect();
+    const q1 = makeQueue(ws1);
+    const q2 = makeQueue(ws2);
+    send(ws1, { type: "worker_hello", workerId: "w1", status: "idle" });
+    await q1.next(); // hello_ack (no task yet)
+    send(ws2, { type: "worker_hello", workerId: "w2", status: "idle" });
+    await q2.next(); // hello_ack (no task yet)
+
+    // Both workers are idle. Create a single task and fire two reconcile() calls concurrently.
+    await makeTask(taskModel, 99);
+    await Promise.all([reconcile(), reconcile()]);
+
+    // Only one worker should have been assigned.
+    const w1Status = registry.get("w1")?.status;
+    const w2Status = registry.get("w2")?.status;
+    const busyCount = [w1Status, w2Status].filter((s) => s === "busy").length;
+    expect(busyCount).toBe(1);
+
+    const task = await taskModel.get("99");
+    expect(task?.status).toBe("assigned");
+    expect(task?.assignedWorkerId).toBeTruthy();
+  });
+
   it("task_complete completes task and assigns next task", async () => {
     // Create first task and ensure it has an older timestamp
     await makeTask(taskModel, 1001);
