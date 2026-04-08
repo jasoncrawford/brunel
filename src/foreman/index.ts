@@ -7,13 +7,13 @@ import type { DependencyGraph } from "./dependencies.js";
 import { loadConfig } from "../config.js";
 import { createDbLogger, createNullDbLogger } from "./db.js";
 import type { DbLogger } from "./db.js";
-import { TaskModel } from "./task-model.js";
-import { WorkerRegistry } from "./worker-registry.js";
-import { createHttpServer } from "./http-server.js";
-import { createForemanWss } from "./wss.js";
-import type { ForemanWss } from "./wss.js";
+import { TaskModel } from "./models/task-model.js";
+import { WorkerRegistry } from "./models/worker-registry.js";
+import { createHttpServer } from "./controllers/http-server.js";
+import { createForemanWss } from "./controllers/wss.js";
+import type { ForemanWss } from "./controllers/wss.js";
 import { createAdminWss } from "./admin-ws.js";
-import { isMutedEvent, summaryEvent } from "./event-router.js";
+import { isMutedEvent, summaryEvent } from "./controllers/event-router.js";
 import { fmtError } from "../utils.js";
 
 function flog(msg: string) {

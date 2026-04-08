@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { summaryEvent, isMutedEvent } from "../src/foreman/event-router.js";
+import { summaryEvent, isMutedEvent } from "../src/foreman/controllers/event-router.js";
 
 describe("isMutedEvent", () => {
   it("mutes workflow_job events", () => {

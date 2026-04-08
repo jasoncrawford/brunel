@@ -1,15 +1,15 @@
 import http from "http";
 import { WebSocketServer, WebSocket } from "ws";
-import type { WorkerMessage, ForemanMessage, GitHubEvent } from "../types.js";
-import type { DependencyGraph } from "./dependencies.js";
-import { type DbLogger, buildMessageSummary } from "./db.js";
-import type { AdminWss } from "./admin-ws.js";
-import { fmtEvent } from "./event-fmt.js";
-import { fmtError } from "../utils.js";
-import { shortWorkerId } from "../../shared/utils.js";
-import type { BrunelConfig } from "../config.js";
-import type { TaskModel, Task } from "./task-model.js";
-import type { WorkerRegistry } from "./worker-registry.js";
+import type { WorkerMessage, ForemanMessage, GitHubEvent } from "../../types.js";
+import type { DependencyGraph } from "../dependencies.js";
+import { type DbLogger, buildMessageSummary } from "../db.js";
+import type { AdminWss } from "../admin-ws.js";
+import { fmtEvent } from "../event-fmt.js";
+import { fmtError } from "../../utils.js";
+import { shortWorkerId } from "../../../shared/utils.js";
+import type { BrunelConfig } from "../../config.js";
+import type { TaskModel, Task } from "../models/task-model.js";
+import type { WorkerRegistry } from "../models/worker-registry.js";
 import { doRouteEvent, reconcile, isMutedEvent, summaryEvent, forwardEvent } from "./event-router.js";
 import type { EventRouterDeps } from "./event-router.js";
 

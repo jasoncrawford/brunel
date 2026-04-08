@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import http from "http";
-import { WorkerRegistry } from "../src/foreman/worker-registry.js";
-import { createForemanWss } from "../src/foreman/wss.js";
-import { TaskModel } from "../src/foreman/task-model.js";
+import { WorkerRegistry } from "../src/foreman/models/worker-registry.js";
+import { createForemanWss } from "../src/foreman/controllers/wss.js";
+import { TaskModel } from "../src/foreman/models/task-model.js";
 import { loadDefaultConfig } from "../src/config.js";
 const defaultCfg = await loadDefaultConfig();
 import type { TaskIssue } from "../src/types.js";

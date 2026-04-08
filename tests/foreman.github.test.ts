@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { loadIssuesToQueue, fetchIssueStates, fetchNativeBlockers } from "../src/foreman/github.js";
-import { TaskModel } from "../src/foreman/task-model.js";
+import { TaskModel } from "../src/foreman/models/task-model.js";
 import { fetchBlockers } from "../src/foreman/dependencies.js";
 import type { DependencyGraph } from "../src/foreman/dependencies.js";
 

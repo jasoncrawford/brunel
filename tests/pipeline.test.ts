@@ -18,9 +18,9 @@ import http from "http";
 import { WebSocket, WebSocketServer } from "ws";
 import type { AddressInfo } from "net";
 import type { ForemanMessage } from "../src/types.js";
-import { WorkerRegistry } from "../src/foreman/worker-registry.js";
-import { createForemanWss } from "../src/foreman/wss.js";
-import { TaskModel, rowToTask } from "../src/foreman/task-model.js";
+import { WorkerRegistry } from "../src/foreman/models/worker-registry.js";
+import { createForemanWss } from "../src/foreman/controllers/wss.js";
+import { TaskModel, rowToTask } from "../src/foreman/models/task-model.js";
 import type { DbLogger } from "../src/foreman/db.js";
 import {
   createDbLogger,

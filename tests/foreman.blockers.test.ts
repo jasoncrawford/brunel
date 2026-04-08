@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
-import { WorkerRegistry } from "../src/foreman/worker-registry.js";
-import { createForemanWss } from "../src/foreman/wss.js";
-import { TaskModel } from "../src/foreman/task-model.js";
+import { WorkerRegistry } from "../src/foreman/models/worker-registry.js";
+import { createForemanWss } from "../src/foreman/controllers/wss.js";
+import { TaskModel } from "../src/foreman/models/task-model.js";
 import { loadDefaultConfig } from "../src/config.js";
 import { createMemoryTaskStore } from "../src/foreman/db.js";
 import type { TaskStore } from "../src/foreman/db.js";
