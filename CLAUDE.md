@@ -36,7 +36,8 @@ All agent/worker code lives in `src/agent/`:
 - **`src/agent/index.ts`** — Entry point: core agent loop. Interactive REPL (default) or worker process (`--worker-mode`). Workers connect to the foreman, receive tasks, run Claude Agent SDK sessions, and report completion.
 - **`src/agent/display.ts`** — Display/rendering engine for the worker TUI. Colors, ANSI escapes, status bar, Claude SDK message formatting.
 - **`src/agent/worker.ts`** — WebSocket client + task lifecycle. `WorkerSession`, `WorkerStatusModel`, event classification, debouncing.
-- **`src/agent/input.ts`** — User input handling: `ask()`, slash command parsing, command dispatch, autocomplete.
+- **`src/agent/commands.ts`** — Command registry: `register(name, opts)`, `lookup(name)`, `listAll(workerMode)`. All built-in slash commands are registered here with canonical namespaced names (e.g. `workspace:create`, `worker:task-complete`), backward-compat aliases (e.g. `create-workspace`), descriptions, and availability (`repl | worker | both`). This is the single source of truth for command metadata.
+- **`src/agent/input.ts`** — User input handling: `ask()`, slash command parsing (resolves aliases via registry), `dispatchInput()` (returns `{ type: "command"; name; args }` for registry commands), autocomplete.
 - **`src/agent/workspace.ts`** — Git/npm workspace management: `Workspace` class, branch checkout, npm install, safety confirmations.
 - **`src/agent/templates.ts`** — Prompt templates: `buildInitialPrompt`, `buildEventPrompt`, event formatting.
 - **`src/agent/model.ts`** — Model selection logic: cached model list from the SDK, `/model` command handler, `findModel` exact-match lookup. The SDK returns short aliases (`default`, `opus`, `haiku`, `sonnet[1m]`, `opus[1m]`); `"sonnet"` is hardcoded to map to `"default"`. Unknown strings are accepted with a warning (power-user escape hatch for full model IDs).
