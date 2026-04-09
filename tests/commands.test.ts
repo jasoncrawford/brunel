@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { register, lookup, listAll, execute, _reset } from "../src/agent/commands.js";
+import { registerTestCommands } from "./helpers.js";
 
 beforeEach(() => {
   _reset();
@@ -34,17 +35,7 @@ describe("lookup", () => {
 // ── listAll ───────────────────────────────────────────────────────────────────
 
 describe("listAll", () => {
-  beforeEach(() => {
-    register("clear",  { description: "Clear the conversation", handler: async () => {} });
-    register("exit",   { description: "Exit the REPL", handler: async () => "exit" });
-    register("model",  { description: "Select model", handler: async () => {} });
-    register("effort", { description: "Set effort", handler: async () => {} });
-    register("workspace:create", { description: "Create workspace", handler: async () => {} });
-    register("workspace:reset",  { description: "Reset workspace", handler: async () => {} });
-    register("workspace:remove", { description: "Remove workspace", handler: async () => {} });
-    register("workspace:prune",  { description: "Prune workspaces", handler: async () => {} });
-    register("worker:task-complete", { description: "Mark task done", availability: "worker", handler: async () => "task-complete" });
-  });
+  beforeEach(async () => registerTestCommands());
 
   it("non-worker mode excludes worker-only commands", () => {
     const names = listAll(false).map(e => e.name);

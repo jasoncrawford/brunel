@@ -15,7 +15,7 @@ import type { ForemanMessage, GitHubEvent, TaskIssue, WorkerMessage } from "../t
 import type { PermissionMode } from "@anthropic-ai/claude-agent-sdk";
 import { Workspace, confirmIfUnsafe, registerWorkspaceCommands } from "./workspace.js";
 import { fmtError, generateWorkerId } from "../utils.js";
-import { _reset, register, execute } from "./commands.js";
+import { _reset, register, execute, scoped } from "./commands.js";
 
 const execAsync = promisify(exec);
 
@@ -282,7 +282,8 @@ export class WorkerSession {
   private _registerCommands(): void {
     const ctx = this.options.workspaceCtx;
     _reset();
-    register("worker:task-complete", {
+    const workerReg = scoped("worker");
+    workerReg("task-complete", {
       description: "Mark the current task as done",
       availability: "worker",
       handler: async () => {
