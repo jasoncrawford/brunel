@@ -8,7 +8,8 @@ import { fmtEvent } from "../event-fmt.js";
 import { fmtError } from "../../utils.js";
 import { shortWorkerId } from "../../../shared/utils.js";
 import type { BrunelConfig } from "../../config.js";
-import type { TaskModel, Task } from "../models/task-model.js";
+import type { TaskManager } from "../models/task-model.js";
+import { Task } from "../models/task.js";
 import type { WorkerRegistry } from "../models/worker-registry.js";
 import { doRouteEvent, reconcile, isMutedEvent, summaryEvent, forwardEvent } from "./event-router.js";
 import type { EventRouterDeps } from "./event-router.js";
@@ -34,7 +35,7 @@ export interface ForemanWss {
 }
 
 export function createForemanWss(
-  taskModel: TaskModel,
+  taskManager: TaskManager,
   registry: WorkerRegistry,
   server: http.Server,
   config: Pick<BrunelConfig, "taskLabel" | "githubRepo" | "githubToken" | "githubApiUrl" | "workerSecret" | "pingIntervalMs">,
@@ -88,13 +89,13 @@ export function createForemanWss(
   async function broadcastSnapshot() {
     if (!adminWss) return;
     adminWss.broadcastSnapshot({
-      tasks: await taskModel.getTaskSnapshots(graph),
+      tasks: await taskManager.getTaskSnapshots(graph),
       workers: registry.getWorkerSnapshots(),
     });
   }
 
   const debouncedBroadcast = debounce(broadcastSnapshot, 10);
-  taskModel.on("changed", debouncedBroadcast);
+  taskManager.on("changed", debouncedBroadcast);
   registry.on("changed", debouncedBroadcast);
 
   // Mutex that ensures at most one assignIdleWorkers() runs at a time.
@@ -115,20 +116,21 @@ export function createForemanWss(
   }
 
   async function tryAssignWork(workerId: string): Promise<void> {
-    const task = await taskModel.nextPending(
-      (t) => taskModel.isDepsLoaded(t.issueNumber) && !taskModel.isBlocked(t.issueNumber, graph),
+    const task = await taskManager.nextPending(
+      (t) => taskManager.isDepsLoaded(t.issueNumber) && !taskManager.isBlocked(t.issueNumber, graph),
     );
     if (task) {
       registry.assignTask(workerId, task.taskId);
-      const ok = await taskModel.assign(task.taskId, workerId);
-      if (!ok) {
-        flog(`ERROR Failed to persist assignment for task #${task.taskId}`);
+      try {
+        await task.assign(workerId);
+      } catch (err) {
+        flog(`ERROR Failed to persist assignment for task #${task.taskId}: ${fmtError(err)}`);
         registry.releaseWorker(workerId);
         log(workerId, "→ idle (DB write failed)");
         return;
       }
 
-      const queued = taskModel.drainEvents(task.taskId);
+      const queued = taskManager.drainEvents(task.taskId);
       const assignMsg: ForemanMessage = {
         type: "task_assigned",
         taskId: task.taskId,
@@ -147,13 +149,12 @@ export function createForemanWss(
         sendMsg(workerId, evtMsg);
         log(workerId, `→ event_notification #${task.issueNumber} ${evt.name} (queued)`);
       }
-
     }
   }
 
   // Build the event router deps object
   const routerDeps: EventRouterDeps = {
-    taskModel,
+    taskManager,
     registry,
     graph,
     repo,
@@ -218,7 +219,7 @@ export function createForemanWss(
       workerId = msg.workerId;
 
       function flushQueuedEvents(taskId: string, issueRef: string | number) {
-        for (const evt of taskModel.drainEvents(taskId)) {
+        for (const evt of taskManager.drainEvents(taskId)) {
           sendMsg(workerId, { type: "event_notification", taskId, event: evt });
           log(workerId, `→ event_notification #${issueRef} ${evt.name} (queued)`);
         }
@@ -233,7 +234,7 @@ export function createForemanWss(
         registry.register(workerId, ws, "busy", task.taskId);
         // Only call assign if task is not already complete (to preserve task status)
         if (task.status !== "complete") {
-          await taskModel.assign(task.taskId, workerId);
+          await task.assign(workerId);
         }
         // For complete tasks, the task stays complete while worker finishes cleanup/finalization work
         sendMsg(workerId, { type: "hello_ack", workerId, status: "busy" }, task.taskId);
@@ -241,30 +242,30 @@ export function createForemanWss(
       }
 
       if (msg.status === "busy" && msg.taskId) {
-        const existing = await taskModel.get(msg.taskId);
+        const existing = await Task.get(msg.taskId);
 
         if (!existing) {
           log(workerId, `hello busy task=#${msg.taskId} — unknown task, respecting busy status`);
           // Create a placeholder so the worker can complete normally
           const issueNumber = parseInt(msg.taskId, 10);
+          let placeholderTask: Task | null = null;
           if (!isNaN(issueNumber)) {
-            await taskModel.register(msg.taskId, issueNumber, "", "", "", []);
+            placeholderTask = await Task.upsert(msg.taskId, issueNumber, "", "", "", []);
           }
-          const placeholderTask = await taskModel.get(msg.taskId);
           if (placeholderTask) {
             await reclaimWorker(placeholderTask);
           } else {
             cancelWorker(msg.taskId);
           }
         } else if (existing.status === "complete") {
-          if (existing.assignedWorkerId && existing.assignedWorkerId !== workerId) {
+          if (existing.workerId && existing.workerId !== workerId) {
             log(workerId, `hello busy task=#${msg.taskId} — task complete but owned by another worker, cancelling`);
             cancelWorker(msg.taskId);
           } else {
             log(workerId, `hello busy task=#${msg.taskId} — task already complete, reclaiming for finalization`);
             await reclaimWorker(existing);
           }
-        } else if (existing.assignedWorkerId && existing.assignedWorkerId !== workerId) {
+        } else if (existing.workerId && existing.workerId !== workerId) {
           log(workerId, `hello busy task=#${msg.taskId} — task taken by another worker`);
           cancelWorker(msg.taskId);
         } else {
@@ -272,9 +273,9 @@ export function createForemanWss(
           await reclaimWorker(existing);
         }
       } else {
-        const priorTask = await taskModel.getAssignedTaskForWorker(workerId);
+        const priorTask = await Task.getByWorker(workerId);
         if (priorTask) {
-          await taskModel.revert(priorTask.taskId).catch((err: unknown) =>
+          await priorTask.revert().catch((err: unknown) =>
             flog(`ERROR Failed to revert task #${priorTask.taskId} to pending: ${fmtError(err)}`)
           );
           log(workerId, `hello idle (had task #${priorTask.taskId}) — reverting task to pending`);
@@ -288,13 +289,13 @@ export function createForemanWss(
 
     async function handleTaskComplete(msg: Extract<WorkerMessage, { type: "task_complete" }>) {
       log(workerId, `task_complete #${msg.taskId}`);
-      const task = await taskModel.get(msg.taskId);
-      if (task && task.assignedWorkerId !== workerId) {
-        log(workerId, `task_complete #${msg.taskId} ignored — owned by ${task.assignedWorkerId ?? "nobody"}`);
+      const task = await Task.get(msg.taskId);
+      if (task && task.workerId !== workerId) {
+        log(workerId, `task_complete #${msg.taskId} ignored — owned by ${task.workerId ?? "nobody"}`);
         return;
       }
       if (task) {
-        await taskModel.complete(msg.taskId).catch((err: unknown) =>
+        await task.complete().catch((err: unknown) =>
           flog(`ERROR Failed to mark task #${msg.taskId} complete: ${fmtError(err)}`)
         );
       }
@@ -304,9 +305,12 @@ export function createForemanWss(
     async function handleWorkerGoodbye(msg: Extract<WorkerMessage, { type: "worker_goodbye" }>) {
       log(workerId, `worker_goodbye (task=${msg.taskId ?? "none"})`);
       if (msg.taskId) {
-        await taskModel.revert(msg.taskId).catch((err: unknown) =>
-          flog(`ERROR Failed to revert task #${msg.taskId} to pending: ${fmtError(err)}`)
-        );
+        const task = await Task.get(msg.taskId);
+        if (task) {
+          await task.revert().catch((err: unknown) =>
+            flog(`ERROR Failed to revert task #${msg.taskId} to pending: ${fmtError(err)}`)
+          );
+        }
       }
       registry.remove(workerId);
     }

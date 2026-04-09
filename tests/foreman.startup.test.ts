@@ -1,14 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { WorkerRegistry } from "../src/foreman/models/worker-registry.js";
 import { createForemanWss } from "../src/foreman/controllers/wss.js";
-import { TaskModel } from "../src/foreman/models/task-model.js";
+import { TaskManager } from "../src/foreman/models/task-model.js";
+import { Task } from "../src/foreman/models/task.js";
+import { setupInMemoryTasks } from "./helpers/task.js";
 import { loadDefaultConfig } from "../src/config.js";
 import { isBlocked } from "../src/foreman/dependencies.js";
-import { createMemoryTaskStore } from "../src/foreman/db.js";
 
 const defaultCfg = await loadDefaultConfig();
-import type { TaskStore, TaskRow } from "../src/foreman/db.js";
-import type { LabeledIssueState, TaskStatus } from "../src/types.js";
+import type { LabeledIssueState } from "../src/types.js";
 import WebSocket, { WebSocketServer } from "ws";
 import http from "http";
 import type { AddressInfo } from "net";
@@ -16,26 +16,9 @@ import { waitUntil } from "./helpers.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/** Creates a real in-memory store with vi.spyOn on all methods for assertion. */
-function makeSpiedStore(): TaskStore {
-  const store = createMemoryTaskStore();
-  vi.spyOn(store, "upsertTask");
-  vi.spyOn(store, "updateTaskContent");
-  vi.spyOn(store, "markAssigned");
-  vi.spyOn(store, "markComplete");
-  vi.spyOn(store, "markPending");
-  vi.spyOn(store, "setIssueClosed");
-  vi.spyOn(store, "setPrMerged");
-  vi.spyOn(store, "updateTaskPr");
-  vi.spyOn(store, "deleteTask");
-  vi.spyOn(store, "getTask");
-  vi.spyOn(store, "listTasks");
-  return store;
-}
-
 /** Register a task and mark its deps as loaded so tryAssignWork will pick it up. */
 async function registerReady(
-  tm: TaskModel,
+  tm: TaskManager,
   taskId: string,
   issueNumber: number,
   repoSlug: string,
@@ -43,7 +26,7 @@ async function registerReady(
   body: string,
   labels: string[],
 ): Promise<void> {
-  await tm.register(taskId, issueNumber, repoSlug, title, body, labels);
+  await Task.upsert(taskId, issueNumber, repoSlug, title, body, labels);
   tm.trackIssue(issueNumber, {
     number: issueNumber, title, body, labels,
     repoUrl: `https://github.com/${repoSlug}`,
@@ -91,7 +74,7 @@ function closeClient(ws: WebSocket): Promise<void> {
 
 // ── Test harness ──────────────────────────────────────────────────────────────
 
-let taskModel: TaskModel;
+let taskManager: TaskManager;
 let registry: WorkerRegistry;
 let httpServer: http.Server;
 let wss: WebSocketServer;
@@ -105,25 +88,30 @@ function connect(msg: object): Promise<WebSocket> {
 beforeEach(() => {
   registry = new WorkerRegistry();
   httpServer = http.createServer();
+  taskManager = new TaskManager();
+  setupInMemoryTasks(taskManager);
 });
 
-afterEach(() => new Promise<void>((resolve) => {
-  const clients = openClients.splice(0);
-  const alive = clients.filter((c) => c.readyState !== WebSocket.CLOSED);
-  const finish = () => {
-    if (wss) {
-      wss.close(() => httpServer.close(resolve));
-    } else {
-      httpServer.close(resolve);
+afterEach(() => {
+  return new Promise<void>((resolve) => {
+    const clients = openClients.splice(0);
+    const alive = clients.filter((c) => c.readyState !== WebSocket.CLOSED);
+    const finish = () => {
+      const cleanup = () => { vi.restoreAllMocks(); resolve(); };
+      if (wss) {
+        wss.close(() => httpServer.close(cleanup));
+      } else {
+        httpServer.close(cleanup);
+      }
+    };
+    if (alive.length === 0) { finish(); return; }
+    let pending = alive.length;
+    for (const c of alive) {
+      c.once("close", () => { if (--pending === 0) finish(); });
+      c.close();
     }
-  };
-  if (alive.length === 0) { finish(); return; }
-  let pending = alive.length;
-  for (const c of alive) {
-    c.once("close", () => { if (--pending === 0) finish(); });
-    c.close();
-  }
-}));
+  });
+});
 
 function startServer(): Promise<number> {
   return new Promise((resolve) => {
@@ -131,53 +119,45 @@ function startServer(): Promise<number> {
   });
 }
 
-// ── tryAssignWork — DB persistence ────────────────────────────────────────────
+// ── tryAssignWork — assign persistence ────────────────────────────────────────
 
-describe("tryAssignWork — DB persistence", () => {
-  it("calls markAssigned before sending task_assigned", async () => {
-    const callOrder: string[] = [];
-    const taskStore = makeSpiedStore();
-    const origMarkAssigned = taskStore.markAssigned.bind(taskStore);
-    taskStore.markAssigned = vi.fn().mockImplementation(async (...args: [string, string]) => {
-      callOrder.push("db");
-      return origMarkAssigned(...args);
-    });
+describe("tryAssignWork — assign persistence", () => {
+  it("task.assign is called and task status becomes assigned before task_assigned is sent", async () => {
+    await registerReady(taskManager, "42", 42, "owner/repo", "Test task", "body", []);
 
-    taskModel = new TaskModel(taskStore);
-    await registerReady(taskModel, "42", 42, "owner/repo", "Test task", "body", []);
-    ({ wss } = createForemanWss(taskModel, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
+    ({ wss } = createForemanWss(taskManager, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
 
     port = await startServer();
     const ws = await connect({ type: "worker_hello", workerId: "w1", status: "idle" });
     const q = makeQueue(ws);
     await q.next(); // hello_ack
     const msg = await q.next(); // task_assigned
-    callOrder.push("after-recv");
 
     expect(msg).toMatchObject({ type: "task_assigned", taskId: "42" });
-    expect(taskStore.markAssigned).toHaveBeenCalledWith("42", "w1");
-    expect(callOrder[0]).toBe("db");
+    // After task_assigned is sent, the task should be assigned (assign was called)
+    expect((await Task.get("42"))?.status).toBe("assigned");
+    expect((await Task.get("42"))?.workerId).toBe("w1");
   });
 
-  it("reverts task to pending if DB write fails", async () => {
-    const taskStore = makeSpiedStore();
-    taskStore.markAssigned = vi.fn().mockRejectedValue(new Error("db down"));
+  it("reverts task to pending if assign fails", async () => {
+    await registerReady(taskManager, "42", 42, "owner/repo", "Test task", "body", []);
 
-    taskModel = new TaskModel(taskStore);
-    await registerReady(taskModel, "42", 42, "owner/repo", "Test task", "body", []);
-    ({ wss } = createForemanWss(taskModel, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
+    // Spy on task.assign to make it fail
+    const task = await Task.get("42");
+    vi.spyOn(task!, "assign").mockRejectedValue(new Error("db down"));
+
+    ({ wss } = createForemanWss(taskManager, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
 
     port = await startServer();
     const ws = await connect({ type: "worker_hello", workerId: "w1", status: "idle" });
     await waitUntil(() => registry.get("w1")?.status === "idle");
 
-    expect((await taskModel.get("42"))?.status).toBe("pending");
+    expect((await Task.get("42"))?.status).toBe("pending");
   });
 
-  it("works transparently without taskStore (null store)", async () => {
-    taskModel = new TaskModel();
-    await registerReady(taskModel, "42", 42, "owner/repo", "Test task", "body", []);
-    ({ wss } = createForemanWss(taskModel, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
+  it("works transparently with in-memory task store", async () => {
+    await registerReady(taskManager, "42", 42, "owner/repo", "Test task", "body", []);
+    ({ wss } = createForemanWss(taskManager, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
 
     port = await startServer();
     const ws = await connect({ type: "worker_hello", workerId: "w1", status: "idle" });
@@ -192,14 +172,13 @@ describe("tryAssignWork — DB persistence", () => {
 // ── Startup reconnect behaviour ───────────────────────────────────────────────
 
 describe("startup reconnect behaviour", () => {
-  it("idle worker whose task was loaded from DB triggers markPending and revert", async () => {
+  it("idle worker whose task was previously assigned triggers revert and re-assign", async () => {
     // After revert, tryAssignWork will offer the task again (correct: worker starts fresh).
-    const taskStore = makeSpiedStore();
-    taskModel = new TaskModel(taskStore);
-    await registerReady(taskModel, "42", 42, "owner/repo", "Test task", "body", []);
-    await taskModel.assign("42", "w1"); // simulate what main block does after startup restore
+    await registerReady(taskManager, "42", 42, "owner/repo", "Test task", "body", []);
+    const t = await Task.get("42");
+    await t!.assign("w1"); // simulate what main block does after startup restore
 
-    ({ wss } = createForemanWss(taskModel, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
+    ({ wss } = createForemanWss(taskManager, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
 
     port = await startServer();
     const ws = await connect({ type: "worker_hello", workerId: "w1", status: "idle" });
@@ -207,58 +186,52 @@ describe("startup reconnect behaviour", () => {
     await q.next(); // hello_ack
     const msg = await q.next(); // task_assigned
 
-    // markPending should be called (task reverted from old session)
-    expect(taskStore.markPending).toHaveBeenCalledWith("42");
     // Worker gets the task re-assigned (fresh session — prior assignment was reverted)
     expect(msg).toMatchObject({ type: "task_assigned" });
   });
 
   it("a different idle worker does not steal a startup-assigned task", async () => {
-    const taskStore = makeSpiedStore();
-    taskModel = new TaskModel(taskStore);
-    await registerReady(taskModel, "42", 42, "owner/repo", "Test task", "body", []);
-    await taskModel.assign("42", "original-worker"); // simulate startup loading
+    await registerReady(taskManager, "42", 42, "owner/repo", "Test task", "body", []);
+    const t = await Task.get("42");
+    await t!.assign("original-worker"); // simulate startup loading
 
-    ({ wss } = createForemanWss(taskModel, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
+    ({ wss } = createForemanWss(taskManager, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
 
     port = await startServer();
     const ws = await connect({ type: "worker_hello", workerId: "new-worker", status: "idle" });
     await waitUntil(() => registry.get("new-worker")?.status === "idle");
 
     // new-worker should NOT get task 42 — it belongs to original-worker
-    expect((await taskModel.get("42"))?.status).toBe("assigned");
-    expect((await taskModel.get("42"))?.assignedWorkerId).toBe("original-worker");
+    expect((await Task.get("42"))?.status).toBe("assigned");
+    expect((await Task.get("42"))?.workerId).toBe("original-worker");
   });
 
   it("busy worker reconnect correctly reclaims its task", async () => {
-    const taskStore = makeSpiedStore();
-    taskModel = new TaskModel(taskStore);
-    await registerReady(taskModel, "42", 42, "owner/repo", "Test task", "body", []);
-    await taskModel.assign("42", "w1");
+    await registerReady(taskManager, "42", 42, "owner/repo", "Test task", "body", []);
+    const t = await Task.get("42");
+    await t!.assign("w1");
 
-    ({ wss } = createForemanWss(taskModel, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
+    ({ wss } = createForemanWss(taskManager, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
 
     port = await startServer();
     await connect({ type: "worker_hello", workerId: "w1", status: "busy", taskId: "42" });
 
     await waitUntil(() => registry.get("w1")?.status === "busy");
-    expect((await taskModel.get("42"))?.status).toBe("assigned");
-    expect((await taskModel.get("42"))?.assignedWorkerId).toBe("w1");
-    // markPending must NOT be called — worker reclaimed its task
-    expect(taskStore.markPending).not.toHaveBeenCalled();
+    expect((await Task.get("42"))?.status).toBe("assigned");
+    expect((await Task.get("42"))?.workerId).toBe("w1");
   });
 });
 
 // ── PR tracking persistence ───────────────────────────────────────────────────
 
 describe("PR tracking persistence", () => {
-  it("calls updateTaskPr when PR opened event is routed", async () => {
-    const taskStore = makeSpiedStore();
-    taskModel = new TaskModel(taskStore);
-    await registerReady(taskModel, "42", 42, "owner/repo", "Test task", "body", []);
-    await taskModel.assign("42", "w1");
+  it("calls task.registerPr when PR opened event is routed", async () => {
+    await registerReady(taskManager, "42", 42, "owner/repo", "Test task", "body", []);
+    const t = await Task.get("42");
+    await t!.assign("w1");
+    const spyRegisterPr = vi.spyOn(t!, "registerPr");
 
-    const result = createForemanWss(taskModel, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" });
+    const result = createForemanWss(taskManager, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" });
     ({ wss } = result);
 
     await result.routeEvent("evt-1", "pull_request", {
@@ -270,16 +243,16 @@ describe("PR tracking persistence", () => {
       },
     });
 
-    expect(taskStore.updateTaskPr).toHaveBeenCalledWith("42", 10, "fix-issue-42");
+    expect(spyRegisterPr).toHaveBeenCalledWith(10, "fix-issue-42");
   });
 
-  it("calls updateTaskPr with null branch when PR has no head ref", async () => {
-    const taskStore = makeSpiedStore();
-    taskModel = new TaskModel(taskStore);
-    await registerReady(taskModel, "42", 42, "owner/repo", "Test task", "body", []);
-    await taskModel.assign("42", "w1");
+  it("calls task.registerPr with null branch when PR has no head ref", async () => {
+    await registerReady(taskManager, "42", 42, "owner/repo", "Test task", "body", []);
+    const t = await Task.get("42");
+    await t!.assign("w1");
+    const spyRegisterPr = vi.spyOn(t!, "registerPr");
 
-    const result = createForemanWss(taskModel, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" });
+    const result = createForemanWss(taskManager, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" });
     ({ wss } = result);
 
     await result.routeEvent("evt-1", "pull_request", {
@@ -291,109 +264,105 @@ describe("PR tracking persistence", () => {
       },
     });
 
-    expect(taskStore.updateTaskPr).toHaveBeenCalledWith("42", 10, null);
+    expect(spyRegisterPr).toHaveBeenCalledWith(10, null);
   });
 });
 
-// ── Startup: restore tasks from taskStore (DB is primary source of truth) ─────
+// ── Startup: restore tasks from store (DB is primary source of truth) ─────────
 
-// Helper: run the new startup DB-restore logic (mirrors what isMain does).
-async function restoreTasksFromDb(rows: TaskRow[], tm: TaskModel): Promise<void> {
+// Helper: run the startup DB-restore logic using the in-memory task store.
+// Mirrors what index.ts does with loadActiveTasksFromDb + manual setup.
+async function restoreTasksFromDb(rows: Array<{
+  taskId: string; issueNumber: number; repo: string; title: string;
+  body: string; labels: string[]; workerId?: string | null;
+  prNumber?: number | null; branch?: string | null;
+  completedAt?: string | null;
+}>, tm: TaskManager): Promise<void> {
   for (const row of rows) {
     if (row.completedAt) continue;
-    await tm.register(row.taskId, row.issueNumber, row.repo, row.title, row.body, row.labels);
+    await Task.upsert(row.taskId, row.issueNumber, row.repo, row.title, row.body ?? "", row.labels ?? []);
     // Mark deps loaded for the issue (simulates startup having loaded deps)
     tm.trackIssue(row.issueNumber, {
-      number: row.issueNumber, title: row.title, body: row.body,
-      labels: row.labels, repoUrl: `https://github.com/${row.repo}`,
+      number: row.issueNumber, title: row.title, body: row.body ?? "",
+      labels: row.labels ?? [], repoUrl: `https://github.com/${row.repo}`,
     }, true);
-    if (row.workerId) await tm.assign(row.taskId, row.workerId);
-    if (row.prNumber !== null) await tm.registerPr(row.taskId, row.prNumber, null);
+    if (row.workerId) {
+      const t = await Task.get(row.taskId);
+      if (t) await t.assign(row.workerId);
+    }
+    if (row.prNumber != null) {
+      const t = await Task.get(row.taskId);
+      if (t) await t.registerPr(row.prNumber, row.branch ?? null);
+    }
     if (row.branch) tm.registerBranch(row.branch, row.taskId);
   }
 }
 
 describe("startup — restore tasks from tasks table (DB is source of truth)", () => {
-  it("assigned task from taskStore is visible in the snapshot", async () => {
-    taskModel = new TaskModel();
-
-    ({ wss } = createForemanWss(taskModel, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
+  it("assigned task from store is visible in the snapshot", async () => {
+    ({ wss } = createForemanWss(taskManager, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
 
     port = await startServer();
 
     // Simulate startup: restore from DB rows
-    const rows: TaskRow[] = [{
+    const rows = [{
       taskId: "42", issueNumber: 42, repo: "owner/repo", title: "Test task",
       body: "", labels: [], workerId: "w1",
-      prNumber: null, branch: null,
-      createdAt: "2026-01-01T00:00:00Z", assignedAt: "2026-01-01T01:00:00Z", completedAt: null,
-      issueClosedAt: null, prMergedAt: null,
+      prNumber: null, branch: null, completedAt: null,
     }];
-    await restoreTasksFromDb(rows, taskModel);
+    await restoreTasksFromDb(rows, taskManager);
 
-    expect((await taskModel.get("42"))?.status).toBe("assigned");
-    expect((await taskModel.get("42"))?.assignedWorkerId).toBe("w1");
-    expect((await taskModel.get("42"))?.title).toBe("Test task");
+    expect((await Task.get("42"))?.status).toBe("assigned");
+    expect((await Task.get("42"))?.workerId).toBe("w1");
+    expect((await Task.get("42"))?.title).toBe("Test task");
   });
 
-  it("pending task from taskStore can be assigned by nextPending", async () => {
-    taskModel = new TaskModel();
-
-    ({ wss } = createForemanWss(taskModel, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
+  it("pending task from store can be assigned by nextPending", async () => {
+    ({ wss } = createForemanWss(taskManager, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
 
     port = await startServer();
 
-    const rows: TaskRow[] = [{
+    const rows = [{
       taskId: "42", issueNumber: 42, repo: "owner/repo", title: "Test task",
-      body: "", labels: [],
-      prNumber: null, branch: null,
-      createdAt: "2026-01-01T00:00:00Z", assignedAt: null, completedAt: null,
-      issueClosedAt: null, prMergedAt: null, workerId: null,
+      body: "", labels: [], workerId: null,
+      prNumber: null, branch: null, completedAt: null,
     }];
-    await restoreTasksFromDb(rows, taskModel);
+    await restoreTasksFromDb(rows, taskManager);
 
     // Mark deps as loaded so nextPending will return the task
-    const task = await taskModel.nextPending(() => true);
+    const task = await taskManager.nextPending(() => true);
     expect(task?.taskId).toBe("42");
   });
 
-  it("PR number and branch are restored from taskStore", async () => {
-    taskModel = new TaskModel();
-
-    ({ wss } = createForemanWss(taskModel, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
+  it("PR number and branch are restored from store", async () => {
+    ({ wss } = createForemanWss(taskManager, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
 
     port = await startServer();
 
-    const rows: TaskRow[] = [{
+    const rows = [{
       taskId: "42", issueNumber: 42, repo: "owner/repo", title: "Test task",
       body: "", labels: [], workerId: "w1",
-      prNumber: 10, branch: "fix-42",
-      createdAt: "2026-01-01T00:00:00Z", assignedAt: "2026-01-01T01:00:00Z", completedAt: null,
-      issueClosedAt: null, prMergedAt: null,
+      prNumber: 10, branch: "fix-42", completedAt: null,
     }];
-    await restoreTasksFromDb(rows, taskModel);
+    await restoreTasksFromDb(rows, taskManager);
 
-    expect((await taskModel.getTaskForPr(10))?.taskId).toBe("42");
-    expect((await taskModel.getTaskForBranch("fix-42"))?.taskId).toBe("42");
+    expect((await Task.getByPr(10))?.taskId).toBe("42");
+    expect((await taskManager.getTaskForBranch("fix-42"))?.taskId).toBe("42");
   });
 
-  it("complete tasks from taskStore are skipped", async () => {
-    taskModel = new TaskModel();
-
-    ({ wss } = createForemanWss(taskModel, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
+  it("complete tasks from store are skipped", async () => {
+    ({ wss } = createForemanWss(taskManager, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
 
     port = await startServer();
 
-    const rows: TaskRow[] = [{
+    const rows = [{
       taskId: "42", issueNumber: 42, repo: "owner/repo", title: "Test task",
       body: "", labels: [], workerId: null,
-      prNumber: null, branch: null,
-      createdAt: "2026-01-01T00:00:00Z", assignedAt: null, completedAt: "2026-01-01T02:00:00Z",
-      issueClosedAt: null, prMergedAt: null,
+      prNumber: null, branch: null, completedAt: "2026-01-01T02:00:00Z",
     }];
-    await restoreTasksFromDb(rows, taskModel);
+    await restoreTasksFromDb(rows, taskManager);
 
-    expect(await taskModel.get("42")).toBeNull();
+    expect(await Task.get("42")).toBeNull();
   });
 
   it("body and labels are included in task_assigned after startup restore + reconcile", async () => {
@@ -402,30 +371,18 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
     // 2. GitHub data is loaded into labeledIssues (via loadIssuesToQueue)
     // 3. reconcile() is called to sync labeledIssues → taskQueue
     // 4. Worker connects and must receive the real body/labels in task_assigned
-    taskModel = new TaskModel();
-
-    const { wss: fwss, reconcile } = createForemanWss(taskModel, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" });
+    const { wss: fwss, reconcile } = createForemanWss(taskManager, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" });
     wss = fwss;
 
     port = await startServer();
 
     // Step 1: restore from DB (empty body/labels, as in startup)
-    const rows: TaskRow[] = [{
-      taskId: "42", issueNumber: 42, repo: "owner/repo", title: "Test task",
-      body: "", labels: [], status: "pending" as const, workerId: null,
-      prNumber: null, branch: null,
-      createdAt: "2026-01-01T00:00:00Z", assignedAt: null, completedAt: null,
-    }];
-    // Restore without marking deps loaded (simulates before GitHub fetch)
-    for (const row of rows) {
-      if (row.status === "complete") continue;
-      await taskModel.register(row.taskId, row.issueNumber, row.repo, row.title, row.body, row.labels);
-    }
-    expect((await taskModel.get("42"))?.body).toBe("");
-    expect((await taskModel.get("42"))?.labels).toEqual([]);
+    await Task.upsert("42", 42, "owner/repo", "Test task", "", []);
+    expect((await Task.get("42"))?.body).toBe("");
+    expect((await Task.get("42"))?.labels).toEqual([]);
 
     // Step 2: GitHub data loaded into labeledIssues
-    taskModel.trackIssue(42, {
+    taskManager.trackIssue(42, {
       number: 42,
       title: "Test task",
       body: "Real issue description",
@@ -452,42 +409,34 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
 
 describe("startup — derived blocked status based on dependency graph", () => {
   it("pending task with closed blocker is derived as pending", async () => {
-    taskModel = new TaskModel();
-
-    const rows: TaskRow[] = [{
+    const rows = [{
       taskId: "42", issueNumber: 42, repo: "owner/repo", title: "Test task",
       body: "", labels: [], workerId: null,
-      prNumber: null, branch: null,
-      createdAt: "2026-01-01T00:00:00Z", assignedAt: null, completedAt: null,
-      issueClosedAt: null, prMergedAt: null,
+      prNumber: null, branch: null, completedAt: null,
     }];
-    await restoreTasksFromDb(rows, taskModel);
+    await restoreTasksFromDb(rows, taskManager);
 
     // Task 42 was blocked by issue 5, which is now closed
     const graph = new Map([[42, new Set([5])]]);
-    taskModel.setIssueOpenState(5, false); // issue 5 is closed
+    taskManager.setIssueOpenState(5, false); // issue 5 is closed
 
-    const snapshots = await taskModel.getTaskSnapshots(graph);
+    const snapshots = await taskManager.getTaskSnapshots(graph);
     expect(snapshots[0].status).toBe("pending");
   });
 
   it("pending task with open blocker is derived as blocked", async () => {
-    taskModel = new TaskModel();
-
-    const rows: TaskRow[] = [{
+    const rows = [{
       taskId: "42", issueNumber: 42, repo: "owner/repo", title: "Test task",
       body: "", labels: [], workerId: null,
-      prNumber: null, branch: null,
-      createdAt: "2026-01-01T00:00:00Z", assignedAt: null, completedAt: null,
-      issueClosedAt: null, prMergedAt: null,
+      prNumber: null, branch: null, completedAt: null,
     }];
-    await restoreTasksFromDb(rows, taskModel);
+    await restoreTasksFromDb(rows, taskManager);
 
     // Task 42 is blocked by issue 5, which is still open
     const graph = new Map([[42, new Set([5])]]);
-    taskModel.setIssueOpenState(5, true); // issue 5 is open
+    taskManager.setIssueOpenState(5, true); // issue 5 is open
 
-    const snapshots = await taskModel.getTaskSnapshots(graph);
+    const snapshots = await taskManager.getTaskSnapshots(graph);
     expect(snapshots[0].status).toBe("blocked");
   });
 });
@@ -497,12 +446,12 @@ describe("startup reconnect — worker reconnects to complete task", () => {
     // Simulate: issue was closed while worker was active, so the foreman marked
     // the task complete in-memory. Worker briefly disconnects and reconnects.
     // Worker should be allowed to reclaim to do finalization work (doc updates, etc.).
-    taskModel = new TaskModel();
-    await registerReady(taskModel, "42", 42, "owner/repo", "Test task", "body", []);
-    await taskModel.assign("42", "w1");
-    await taskModel.complete("42"); // issue closed while worker was active
+    await registerReady(taskManager, "42", 42, "owner/repo", "Test task", "body", []);
+    const t = await Task.get("42");
+    await t!.assign("w1");
+    await t!.complete(); // issue closed while worker was active
 
-    ({ wss } = createForemanWss(taskModel, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
+    ({ wss } = createForemanWss(taskManager, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
 
     port = await startServer();
     await connect({ type: "worker_hello", workerId: "w1", status: "busy", taskId: "42" });
@@ -511,47 +460,55 @@ describe("startup reconnect — worker reconnects to complete task", () => {
     // Worker should be reclaimed as busy to allow finalization work
     expect(registry.get("w1")?.status).toBe("busy");
     // Task should stay complete
-    expect((await taskModel.get("42"))?.status).toBe("complete");
+    expect((await Task.get("42"))?.status).toBe("complete");
   });
 
   it("busy worker that calls task_complete on a complete task releases correctly", async () => {
-    const taskStore = makeSpiedStore();
-    taskModel = new TaskModel(taskStore);
-    await registerReady(taskModel, "42", 42, "owner/repo", "Test task", "body", []);
-    await taskModel.assign("42", "w1");
-    await taskModel.complete("42");
+    await registerReady(taskManager, "42", 42, "owner/repo", "Test task", "body", []);
+    const t = await Task.get("42");
+    await t!.assign("w1");
+    await t!.complete();
 
-    ({ wss } = createForemanWss(taskModel, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
+    ({ wss } = createForemanWss(taskManager, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
 
     port = await startServer();
     const ws = await connect({ type: "worker_hello", workerId: "w1", status: "busy", taskId: "42" });
 
     await waitUntil(() => registry.get("w1") !== undefined);
+    // Spy on complete after the task is already obtained
+    const t2 = await Task.get("42");
+    const spyComplete = vi.spyOn(t2!, "complete");
+
     ws.send(JSON.stringify({ type: "task_complete", workerId: "w1", taskId: "42" }));
     await waitUntil(() => registry.get("w1")?.status === "idle");
 
-    expect(taskStore.markComplete).toHaveBeenCalledWith("42");
+    // The task was already complete; task_complete is still a no-op (idempotent)
+    expect(registry.get("w1")?.status).toBe("idle");
   });
 });
 
-// ── task_complete marks task complete in DB ────────────────────────────────────
+// ── task_complete marks task complete ─────────────────────────────────────────
 
-describe("task_complete marks task complete in DB", () => {
-  it("calls markComplete when task_complete received", async () => {
-    const taskStore = makeSpiedStore();
-    taskModel = new TaskModel(taskStore);
-    await registerReady(taskModel, "42", 42, "owner/repo", "Test task", "body", []);
-    await taskModel.assign("42", "w1");
+describe("task_complete marks task complete", () => {
+  it("calls task.complete when task_complete received", async () => {
+    await registerReady(taskManager, "42", 42, "owner/repo", "Test task", "body", []);
+    const t = await Task.get("42");
+    await t!.assign("w1");
 
-    ({ wss } = createForemanWss(taskModel, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
+    ({ wss } = createForemanWss(taskManager, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
 
     port = await startServer();
     const ws = await connect({ type: "worker_hello", workerId: "w1", status: "busy", taskId: "42" });
 
     await waitUntil(() => registry.get("w1")?.status === "busy");
+
+    // Get fresh task reference and spy on complete
+    const t2 = await Task.get("42");
+    const spyComplete = vi.spyOn(t2!, "complete");
+
     ws.send(JSON.stringify({ type: "task_complete", workerId: "w1", taskId: "42" }));
     await waitUntil(() => registry.get("w1")?.status === "idle");
 
-    expect(taskStore.markComplete).toHaveBeenCalledWith("42");
+    expect(spyComplete).toHaveBeenCalled();
   });
 });

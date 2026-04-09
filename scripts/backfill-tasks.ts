@@ -17,7 +17,7 @@
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "../src/database.types.js";
 import { loadConfig } from "../src/config.js";
-import { createTaskStore } from "../src/foreman/db.js";
+import { Task, initTask } from "../src/foreman/models/task.js";
 
 const dryRun = process.argv.includes("--dry-run");
 
@@ -30,7 +30,7 @@ if (!supabaseUrl || !supabaseSecretKey) {
 }
 
 const supabase = createClient<Database>(supabaseUrl, supabaseSecretKey);
-const taskStore = createTaskStore(supabase);
+initTask(supabase);
 
 const [owner, repoName] = repo.split("/");
 
@@ -57,7 +57,7 @@ async function fetchIssue(issueNumber: number): Promise<GitHubIssue> {
 
 async function main() {
   console.log(`Fetching all tasks from DB${dryRun ? " [DRY RUN]" : ""}...`);
-  const tasks = await taskStore.listTasks({ limit: 1000 });
+  const tasks = await Task.list({ limit: 1000 });
   console.log(`Found ${tasks.length} tasks.`);
 
   let updated = 0;
@@ -78,9 +78,7 @@ async function main() {
       if (title !== task.title || body !== task.body || labels.join(",") !== task.labels.join(",")) {
         actions.push("update title/body/labels");
         if (!dryRun) {
-          await supabase.from("tasks")
-            .update({ title, body, labels })
-            .eq("task_id", task.taskId);
+          await task.updateContent(title, body, labels);
         }
         updated++;
       }
@@ -88,7 +86,7 @@ async function main() {
       if (issueClosed && task.status !== "complete") {
         actions.push(`mark complete (issue closed, was ${task.status})`);
         if (!dryRun) {
-          await taskStore.markComplete(task.taskId);
+          await task.complete();
         }
         closed++;
       }

@@ -2,7 +2,8 @@ import type { GitHubEvent, ForemanMessage, TaskIssue } from "../../types.js";
 import type { DependencyGraph } from "../dependencies.js";
 import { setBlockers, fetchBlockers } from "../dependencies.js";
 import { fetchIssueStates } from "../github.js";
-import type { TaskModel, Task } from "../models/task-model.js";
+import type { TaskManager } from "../models/task-model.js";
+import { Task } from "../models/task.js";
 import type { WorkerRegistry } from "../models/worker-registry.js";
 import { shortWorkerId } from "../../../shared/utils.js";
 import { fmtError } from "../../utils.js";
@@ -10,7 +11,7 @@ import { fmtError } from "../../utils.js";
 // ── Dependencies interface ──────────────────────────────────────────────────
 
 export interface EventRouterDeps {
-  taskModel: TaskModel;
+  taskManager: TaskManager;
   registry: WorkerRegistry;
   graph: DependencyGraph;
   repo: string;
@@ -96,20 +97,20 @@ export function isMutedEvent(name: string): boolean {
 // ── Event forwarding ─────────────────────────────────────────────────────────
 
 export function forwardEvent(deps: EventRouterDeps, task: Task, evt: GitHubEvent, ref: string): void {
-  if (task.assignedWorkerId) {
-    const worker = deps.registry.get(task.assignedWorkerId);
+  if (task.workerId) {
+    const worker = deps.registry.get(task.workerId);
     if (worker?.status === "disconnected") {
-      deps.taskModel.queueEvent(task.taskId, evt);
-      deps.flog(`[task ${ref}] ${evt.name} queued (worker ${shortWorkerId(task.assignedWorkerId)} disconnected)`);
+      deps.taskManager.queueEvent(task.taskId, evt);
+      deps.flog(`[task ${ref}] ${evt.name} queued (worker ${shortWorkerId(task.workerId)} disconnected)`);
     } else if (worker) {
       const evtMsg: ForemanMessage = { type: "event_notification", taskId: task.taskId, event: evt };
-      deps.sendMsg(task.assignedWorkerId, evtMsg);
-      deps.flog(`[worker ${shortWorkerId(task.assignedWorkerId)}] → event_notification ${ref} ${evt.name}`);
+      deps.sendMsg(task.workerId, evtMsg);
+      deps.flog(`[worker ${shortWorkerId(task.workerId)}] → event_notification ${ref} ${evt.name}`);
     } else {
-      deps.flog(`[task ${ref}] ${evt.name} DROPPED — worker ${shortWorkerId(task.assignedWorkerId)} not in registry (disconnected?)`);
+      deps.flog(`[task ${ref}] ${evt.name} DROPPED — worker ${shortWorkerId(task.workerId)} not in registry (disconnected?)`);
     }
   } else if (task.status === "pending" || task.status === "blocked") {
-    deps.taskModel.queueEvent(task.taskId, evt);
+    deps.taskManager.queueEvent(task.taskId, evt);
     deps.flog(`[task ${ref}] ${evt.name} queued (no worker assigned)`);
   }
 }
@@ -123,10 +124,10 @@ export function startDepsLoad(deps: EventRouterDeps, issueNumber: number, body: 
       if (blockers.length > 0) {
         const states = await fetchIssueStates(blockers, { repo: deps.repo, token: deps.token });
         for (const [num, state] of states) {
-          deps.taskModel.setIssueOpenState(num, state === "open");
+          deps.taskManager.setIssueOpenState(num, state === "open");
         }
       }
-      deps.taskModel.markIssueDepsLoaded(issueNumber);
+      deps.taskManager.markIssueDepsLoaded(issueNumber);
       await reconcile(deps);
     })
     .catch((err) => deps.flog(`ERROR fetching deps for #${issueNumber}: ${fmtError(err)}`));
@@ -135,15 +136,16 @@ export function startDepsLoad(deps: EventRouterDeps, issueNumber: number, body: 
 // ── Reconciliation ──────────────────────────────────────────────────────────
 
 export async function reconcile(deps: EventRouterDeps): Promise<void> {
-  const labeledIssues = deps.taskModel.getLabeledIssues();
+  const labeledIssues = deps.taskManager.getLabeledIssues();
 
   // Step 1: materialise tasks for new labeledIssues entries.
   const registerPromises: Promise<void>[] = [];
   for (const [num, { issue }] of labeledIssues) {
-    if (!(await deps.taskModel.getTaskForIssue(num))) {
+    if (!(await Task.getByIssue(num))) {
       deps.flog(`[task #${num}] reconcile: creating task (title: ${JSON.stringify(issue.title)})`);
       registerPromises.push(
-        deps.taskModel.register(String(num), num, deps.repo, issue.title, issue.body, issue.labels)
+        Task.upsert(String(num), num, deps.repo, issue.title, issue.body, issue.labels)
+          .then(() => undefined)
           .catch((err: unknown) => deps.flog(`ERROR Failed to persist task #${num}: ${fmtError(err)}`))
       );
     }
@@ -152,10 +154,10 @@ export async function reconcile(deps: EventRouterDeps): Promise<void> {
   // Step 2: sync title/body/labels from labeledIssues to existing tasks.
   const refreshPromises: Promise<void>[] = [];
   for (const [num, { issue }] of labeledIssues) {
-    const t = await deps.taskModel.getTaskForIssue(num);
+    const t = await Task.getByIssue(num);
     if (t) {
       refreshPromises.push(
-        deps.taskModel.refreshContent(t.taskId, issue.title, issue.body, issue.labels)
+        t.updateContent(issue.title, issue.body, issue.labels)
           .catch((err: unknown) => deps.flog(`ERROR Failed to refresh content for task #${t.taskId}: ${fmtError(err)}`))
       );
     }
@@ -163,10 +165,10 @@ export async function reconcile(deps: EventRouterDeps): Promise<void> {
 
   // Step 3: remove pending/blocked tasks whose issue no longer has the label
   const cancelPromises: Promise<void>[] = [];
-  for (const t of await deps.taskModel.listActiveTasks()) {
+  for (const t of await deps.taskManager.listActiveTasks()) {
     if (!labeledIssues.has(t.issueNumber)) {
       cancelPromises.push(
-        deps.taskModel.cancel(t.taskId)
+        t.delete()
           .catch((err: unknown) => deps.flog(`ERROR Failed to delete task #${t.taskId} from DB: ${fmtError(err)}`))
       );
     }
@@ -184,11 +186,11 @@ export async function reconcile(deps: EventRouterDeps): Promise<void> {
 export interface RouteResult { taskId: string | null; workerId: string | null; }
 
 export async function doRouteEvent(deps: EventRouterDeps, name: string, p: Record<string, unknown>, evt: GitHubEvent): Promise<RouteResult> {
-  function result(task: { taskId: string; assignedWorkerId?: string } | null | undefined): RouteResult {
-    return { taskId: task?.taskId ?? null, workerId: task?.assignedWorkerId ?? null };
+  function result(task: { taskId: string; workerId: string | null } | null | undefined): RouteResult {
+    return { taskId: task?.taskId ?? null, workerId: task?.workerId ?? null };
   }
 
-  const { taskModel, flog, repo } = deps;
+  const { taskManager, flog, repo } = deps;
 
   // ── PR events: route by PR number ────────────────────────────────────────
 
@@ -198,17 +200,17 @@ export async function doRouteEvent(deps: EventRouterDeps, name: string, p: Recor
     if (prNumber === null) return result(null);
 
     // Drop synchronize events — the worker pushed these commits itself.
-    if (p.action === "synchronize") return result(await taskModel.getTaskForPr(prNumber));
+    if (p.action === "synchronize") return result(await Task.getByPr(prNumber));
 
     // When a PR is opened, register it against a task if the body links an issue.
     if (p.action === "opened" && pr) {
       const linkedIssue = extractLinkedIssueNumber(String(pr.body ?? ""));
       if (linkedIssue !== null) {
-        const linkedTask = await taskModel.getTaskForIssue(linkedIssue);
+        const linkedTask = await Task.getByIssue(linkedIssue);
         if (linkedTask) {
           const branch = strProp(pr.head, "ref");
-          if (branch) taskModel.registerBranch(branch, linkedTask.taskId);
-          await taskModel.registerPr(linkedTask.taskId, prNumber, branch ?? null).catch((err: unknown) =>
+          if (branch) taskManager.registerBranch(branch, linkedTask.taskId);
+          await linkedTask.registerPr(prNumber, branch ?? null).catch((err: unknown) =>
             flog(`ERROR Failed to register PR for task #${linkedTask.taskId}: ${fmtError(err)}`)
           );
           flog(`[task #${linkedIssue}] PR #${prNumber} registered`);
@@ -218,10 +220,10 @@ export async function doRouteEvent(deps: EventRouterDeps, name: string, p: Recor
 
     // When a PR is closed without merging, clear it from the task.
     if (p.action === "closed" && pr && !pr.merged) {
-      const task = await taskModel.getTaskForPr(prNumber);
+      const task = await Task.getByPr(prNumber);
       if (task) {
         flog(`[task #${task.issueNumber}] PR #${prNumber} unregistered (closed without merging)`);
-        await taskModel.unregisterPr(prNumber).catch((err: unknown) =>
+        await task.unregisterPr().catch((err: unknown) =>
           flog(`ERROR Failed to unregister PR #${prNumber}: ${fmtError(err)}`)
         );
         forwardEvent(deps, task, evt, `PR #${prNumber}`);
@@ -232,10 +234,10 @@ export async function doRouteEvent(deps: EventRouterDeps, name: string, p: Recor
 
     // When a PR is closed with merging, record that it was merged.
     if (p.action === "closed" && pr && pr.merged) {
-      const task = await taskModel.getTaskForPr(prNumber);
+      const task = await Task.getByPr(prNumber);
       if (task) {
         flog(`[task #${task.issueNumber}] PR #${prNumber} merged`);
-        await taskModel.registerPrMerge(prNumber).catch((err: unknown) =>
+        await task.mergePr().catch((err: unknown) =>
           flog(`ERROR Failed to record PR #${prNumber} merge: ${fmtError(err)}`)
         );
         forwardEvent(deps, task, evt, `PR #${prNumber}`);
@@ -244,7 +246,7 @@ export async function doRouteEvent(deps: EventRouterDeps, name: string, p: Recor
       return result(null);
     }
 
-    const task = await taskModel.getTaskForPr(prNumber);
+    const task = await Task.getByPr(prNumber);
     if (task) forwardEvent(deps, task, evt, `PR #${prNumber}`);
     return result(task);
   }
@@ -253,7 +255,7 @@ export async function doRouteEvent(deps: EventRouterDeps, name: string, p: Recor
     const pr = p.pull_request as Record<string, unknown> | undefined;
     const prNumber = numProp(pr, "number");
     if (prNumber === null) return result(null);
-    const task = await taskModel.getTaskForPr(prNumber);
+    const task = await Task.getByPr(prNumber);
     if (task) forwardEvent(deps, task, evt, `PR #${prNumber}`);
     return result(task);
   }
@@ -263,7 +265,7 @@ export async function doRouteEvent(deps: EventRouterDeps, name: string, p: Recor
     const prs = inner?.pull_requests as Array<{ number: number }> | undefined;
 
     if (prs && prs.length > 0) {
-      const task = await taskModel.getTaskForPr(prs[0].number);
+      const task = await Task.getByPr(prs[0].number);
       if (task) { forwardEvent(deps, task, evt, `PR #${prs[0].number}`); return result(task); }
     }
 
@@ -271,7 +273,7 @@ export async function doRouteEvent(deps: EventRouterDeps, name: string, p: Recor
       ? strProp(inner?.check_suite, "head_branch") ?? ""
       : strProp(inner, "head_branch") ?? "";
     if (headBranch) {
-      const task = await taskModel.getTaskForBranch(headBranch);
+      const task = await taskManager.getTaskForBranch(headBranch);
       if (task) { forwardEvent(deps, task, evt, `branch ${headBranch}`); return result(task); }
     }
     return result(null);
@@ -283,10 +285,10 @@ export async function doRouteEvent(deps: EventRouterDeps, name: string, p: Recor
   const issueNumber = numProp(issue, "number");
   if (issueNumber === null) return result(null);
 
-  let task = await taskModel.getTaskForIssue(issueNumber);
+  let task = await Task.getByIssue(issueNumber);
 
   // GitHub issue_comment events on PRs have the PR number in issue.number.
-  if (!task) task = await taskModel.getTaskForPr(issueNumber);
+  if (!task) task = await Task.getByPr(issueNumber);
 
   // If the issue isn't queued yet, check if this webhook should enqueue it.
   if (!task && name === "issues" && issue) {
@@ -315,7 +317,7 @@ export async function doRouteEvent(deps: EventRouterDeps, name: string, p: Recor
         labels,
         repoUrl,
       };
-      taskModel.trackIssue(issueNumber, issueData);
+      taskManager.trackIssue(issueNumber, issueData);
       startDepsLoad(deps, issueNumber, issueData.body);
       await reconcile(deps);
       flog(`[task #${issueNumber}] enqueued via ${name}/${action}`);
@@ -332,14 +334,14 @@ export async function doRouteEvent(deps: EventRouterDeps, name: string, p: Recor
       action === "unlabeled" &&
       (p.label as Record<string, unknown> | undefined)?.name === deps.taskLabel
     ) {
-      taskModel.untrackIssue(issueNumber);
+      taskManager.untrackIssue(issueNumber);
       flog(`[task #${issueNumber}] dequeued (label removed)`);
       await reconcile(deps);
       return result(task);
     }
 
     if (action === "closed") {
-      await taskModel.closeIssue(issueNumber).catch((err: unknown) =>
+      await taskManager.closeIssue(issueNumber).catch((err: unknown) =>
         flog(`ERROR Failed to close issue #${issueNumber}: ${fmtError(err)}`)
       );
       await reconcile(deps);
@@ -347,7 +349,7 @@ export async function doRouteEvent(deps: EventRouterDeps, name: string, p: Recor
     }
 
     if (action === "reopened") {
-      await taskModel.reopenIssue(issueNumber).catch((err: unknown) =>
+      await taskManager.reopenIssue(issueNumber).catch((err: unknown) =>
         flog(`ERROR Failed to reopen issue #${issueNumber}: ${fmtError(err)}`)
       );
       await reconcile(deps);
@@ -356,9 +358,9 @@ export async function doRouteEvent(deps: EventRouterDeps, name: string, p: Recor
 
     if (action === "edited") {
       const changes = p.changes as Record<string, unknown> | undefined;
-      if (changes?.body && taskModel.isTracked(issueNumber)) {
+      if (changes?.body && taskManager.isTracked(issueNumber)) {
         const newBody = String(issue.body ?? "");
-        taskModel.resetIssueDeps(issueNumber, newBody);
+        taskManager.resetIssueDeps(issueNumber, newBody);
         startDepsLoad(deps, issueNumber, newBody);
       }
     }
