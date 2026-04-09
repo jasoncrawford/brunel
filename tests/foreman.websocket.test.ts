@@ -11,8 +11,6 @@ import { setupInMemoryTasks } from "./helpers/task.js";
 import { loadDefaultConfig } from "../src/config.js";
 const defaultCfg = await loadDefaultConfig();
 import type { ForemanMessage } from "../src/types.js";
-import { setBlockers } from "../src/foreman/dependencies.js";
-import type { DependencyGraph } from "../src/foreman/dependencies.js";
 import type { DbLogger } from "../src/foreman/db.js";
 import { waitUntil } from "./helpers.js";
 
@@ -60,10 +58,9 @@ async function makeTask(tm: TaskManager, n: number) {
   const body = `Body of issue ${n}`;
   const labels: string[] = [];
   const repoSlug = "owner/repo";
-  const repoUrl = `https://github.com/${repoSlug}`;
   await Task.upsert(taskId, n, repoSlug, title, body, labels);
-  tm.trackIssue(n, { number: n, title, body, labels, repoUrl });
-  tm.markIssueDepsLoaded(n);
+  tm.trackIssue(n);
+  tm.markBlockersLoaded(n);
 }
 
 function closeClient(ws: WebSocket): Promise<void> {
@@ -84,7 +81,6 @@ let routeEvent: (id: string, name: string, payload: unknown) => Promise<void>;
 let reconcile: () => Promise<void>;
 let shutdown: () => Promise<void>;
 let port: number;
-let graph: DependencyGraph;
 const openClients: WebSocket[] = [];
 
 function connect(): Promise<WebSocket> {
@@ -95,9 +91,8 @@ beforeEach(() => {
   taskManager = new TaskManager();
   setupInMemoryTasks(taskManager);
   registry = new WorkerRegistry();
-  graph = new Map();
   httpServer = http.createServer();
-  ({ wss, routeEvent, reconcile, shutdown } = createForemanWss(taskManager, registry, httpServer, defaultCfg, { graph }));
+  ({ wss, routeEvent, reconcile, shutdown } = createForemanWss(taskManager, registry, httpServer, defaultCfg));
 
   return new Promise<void>((resolve) => {
     httpServer.listen(0, () => {
@@ -533,7 +528,7 @@ describe("dependency-aware task assignment", () => {
   it("idle worker gets no message when the only pending task is blocked", async () => {
     await makeTask(taskManager, 42);
     taskManager.setIssueOpenState(10, true); // blocker is open
-    setBlockers(42, [10], graph);
+    taskManager.setBlockers(42, [10]);
 
     const ws = await connect();
     const ackP = nextMsg(ws);
@@ -548,7 +543,7 @@ describe("dependency-aware task assignment", () => {
 
   it("idle worker gets task_assigned when task has no open blockers", async () => {
     await makeTask(taskManager, 42);
-    setBlockers(42, [10], graph);
+    taskManager.setBlockers(42, [10]);
     // openIssues does NOT contain 10 — blocker is closed
 
     const ws = await connect();
@@ -562,7 +557,7 @@ describe("dependency-aware task assignment", () => {
   it("issues/closed event unblocks a waiting task and sends task_assigned to idle worker", async () => {
     await makeTask(taskManager, 42);
     taskManager.setIssueOpenState(10, true);
-    setBlockers(42, [10], graph);
+    taskManager.setBlockers(42, [10]);
 
     const ws = await connect();
     const ackP = nextMsg(ws);
@@ -579,7 +574,7 @@ describe("dependency-aware task assignment", () => {
 
   it("issues/reopened re-blocks subsequent task assignments", async () => {
     await makeTask(taskManager, 43);
-    setBlockers(43, [10], graph);
+    taskManager.setBlockers(43, [10]);
 
     routeEvent("evt-1", "issues", {
       action: "reopened",
@@ -601,7 +596,7 @@ describe("dependency-aware task assignment", () => {
     await makeTask(taskManager, 1); // blocked
     await makeTask(taskManager, 2); // unblocked
     taskManager.setIssueOpenState(99, true);
-    setBlockers(1, [99], graph);
+    taskManager.setBlockers(1, [99]);
 
     const ws = await connect();
     const q = makeQueue(ws);
@@ -763,8 +758,8 @@ describe("worker disconnect DB logging", () => {
     const localTm = new TaskManager();
     setupInMemoryTasks(localTm);
     await Task.upsert("42", 42, "owner/repo", "Some task", "Body", []);
-    localTm.trackIssue(42, { number: 42, title: "Some task", body: "Body", labels: [], repoUrl: "https://github.com/owner/repo" });
-    localTm.markIssueDepsLoaded(42);
+    localTm.trackIssue(42);
+    localTm.markBlockersLoaded(42);
 
     const localRegistry2 = new WorkerRegistry();
     const server = http.createServer();
@@ -1012,8 +1007,8 @@ describe("issues/closed — close persistence", () => {
     const spyClose = vi.spyOn(t!, "close");
     vi.spyOn(Task, "getByIssue").mockResolvedValue(t!);
 
-    taskManager.trackIssue(1, { number: 1, title: "T", body: "b", labels: [], repoUrl: "https://github.com/test/repo" });
-    taskManager.markIssueDepsLoaded(1);
+    taskManager.trackIssue(1);
+    taskManager.markBlockersLoaded(1);
 
     await routeEvent("evt-1", "issues", { action: "closed", issue: { number: 1, title: "T", body: "", labels: [] } });
 

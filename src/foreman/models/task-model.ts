@@ -1,33 +1,39 @@
 import { EventEmitter } from "events";
-import type { GitHubEvent, LabeledIssueState, TaskIssue } from "../../types.js";
-import { isBlocked } from "../dependencies.js";
-import type { DependencyGraph } from "../dependencies.js";
+import type { GitHubEvent } from "../../types.js";
 import type { TaskSnapshot } from "../admin-ws.js";
 import { loadIssuesToQueue } from "../github.js";
+import { EventQueue } from "../event-queue.js";
 import { Task } from "./task.js";
 
 
 // ── TaskManager ────────────────────────────────────────────────────────────────
-// Owns all ephemeral in-memory state (event queues, branch mappings, issue
-// tracking) that has no DB backing.  DB reads/writes go through Task statics
-// and instance methods.
+// Owns all ephemeral in-memory state (event queues, branch mappings, open-issue
+// tracking, blocker state) that has no DB backing.  DB reads/writes go through
+// Task statics and instance methods.
 //
 // Emits "changed" after every Task mutation (by subscribing to Task.events)
 // and after every worker registry change so the admin dashboard can refresh.
 
 export class TaskManager extends EventEmitter {
   // ── Ephemeral in-memory state (no DB backing) ────────────────────────────
-  private eventQueues = new Map<string, GitHubEvent[]>();
+  private eventQueue = new EventQueue();
   private branchToTaskId = new Map<string, string>();
 
   // ── GitHub issue state ────────────────────────────────────────────────────
-  private _labeledIssues: Map<number, LabeledIssueState>;
+  /** Open issues that are blockers (non-task issues whose open/closed state
+   *  determines whether dependent tasks are blocked). Also includes labeled
+   *  task issues so that a task blocking another task is tracked correctly. */
   private _openIssues: Set<number>;
+
+  // ── Per-issue blocker state (replaces DependencyGraph + LabeledIssueState.depsLoaded) ──
+  private _blockers: Map<number, number[]>;
+  private _blockersLoaded: Set<number>;
 
   constructor() {
     super();
-    this._labeledIssues = new Map();
     this._openIssues = new Set();
+    this._blockers = new Map();
+    this._blockersLoaded = new Set();
     Task.events.on("changed", () => this.emit("changed"));
   }
 
@@ -44,6 +50,7 @@ export class TaskManager extends EventEmitter {
   async nextPending(isReady?: (t: Task) => boolean): Promise<Task | null> {
     const tasks = await Task.list({ cancelable: true });
     for (const task of tasks) {
+      this.hydrateBlockers(task);
       if (isReady === undefined || isReady(task)) return task;
     }
     return null;
@@ -58,16 +65,11 @@ export class TaskManager extends EventEmitter {
   // ── Memory-only write operations (ephemeral data) ─────────────────────────
 
   queueEvent(taskId: string, event: GitHubEvent): void {
-    let queue = this.eventQueues.get(taskId);
-    if (!queue) { queue = []; this.eventQueues.set(taskId, queue); }
-    queue.push(event);
+    this.eventQueue.enqueue(taskId, event);
   }
 
   drainEvents(taskId: string): GitHubEvent[] {
-    const queue = this.eventQueues.get(taskId);
-    if (!queue || queue.length === 0) return [];
-    this.eventQueues.delete(taskId);
-    return queue;
+    return this.eventQueue.drain(taskId);
   }
 
   registerBranch(branch: string, taskId: string): void {
@@ -76,49 +78,27 @@ export class TaskManager extends EventEmitter {
 
   // ── Issue-lifecycle methods ───────────────────────────────────────────────
 
-  /** Whether the issue is currently tracked (has the brunel:ready label). */
-  isTracked(issueNumber: number): boolean { return this._labeledIssues.has(issueNumber); }
-
-  /** Read-only view of tracked labeled issues — used by reconcile() for iteration. */
-  getLabeledIssues(): ReadonlyMap<number, LabeledIssueState> { return this._labeledIssues; }
-
-  /** Whether deps have been loaded for this issue. */
-  isDepsLoaded(issueNumber: number): boolean {
-    const entry = this._labeledIssues.get(issueNumber);
-    return entry?.depsLoaded ?? false;
-  }
-
-  /** Whether the issue is blocked by an open dependency. */
-  isBlocked(issueNumber: number, graph: DependencyGraph): boolean {
-    return isBlocked(issueNumber, graph, this._openIssues);
-  }
-
-  /** Task snapshots with open-issue state baked in — for admin broadcasts.
-   *  Complete tasks are excluded: the dashboard only shows active tasks. */
-  async getTaskSnapshots(graph: DependencyGraph): Promise<TaskSnapshot[]> {
-    const tasks = await Task.list();
-    return tasks.filter((t) => !t.completedAt).map((t) => t.toSnapshot(graph, this._openIssues));
-  }
-
-  /** Called when issues/labeled fires: begin tracking the issue. */
-  trackIssue(issueNumber: number, issue: TaskIssue, depsLoaded = false): void {
-    this._labeledIssues.set(issueNumber, { issue, depsLoaded });
+  /** Called when issues/labeled fires: begin tracking the issue as open. */
+  trackIssue(issueNumber: number): void {
     this._openIssues.add(issueNumber);
   }
 
   /** Called when the brunel:ready label is removed: stop tracking the issue. */
   untrackIssue(issueNumber: number): void {
-    this._labeledIssues.delete(issueNumber);
     this._openIssues.delete(issueNumber);
+    this._blockers.delete(issueNumber);
+    this._blockersLoaded.delete(issueNumber);
   }
 
-  /** Called when issues/closed fires: mark the issue as closed. */
+  /** Called when issues/closed fires: mark the issue as closed or delete it if pending. */
   async closeIssue(issueNumber: number): Promise<void> {
-    this._labeledIssues.delete(issueNumber);
     this._openIssues.delete(issueNumber);
     const task = await Task.getByIssue(issueNumber);
-    if (task && task.status !== "complete") {
-      await task.close();
+    if (!task || task.status === "complete") return;
+    await task.close();
+    if (!task.workerId) {
+      // Pending/blocked tasks have no active worker — remove rather than keeping a closed row.
+      await task.delete();
     }
   }
 
@@ -131,25 +111,50 @@ export class TaskManager extends EventEmitter {
     }
   }
 
-  /** Called when issues/edited fires with a body change: reset deps and update body. */
-  resetIssueDeps(issueNumber: number, newBody: string): void {
-    const entry = this._labeledIssues.get(issueNumber);
-    if (entry) {
-      entry.depsLoaded = false;
-      entry.issue = { ...entry.issue, body: newBody };
-    }
-  }
-
-  /** Called after fetchBlockers resolves: mark deps as fully loaded. */
-  markIssueDepsLoaded(issueNumber: number): void {
-    const entry = this._labeledIssues.get(issueNumber);
-    if (entry) entry.depsLoaded = true;
-  }
-
   /** Update the open/closed state of any referenced issue (used by fetchBlockers). */
   setIssueOpenState(issueNumber: number, isOpen: boolean): void {
     if (isOpen) this._openIssues.add(issueNumber);
     else this._openIssues.delete(issueNumber);
+  }
+
+  // ── Blocker state management (replaces DependencyGraph + isDepsLoaded) ────
+
+  /** Store the merged set of blockers for an issue (from body + GitHub native). */
+  setBlockers(issueNumber: number, blockers: number[]): void {
+    this._blockers.set(issueNumber, blockers);
+  }
+
+  /** Mark that all blockers have been fetched for this issue. */
+  markBlockersLoaded(issueNumber: number): void {
+    this._blockersLoaded.add(issueNumber);
+  }
+
+  /** Reset blocker state (called when issue body changes — deps must be re-fetched). */
+  resetBlockers(issueNumber: number): void {
+    this._blockers.delete(issueNumber);
+    this._blockersLoaded.delete(issueNumber);
+  }
+
+  /** Whether blockers have been fully loaded for this issue. */
+  isBlockersLoaded(issueNumber: number): boolean {
+    return this._blockersLoaded.has(issueNumber);
+  }
+
+  /** Whether any blocker for this issue is currently open. */
+  isBlocked(issueNumber: number): boolean {
+    const blockers = this._blockers.get(issueNumber);
+    if (!blockers || blockers.length === 0) return false;
+    return blockers.some(b => this._openIssues.has(b));
+  }
+
+  /** Task snapshots with open-issue state baked in — for admin broadcasts.
+   *  Complete tasks are excluded: the dashboard only shows active tasks. */
+  async getTaskSnapshots(): Promise<TaskSnapshot[]> {
+    const tasks = await Task.list();
+    return tasks.filter((t) => !t.completedAt).map((t) => {
+      this.hydrateBlockers(t);
+      return t.toSnapshot(this._openIssues);
+    });
   }
 
   // ── Startup methods ────────────────────────────────────────────────────────
@@ -167,11 +172,17 @@ export class TaskManager extends EventEmitter {
   /** Fetch brunel:ready issues from GitHub and load deps.
    *  Called at startup after loadActiveTasksFromDb. */
   async loadIssuesFromGithub(
-    graph: DependencyGraph,
     config: { githubRepo: string; githubToken: string; taskLabel: string; githubApiUrl?: string },
     flog: (msg: string) => void,
   ): Promise<void> {
-    await loadIssuesToQueue(this, graph, config);
+    await loadIssuesToQueue(this, config);
+  }
+
+  // ── Private helpers ───────────────────────────────────────────────────────
+
+  /** Annotate a task with in-memory blocker state before returning it. */
+  private hydrateBlockers(task: Task): void {
+    task.blockers = this._blockers.get(task.issueNumber) ?? [];
+    task.blockersLoaded = this._blockersLoaded.has(task.issueNumber);
   }
 }
-

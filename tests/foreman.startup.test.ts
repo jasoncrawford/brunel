@@ -5,10 +5,8 @@ import { TaskManager } from "../src/foreman/models/task-model.js";
 import { Task } from "../src/foreman/models/task.js";
 import { setupInMemoryTasks } from "./helpers/task.js";
 import { loadDefaultConfig } from "../src/config.js";
-import { isBlocked } from "../src/foreman/dependencies.js";
 
 const defaultCfg = await loadDefaultConfig();
-import type { LabeledIssueState } from "../src/types.js";
 import WebSocket, { WebSocketServer } from "ws";
 import http from "http";
 import type { AddressInfo } from "net";
@@ -27,10 +25,8 @@ async function registerReady(
   labels: string[],
 ): Promise<void> {
   await Task.upsert(taskId, issueNumber, repoSlug, title, body, labels);
-  tm.trackIssue(issueNumber, {
-    number: issueNumber, title, body, labels,
-    repoUrl: `https://github.com/${repoSlug}`,
-  }, true);
+  tm.trackIssue(issueNumber);
+  tm.markBlockersLoaded(issueNumber);
 }
 
 function connectWorker(port: number, msg: object): Promise<WebSocket> {
@@ -282,10 +278,8 @@ async function restoreTasksFromDb(rows: Array<{
     if (row.completedAt) continue;
     await Task.upsert(row.taskId, row.issueNumber, row.repo, row.title, row.body ?? "", row.labels ?? []);
     // Mark deps loaded for the issue (simulates startup having loaded deps)
-    tm.trackIssue(row.issueNumber, {
-      number: row.issueNumber, title: row.title, body: row.body ?? "",
-      labels: row.labels ?? [], repoUrl: `https://github.com/${row.repo}`,
-    }, true);
+    tm.trackIssue(row.issueNumber);
+    tm.markBlockersLoaded(row.issueNumber);
     if (row.workerId) {
       const t = await Task.get(row.taskId);
       if (t) await t.assign(row.workerId);
@@ -381,16 +375,12 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
     expect((await Task.get("42"))?.body).toBe("");
     expect((await Task.get("42"))?.labels).toEqual([]);
 
-    // Step 2: GitHub data loaded into labeledIssues
-    taskManager.trackIssue(42, {
-      number: 42,
-      title: "Test task",
-      body: "Real issue description",
-      labels: ["brunel:ready", "bug"],
-      repoUrl: "https://github.com/owner/repo",
-    }, true);
+    // Step 2: GitHub data updates the task (simulates loadIssuesFromGithub calling Task.upsert)
+    await Task.upsert("42", 42, "owner/repo", "Test task", "Real issue description", ["brunel:ready", "bug"]);
+    taskManager.trackIssue(42);
+    taskManager.markBlockersLoaded(42);
 
-    // Step 3: reconcile syncs labeledIssues → taskQueue
+    // Step 3: reconcile assigns idle workers
     await reconcile();
 
     // Step 4: worker connects and receives task_assigned with real body/labels
@@ -407,7 +397,7 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
 
 // ── Reconnect to complete task (issue closed while worker active) ─────────────
 
-describe("startup — derived blocked status based on dependency graph", () => {
+describe("startup — derived blocked status", () => {
   it("pending task with closed blocker is derived as pending", async () => {
     const rows = [{
       taskId: "42", issueNumber: 42, repo: "owner/repo", title: "Test task",
@@ -417,10 +407,10 @@ describe("startup — derived blocked status based on dependency graph", () => {
     await restoreTasksFromDb(rows, taskManager);
 
     // Task 42 was blocked by issue 5, which is now closed
-    const graph = new Map([[42, new Set([5])]]);
+    taskManager.setBlockers(42, [5]);
     taskManager.setIssueOpenState(5, false); // issue 5 is closed
 
-    const snapshots = await taskManager.getTaskSnapshots(graph);
+    const snapshots = await taskManager.getTaskSnapshots();
     expect(snapshots[0].status).toBe("pending");
   });
 
@@ -433,10 +423,10 @@ describe("startup — derived blocked status based on dependency graph", () => {
     await restoreTasksFromDb(rows, taskManager);
 
     // Task 42 is blocked by issue 5, which is still open
-    const graph = new Map([[42, new Set([5])]]);
+    taskManager.setBlockers(42, [5]);
     taskManager.setIssueOpenState(5, true); // issue 5 is open
 
-    const snapshots = await taskManager.getTaskSnapshots(graph);
+    const snapshots = await taskManager.getTaskSnapshots();
     expect(snapshots[0].status).toBe("blocked");
   });
 });

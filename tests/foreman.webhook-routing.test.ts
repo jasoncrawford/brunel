@@ -32,10 +32,8 @@ async function registerReady(
   labels: string[],
 ): Promise<void> {
   await Task.upsert(taskId, issueNumber, repoSlug, title, body, labels);
-  tm.trackIssue(issueNumber, {
-    number: issueNumber, title, body, labels,
-    repoUrl: `https://github.com/${repoSlug}`,
-  }, true);
+  tm.trackIssue(issueNumber);
+  tm.markBlockersLoaded(issueNumber);
 }
 
 function connectWorker(port: number): Promise<WebSocket> {

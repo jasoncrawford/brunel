@@ -1,6 +1,4 @@
 import type { GitHubEvent, ForemanMessage, TaskIssue } from "../../types.js";
-import type { DependencyGraph } from "../dependencies.js";
-import { setBlockers, fetchBlockers } from "../dependencies.js";
 import { fetchIssueStates } from "../github.js";
 import type { TaskManager } from "../models/task-model.js";
 import { Task } from "../models/task.js";
@@ -13,7 +11,6 @@ import { fmtError } from "../../utils.js";
 export interface EventRouterDeps {
   taskManager: TaskManager;
   registry: WorkerRegistry;
-  graph: DependencyGraph;
   repo: string;
   token: string;
   githubApiUrl?: string;
@@ -118,66 +115,28 @@ export function forwardEvent(deps: EventRouterDeps, task: Task, evt: GitHubEvent
 // ── Dependency loading ─────────────────────────────────────────────────────
 
 export function startDepsLoad(deps: EventRouterDeps, issueNumber: number, body: string): void {
-  fetchBlockers(issueNumber, body, { repo: deps.repo, token: deps.token, apiUrl: deps.githubApiUrl })
+  Task.fetchBlockers(issueNumber, body, { repo: deps.repo, token: deps.token, apiUrl: deps.githubApiUrl })
     .then(async (blockers) => {
-      setBlockers(issueNumber, blockers, deps.graph);
+      deps.taskManager.setBlockers(issueNumber, blockers);
       if (blockers.length > 0) {
         const states = await fetchIssueStates(blockers, { repo: deps.repo, token: deps.token });
         for (const [num, state] of states) {
           deps.taskManager.setIssueOpenState(num, state === "open");
         }
       }
-      deps.taskManager.markIssueDepsLoaded(issueNumber);
+      deps.taskManager.markBlockersLoaded(issueNumber);
       await reconcile(deps);
     })
     .catch((err) => deps.flog(`ERROR fetching deps for #${issueNumber}: ${fmtError(err)}`));
 }
 
 // ── Reconciliation ──────────────────────────────────────────────────────────
+// After dissolving _labeledIssues, task creation and stale-task cleanup are
+// handled at the event call sites (trackIssue + Task.upsert on label;
+// untrackIssue + task.delete on unlabel; loadIssuesToQueue on startup).
+// reconcile() now only triggers worker assignment.
 
 export async function reconcile(deps: EventRouterDeps): Promise<void> {
-  const labeledIssues = deps.taskManager.getLabeledIssues();
-
-  // Step 1: materialise tasks for new labeledIssues entries.
-  const registerPromises: Promise<void>[] = [];
-  for (const [num, { issue }] of labeledIssues) {
-    if (!(await Task.getByIssue(num))) {
-      deps.flog(`[task #${num}] reconcile: creating task (title: ${JSON.stringify(issue.title)})`);
-      registerPromises.push(
-        Task.upsert(String(num), num, deps.repo, issue.title, issue.body, issue.labels)
-          .then(() => undefined)
-          .catch((err: unknown) => deps.flog(`ERROR Failed to persist task #${num}: ${fmtError(err)}`))
-      );
-    }
-  }
-
-  // Step 2: sync title/body/labels from labeledIssues to existing tasks.
-  const refreshPromises: Promise<void>[] = [];
-  for (const [num, { issue }] of labeledIssues) {
-    const t = await Task.getByIssue(num);
-    if (t) {
-      refreshPromises.push(
-        t.updateContent(issue.title, issue.body, issue.labels)
-          .catch((err: unknown) => deps.flog(`ERROR Failed to refresh content for task #${t.taskId}: ${fmtError(err)}`))
-      );
-    }
-  }
-
-  // Step 3: remove pending/blocked tasks whose issue no longer has the label
-  const cancelPromises: Promise<void>[] = [];
-  for (const t of await deps.taskManager.listActiveTasks()) {
-    if (!labeledIssues.has(t.issueNumber)) {
-      cancelPromises.push(
-        t.delete()
-          .catch((err: unknown) => deps.flog(`ERROR Failed to delete task #${t.taskId} from DB: ${fmtError(err)}`))
-      );
-    }
-  }
-
-  // Step 4: await all DB writes before assigning
-  await Promise.all([...registerPromises, ...refreshPromises, ...cancelPromises]);
-
-  // Step 5: try assignment for all idle workers
   await deps.assignIdleWorkers();
 }
 
@@ -317,7 +276,12 @@ export async function doRouteEvent(deps: EventRouterDeps, name: string, p: Recor
         labels,
         repoUrl,
       };
-      taskManager.trackIssue(issueNumber, issueData);
+
+      // Track as open and immediately upsert into DB.
+      taskManager.trackIssue(issueNumber);
+      await Task.upsert(String(issueNumber), issueNumber, repo, issueData.title, issueData.body, issueData.labels)
+        .catch((err: unknown) => flog(`ERROR Failed to persist task #${issueNumber}: ${fmtError(err)}`));
+
       startDepsLoad(deps, issueNumber, issueData.body);
       await reconcile(deps);
       flog(`[task #${issueNumber}] enqueued via ${name}/${action}`);
@@ -335,6 +299,13 @@ export async function doRouteEvent(deps: EventRouterDeps, name: string, p: Recor
       (p.label as Record<string, unknown> | undefined)?.name === deps.taskLabel
     ) {
       taskManager.untrackIssue(issueNumber);
+      // Delete the task from DB (only works for non-assigned tasks).
+      const staleTask = await Task.getByIssue(issueNumber);
+      if (staleTask) {
+        await staleTask.delete().catch((err: unknown) =>
+          flog(`ERROR Failed to delete task #${staleTask.taskId} from DB: ${fmtError(err)}`)
+        );
+      }
       flog(`[task #${issueNumber}] dequeued (label removed)`);
       await reconcile(deps);
       return result(task);
@@ -358,10 +329,13 @@ export async function doRouteEvent(deps: EventRouterDeps, name: string, p: Recor
 
     if (action === "edited") {
       const changes = p.changes as Record<string, unknown> | undefined;
-      if (changes?.body && taskManager.isTracked(issueNumber)) {
-        const newBody = String(issue.body ?? "");
-        taskManager.resetIssueDeps(issueNumber, newBody);
-        startDepsLoad(deps, issueNumber, newBody);
+      if (changes?.body) {
+        const trackedTask = await Task.getByIssue(issueNumber);
+        if (trackedTask) {
+          const newBody = String(issue.body ?? "");
+          taskManager.resetBlockers(issueNumber);
+          startDepsLoad(deps, issueNumber, newBody);
+        }
       }
     }
   }

@@ -4,7 +4,6 @@ import "dotenv/config";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "../database.types.js";
 import { Webhooks } from "@octokit/webhooks";
-import type { DependencyGraph } from "./dependencies.js";
 import { loadConfig } from "../config.js";
 import { createDbLogger } from "./db.js";
 import type { DbLogger } from "./db.js";
@@ -34,7 +33,6 @@ if (isMain) {
   const config = await loadConfig(process.argv);
 
   const registry = new WorkerRegistry();
-  const graph: DependencyGraph = new Map();
   const webhooks = config.webhookSecret
     ? new Webhooks({ secret: config.webhookSecret })
     : null;
@@ -54,12 +52,11 @@ if (isMain) {
 
   // Admin WebSocket broadcaster
   const adminWss = createAdminWss(server, async () => ({
-    tasks: await taskManager.getTaskSnapshots(graph),
+    tasks: await taskManager.getTaskSnapshots(),
     workers: registry.getWorkerSnapshots(),
   }));
 
   foremanWss = createForemanWss(taskManager, registry, server, config, {
-    graph,
     dbLogger,
     adminWss,
   });
@@ -85,7 +82,7 @@ if (isMain) {
   // Step 2: Fetch brunel:ready issues from GitHub for reconciliation.
   flog("[startup] step 2: fetching brunel:ready issues from GitHub for reconciliation...");
   try {
-    await taskManager.loadIssuesFromGithub(graph, config, flog);
+    await taskManager.loadIssuesFromGithub(config, flog);
     await foremanWss.reconcile();
   } catch (err) {
     flog(`ERROR Failed to load issues from GitHub: ${fmtError(err)}`);

@@ -1,7 +1,6 @@
 import http from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import type { WorkerMessage, ForemanMessage, GitHubEvent } from "../../types.js";
-import type { DependencyGraph } from "../dependencies.js";
 import { type DbLogger, buildMessageSummary } from "../db.js";
 import type { AdminWss } from "../admin-ws.js";
 import { fmtEvent } from "../event-fmt.js";
@@ -40,13 +39,11 @@ export function createForemanWss(
   server: http.Server,
   config: Pick<BrunelConfig, "taskLabel" | "githubRepo" | "githubToken" | "githubApiUrl" | "workerSecret" | "pingIntervalMs">,
   deps?: {
-    graph?: DependencyGraph;
     dbLogger?: DbLogger;
     adminWss?: AdminWss;
   },
 ): ForemanWss {
   const taskLabel = config.taskLabel;
-  const graph = deps?.graph ?? new Map<number, Set<number>>();
   const repo = config.githubRepo;
   const token = config.githubToken;
   const githubApiUrl = config.githubApiUrl;
@@ -89,7 +86,7 @@ export function createForemanWss(
   async function broadcastSnapshot() {
     if (!adminWss) return;
     adminWss.broadcastSnapshot({
-      tasks: await taskManager.getTaskSnapshots(graph),
+      tasks: await taskManager.getTaskSnapshots(),
       workers: registry.getWorkerSnapshots(),
     });
   }
@@ -117,7 +114,7 @@ export function createForemanWss(
 
   async function tryAssignWork(workerId: string): Promise<void> {
     const task = await taskManager.nextPending(
-      (t) => taskManager.isDepsLoaded(t.issueNumber) && !taskManager.isBlocked(t.issueNumber, graph),
+      (t) => t.blockersLoaded && !taskManager.isBlocked(t.issueNumber),
     );
     if (task) {
       registry.assignTask(workerId, task.taskId);
@@ -156,7 +153,6 @@ export function createForemanWss(
   const routerDeps: EventRouterDeps = {
     taskManager,
     registry,
-    graph,
     repo,
     token,
     githubApiUrl,

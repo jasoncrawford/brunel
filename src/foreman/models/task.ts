@@ -2,8 +2,7 @@ import { EventEmitter } from "node:events";
 import type { TaskStatus } from "../../types.js";
 import type { Row } from "../db.js";
 import type { TaskSnapshot } from "../admin-ws.js";
-import type { DependencyGraph } from "../dependencies.js";
-import { isBlocked } from "../dependencies.js";
+import { fetchNativeBlockers } from "../github.js";
 import { db } from "../db-client.js";
 
 type DbRow = Row<"tasks">;
@@ -25,6 +24,12 @@ export class Task {
   completedAt: string | null;
   issueClosedAt: string | null;
   prMergedAt: string | null;
+
+  // ── In-memory blocker state (not persisted to DB) ─────────────────────────
+  /** Merged set of body-parsed + native GitHub blockers for this task. */
+  blockers: number[] = [];
+  /** Whether native blockers have been fetched from the GitHub API. */
+  blockersLoaded: boolean = false;
 
   private constructor(row: DbRow) {
     this.taskId = row.task_id;
@@ -56,6 +61,11 @@ export class Task {
     return `https://github.com/${this.repo}`;
   }
 
+  /** Returns true if any of this task's blockers appear in the open-issues set. */
+  isBlocked(openIssues: Set<number>): boolean {
+    return this.blockers.some(n => openIssues.has(n));
+  }
+
   toJSON() {
     return {
       taskId: this.taskId,
@@ -76,10 +86,9 @@ export class Task {
     };
   }
 
-  toSnapshot(graph: DependencyGraph, openIssues: Set<number>): TaskSnapshot {
+  toSnapshot(openIssues: Set<number>): TaskSnapshot {
     let status: TaskStatus = this.status;
-    if (status === "pending" && isBlocked(this.issueNumber, graph, openIssues)) status = "blocked";
-    const blockerSet = graph.get(this.issueNumber) ?? new Set<number>();
+    if (status === "pending" && this.isBlocked(openIssues)) status = "blocked";
     return {
       taskId: this.taskId,
       issueNumber: this.issueNumber,
@@ -88,7 +97,7 @@ export class Task {
       assignedWorkerId: this.workerId ?? undefined,
       prNumber: this.prNumber ?? undefined,
       prUrl: this.prNumber != null ? `https://github.com/${this.repo}/pull/${this.prNumber}` : undefined,
-      blockers: Array.from(blockerSet).map((n) => ({ issueNumber: n, isOpen: openIssues.has(n) })),
+      blockers: this.blockers.map((n) => ({ issueNumber: n, isOpen: openIssues.has(n) })),
     };
   }
 
@@ -109,6 +118,42 @@ export class Task {
       ...fields,
     };
     return new Task(row);
+  }
+
+  // ── Blocker parsing (moved from dependencies.ts) ─────────────────────────
+
+  /**
+   * Parse "Depends on #N" / "Blocked by #N" lines from an issue body.
+   * Returns a deduplicated list of blocker issue numbers.
+   */
+  static parseBodyBlockers(body: string): number[] {
+    const clausePattern = /(?:^|\s)\*{0,2}(?:depends\s+on|blocked\s+by)[\s:*]+(#\d+(?:\s*,\s*#\d+)*)/gi;
+    const numbers = new Set<number>();
+    let m: RegExpExecArray | null;
+    while ((m = clausePattern.exec(body)) !== null) {
+      const refPattern = /#(\d+)/g;
+      let r: RegExpExecArray | null;
+      while ((r = refPattern.exec(m[1])) !== null) {
+        numbers.add(parseInt(r[1], 10));
+      }
+    }
+    return Array.from(numbers);
+  }
+
+  /**
+   * Fetch all blockers for an issue from both body text and GitHub native relationships.
+   * Results are merged and deduplicated.
+   */
+  static async fetchBlockers(
+    issueNumber: number,
+    body: string,
+    opts: { repo: string; token: string; apiUrl?: string },
+  ): Promise<number[]> {
+    const [bodyBlockers, nativeBlockers] = await Promise.all([
+      Promise.resolve(Task.parseBodyBlockers(body)),
+      fetchNativeBlockers(issueNumber, opts),
+    ]);
+    return Array.from(new Set([...bodyBlockers, ...nativeBlockers]));
   }
 
   // ── Private helpers ─────────────────────────────────────────────────────────
