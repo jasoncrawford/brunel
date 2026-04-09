@@ -188,7 +188,6 @@ export interface WorkspaceCommandDeps {
   workspaceCfg: { workspaceDir: string; repoUrl: string } | undefined;
   sessionId: string;
   originalCwd: string;
-  confirmIfUnsafe: (ws: Workspace, confirm: (msg: string) => Promise<boolean>) => Promise<boolean>;
   confirm: (msg: string) => Promise<boolean>;
   print: (msg: string) => void;
   chdir: (dir: string) => void;
@@ -240,7 +239,7 @@ export function registerWorkspaceCommands(
         deps.print(display.c.boldRed("No workspace. Use /workspace:create first."));
         return;
       }
-      const ok = await deps.confirmIfUnsafe(ws, deps.confirm);
+      const ok = await confirmIfUnsafe(ws, deps.confirm);
       if (!ok) return;
       await ws.reset();
       deps.print(display.c.sageGreen("Workspace reset to main."));
@@ -255,7 +254,7 @@ export function registerWorkspaceCommands(
         deps.print(display.c.boldRed("No workspace in this session."));
         return;
       }
-      const ok = await deps.confirmIfUnsafe(ws, deps.confirm);
+      const ok = await confirmIfUnsafe(ws, deps.confirm);
       if (!ok) return;
       await ws.destroy();
       deps.chdir(deps.originalCwd);

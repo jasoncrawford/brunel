@@ -351,7 +351,6 @@ export class WorkerSession {
       workspaceCfg: ctx ? { workspaceDir: ctx.workspaceDir, repoUrl: ctx.repoUrl } : undefined,
       sessionId: this.workerId,
       originalCwd: ctx?.originalCwd ?? process.cwd(),
-      confirmIfUnsafe,
       confirm: ctx?.confirm ?? (() => Promise.resolve(false)),
       print: this.display.print,
       chdir: (dir) => process.chdir(dir),

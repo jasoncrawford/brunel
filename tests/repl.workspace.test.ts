@@ -38,7 +38,6 @@ function makeAndRegister(overrides: Record<string, unknown> = {}) {
     workspaceCfg: cfg as { workspaceDir: string; repoUrl: string } | undefined,
     sessionId: SESSION_ID,
     originalCwd: ORIGINAL_CWD,
-    confirmIfUnsafe: vi.fn().mockResolvedValue(true),
     confirm: vi.fn().mockResolvedValue(true),
     print: vi.fn(),
     chdir: vi.fn(),
@@ -87,19 +86,20 @@ describe("workspace:reset", () => {
     expect(stripAnsi(vi.mocked(deps.print).mock.calls[0][0])).toContain("No workspace");
   });
 
-  it("resets workspace and prints success when safe", async () => {
-    const ws = { dir: "/ws", reset: vi.fn().mockResolvedValue(undefined), destroy: vi.fn(), checkSafety: vi.fn().mockResolvedValue({ uncommittedFiles: [], unpushedCommits: [], noUpstream: false }) } as any;
+  it("resets workspace when clean", async () => {
+    const ws = { dir: "/ws", reset: vi.fn().mockResolvedValue(undefined), destroy: vi.fn(),
+      checkSafety: vi.fn().mockResolvedValue({ uncommittedFiles: [], unpushedCommits: [], noUpstream: false }) } as any;
     const deps = makeAndRegister();
     deps.setWorkspace(ws);
     await execute("workspace:reset", "");
-    expect(deps.confirmIfUnsafe).toHaveBeenCalledWith(ws, deps.confirm);
     expect(ws.reset).toHaveBeenCalled();
     expect(stripAnsi(vi.mocked(deps.print).mock.calls[0][0])).toContain("Workspace reset to main");
   });
 
   it("skips reset if user declines confirmation", async () => {
-    const ws = { dir: "/ws", reset: vi.fn(), destroy: vi.fn(), checkSafety: vi.fn() } as any;
-    const deps = makeAndRegister({ confirmIfUnsafe: vi.fn().mockResolvedValue(false) });
+    const ws = { dir: "/ws", reset: vi.fn(), destroy: vi.fn(),
+      checkSafety: vi.fn().mockResolvedValue({ uncommittedFiles: ["M foo.ts"], unpushedCommits: [], noUpstream: false }) } as any;
+    const deps = makeAndRegister({ confirm: vi.fn().mockResolvedValue(false) });
     deps.setWorkspace(ws);
     await execute("workspace:reset", "");
     expect(ws.reset).not.toHaveBeenCalled();
@@ -117,11 +117,11 @@ describe("workspace:remove", () => {
   });
 
   it("destroys workspace, chdir to originalCwd, clears workspace", async () => {
-    const ws = { dir: "/ws", reset: vi.fn(), destroy: vi.fn().mockResolvedValue(undefined), checkSafety: vi.fn().mockResolvedValue({ uncommittedFiles: [], unpushedCommits: [], noUpstream: false }) } as any;
+    const ws = { dir: "/ws", reset: vi.fn(), destroy: vi.fn().mockResolvedValue(undefined),
+      checkSafety: vi.fn().mockResolvedValue({ uncommittedFiles: [], unpushedCommits: [], noUpstream: false }) } as any;
     const deps = makeAndRegister();
     deps.setWorkspace(ws);
     await execute("workspace:remove", "");
-    expect(deps.confirmIfUnsafe).toHaveBeenCalledWith(ws, deps.confirm);
     expect(ws.destroy).toHaveBeenCalled();
     expect(vi.mocked(deps.chdir)).toHaveBeenCalledWith(ORIGINAL_CWD);
     expect(stripAnsi(vi.mocked(deps.print).mock.calls[0][0])).toContain("Workspace removed");
@@ -129,8 +129,9 @@ describe("workspace:remove", () => {
   });
 
   it("skips removal if user declines confirmation", async () => {
-    const ws = { dir: "/ws", reset: vi.fn(), destroy: vi.fn(), checkSafety: vi.fn() } as any;
-    const deps = makeAndRegister({ confirmIfUnsafe: vi.fn().mockResolvedValue(false) });
+    const ws = { dir: "/ws", reset: vi.fn(), destroy: vi.fn(),
+      checkSafety: vi.fn().mockResolvedValue({ uncommittedFiles: ["M foo.ts"], unpushedCommits: [], noUpstream: false }) } as any;
+    const deps = makeAndRegister({ confirm: vi.fn().mockResolvedValue(false) });
     deps.setWorkspace(ws);
     await execute("workspace:remove", "");
     expect(ws.destroy).not.toHaveBeenCalled();

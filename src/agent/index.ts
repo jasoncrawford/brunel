@@ -290,7 +290,6 @@ async function main(
     workspaceCfg,
     sessionId: sessionId_,
     originalCwd,
-    confirmIfUnsafe,
     confirm,
     print: display.print,
     chdir: (dir) => process.chdir(dir),

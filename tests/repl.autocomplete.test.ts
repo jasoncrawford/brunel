@@ -39,7 +39,7 @@ function registerBuiltins() {
 beforeEach(() => {
   origStdin = process.stdin;
   vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-  registerBuiltins();
+  _reset();
 });
 
 afterEach(() => {
@@ -325,6 +325,8 @@ describe("filterCommands", () => {
 // ── listCommandNames ──────────────────────────────────────────────────────────
 
 describe("listCommandNames", () => {
+  beforeEach(() => registerBuiltins());
+
   it("always includes builtins clear and exit", () => {
     const result = listCommandNames(() => null);
     expect(result).toContain("clear");
@@ -441,6 +443,8 @@ describe("listCommandNames", () => {
 // ── listCommands ─────────────────────────────────────────────────────────────
 
 describe("listCommands", () => {
+  beforeEach(() => registerBuiltins());
+
   it("returns CommandSuggestion objects with name and description", () => {
     const result = listCommands(() => null);
     expect(result.length).toBeGreaterThan(0);
@@ -532,6 +536,8 @@ describe("listCommands", () => {
 // ── listWorkerCommandNames ────────────────────────────────────────────────────
 
 describe("listWorkerCommandNames", () => {
+  beforeEach(() => registerBuiltins());
+
   it("includes worker:task-complete", () => {
     const result = listWorkerCommandNames(() => null);
     expect(result).toContain("worker:task-complete");
