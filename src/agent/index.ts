@@ -261,7 +261,7 @@ async function main(
   let sessionId: string | undefined;
   const sessionId_ = crypto.randomUUID();
   const originalCwd = process.cwd();
-  let workspace: Workspace | undefined = undefined;
+  const workspaceRef: { current: Workspace | undefined } = { current: undefined };
 
   const confirm = async (msg: string): Promise<boolean> => {
     display.stopStatus();
@@ -271,9 +271,9 @@ async function main(
   };
 
   const doExit = async () => {
-    if (workspace) {
-      const ok = await confirmIfUnsafe(workspace, confirm);
-      if (ok) await workspace.destroy();
+    if (workspaceRef.current) {
+      const ok = await confirmIfUnsafe(workspaceRef.current, confirm);
+      if (ok) await workspaceRef.current.destroy();
     }
     process.stdout.write("\x1b[?2004l\r\n");
     process.stdin.setRawMode(false);
@@ -284,15 +284,11 @@ async function main(
   // command with its implementation. Workspace commands are registered by
   // workspace.ts (which owns the logic); the rest are inlined here.
   _reset();
-  registerWorkspaceCommands("workspace", {
-    getWorkspace: () => workspace,
-    setWorkspace: (ws) => { workspace = ws; },
-    workspaceCfg,
-    sessionId: sessionId_,
+  registerWorkspaceCommands({
+    workspace: workspaceRef,
+    config: workspaceCfg ? { ...workspaceCfg, sessionId: sessionId_ } : undefined,
     originalCwd,
     confirm,
-    print: display.print,
-    chdir: (dir) => process.chdir(dir),
   });
   register("exit", {
     description: "Exit the REPL",

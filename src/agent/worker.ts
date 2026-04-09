@@ -337,23 +337,20 @@ export class WorkerSession {
         );
       },
     });
-    registerWorkspaceCommands("workspace", {
-      getWorkspace: () => this.options.workspaceCtx?.workspace,
-      setWorkspace: (ws) => {
-        if (this.options.workspaceCtx) {
-          if (ws) {
-            this.options.workspaceCtx.workspace = ws;
-          } else {
-            this.options.workspaceCtx = undefined;
+    const self = this;
+    registerWorkspaceCommands({
+      workspace: {
+        get current() { return self.options.workspaceCtx?.workspace; },
+        set current(ws: Workspace | undefined) {
+          if (self.options.workspaceCtx) {
+            if (ws) { self.options.workspaceCtx.workspace = ws; }
+            else { self.options.workspaceCtx = undefined; }
           }
-        }
+        },
       },
-      workspaceCfg: ctx ? { workspaceDir: ctx.workspaceDir, repoUrl: ctx.repoUrl } : undefined,
-      sessionId: this.workerId,
+      config: ctx ? { workspaceDir: ctx.workspaceDir, repoUrl: ctx.repoUrl, sessionId: self.workerId } : undefined,
       originalCwd: ctx?.originalCwd ?? process.cwd(),
       confirm: ctx?.confirm ?? (() => Promise.resolve(false)),
-      print: this.display.print,
-      chdir: (dir) => process.chdir(dir),
     }, true); // workerMode=true: workspace:create prints "managed automatically"
   }
 

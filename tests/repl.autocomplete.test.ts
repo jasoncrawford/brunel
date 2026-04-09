@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PassThrough } from "stream";
 import { ask, matchCommands, filterCommands, listCommandNames, listWorkerCommandNames, listCommands, parseFrontmatter, listSkillNames, type ListDir, type CommandSuggestion } from "../src/agent/input.js";
-import { _reset, register } from "../src/agent/commands.js";
+import { _reset } from "../src/agent/commands.js";
+import { registerTestCommands } from "./helpers.js";
 
 // ── Test harness for ask() integration tests ──────────────────────────────────
 
@@ -20,20 +21,6 @@ function withFakeStdin(fn: (stdin: PassThrough) => Promise<void>): Promise<void>
   return fn(stdin).finally(() => {
     Object.defineProperty(process, "stdin", { value: origStdin, configurable: true });
   });
-}
-
-function registerBuiltins() {
-  _reset();
-  const noop = async () => {};
-  register("clear",  { description: "Clear the conversation", handler: noop });
-  register("exit",   { description: "Exit the REPL", handler: noop });
-  register("model",  { description: "Select the Claude model to use", handler: noop });
-  register("effort", { description: "Set the effort level for Claude's thinking", handler: noop });
-  register("workspace:create", { description: "Create an isolated git checkout for this session", handler: noop });
-  register("workspace:reset",  { description: "Reset workspace to clean main branch", handler: noop });
-  register("workspace:remove", { description: "Remove the workspace checkout for this session", handler: noop });
-  register("workspace:prune",  { description: "Remove orphaned worker workspace directories", handler: noop });
-  register("worker:task-complete", { description: "Mark the current task as done", availability: "worker", handler: async () => "task-complete" });
 }
 
 beforeEach(() => {
@@ -325,7 +312,7 @@ describe("filterCommands", () => {
 // ── listCommandNames ──────────────────────────────────────────────────────────
 
 describe("listCommandNames", () => {
-  beforeEach(() => registerBuiltins());
+  beforeEach(async () => registerTestCommands());
 
   it("always includes builtins clear and exit", () => {
     const result = listCommandNames(() => null);
@@ -443,7 +430,7 @@ describe("listCommandNames", () => {
 // ── listCommands ─────────────────────────────────────────────────────────────
 
 describe("listCommands", () => {
-  beforeEach(() => registerBuiltins());
+  beforeEach(async () => registerTestCommands());
 
   it("returns CommandSuggestion objects with name and description", () => {
     const result = listCommands(() => null);
@@ -536,7 +523,7 @@ describe("listCommands", () => {
 // ── listWorkerCommandNames ────────────────────────────────────────────────────
 
 describe("listWorkerCommandNames", () => {
-  beforeEach(() => registerBuiltins());
+  beforeEach(async () => registerTestCommands());
 
   it("includes worker:task-complete", () => {
     const result = listWorkerCommandNames(() => null);

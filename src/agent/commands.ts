@@ -54,6 +54,16 @@ export async function execute(name: string, args: string): Promise<HandlerResult
   return entry.handler(args);
 }
 
+/**
+ * Returns a register function scoped to the given namespace prefix.
+ * e.g. scoped("workspace")("create", opts) registers "workspace:create".
+ */
+export function scoped(
+  prefix: string,
+): (name: string, opts: { description: string; availability?: Availability; handler: CommandHandler }) => void {
+  return (name, opts) => register(`${prefix}:${name}`, opts);
+}
+
 /** Reset the registry (for test isolation). */
 export function _reset(): void {
   _entries.clear();

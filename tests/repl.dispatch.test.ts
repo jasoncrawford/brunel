@@ -1,21 +1,8 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { dispatchInput, applyArguments, resolveContent } from "../src/agent/input.js";
-import { _reset, register } from "../src/agent/commands.js";
+import { registerTestCommands } from "./helpers.js";
 
-// Register the built-in commands that dispatchInput relies on via lookup().
-beforeEach(() => {
-  _reset();
-  const noop = async () => {};
-  register("exit",   { description: "Exit", handler: noop });
-  register("clear",  { description: "Clear", handler: noop });
-  register("model",  { description: "Model", handler: noop });
-  register("effort", { description: "Effort", handler: noop });
-  register("workspace:create", { description: "Create workspace", handler: noop });
-  register("workspace:reset",  { description: "Reset workspace", handler: noop });
-  register("workspace:remove", { description: "Remove workspace", handler: noop });
-  register("workspace:prune",  { description: "Prune workspaces", handler: noop });
-  register("worker:task-complete", { description: "Task done", availability: "worker", handler: async () => "task-complete" });
-});
+beforeEach(async () => registerTestCommands());
 
 // ── applyArguments ────────────────────────────────────────────────────────────
 

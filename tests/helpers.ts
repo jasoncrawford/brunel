@@ -8,3 +8,30 @@ export async function waitUntil(predicate: () => boolean): Promise<void> {
     await new Promise(r => setImmediate(r));
   }
 }
+
+/**
+ * Register all standard built-in commands with minimal stubs.
+ * Workspace commands use the real registerWorkspaceCommands (real descriptions, real handler logic).
+ * Call this in beforeEach for tests that query the command registry.
+ */
+export async function registerTestCommands(): Promise<void> {
+  const { _reset, register } = await import("../src/agent/commands.js");
+  const { registerWorkspaceCommands } = await import("../src/agent/workspace.js");
+  _reset();
+  registerWorkspaceCommands({
+    workspace: { current: undefined },
+    config: undefined,
+    originalCwd: process.cwd(),
+    confirm: async () => true,
+  });
+  const noop = async () => {};
+  register("exit",   { description: "Exit the REPL", handler: noop });
+  register("clear",  { description: "Clear the conversation", handler: noop });
+  register("model",  { description: "Select the Claude model to use", handler: noop });
+  register("effort", { description: "Set the effort level for Claude's thinking", handler: noop });
+  register("worker:task-complete", {
+    description: "Mark the current task as done",
+    availability: "worker",
+    handler: async () => "task-complete",
+  });
+}

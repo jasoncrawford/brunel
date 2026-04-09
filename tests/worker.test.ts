@@ -3,6 +3,7 @@ import { EventEmitter } from "events";
 import { WorkerSession, classifyEvent, debounceMs } from "../src/agent/worker.js";
 import type { ForemanMessage, GitHubEvent, TaskIssue } from "../src/types.js";
 import { stripAnsi } from "./helpers.js";
+import * as displayModule from "../src/agent/display.js";
 
 // ── Fake WebSocket ─────────────────────────────────────────────────────────────
 
@@ -1455,11 +1456,16 @@ describe("workspace slash commands in WorkerSession", () => {
   });
 
   it("/create-workspace prints 'managed automatically' in worker mode", async () => {
-    const sessionWs = new WorkerSession(WORKER_ID, wsFactory, runQuery, display, {});
-    sessionWs.start();
-    await sessionWs.handleUserInput("/workspace:create");
-    const printed = display.print.mock.calls.map(([s]: [string]) => s).join("\n");
-    expect(printed).toContain("managed automatically");
+    const printSpy = vi.spyOn(displayModule, "print").mockImplementation(() => {});
+    try {
+      const sessionWs = new WorkerSession(WORKER_ID, wsFactory, runQuery, display, {});
+      sessionWs.start();
+      await sessionWs.handleUserInput("/workspace:create");
+      const printed = printSpy.mock.calls.map(([s]) => stripAnsi(s as string)).join("\n");
+      expect(printed).toContain("managed automatically");
+    } finally {
+      printSpy.mockRestore();
+    }
   });
 });
 

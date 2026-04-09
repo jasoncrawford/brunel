@@ -4,7 +4,7 @@ import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
 import * as display from "./display.js";
 import { fmtError } from "../utils.js";
-import { register } from "./commands.js";
+import { scoped } from "./commands.js";
 
 const execFileAsync = promisify(execFileCb);
 
@@ -183,14 +183,10 @@ export class Workspace {
 // ── Workspace command registration ────────────────────────────────────────────
 
 export interface WorkspaceCommandDeps {
-  getWorkspace: () => Workspace | undefined;
-  setWorkspace: (ws: Workspace | undefined) => void;
-  workspaceCfg: { workspaceDir: string; repoUrl: string } | undefined;
-  sessionId: string;
+  workspace: { current: Workspace | undefined };
+  config: { workspaceDir: string; repoUrl: string; sessionId: string } | undefined;
   originalCwd: string;
   confirm: (msg: string) => Promise<boolean>;
-  print: (msg: string) => void;
-  chdir: (dir: string) => void;
 }
 
 /**
@@ -199,83 +195,76 @@ export interface WorkspaceCommandDeps {
  * If workerMode is true, workspace:create prints "managed automatically" instead
  * of creating a workspace (workers have their workspace managed by the foreman).
  */
-export function registerWorkspaceCommands(
-  namespace: string,
-  deps: WorkspaceCommandDeps,
-  workerMode = false,
-): void {
-  register(`${namespace}:create`, {
+export function registerWorkspaceCommands(deps: WorkspaceCommandDeps, workerMode = false): void {
+  const reg = scoped("workspace");
+
+  reg("create", {
     description: "Create an isolated git checkout for this session",
     handler: async () => {
       if (workerMode) {
-        deps.print(display.c.amber("Workspace is managed automatically in worker mode."));
+        display.print(display.c.amber("Workspace is managed automatically in worker mode."));
         return;
       }
-      if (!deps.workspaceCfg) {
-        deps.print(display.c.boldRed("Cannot create workspace: no GitHub repo configured."));
+      if (!deps.config) {
+        display.print(display.c.boldRed("Cannot create workspace: no GitHub repo configured."));
         return;
       }
-      const existing = deps.getWorkspace();
-      if (existing) {
-        deps.print(display.c.amber(`Workspace already exists: ${existing.dir}`));
+      if (deps.workspace.current) {
+        display.print(display.c.amber(`Workspace already exists: ${deps.workspace.current.dir}`));
         return;
       }
-      const ws = await Workspace.create(
-        deps.workspaceCfg.workspaceDir,
-        deps.sessionId,
-        deps.workspaceCfg.repoUrl,
-      );
-      deps.setWorkspace(ws);
-      deps.chdir(ws.dir);
-      deps.print(display.c.sageGreen(`Workspace created: ${ws.dir}`));
+      const ws = await Workspace.create(deps.config.workspaceDir, deps.config.sessionId, deps.config.repoUrl);
+      deps.workspace.current = ws;
+      process.chdir(ws.dir);
+      display.print(display.c.sageGreen(`Workspace created: ${ws.dir}`));
     },
   });
 
-  register(`${namespace}:reset`, {
+  reg("reset", {
     description: "Reset workspace to clean main branch",
     handler: async () => {
-      const ws = deps.getWorkspace();
+      const ws = deps.workspace.current;
       if (!ws) {
-        deps.print(display.c.boldRed("No workspace. Use /workspace:create first."));
+        display.print(display.c.boldRed("No workspace. Use /workspace:create first."));
         return;
       }
       const ok = await confirmIfUnsafe(ws, deps.confirm);
       if (!ok) return;
       await ws.reset();
-      deps.print(display.c.sageGreen("Workspace reset to main."));
+      display.print(display.c.sageGreen("Workspace reset to main."));
     },
   });
 
-  register(`${namespace}:remove`, {
+  reg("remove", {
     description: "Remove the workspace checkout for this session",
     handler: async () => {
-      const ws = deps.getWorkspace();
+      const ws = deps.workspace.current;
       if (!ws) {
-        deps.print(display.c.boldRed("No workspace in this session."));
+        display.print(display.c.boldRed("No workspace in this session."));
         return;
       }
       const ok = await confirmIfUnsafe(ws, deps.confirm);
       if (!ok) return;
       await ws.destroy();
-      deps.chdir(deps.originalCwd);
-      deps.setWorkspace(undefined);
-      deps.print(display.c.sageGreen(`Workspace removed. Now in: ${deps.originalCwd}`));
+      process.chdir(deps.originalCwd);
+      deps.workspace.current = undefined;
+      display.print(display.c.sageGreen(`Workspace removed. Now in: ${deps.originalCwd}`));
     },
   });
 
-  register(`${namespace}:prune`, {
+  reg("prune", {
     description: "Remove orphaned worker workspace directories",
     handler: async () => {
-      if (!deps.workspaceCfg) {
-        deps.print(display.c.boldRed("Cannot prune: no workspace directory configured."));
+      if (!deps.config) {
+        display.print(display.c.boldRed("Cannot prune: no workspace directory configured."));
         return;
       }
-      const removed = await Workspace.prune(deps.workspaceCfg.workspaceDir);
+      const removed = await Workspace.prune(deps.config.workspaceDir);
       if (removed.length === 0) {
-        deps.print(display.c.sageGreen("Nothing to prune."));
+        display.print(display.c.sageGreen("Nothing to prune."));
       } else {
-        for (const dir of removed) deps.print(display.c.darkGray(`  Removed: ${dir}`));
-        deps.print(display.c.sageGreen(`Pruned ${removed.length} orphaned workspace(s).`));
+        for (const dir of removed) display.print(display.c.darkGray(`  Removed: ${dir}`));
+        display.print(display.c.sageGreen(`Pruned ${removed.length} orphaned workspace(s).`));
       }
     },
   });
