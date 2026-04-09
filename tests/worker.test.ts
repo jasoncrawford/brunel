@@ -3,6 +3,7 @@ import { EventEmitter } from "events";
 import { WorkerSession, classifyEvent, debounceMs } from "../src/agent/worker.js";
 import type { ForemanMessage, GitHubEvent, TaskIssue } from "../src/types.js";
 import { stripAnsi } from "./helpers.js";
+import * as displayModule from "../src/agent/display.js";
 
 // ── Fake WebSocket ─────────────────────────────────────────────────────────────
 
@@ -80,7 +81,7 @@ describe("task_assigned", () => {
     await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
     // The state is observable via /task-complete behavior: if task is set,
     // task_complete message is sent to WS
-    const action = session.handleUserInput("/task-complete");
+    const action = session.handleUserInput("/worker:task-complete");
     await action;
     const sent = JSON.parse(fakeWs.send.mock.calls[0][0]);
     expect(sent.taskId).toBe("42");
@@ -192,7 +193,7 @@ describe("handleUserInput", () => {
     sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
     await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
 
-    await session.handleUserInput("/task-complete");
+    await session.handleUserInput("/worker:task-complete");
 
     const sent = JSON.parse(fakeWs.send.mock.calls[0][0]);
     expect(sent).toEqual({ type: "task_complete", workerId: WORKER_ID, taskId: "42" });
@@ -203,18 +204,18 @@ describe("handleUserInput", () => {
     sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
     await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
 
-    const result = await session.handleUserInput("/task-complete");
+    const result = await session.handleUserInput("/worker:task-complete");
 
     expect(result).toBe("task-complete");
   });
 
   it("/task-complete with no active task returns undefined (no prompt change needed)", async () => {
-    const result = await session.handleUserInput("/task-complete");
+    const result = await session.handleUserInput("/worker:task-complete");
     expect(result).toBeUndefined();
   });
 
   it("/task-complete with no active task does not send to WS", async () => {
-    await session.handleUserInput("/task-complete");
+    await session.handleUserInput("/worker:task-complete");
     expect(fakeWs.send).not.toHaveBeenCalled();
   });
 
@@ -226,7 +227,7 @@ describe("handleUserInput", () => {
     await session.handleUserInput("/clear");
 
     // After /clear, task is still set — /task-complete should still send
-    await session.handleUserInput("/task-complete");
+    await session.handleUserInput("/worker:task-complete");
     expect(fakeWs.send).toHaveBeenCalled();
     const sent = JSON.parse(fakeWs.send.mock.calls[0][0]);
     expect(sent.taskId).toBe("42");
@@ -272,11 +273,11 @@ describe("state after task_complete", () => {
     sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
     await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
 
-    await session.handleUserInput("/task-complete");
+    await session.handleUserInput("/worker:task-complete");
 
     // State should be cleared — another /task-complete sends nothing
     fakeWs.send.mockClear();
-    await session.handleUserInput("/task-complete");
+    await session.handleUserInput("/worker:task-complete");
     expect(fakeWs.send).not.toHaveBeenCalled();
   });
 });
@@ -527,7 +528,7 @@ describe("status bar content", () => {
     expect(stripAnsi(session.getStatusText())).toContain("PR #55");
 
     // Complete task and assign new task
-    await session.handleUserInput("/task-complete");
+    await session.handleUserInput("/worker:task-complete");
     const issue2 = makeIssue(2);
     sendMsg(fakeWs, { type: "task_assigned", taskId: "t2", issue: issue2 });
     await vi.waitFor(() => expect(runQuery).toHaveBeenCalledTimes(2));
@@ -715,7 +716,7 @@ describe("hello_ack handshake — buffering", () => {
       newWs.emit("open");
 
       // Try to send task_complete — should be buffered (hello_ack not yet received)
-      await session.handleUserInput("/task-complete");
+      await session.handleUserInput("/worker:task-complete");
       expect(newWs.send).not.toHaveBeenCalled();
 
       // Send hello_ack → buffer should be flushed
@@ -739,7 +740,7 @@ describe("hello_ack handshake — buffering", () => {
       newWs.emit("open");
 
       // Buffer a task_complete
-      await session.handleUserInput("/task-complete");
+      await session.handleUserInput("/worker:task-complete");
       expect(newWs.send).not.toHaveBeenCalled();
 
       // Send hello_ack cancelled → buffer discarded, task state cleared
@@ -747,7 +748,7 @@ describe("hello_ack handshake — buffering", () => {
       expect(newWs.send).not.toHaveBeenCalled();
 
       // Verify task state cleared: subsequent /task-complete sends nothing
-      await session.handleUserInput("/task-complete");
+      await session.handleUserInput("/worker:task-complete");
       expect(newWs.send).not.toHaveBeenCalled();
     } finally {
       vi.restoreAllMocks();
@@ -861,7 +862,7 @@ describe("hello_ack handshake — buffering", () => {
       const newWs = reconnectWithNewWs();
       newWs.emit("open");
 
-      await session.handleUserInput("/task-complete");
+      await session.handleUserInput("/worker:task-complete");
       expect(newWs.send).not.toHaveBeenCalled();
 
       // hello_ack idle — task was reverted on foreman side; but worker flushes anyway
@@ -1412,7 +1413,7 @@ describe("workspace slash commands in WorkerSession", () => {
       },
     });
     sessionWs.start();
-    await sessionWs.handleUserInput("/reset-workspace");
+    await sessionWs.handleUserInput("/workspace:reset");
     expect(workspace.reset).toHaveBeenCalledOnce();
   });
 
@@ -1432,7 +1433,7 @@ describe("workspace slash commands in WorkerSession", () => {
       },
     });
     sessionWs.start();
-    await sessionWs.handleUserInput("/reset-workspace");
+    await sessionWs.handleUserInput("/workspace:reset");
     expect(workspace.reset).not.toHaveBeenCalled();
   });
 
@@ -1450,16 +1451,21 @@ describe("workspace slash commands in WorkerSession", () => {
       },
     });
     sessionWs.start();
-    await sessionWs.handleUserInput("/remove-workspace");
+    await sessionWs.handleUserInput("/workspace:remove");
     expect(workspace.destroy).toHaveBeenCalledOnce();
   });
 
   it("/create-workspace prints 'managed automatically' in worker mode", async () => {
-    const sessionWs = new WorkerSession(WORKER_ID, wsFactory, runQuery, display, {});
-    sessionWs.start();
-    await sessionWs.handleUserInput("/create-workspace");
-    const printed = display.print.mock.calls.map(([s]: [string]) => s).join("\n");
-    expect(printed).toContain("managed automatically");
+    const printSpy = vi.spyOn(displayModule, "print").mockImplementation(() => {});
+    try {
+      const sessionWs = new WorkerSession(WORKER_ID, wsFactory, runQuery, display, {});
+      sessionWs.start();
+      await sessionWs.handleUserInput("/workspace:create");
+      const printed = printSpy.mock.calls.map(([s]) => stripAnsi(s as string)).join("\n");
+      expect(printed).toContain("managed automatically");
+    } finally {
+      printSpy.mockRestore();
+    }
   });
 });
 
@@ -1477,7 +1483,7 @@ describe("afterTask callback on /task-complete", () => {
     sendMsg(fakeWs, { type: "task_assigned", taskId: "t1", issue });
     await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
 
-    await sessionWithAfterTask.handleUserInput("/task-complete");
+    await sessionWithAfterTask.handleUserInput("/worker:task-complete");
     expect(afterTask).toHaveBeenCalledOnce();
     const sentMsg = JSON.parse(fakeWs.send.mock.calls.at(-1)![0]);
     expect(sentMsg.type).toBe("task_complete");
@@ -1495,7 +1501,7 @@ describe("afterTask callback on /task-complete", () => {
     await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
 
     const sendCountBefore = fakeWs.send.mock.calls.length;
-    await sessionWithAfterTask.handleUserInput("/task-complete");
+    await sessionWithAfterTask.handleUserInput("/worker:task-complete");
     const taskCompleteSent = fakeWs.send.mock.calls
       .slice(sendCountBefore)
       .some(([data]: [string]) => JSON.parse(data).type === "task_complete");
@@ -1506,7 +1512,7 @@ describe("afterTask callback on /task-complete", () => {
     const issue = makeIssue();
     sendMsg(fakeWs, { type: "task_assigned", taskId: "t1", issue });
     await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
-    await session.handleUserInput("/task-complete");
+    await session.handleUserInput("/worker:task-complete");
     const lastMsg = JSON.parse(fakeWs.send.mock.calls.at(-1)![0]);
     expect(lastMsg.type).toBe("task_complete");
   });

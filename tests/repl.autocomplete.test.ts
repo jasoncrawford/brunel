@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PassThrough } from "stream";
 import { ask, matchCommands, filterCommands, listCommandNames, listWorkerCommandNames, listCommands, parseFrontmatter, listSkillNames, type ListDir, type CommandSuggestion } from "../src/agent/input.js";
+import { _reset } from "../src/agent/commands.js";
+import { registerTestCommands } from "./helpers.js";
 
 // ── Test harness for ask() integration tests ──────────────────────────────────
 
@@ -24,6 +26,7 @@ function withFakeStdin(fn: (stdin: PassThrough) => Promise<void>): Promise<void>
 beforeEach(() => {
   origStdin = process.stdin;
   vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+  _reset();
 });
 
 afterEach(() => {
@@ -309,6 +312,8 @@ describe("filterCommands", () => {
 // ── listCommandNames ──────────────────────────────────────────────────────────
 
 describe("listCommandNames", () => {
+  beforeEach(async () => registerTestCommands());
+
   it("always includes builtins clear and exit", () => {
     const result = listCommandNames(() => null);
     expect(result).toContain("clear");
@@ -317,7 +322,7 @@ describe("listCommandNames", () => {
 
   it("returns only builtins when directory is missing", () => {
     const result = listCommandNames(() => null);
-    expect(result).toEqual(["clear", "create-workspace", "effort", "exit", "model", "prune", "remove-workspace", "reset-workspace"]);
+    expect(result).toEqual(["clear", "effort", "exit", "model", "workspace:create", "workspace:prune", "workspace:remove", "workspace:reset"]);
   });
 
   it("includes a file at root level", () => {
@@ -400,8 +405,9 @@ describe("listCommandNames", () => {
     expect(result).toContain("my-skill");
   });
 
-  it("does not include task-complete (worker-only command)", () => {
+  it("does not include worker:task-complete (worker-only command)", () => {
     const result = listCommandNames(() => null);
+    expect(result).not.toContain("worker:task-complete");
     expect(result).not.toContain("task-complete");
   });
 
@@ -424,6 +430,8 @@ describe("listCommandNames", () => {
 // ── listCommands ─────────────────────────────────────────────────────────────
 
 describe("listCommands", () => {
+  beforeEach(async () => registerTestCommands());
+
   it("returns CommandSuggestion objects with name and description", () => {
     const result = listCommands(() => null);
     expect(result.length).toBeGreaterThan(0);
@@ -515,9 +523,11 @@ describe("listCommands", () => {
 // ── listWorkerCommandNames ────────────────────────────────────────────────────
 
 describe("listWorkerCommandNames", () => {
-  it("includes task-complete", () => {
+  beforeEach(async () => registerTestCommands());
+
+  it("includes worker:task-complete", () => {
     const result = listWorkerCommandNames(() => null);
-    expect(result).toContain("task-complete");
+    expect(result).toContain("worker:task-complete");
   });
 
   it("also includes clear and exit", () => {

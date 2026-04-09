@@ -1,5 +1,8 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { dispatchInput, applyArguments, resolveContent } from "../src/agent/input.js";
+import { registerTestCommands } from "./helpers.js";
+
+beforeEach(async () => registerTestCommands());
 
 // ── applyArguments ────────────────────────────────────────────────────────────
 
@@ -87,14 +90,14 @@ describe("dispatchInput", () => {
     expect(result).toEqual({ type: "skip" });
   });
 
-  it("/exit returns { type: 'exit' }", async () => {
+  it("/exit returns { type: 'command', name: 'exit', args: '' }", async () => {
     const result = await dispatchInput("/exit", () => null);
-    expect(result).toEqual({ type: "exit" });
+    expect(result).toEqual({ type: "command", name: "exit", args: "" });
   });
 
-  it("/clear returns { type: 'clear' }", async () => {
+  it("/clear returns { type: 'command', name: 'clear', args: '' }", async () => {
     const result = await dispatchInput("/clear", () => null);
-    expect(result).toEqual({ type: "clear" });
+    expect(result).toEqual({ type: "command", name: "clear", args: "" });
   });
 
   it("/unknown with no file returns { type: 'unknown_command', command }", async () => {
@@ -151,28 +154,38 @@ describe("dispatchInput", () => {
     expect(result).toEqual({ type: "query", prompt: "Plugin skill bar baz." });
   });
 
-  it("/create-workspace returns { type: 'create-workspace' }", async () => {
-    const result = await dispatchInput("/create-workspace", () => null);
-    expect(result).toEqual({ type: "create-workspace" });
+  it("/workspace:create returns canonical command", async () => {
+    const result = await dispatchInput("/workspace:create", () => null);
+    expect(result).toEqual({ type: "command", name: "workspace:create", args: "" });
   });
 
-  it("/reset-workspace returns { type: 'reset-workspace' }", async () => {
-    const result = await dispatchInput("/reset-workspace", () => null);
-    expect(result).toEqual({ type: "reset-workspace" });
+  it("/workspace:reset returns canonical command", async () => {
+    const result = await dispatchInput("/workspace:reset", () => null);
+    expect(result).toEqual({ type: "command", name: "workspace:reset", args: "" });
   });
 
-  it("/remove-workspace returns { type: 'remove-workspace' }", async () => {
-    const result = await dispatchInput("/remove-workspace", () => null);
-    expect(result).toEqual({ type: "remove-workspace" });
+  it("/workspace:remove returns canonical command", async () => {
+    const result = await dispatchInput("/workspace:remove", () => null);
+    expect(result).toEqual({ type: "command", name: "workspace:remove", args: "" });
   });
 
-  it("/prune returns { type: 'prune' }", async () => {
-    const result = await dispatchInput("/prune", () => null);
-    expect(result).toEqual({ type: "prune" });
+  it("/workspace:prune returns canonical command", async () => {
+    const result = await dispatchInput("/workspace:prune", () => null);
+    expect(result).toEqual({ type: "command", name: "workspace:prune", args: "" });
   });
 
-  it("/model returns { type: 'model' }", async () => {
+  it("/model returns command with args", async () => {
     const result = await dispatchInput("/model", () => null);
-    expect(result).toEqual({ type: "model" });
+    expect(result).toEqual({ type: "command", name: "model", args: "" });
+  });
+
+  it("/model opus passes args to command", async () => {
+    const result = await dispatchInput("/model opus", () => null);
+    expect(result).toEqual({ type: "command", name: "model", args: "opus" });
+  });
+
+  it("/worker:task-complete returns canonical command", async () => {
+    const result = await dispatchInput("/worker:task-complete", () => null);
+    expect(result).toEqual({ type: "command", name: "worker:task-complete", args: "" });
   });
 });

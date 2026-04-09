@@ -1,173 +1,170 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-
-// Mock workspace module before importing repl
-vi.mock("../src/agent/workspace.js", () => {
-  const mockInstance = {
-    dir: "/fake/workspace",
-    reset: vi.fn().mockResolvedValue(undefined),
-    destroy: vi.fn().mockResolvedValue(undefined),
-    checkSafety: vi.fn().mockResolvedValue({ uncommittedFiles: [], unpushedCommits: [], noUpstream: false }),
-  };
-  return {
-    Workspace: {
-      create: vi.fn().mockResolvedValue(mockInstance),
-      prune: vi.fn().mockResolvedValue([]),
-    },
-    confirmIfUnsafe: vi.fn().mockResolvedValue(true),
-  };
-});
-
-// Prevent repl.ts from writing log entries to disk
-vi.mock("fs", () => ({ default: { appendFileSync: vi.fn() } }));
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Prevent SDK import side-effects
 vi.mock("@anthropic-ai/claude-agent-sdk", () => ({ query: vi.fn() }));
+// Prevent repl.ts from writing log entries to disk
+vi.mock("fs", () => ({ default: { appendFileSync: vi.fn() } }));
+// Mock display.print so workspace handlers don't write to stdout in tests
+vi.mock("../src/agent/display.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/agent/display.js")>();
+  return { ...actual, print: vi.fn() };
+});
 
-import { handleWorkspaceAction } from "../src/agent/index.js";
-import { Workspace, confirmIfUnsafe } from "../src/agent/workspace.js";
+import { Workspace, registerWorkspaceCommands, type WorkspaceCommandDeps } from "../src/agent/workspace.js";
+import * as display from "../src/agent/display.js";
+import { execute, _reset } from "../src/agent/commands.js";
 import { stripAnsi } from "./helpers.js";
 
-const cfg = { workspaceDir: "/base", repoUrl: "https://x@github.com/owner/repo.git" };
-const SESSION_ID = "test-session-uuid";
+const cfg = { workspaceDir: "/base", repoUrl: "https://x@github.com/owner/repo.git", sessionId: "test-session-uuid" };
 const ORIGINAL_CWD = "/original";
 
-function makeParams(
-  overrides: Partial<Parameters<typeof handleWorkspaceAction>[1]> = {},
-): Parameters<typeof handleWorkspaceAction>[1] {
-  return {
-    workspaceCfg: cfg,
-    workspace: undefined,
-    sessionId_: SESSION_ID,
+const mockInstance = {
+  dir: "/fake/workspace",
+  reset: vi.fn().mockResolvedValue(undefined),
+  destroy: vi.fn().mockResolvedValue(undefined),
+  checkSafety: vi.fn().mockResolvedValue({ uncommittedFiles: [], unpushedCommits: [], noUpstream: false }),
+} as unknown as Workspace;
+
+beforeEach(() => {
+  vi.spyOn(Workspace, "create").mockResolvedValue(mockInstance);
+  vi.spyOn(Workspace, "prune").mockResolvedValue([]);
+  vi.spyOn(process, "chdir").mockImplementation(() => undefined);
+  vi.mocked(display.print).mockClear();
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+function makeAndRegister(overrides: Partial<WorkspaceCommandDeps> = {}) {
+  _reset();
+  const workspaceRef: { current: Workspace | undefined } = { current: undefined };
+  const deps: WorkspaceCommandDeps = {
+    workspace: workspaceRef,
+    config: cfg,
     originalCwd: ORIGINAL_CWD,
     confirm: vi.fn().mockResolvedValue(true),
-    print: vi.fn(),
-    chdir: vi.fn(),
     ...overrides,
   };
+  registerWorkspaceCommands(deps);
+  return deps;
 }
 
-// Reset mocks between tests
-beforeEach(() => {
-  vi.mocked(Workspace.create).mockResolvedValue({ dir: "/fake/workspace", reset: vi.fn(), destroy: vi.fn(), checkSafety: vi.fn() } as any);
-  vi.mocked(Workspace.prune).mockResolvedValue([]);
-  vi.mocked(confirmIfUnsafe).mockResolvedValue(true);
-});
+// ── workspace:create ──────────────────────────────────────────────────────────
 
-// ── /create-workspace ─────────────────────────────────────────────────────────
-
-describe("handleWorkspaceAction — create-workspace", () => {
-  it("prints error and returns undefined if no workspaceCfg", async () => {
-    const params = makeParams({ workspaceCfg: undefined });
-    const result = await handleWorkspaceAction("create-workspace", params);
-    expect(stripAnsi(vi.mocked(params.print).mock.calls[0][0])).toContain("no GitHub repo configured");
-    expect(result).toBeUndefined();
+describe("workspace:create", () => {
+  it("prints error if no config", async () => {
+    makeAndRegister({ config: undefined });
+    await execute("workspace:create", "");
+    expect(stripAnsi(vi.mocked(display.print).mock.calls[0][0])).toContain("no GitHub repo configured");
     expect(Workspace.create).not.toHaveBeenCalled();
   });
 
-  it("prints error and returns existing workspace if one already exists", async () => {
+  it("prints error if workspace already exists", async () => {
     const existing = { dir: "/existing" } as any;
-    const params = makeParams({ workspace: existing });
-    const result = await handleWorkspaceAction("create-workspace", params);
-    expect(stripAnsi(vi.mocked(params.print).mock.calls[0][0])).toContain("Workspace already exists");
-    expect(result).toBe(existing);
+    const deps = makeAndRegister();
+    deps.workspace.current = existing;
+    await execute("workspace:create", "");
+    expect(stripAnsi(vi.mocked(display.print).mock.calls[0][0])).toContain("Workspace already exists");
     expect(Workspace.create).not.toHaveBeenCalled();
   });
 
-  it("creates workspace, calls chdir, and returns new workspace", async () => {
-    const params = makeParams();
-    const result = await handleWorkspaceAction("create-workspace", params);
-    expect(Workspace.create).toHaveBeenCalledWith(cfg.workspaceDir, SESSION_ID, cfg.repoUrl);
-    expect(vi.mocked(params.chdir)).toHaveBeenCalledWith("/fake/workspace");
-    expect(stripAnsi(vi.mocked(params.print).mock.calls[0][0])).toContain("Workspace created");
-    expect(result).toBeTruthy();
-    expect(result!.dir).toBe("/fake/workspace");
+  it("creates workspace, chdirs to it, and sets workspace.current", async () => {
+    const deps = makeAndRegister();
+    await execute("workspace:create", "");
+    expect(Workspace.create).toHaveBeenCalledWith(cfg.workspaceDir, cfg.sessionId, cfg.repoUrl);
+    expect(process.chdir).toHaveBeenCalledWith("/fake/workspace");
+    expect(stripAnsi(vi.mocked(display.print).mock.calls[0][0])).toContain("Workspace created");
+    expect(deps.workspace.current).toBeTruthy();
+    expect(deps.workspace.current!.dir).toBe("/fake/workspace");
   });
 });
 
-// ── /reset-workspace ──────────────────────────────────────────────────────────
+// ── workspace:reset ───────────────────────────────────────────────────────────
 
-describe("handleWorkspaceAction — reset-workspace", () => {
-  it("prints error and returns undefined if no workspace exists", async () => {
-    const params = makeParams();
-    const result = await handleWorkspaceAction("reset-workspace", params);
-    expect(stripAnsi(vi.mocked(params.print).mock.calls[0][0])).toContain("No workspace");
-    expect(result).toBeUndefined();
+describe("workspace:reset", () => {
+  it("prints error if no workspace exists", async () => {
+    makeAndRegister();
+    await execute("workspace:reset", "");
+    expect(stripAnsi(vi.mocked(display.print).mock.calls[0][0])).toContain("No workspace");
   });
 
-  it("resets workspace and prints success when safe", async () => {
-    const ws = { dir: "/ws", reset: vi.fn().mockResolvedValue(undefined), destroy: vi.fn(), checkSafety: vi.fn() } as any;
-    const params = makeParams({ workspace: ws });
-    const result = await handleWorkspaceAction("reset-workspace", params);
-    expect(confirmIfUnsafe).toHaveBeenCalledWith(ws, params.confirm);
+  it("resets workspace when clean", async () => {
+    const ws = { dir: "/ws", reset: vi.fn().mockResolvedValue(undefined), destroy: vi.fn(),
+      checkSafety: vi.fn().mockResolvedValue({ uncommittedFiles: [], unpushedCommits: [], noUpstream: false }) } as any;
+    const deps = makeAndRegister();
+    deps.workspace.current = ws;
+    await execute("workspace:reset", "");
     expect(ws.reset).toHaveBeenCalled();
-    expect(stripAnsi(vi.mocked(params.print).mock.calls[0][0])).toContain("Workspace reset to main");
-    expect(result).toBe(ws);
+    expect(stripAnsi(vi.mocked(display.print).mock.calls[0][0])).toContain("Workspace reset to main");
   });
 
   it("skips reset if user declines confirmation", async () => {
-    const ws = { dir: "/ws", reset: vi.fn(), destroy: vi.fn(), checkSafety: vi.fn() } as any;
-    vi.mocked(confirmIfUnsafe).mockResolvedValue(false);
-    const params = makeParams({ workspace: ws });
-    const result = await handleWorkspaceAction("reset-workspace", params);
+    const ws = { dir: "/ws", reset: vi.fn(), destroy: vi.fn(),
+      checkSafety: vi.fn().mockResolvedValue({ uncommittedFiles: ["M foo.ts"], unpushedCommits: [], noUpstream: false }) } as any;
+    const deps = makeAndRegister({ confirm: vi.fn().mockResolvedValue(false) });
+    deps.workspace.current = ws;
+    await execute("workspace:reset", "");
     expect(ws.reset).not.toHaveBeenCalled();
-    expect(result).toBe(ws);
+    expect(deps.workspace.current).toBe(ws);
   });
 });
 
-// ── /remove-workspace ─────────────────────────────────────────────────────────
+// ── workspace:remove ──────────────────────────────────────────────────────────
 
-describe("handleWorkspaceAction — remove-workspace", () => {
-  it("prints error and returns undefined if no workspace exists", async () => {
-    const params = makeParams();
-    const result = await handleWorkspaceAction("remove-workspace", params);
-    expect(stripAnsi(vi.mocked(params.print).mock.calls[0][0])).toContain("No workspace in this session");
-    expect(result).toBeUndefined();
+describe("workspace:remove", () => {
+  it("prints error if no workspace exists", async () => {
+    makeAndRegister();
+    await execute("workspace:remove", "");
+    expect(stripAnsi(vi.mocked(display.print).mock.calls[0][0])).toContain("No workspace in this session");
   });
 
-  it("destroys workspace, chdir to originalCwd, and returns undefined", async () => {
-    const ws = { dir: "/ws", reset: vi.fn(), destroy: vi.fn().mockResolvedValue(undefined), checkSafety: vi.fn() } as any;
-    const params = makeParams({ workspace: ws });
-    const result = await handleWorkspaceAction("remove-workspace", params);
-    expect(confirmIfUnsafe).toHaveBeenCalledWith(ws, params.confirm);
+  it("destroys workspace, chdirs to originalCwd, clears workspace.current", async () => {
+    const ws = { dir: "/ws", reset: vi.fn(), destroy: vi.fn().mockResolvedValue(undefined),
+      checkSafety: vi.fn().mockResolvedValue({ uncommittedFiles: [], unpushedCommits: [], noUpstream: false }) } as any;
+    const deps = makeAndRegister();
+    deps.workspace.current = ws;
+    await execute("workspace:remove", "");
     expect(ws.destroy).toHaveBeenCalled();
-    expect(vi.mocked(params.chdir)).toHaveBeenCalledWith(ORIGINAL_CWD);
-    expect(stripAnsi(vi.mocked(params.print).mock.calls[0][0])).toContain("Workspace removed");
-    expect(result).toBeUndefined();
+    expect(process.chdir).toHaveBeenCalledWith(ORIGINAL_CWD);
+    expect(stripAnsi(vi.mocked(display.print).mock.calls[0][0])).toContain("Workspace removed");
+    expect(deps.workspace.current).toBeUndefined();
   });
 
   it("skips removal if user declines confirmation", async () => {
-    const ws = { dir: "/ws", reset: vi.fn(), destroy: vi.fn(), checkSafety: vi.fn() } as any;
-    vi.mocked(confirmIfUnsafe).mockResolvedValue(false);
-    const params = makeParams({ workspace: ws });
-    const result = await handleWorkspaceAction("remove-workspace", params);
+    const ws = { dir: "/ws", reset: vi.fn(), destroy: vi.fn(),
+      checkSafety: vi.fn().mockResolvedValue({ uncommittedFiles: ["M foo.ts"], unpushedCommits: [], noUpstream: false }) } as any;
+    const deps = makeAndRegister({ confirm: vi.fn().mockResolvedValue(false) });
+    deps.workspace.current = ws;
+    await execute("workspace:remove", "");
     expect(ws.destroy).not.toHaveBeenCalled();
-    expect(vi.mocked(params.chdir)).not.toHaveBeenCalled();
-    expect(result).toBe(ws);
+    expect(process.chdir).not.toHaveBeenCalled();
+    expect(deps.workspace.current).toBe(ws);
   });
 });
 
-// ── /prune ────────────────────────────────────────────────────────────────────
+// ── workspace:prune ───────────────────────────────────────────────────────────
 
-describe("handleWorkspaceAction — prune", () => {
-  it("prints error if no workspaceCfg", async () => {
-    const params = makeParams({ workspaceCfg: undefined });
-    await handleWorkspaceAction("prune", params);
-    expect(stripAnsi(vi.mocked(params.print).mock.calls[0][0])).toContain("no workspace directory configured");
+describe("workspace:prune", () => {
+  it("prints error if no config", async () => {
+    makeAndRegister({ config: undefined });
+    await execute("workspace:prune", "");
+    expect(stripAnsi(vi.mocked(display.print).mock.calls[0][0])).toContain("no workspace directory configured");
   });
 
   it("prints 'Nothing to prune' when no orphans found", async () => {
     vi.mocked(Workspace.prune).mockResolvedValue([]);
-    const params = makeParams();
-    await handleWorkspaceAction("prune", params);
+    makeAndRegister();
+    await execute("workspace:prune", "");
     expect(Workspace.prune).toHaveBeenCalledWith(cfg.workspaceDir);
-    expect(stripAnsi(vi.mocked(params.print).mock.calls[0][0])).toContain("Nothing to prune");
+    expect(stripAnsi(vi.mocked(display.print).mock.calls[0][0])).toContain("Nothing to prune");
   });
 
   it("lists removed dirs and prints summary when orphans are pruned", async () => {
     vi.mocked(Workspace.prune).mockResolvedValue(["/base/abc", "/base/def"]);
-    const params = makeParams();
-    await handleWorkspaceAction("prune", params);
-    const allOutput = vi.mocked(params.print).mock.calls.map(c => stripAnsi(c[0])).join("\n");
+    makeAndRegister();
+    await execute("workspace:prune", "");
+    const allOutput = vi.mocked(display.print).mock.calls.map(c => stripAnsi(c[0])).join("\n");
     expect(allOutput).toContain("/base/abc");
     expect(allOutput).toContain("/base/def");
     expect(allOutput).toContain("Pruned 2 orphaned workspace(s)");

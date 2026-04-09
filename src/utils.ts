@@ -1,3 +1,5 @@
+import { randomInt } from "node:crypto";
+
 export const WORKER_NAMES = [
   "abner",
   "adelaide",
@@ -118,8 +120,8 @@ export const WORKER_NAMES = [
 /** Generate a human-readable worker ID by prepending a random human name to a UUID.
  * E.g. "patience-a9bdda00-1234-5678-abcd-ef0123456789" */
 export function generateWorkerId(): string {
-  const name = WORKER_NAMES[Math.floor(Math.random() * WORKER_NAMES.length)];
-  return `${name}-${crypto.randomUUID()}`;
+  const idx = randomInt(WORKER_NAMES.length);
+  return `${WORKER_NAMES[idx]}-${crypto.randomUUID()}`;
 }
 
 /** Serialize an unknown thrown value to a human-readable string.
