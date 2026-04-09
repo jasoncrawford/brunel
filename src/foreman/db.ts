@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database, Json } from "../database.types.js";
 import { fmtEvent } from "./event-fmt.js";
 import type { TaskStatus } from "../types.js";
 
@@ -83,7 +84,7 @@ export function buildMessageSummary(
 
 // ── Real implementation ────────────────────────────────────────────────────────
 
-export function createDbLogger(supabase: SupabaseClient): DbLogger {
+export function createDbLogger(supabase: SupabaseClient<Database>): DbLogger {
   function fire(promise: PromiseLike<{ error: unknown }>) {
     Promise.resolve(promise).then(({ error }) => {
       if (error) console.error("[db] insert error:", error);
@@ -132,7 +133,7 @@ export function createDbLogger(supabase: SupabaseClient): DbLogger {
         branch: data.branch,
         task_id: data.taskId,
         worker_id: data.workerId,
-        payload: data.payload,
+        payload: data.payload as Json,
       }));
     },
 
@@ -142,7 +143,7 @@ export function createDbLogger(supabase: SupabaseClient): DbLogger {
         worker_id: data.workerId,
         task_id: data.taskId,
         msg_type: data.msgType,
-        payload: data.payload,
+        payload: data.payload as Json,
       }));
     },
 
@@ -275,7 +276,7 @@ export interface TaskStore {
   listTasks(opts?: ListTasksOpts): Promise<TaskRow[]>;
 }
 
-export function createTaskStore(supabase: SupabaseClient): TaskStore {
+export function createTaskStore(supabase: SupabaseClient<Database>): TaskStore {
   function rowToTaskRow(row: Record<string, unknown>): TaskRow {
     return {
       taskId: row.task_id as string,

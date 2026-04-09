@@ -1,5 +1,6 @@
 import { execSync } from "child_process";
 import { createClient } from "@supabase/supabase-js";
+import type { Database } from "../src/database.types.js";
 
 /**
  * Vitest global setup: runs once before the entire test suite.
@@ -54,7 +55,7 @@ export async function setup(): Promise<void> {
   }
 
   // Verify the local Supabase instance is reachable and the schema is intact.
-  const supabase = createClient(url, key, { auth: { persistSession: false } });
+  const supabase = createClient<Database>(url, key, { auth: { persistSession: false } });
   const { error } = await supabase.from("tasks").select("task_id").limit(1);
   if (error) {
     throw new Error(

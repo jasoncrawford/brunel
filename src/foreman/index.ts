@@ -2,6 +2,7 @@
 
 import "dotenv/config";
 import { createClient } from "@supabase/supabase-js";
+import type { Database } from "../database.types.js";
 import { Webhooks } from "@octokit/webhooks";
 import type { DependencyGraph } from "./dependencies.js";
 import { loadConfig } from "../config.js";
@@ -41,7 +42,7 @@ if (isMain) {
   let dbLogger: DbLogger;
   let taskModel: TaskModel;
   if (config.supabaseUrl && config.supabaseSecretKey) {
-    const supabase = createClient(config.supabaseUrl, config.supabaseSecretKey);
+    const supabase = createClient<Database>(config.supabaseUrl, config.supabaseSecretKey);
     dbLogger = createDbLogger(supabase);
     taskModel = TaskModel.create(supabase);
     flog("Supabase logging enabled");
