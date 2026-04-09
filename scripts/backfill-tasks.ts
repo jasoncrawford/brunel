@@ -15,6 +15,7 @@
  */
 
 import { createClient } from "@supabase/supabase-js";
+import type { Database } from "../src/database.types.js";
 import { loadConfig } from "../src/config.js";
 import { createTaskStore } from "../src/foreman/db.js";
 
@@ -28,7 +29,7 @@ if (!supabaseUrl || !supabaseSecretKey) {
   process.exit(1);
 }
 
-const supabase = createClient(supabaseUrl, supabaseSecretKey);
+const supabase = createClient<Database>(supabaseUrl, supabaseSecretKey);
 const taskStore = createTaskStore(supabase);
 
 const [owner, repoName] = repo.split("/");

@@ -1,4 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database, Json } from "../database.types.js";
+
+type Row<T extends keyof Database["public"]["Tables"]> = Database["public"]["Tables"][T]["Row"];
 import { fmtEvent } from "./event-fmt.js";
 import type { TaskStatus } from "../types.js";
 
@@ -83,38 +86,36 @@ export function buildMessageSummary(
 
 // ── Real implementation ────────────────────────────────────────────────────────
 
-export function createDbLogger(supabase: SupabaseClient): DbLogger {
+export function createDbLogger(supabase: SupabaseClient<Database>): DbLogger {
   function fire(promise: PromiseLike<{ error: unknown }>) {
     Promise.resolve(promise).then(({ error }) => {
       if (error) console.error("[db] insert error:", error);
     }).catch((err: unknown) => console.error("[db] unexpected error:", err));
   }
 
-  function webhookToEntry(row: Record<string, unknown>): LogEntry {
-    const storedPayload = (row.payload ?? {}) as Record<string, unknown>;
+  function webhookToEntry(row: Row<"webhook_events">): LogEntry {
     // Merge row-level action as fallback for old rows without stored payload
-    const payload: Record<string, unknown> = { action: row.action, ...storedPayload };
-    const summary = fmtEvent({ id: String(row.delivery_id ?? ""), name: String(row.event_name), payload });
+    const payload: Record<string, unknown> = { action: row.action, ...(row.payload as Record<string, unknown>) };
+    const summary = fmtEvent({ id: row.delivery_id ?? "", name: row.event_name, payload });
     return {
       kind: "webhook",
-      id: row.id as number,
-      timestamp: row.received_at as string,
-      taskId: (row.task_id as string | null) ?? null,
-      workerId: (row.worker_id as string | null) ?? null,
+      id: row.id,
+      timestamp: row.received_at,
+      taskId: row.task_id,
+      workerId: row.worker_id,
       summary,
     };
   }
 
-  function messageToEntry(row: Record<string, unknown>): LogEntry {
-    const payload = (row.payload ?? {}) as Record<string, unknown>;
-    const taskId = (row.task_id as string | null) ?? null;
-    const summary = buildMessageSummary(String(row.direction), String(row.msg_type), taskId, payload);
+  function messageToEntry(row: Row<"foreman_messages">): LogEntry {
+    const payload = row.payload as Record<string, unknown>;
+    const summary = buildMessageSummary(row.direction, row.msg_type, row.task_id, payload);
     return {
       kind: "message",
-      id: row.id as number,
-      timestamp: row.created_at as string,
-      taskId: (row.task_id as string | null) ?? null,
-      workerId: (row.worker_id as string | null) ?? null,
+      id: row.id,
+      timestamp: row.created_at,
+      taskId: row.task_id,
+      workerId: row.worker_id,
       summary,
     };
   }
@@ -132,7 +133,7 @@ export function createDbLogger(supabase: SupabaseClient): DbLogger {
         branch: data.branch,
         task_id: data.taskId,
         worker_id: data.workerId,
-        payload: data.payload,
+        payload: data.payload as Json,
       }));
     },
 
@@ -142,7 +143,7 @@ export function createDbLogger(supabase: SupabaseClient): DbLogger {
         worker_id: data.workerId,
         task_id: data.taskId,
         msg_type: data.msgType,
-        payload: data.payload,
+        payload: data.payload as Json,
       }));
     },
 
@@ -150,16 +151,16 @@ export function createDbLogger(supabase: SupabaseClient): DbLogger {
       const limit = opts.limit ?? 100;
       const [wRes, mRes] = await Promise.all([
         supabase.from("webhook_events")
-          .select("id, received_at, delivery_id, event_name, action, issue_number, task_id, worker_id, payload")
+          .select("*")
           .order("received_at", { ascending: false })
           .limit(limit),
         supabase.from("foreman_messages")
-          .select("id, created_at, direction, worker_id, task_id, msg_type, payload")
+          .select("*")
           .order("created_at", { ascending: false })
           .limit(limit),
       ]);
-      const webhooks = ((wRes.data ?? []) as Record<string, unknown>[]).map(webhookToEntry);
-      const messages = ((mRes.data ?? []) as Record<string, unknown>[]).map(messageToEntry);
+      const webhooks = (wRes.data ?? []).map(webhookToEntry);
+      const messages = (mRes.data ?? []).map(messageToEntry);
       return [...webhooks, ...messages]
         .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
         .slice(0, limit);
@@ -168,18 +169,18 @@ export function createDbLogger(supabase: SupabaseClient): DbLogger {
     async queryTaskEvents(taskId) {
       const [wRes, mRes] = await Promise.all([
         supabase.from("webhook_events")
-          .select("id, received_at, delivery_id, event_name, action, issue_number, task_id, worker_id, payload")
+          .select("*")
           .eq("task_id", taskId)
           .order("received_at", { ascending: false })
           .limit(500),
         supabase.from("foreman_messages")
-          .select("id, created_at, direction, worker_id, task_id, msg_type, payload")
+          .select("*")
           .eq("task_id", taskId)
           .order("created_at", { ascending: false })
           .limit(500),
       ]);
-      const webhooks = ((wRes.data ?? []) as Record<string, unknown>[]).map(webhookToEntry);
-      const messages = ((mRes.data ?? []) as Record<string, unknown>[]).map(messageToEntry);
+      const webhooks = (wRes.data ?? []).map(webhookToEntry);
+      const messages = (mRes.data ?? []).map(messageToEntry);
       return [...webhooks, ...messages]
         .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
     },
@@ -187,18 +188,18 @@ export function createDbLogger(supabase: SupabaseClient): DbLogger {
     async queryWorkerMessages(workerId) {
       const [wRes, mRes] = await Promise.all([
         supabase.from("webhook_events")
-          .select("id, received_at, delivery_id, event_name, action, issue_number, task_id, worker_id, payload")
+          .select("*")
           .eq("worker_id", workerId)
           .order("received_at", { ascending: false })
           .limit(500),
         supabase.from("foreman_messages")
-          .select("id, created_at, direction, worker_id, task_id, msg_type, payload")
+          .select("*")
           .eq("worker_id", workerId)
           .order("created_at", { ascending: false })
           .limit(500),
       ]);
-      const webhooks = ((wRes.data ?? []) as Record<string, unknown>[]).map(webhookToEntry);
-      const messages = ((mRes.data ?? []) as Record<string, unknown>[]).map(messageToEntry);
+      const webhooks = (wRes.data ?? []).map(webhookToEntry);
+      const messages = (mRes.data ?? []).map(messageToEntry);
       return [...webhooks, ...messages]
         .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
     },
@@ -275,23 +276,23 @@ export interface TaskStore {
   listTasks(opts?: ListTasksOpts): Promise<TaskRow[]>;
 }
 
-export function createTaskStore(supabase: SupabaseClient): TaskStore {
-  function rowToTaskRow(row: Record<string, unknown>): TaskRow {
+export function createTaskStore(supabase: SupabaseClient<Database>): TaskStore {
+  function rowToTaskRow(row: Row<"tasks">): TaskRow {
     return {
-      taskId: row.task_id as string,
-      issueNumber: row.issue_number as number,
-      repo: row.repo as string,
-      title: row.title as string,
-      body: (row.body as string | null) ?? "",
-      labels: (row.labels as string[] | null) ?? [],
-      workerId: (row.worker_id as string | null) ?? null,
-      prNumber: (row.pr_number as number | null) ?? null,
-      branch: (row.branch as string | null) ?? null,
-      createdAt: row.created_at as string,
-      assignedAt: (row.assigned_at as string | null) ?? null,
-      completedAt: (row.completed_at as string | null) ?? null,
-      issueClosedAt: (row.issue_closed_at as string | null) ?? null,
-      prMergedAt: (row.pr_merged_at as string | null) ?? null,
+      taskId: row.task_id,
+      issueNumber: row.issue_number,
+      repo: row.repo,
+      title: row.title,
+      body: row.body,
+      labels: row.labels,
+      workerId: row.worker_id,
+      prNumber: row.pr_number,
+      branch: row.branch,
+      createdAt: row.created_at,
+      assignedAt: row.assigned_at,
+      completedAt: row.completed_at,
+      issueClosedAt: row.issue_closed_at,
+      prMergedAt: row.pr_merged_at,
     };
   }
 
@@ -387,46 +388,44 @@ export function createTaskStore(supabase: SupabaseClient): TaskStore {
 
     async getTask(taskId) {
       const { data, error } = await supabase.from("tasks")
-        .select("task_id, issue_number, repo, title, body, labels, worker_id, pr_number, branch, created_at, assigned_at, completed_at, issue_closed_at, pr_merged_at")
+        .select("*")
         .eq("task_id", taskId)
         .maybeSingle();
       if (error) throw error;
-      return data ? rowToTaskRow(data as Record<string, unknown>) : null;
+      return data ? rowToTaskRow(data) : null;
     },
 
     async getTaskByIssue(issueNumber) {
       const { data, error } = await supabase.from("tasks")
-        .select("task_id, issue_number, repo, title, body, labels, worker_id, pr_number, branch, created_at, assigned_at, completed_at, issue_closed_at, pr_merged_at")
+        .select("*")
         .eq("issue_number", issueNumber)
         .maybeSingle();
       if (error) throw error;
-      return data ? rowToTaskRow(data as Record<string, unknown>) : null;
+      return data ? rowToTaskRow(data) : null;
     },
 
     async getTaskByPr(prNumber) {
       const { data, error } = await supabase.from("tasks")
-        .select("task_id, issue_number, repo, title, body, labels, worker_id, pr_number, branch, created_at, assigned_at, completed_at, issue_closed_at, pr_merged_at")
+        .select("*")
         .eq("pr_number", prNumber)
         .maybeSingle();
       if (error) throw error;
-      return data ? rowToTaskRow(data as Record<string, unknown>) : null;
+      return data ? rowToTaskRow(data) : null;
     },
 
     async getTaskByWorker(workerId) {
       const { data, error } = await supabase.from("tasks")
-        .select("task_id, issue_number, repo, title, body, labels, worker_id, pr_number, branch, created_at, assigned_at, completed_at, issue_closed_at, pr_merged_at")
+        .select("*")
         .eq("worker_id", workerId)
         .is("completed_at", null)
         .maybeSingle();
       if (error) throw error;
-      return data ? rowToTaskRow(data as Record<string, unknown>) : null;
+      return data ? rowToTaskRow(data) : null;
     },
 
     async listTasks(opts) {
       const limit = opts?.limit ?? 200;
-      let q = supabase.from("tasks").select(
-        "task_id, issue_number, repo, title, body, labels, worker_id, pr_number, branch, created_at, assigned_at, completed_at, issue_closed_at, pr_merged_at"
-      );
+      let q = supabase.from("tasks").select("*");
       if (opts?.cancelable) {
         q = q.is("worker_id", null)
           .is("completed_at", null)
@@ -435,7 +434,7 @@ export function createTaskStore(supabase: SupabaseClient): TaskStore {
       }
       const { data, error } = await q.order("created_at", { ascending: false }).limit(limit);
       if (error) throw error;
-      return ((data ?? []) as Record<string, unknown>[]).map(rowToTaskRow);
+      return (data ?? []).map(rowToTaskRow);
     },
   };
 }
