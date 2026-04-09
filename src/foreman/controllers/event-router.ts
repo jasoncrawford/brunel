@@ -96,7 +96,7 @@ export function isMutedEvent(name: string): boolean {
 // ── Event forwarding ─────────────────────────────────────────────────────────
 
 export function forwardEvent(deps: EventRouterDeps, task: Task, evt: GitHubEvent, ref: string): void {
-  if (task.status === "assigned" && task.assignedWorkerId) {
+  if (task.assignedWorkerId) {
     const worker = deps.registry.get(task.assignedWorkerId);
     if (worker?.status === "disconnected") {
       deps.taskModel.queueEvent(task.taskId, evt);
