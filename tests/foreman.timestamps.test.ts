@@ -7,7 +7,9 @@ import { WebSocket, WebSocketServer } from "ws";
 import type { AddressInfo } from "net";
 import { WorkerRegistry } from "../src/foreman/models/worker-registry.js";
 import { createForemanWss } from "../src/foreman/controllers/wss.js";
-import { TaskModel } from "../src/foreman/models/task-model.js";
+import { TaskManager } from "../src/foreman/models/task-model.js";
+import { Task } from "../src/foreman/models/task.js";
+import { setupInMemoryTasks } from "./helpers/task.js";
 import { loadDefaultConfig } from "../src/config.js";
 const defaultCfg = await loadDefaultConfig();
 import type { ForemanMessage } from "../src/types.js";
@@ -17,7 +19,7 @@ import { waitUntil } from "./helpers.js";
 
 /** Register a task and mark its deps as loaded so tryAssignWork will pick it up. */
 async function registerReady(
-  tm: TaskModel,
+  tm: TaskManager,
   taskId: string,
   issueNumber: number,
   repoSlug: string,
@@ -25,7 +27,7 @@ async function registerReady(
   body: string,
   labels: string[],
 ): Promise<void> {
-  await tm.register(taskId, issueNumber, repoSlug, title, body, labels);
+  await Task.upsert(taskId, issueNumber, repoSlug, title, body, labels);
   tm.trackIssue(issueNumber, {
     number: issueNumber, title, body, labels,
     repoUrl: `https://github.com/${repoSlug}`,
@@ -69,7 +71,7 @@ const ISO_TIMESTAMP_PREFIX = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z /;
 
 // ── Test harness ──────────────────────────────────────────────────────────────
 
-let taskModel: TaskModel;
+let taskManager: TaskManager;
 let registry: WorkerRegistry;
 let httpServer: http.Server;
 let wss: WebSocketServer;
@@ -92,10 +94,11 @@ beforeEach(() => {
     logLines.push(args.join(" "));
   });
 
-  taskModel = new TaskModel();
+  taskManager = new TaskManager();
+  setupInMemoryTasks(taskManager);
   registry = new WorkerRegistry();
   httpServer = http.createServer();
-  ({ wss, routeEvent } = createForemanWss(taskModel, registry, httpServer, defaultCfg));
+  ({ wss, routeEvent } = createForemanWss(taskManager, registry, httpServer, defaultCfg));
 
   return new Promise<void>((resolve) => {
     httpServer.listen(0, () => {
@@ -107,21 +110,26 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  vi.restoreAllMocks();
   delete process.env.GITHUB_REPO;
   delete process.env.GITHUB_TOKEN;
 
   return new Promise<void>((resolve) => {
     const clients = openClients.splice(0);
     const alive = clients.filter((c) => c.readyState !== WebSocket.CLOSED);
+    const done = () => {
+      httpServer.close(() => {
+        vi.restoreAllMocks();
+        resolve();
+      });
+    };
     if (alive.length === 0) {
-      wss.close(() => httpServer.close(resolve));
+      wss.close(done);
       return;
     }
     let pending = alive.length;
     for (const c of alive) {
       c.once("close", () => {
-        if (--pending === 0) wss.close(() => httpServer.close(resolve));
+        if (--pending === 0) wss.close(done);
       });
       c.close();
     }
@@ -143,7 +151,7 @@ describe("foreman log timestamps", () => {
   });
 
   it("task_assigned log line starts with ISO 8601 timestamp", async () => {
-    await registerReady(taskModel, "1", 1, "owner/repo", "Fix the thing", "Body", []);
+    await registerReady(taskManager, "1", 1, "owner/repo", "Fix the thing", "Body", []);
 
     const ws = await connect();
     const reply = nextMsgWhere(ws, (m) => m.type === "task_assigned");
@@ -156,7 +164,7 @@ describe("foreman log timestamps", () => {
   });
 
   it("event_notification log line starts with ISO 8601 timestamp", async () => {
-    await registerReady(taskModel, "1", 1, "owner/repo", "Fix the thing", "Body", []);
+    await registerReady(taskManager, "1", 1, "owner/repo", "Fix the thing", "Body", []);
 
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "worker-abc123", status: "idle" });

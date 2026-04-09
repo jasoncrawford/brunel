@@ -13,7 +13,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import http from "http";
 import type { AddressInfo } from "net";
 import { createHttpServer } from "../src/foreman/controllers/http-server.js";
-import { TaskModel } from "../src/foreman/models/task-model.js";
+import { TaskManager } from "../src/foreman/models/task-model.js";
+import { Task } from "../src/foreman/models/task.js";
+import { setupInMemoryTasks } from "./helpers/task.js";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -71,6 +73,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await stopServer(server);
 });
 
@@ -187,28 +190,21 @@ describe("GET /api/workers/:id/messages", () => {
 });
 
 describe("GET /api/tasks", () => {
-  it("returns 200 with an empty JSON array when no taskModel is provided", async () => {
+  it("returns 200 with an empty JSON array when no taskManager is provided", async () => {
     const res = await request(port, "GET", "/api/tasks");
     expect(res.status).toBe(200);
     expect(JSON.parse(res.body)).toEqual([]);
   });
 
-  it("returns active tasks from taskModel with derived status and date fields, excluding complete", async () => {
+  it("returns active tasks with derived status and date fields, excluding complete", async () => {
     const createdAt = "2026-01-01T00:00:00.000Z";
-    const pendingRow = {
-      taskId: "1", issueNumber: 1, repo: "test/repo", title: "Pending bug",
-      body: "Description", labels: [],
-      workerId: null, assignedAt: null, completedAt: null, issueClosedAt: null, prMergedAt: null,
-      prNumber: null, branch: null, createdAt,
-    };
-    const completeRow = {
-      taskId: "2", issueNumber: 2, repo: "test/repo", title: "Done bug",
-      body: "Description", labels: [],
-      workerId: null, assignedAt: null, completedAt: "2026-01-02T00:00:00.000Z", issueClosedAt: null, prMergedAt: null,
-      prNumber: null, branch: null, createdAt,
-    };
-    const store = { listTasks: vi.fn().mockResolvedValue([pendingRow, completeRow]) } as never;
-    const tm = new TaskModel(store);
+    const tm = new TaskManager();
+    setupInMemoryTasks(tm);
+
+    await Task.upsert("1", 1, "test/repo", "Pending bug", "Description", []);
+    const t2 = await Task.upsert("2", 2, "test/repo", "Done bug", "Description", []);
+    await t2.complete();
+
     const s = createHttpServer(null, vi.fn(), undefined, tm);
     const p = await startServer(s);
     try {
@@ -222,24 +218,21 @@ describe("GET /api/tasks", () => {
         repo: "test/repo",
         status: "pending",
         workerId: null,
-        createdAt,
         completedAt: null,
       });
-      expect(store.listTasks).toHaveBeenCalled();
     } finally {
+      vi.restoreAllMocks();
       await stopServer(s);
     }
   });
 
   it("returns complete tasks when ?status=complete is requested", async () => {
-    const completeRow = {
-      taskId: "42", issueNumber: 42, repo: "test/repo", title: "Fix bug",
-      body: "Description", labels: [],
-      workerId: null, assignedAt: null, completedAt: new Date().toISOString(), issueClosedAt: null, prMergedAt: null,
-      prNumber: null, branch: null, createdAt: new Date().toISOString(),
-    };
-    const store = { listTasks: vi.fn().mockResolvedValue([completeRow]) } as never;
-    const tm = new TaskModel(store);
+    const tm = new TaskManager();
+    setupInMemoryTasks(tm);
+
+    const t = await Task.upsert("42", 42, "test/repo", "Fix bug", "Description", []);
+    await t.complete();
+
     const s = createHttpServer(null, vi.fn(), undefined, tm);
     const p = await startServer(s);
     try {
@@ -249,25 +242,19 @@ describe("GET /api/tasks", () => {
       expect(body).toHaveLength(1);
       expect(body[0]).toMatchObject({ taskId: "42", status: "complete" });
     } finally {
+      vi.restoreAllMocks();
       await stopServer(s);
     }
   });
 
   it("filters tasks by status in memory", async () => {
-    const row1 = {
-      taskId: "1", issueNumber: 1, repo: "test/repo", title: "T1",
-      body: "b", labels: [],
-      workerId: null, assignedAt: null, completedAt: new Date().toISOString(), issueClosedAt: null, prMergedAt: null,
-      prNumber: null, branch: null, createdAt: new Date().toISOString(),
-    };
-    const row2 = {
-      taskId: "2", issueNumber: 2, repo: "test/repo", title: "T2",
-      body: "b", labels: [],
-      workerId: null, assignedAt: null, completedAt: null, issueClosedAt: null, prMergedAt: null,
-      prNumber: null, branch: null, createdAt: new Date().toISOString(),
-    };
-    const store = { listTasks: vi.fn().mockResolvedValue([row1, row2]) } as never;
-    const tm = new TaskModel(store);
+    const tm = new TaskManager();
+    setupInMemoryTasks(tm);
+
+    const t1 = await Task.upsert("1", 1, "test/repo", "T1", "b", []);
+    await t1.complete();
+    await Task.upsert("2", 2, "test/repo", "T2", "b", []);
+
     const s = createHttpServer(null, vi.fn(), undefined, tm);
     const p = await startServer(s);
     try {
@@ -278,6 +265,7 @@ describe("GET /api/tasks", () => {
       expect(body[0].taskId).toBe("1");
       expect(body[0].status).toBe("complete");
     } finally {
+      vi.restoreAllMocks();
       await stopServer(s);
     }
   });

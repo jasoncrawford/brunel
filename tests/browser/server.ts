@@ -39,11 +39,12 @@ import { WebSocket } from "ws";
 import { WorkerRegistry } from "../../src/foreman/models/worker-registry.js";
 import { createForemanWss } from "../../src/foreman/controllers/wss.js";
 import { createHttpServer } from "../../src/foreman/controllers/http-server.js";
-import { TaskModel } from "../../src/foreman/models/task-model.js";
+import { TaskManager } from "../../src/foreman/models/task-model.js";
+import { initTask } from "../../src/foreman/models/task.js";
+import { createMemoryTaskDb } from "../helpers/memory-db.js";
 import { createAdminWss } from "../../src/foreman/admin-ws.js";
 import { loadDefaultConfig } from "../../src/config.js";
 import type { DependencyGraph } from "../../src/foreman/dependencies.js";
-import type { LabeledIssueState } from "../../src/types.js";
 
 const PORT = parseInt(process.env.PORT ?? "14567", 10);
 
@@ -53,9 +54,8 @@ const cfg = await loadDefaultConfig();
 
 const registry = new WorkerRegistry();
 const graph: DependencyGraph = new Map();
-const openIssues = new Set<number>();
-const labeledIssues = new Map<number, LabeledIssueState>();
-const taskModel = new TaskModel(undefined, labeledIssues, openIssues);
+const taskModel = new TaskManager();
+initTask(createMemoryTaskDb(), () => taskModel.emit("changed"));
 
 // Mock workers managed by /test/connect-worker and /test/workers/:id
 const mockWorkers = new Map<string, WebSocket>();

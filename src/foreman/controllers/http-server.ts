@@ -3,8 +3,8 @@ import http from "http";
 import { Hono } from "hono";
 import { getRequestListener } from "@hono/node-server";
 import type { DbLogger } from "../db.js";
-import type { TaskModel } from "../models/task-model.js";
-import { deriveStatus } from "../models/task-model.js";
+import type { TaskManager } from "../models/task-model.js";
+import { Task } from "../models/task.js";
 import type { TaskStatus } from "../../types.js";
 import { fmtError } from "../../utils.js";
 import { summaryEvent, isMutedEvent } from "./event-router.js";
@@ -22,7 +22,7 @@ export function createHttpServer(
   webhooks: InstanceType<typeof Webhooks> | null,
   routeEvent: (id: string, name: string, payload: unknown) => void | Promise<void>,
   dbLogger?: DbLogger,
-  taskModel?: TaskModel,
+  taskManager?: TaskManager,
 ): http.Server {
   const app = new Hono();
 
@@ -99,20 +99,7 @@ export function createHttpServer(
   app.get("/api/tasks", async (c) => {
     try {
       const statusFilter = c.req.query("status") as TaskStatus | undefined;
-      const rows = taskModel ? await taskModel.listTasks() : [];
-      const tasks = rows.map((row) => ({
-        taskId: row.taskId,
-        issueNumber: row.issueNumber,
-        repo: row.repo,
-        title: row.title,
-        status: deriveStatus(row),
-        workerId: row.workerId,
-        prNumber: row.prNumber,
-        branch: row.branch,
-        createdAt: row.createdAt,
-        assignedAt: row.assignedAt,
-        completedAt: row.completedAt,
-      }));
+      const tasks = taskManager ? await Task.list() : [];
       if (statusFilter) {
         return c.json(tasks.filter((t) => t.status === statusFilter));
       }

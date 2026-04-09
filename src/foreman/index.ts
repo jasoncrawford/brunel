@@ -6,9 +6,10 @@ import type { Database } from "../database.types.js";
 import { Webhooks } from "@octokit/webhooks";
 import type { DependencyGraph } from "./dependencies.js";
 import { loadConfig } from "../config.js";
-import { createDbLogger, createNullDbLogger } from "./db.js";
+import { createDbLogger } from "./db.js";
 import type { DbLogger } from "./db.js";
-import { TaskModel } from "./models/task-model.js";
+import { TaskManager } from "./models/task-model.js";
+import { initTask } from "./models/task.js";
 import { WorkerRegistry } from "./models/worker-registry.js";
 import { createHttpServer } from "./controllers/http-server.js";
 import { createForemanWss } from "./controllers/wss.js";
@@ -38,29 +39,26 @@ if (isMain) {
     ? new Webhooks({ secret: config.webhookSecret })
     : null;
 
-  // Setup DB logger and task model (share the same Supabase client if configured)
-  let dbLogger: DbLogger;
-  let taskModel: TaskModel;
-  if (config.supabaseUrl && config.supabaseSecretKey) {
-    const supabase = createClient<Database>(config.supabaseUrl, config.supabaseSecretKey);
-    dbLogger = createDbLogger(supabase);
-    taskModel = TaskModel.create(supabase);
-    flog("Supabase logging enabled");
-  } else {
-    dbLogger = createNullDbLogger();
-    taskModel = TaskModel.create();
+  // Setup DB logger, task module and task manager (share the same Supabase client)
+  if (!config.supabaseUrl || !config.supabaseSecretKey) {
+    flog("ERROR Supabase is required. Set BRUNEL_SUPABASE_URL and BRUNEL_SUPABASE_SECRET_KEY.");
+    process.exit(1);
   }
+  const supabase = createClient<Database>(config.supabaseUrl, config.supabaseSecretKey);
+  const dbLogger: DbLogger = createDbLogger(supabase);
+  const taskManager = new TaskManager();
+  initTask(supabase, () => taskManager.emit("changed"));
 
   let foremanWss: ForemanWss;
-  const server = createHttpServer(webhooks, (id, name, payload) => foremanWss.routeEvent(id, name, payload), dbLogger, taskModel);
+  const server = createHttpServer(webhooks, (id, name, payload) => foremanWss.routeEvent(id, name, payload), dbLogger, taskManager);
 
   // Admin WebSocket broadcaster
   const adminWss = createAdminWss(server, async () => ({
-    tasks: await taskModel.getTaskSnapshots(graph),
+    tasks: await taskManager.getTaskSnapshots(graph),
     workers: registry.getWorkerSnapshots(),
   }));
 
-  foremanWss = createForemanWss(taskModel, registry, server, config, {
+  foremanWss = createForemanWss(taskManager, registry, server, config, {
     graph,
     dbLogger,
     adminWss,
@@ -78,7 +76,7 @@ if (isMain) {
   // Step 1: Load active tasks from DB (primary source of truth).
   flog("[startup] step 1: loading active tasks from DB...");
   try {
-    await taskModel.loadActiveTasksFromDb(flog);
+    await taskManager.loadActiveTasksFromDb(flog);
   } catch (err) {
     flog(`ERROR Failed to load tasks from DB: ${fmtError(err)}`);
     process.exit(1);
@@ -87,7 +85,7 @@ if (isMain) {
   // Step 2: Fetch brunel:ready issues from GitHub for reconciliation.
   flog("[startup] step 2: fetching brunel:ready issues from GitHub for reconciliation...");
   try {
-    await taskModel.loadIssuesFromGithub(graph, config, flog);
+    await taskManager.loadIssuesFromGithub(graph, config, flog);
     await foremanWss.reconcile();
   } catch (err) {
     flog(`ERROR Failed to load issues from GitHub: ${fmtError(err)}`);

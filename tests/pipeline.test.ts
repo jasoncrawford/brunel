@@ -20,12 +20,12 @@ import type { AddressInfo } from "net";
 import type { ForemanMessage } from "../src/types.js";
 import { WorkerRegistry } from "../src/foreman/models/worker-registry.js";
 import { createForemanWss } from "../src/foreman/controllers/wss.js";
-import { TaskModel, rowToTask } from "../src/foreman/models/task-model.js";
+import { TaskManager } from "../src/foreman/models/task-model.js";
+import { Task, initTask } from "../src/foreman/models/task.js";
 import type { DbLogger } from "../src/foreman/db.js";
 import {
   createDbLogger,
   createNullDbLogger,
-  createTaskStore,
 } from "../src/foreman/db.js";
 import { loadDefaultConfig } from "../src/config.js";
 import { createTestSupabase } from "./helpers/db.js";
@@ -34,9 +34,9 @@ import { createTestSupabase } from "./helpers/db.js";
 
 const defaultCfg = await loadDefaultConfig();
 const supabase = createTestSupabase();
+initTask(supabase);
 const realDbLogger = createDbLogger(supabase);
 const nullDbLogger = createNullDbLogger();
-const taskStore = createTaskStore(supabase);
 
 // ── Generic helpers ───────────────────────────────────────────────────────────
 
@@ -93,9 +93,7 @@ async function pollUntil<T>(
 
 /** Fetch the latest DB row for a task with derived status. */
 async function getDbTask(taskId: string) {
-  const rows = await taskStore.listTasks();
-  const row = rows.find((t) => t.taskId === taskId);
-  return row ? rowToTask(row) : undefined;
+  return Task.get(taskId);
 }
 
 // ── Webhook payload factories ─────────────────────────────────────────────────
@@ -212,7 +210,7 @@ function stubFetchNoBlockers() {
 function buildForeman(opts: {
   dbLogger?: DbLogger;
 } = {}): {
-  taskModel: TaskModel;
+  taskModel: TaskManager;
   registry: WorkerRegistry;
   httpServer: http.Server;
   wss: WebSocketServer;
@@ -222,7 +220,7 @@ function buildForeman(opts: {
   connect: () => Promise<WebSocket>;
   teardown: () => Promise<void>;
 } {
-  const taskModel = new TaskModel(taskStore);
+  const taskModel = new TaskManager();
   const registry = new WorkerRegistry();
   const httpServer = http.createServer();
   const openClients: WebSocket[] = [];
@@ -331,7 +329,7 @@ describe("pipeline: happy path and queued-then-assigned", () => {
       const row = await getDbTask("42");
       return row?.status === "assigned" ? row : null;
     });
-    expect(assignedRow.assignedWorkerId).toBe("w1");
+    expect(assignedRow!.workerId).toBe("w1");
 
     // 5. Worker completes the task
     send(ws, { type: "task_complete", workerId: "w1", taskId: "42" });
@@ -343,7 +341,7 @@ describe("pipeline: happy path and queued-then-assigned", () => {
     });
 
     // 7. Store reflects complete status
-    expect((await taskModel.get("42"))?.status).toBe("complete");
+    expect((await Task.get("42"))?.status).toBe("complete");
   });
 
   it("webhook with no worker → task pending in DB → worker connects → task assigned", async () => {
