@@ -79,10 +79,9 @@ describe("task_assigned", () => {
     const issue = makeIssue();
     sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
     await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
-    // The state is observable via /task-complete behavior: if task is set,
+    // The state is observable via completeCurrentTask behavior: if task is set,
     // task_complete message is sent to WS
-    const action = session.handleUserInput("/worker:task-complete");
-    await action;
+    await session.completeCurrentTask();
     const sent = JSON.parse(fakeWs.send.mock.calls[0][0]);
     expect(sent.taskId).toBe("42");
   });
@@ -221,99 +220,93 @@ describe("event_notification", () => {
   });
 });
 
-// ── User commands ─────────────────────────────────────────────────────────────
+// ── completeCurrentTask ───────────────────────────────────────────────────────
 
-describe("handleUserInput", () => {
-  it("/task-complete sends task_complete to WS and clears task state", async () => {
+describe("completeCurrentTask", () => {
+  it("sends task_complete to WS and clears task state", async () => {
     const issue = makeIssue();
     sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
     await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
 
-    await session.handleUserInput("/worker:task-complete");
+    await session.completeCurrentTask();
 
     const sent = JSON.parse(fakeWs.send.mock.calls[0][0]);
     expect(sent).toEqual({ type: "task_complete", workerId: WORKER_ID, taskId: "42" });
   });
 
-  it("/task-complete returns 'task-complete' so workerMain can hide the prompt", async () => {
+  it("returns 'task-complete' so the main loop can hide the prompt", async () => {
     const issue = makeIssue();
     sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
     await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
 
-    const result = await session.handleUserInput("/worker:task-complete");
+    const result = await session.completeCurrentTask();
 
     expect(result).toBe("task-complete");
   });
 
-  it("/task-complete with no active task returns undefined (no prompt change needed)", async () => {
-    const result = await session.handleUserInput("/worker:task-complete");
+  it("with no active task returns undefined (no prompt change needed)", async () => {
+    const result = await session.completeCurrentTask();
     expect(result).toBeUndefined();
   });
 
-  it("/task-complete with no active task does not send to WS", async () => {
-    await session.handleUserInput("/worker:task-complete");
+  it("with no active task does not send to WS", async () => {
+    await session.completeCurrentTask();
     expect(fakeWs.send).not.toHaveBeenCalled();
   });
+});
 
-  it("/clear clears sessionId but not task state", async () => {
+// ── clearSession ──────────────────────────────────────────────────────────────
+
+describe("clearSession", () => {
+  it("clears sessionId but not task state", async () => {
     const issue = makeIssue();
     sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
     await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
 
-    await session.handleUserInput("/clear");
+    session.clearSession();
 
-    // After /clear, task is still set — /task-complete should still send
-    await session.handleUserInput("/worker:task-complete");
+    // After clear, task is still set — completeCurrentTask should still send
+    await session.completeCurrentTask();
     expect(fakeWs.send).toHaveBeenCalled();
     const sent = JSON.parse(fakeWs.send.mock.calls[0][0]);
     expect(sent.taskId).toBe("42");
   });
+});
 
-  it("regular query text runs runQuery with prompt and sessionId", async () => {
-    await session.handleUserInput("hello claude");
+// ── runForQuery ───────────────────────────────────────────────────────────────
+
+describe("runForQuery", () => {
+  it("runs runQuery with the given prompt", async () => {
+    await session.runForQuery("hello claude");
     expect(runQuery).toHaveBeenCalledWith("hello claude", undefined, expect.anything(), undefined, undefined);
   });
 
   it("passes currentModel to runQuery when set", async () => {
     session.currentModel = "opus";
-    await session.handleUserInput("hello claude");
+    await session.runForQuery("hello claude");
     expect(runQuery).toHaveBeenCalledWith("hello claude", undefined, expect.anything(), "opus", undefined);
   });
 
   it("passes currentEffort to runQuery when set", async () => {
     session.currentEffort = "low";
-    await session.handleUserInput("hello claude");
+    await session.runForQuery("hello claude");
     expect(runQuery).toHaveBeenCalledWith("hello claude", undefined, expect.anything(), undefined, "low");
-  });
-
-  it("WS_TASK_ASSIGNED sentinel triggers initial runQuery", async () => {
-    const issue = makeIssue();
-    // Simulate what the ws message handler does before resolving the promise
-    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
-    const [prompt] = runQuery.mock.calls[0];
-    expect(prompt).toContain(issue.title);
-  });
-
-  it("__eof__ returns 'exit' so workerMain() loop breaks and cleanup runs", async () => {
-    const result = await session.handleUserInput("__eof__");
-    expect(result).toBe("exit");
   });
 });
 
 // ── State isolation ───────────────────────────────────────────────────────────
 
 describe("state after task_complete", () => {
-  it("currentTaskId / currentIssue / currentSessionId are cleared after /task-complete", async () => {
+  it("currentTaskId / currentIssue / currentSessionId are cleared after completeCurrentTask()", async () => {
     const issue = makeIssue();
     sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
     await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
 
-    await session.handleUserInput("/worker:task-complete");
+    await session.completeCurrentTask();
 
-    // State should be cleared — another /task-complete sends nothing
+    // State should be cleared — another completeCurrentTask sends nothing
     fakeWs.send.mockClear();
-    await session.handleUserInput("/worker:task-complete");
+    await session.completeCurrentTask();
     expect(fakeWs.send).not.toHaveBeenCalled();
   });
 });
@@ -564,7 +557,7 @@ describe("status bar content", () => {
     expect(stripAnsi(session.getStatusText())).toContain("PR #55");
 
     // Complete task and assign new task
-    await session.handleUserInput("/worker:task-complete");
+    await session.completeCurrentTask();
     const issue2 = makeIssue(2);
     sendMsg(fakeWs, { type: "task_assigned", taskId: "t2", issue: issue2 });
     await vi.waitFor(() => expect(runQuery).toHaveBeenCalledTimes(2));
@@ -752,7 +745,7 @@ describe("hello_ack handshake — buffering", () => {
       newWs.emit("open");
 
       // Try to send task_complete — should be buffered (hello_ack not yet received)
-      await session.handleUserInput("/worker:task-complete");
+      await session.completeCurrentTask();
       expect(newWs.send).not.toHaveBeenCalled();
 
       // Send hello_ack → buffer should be flushed
@@ -776,15 +769,15 @@ describe("hello_ack handshake — buffering", () => {
       newWs.emit("open");
 
       // Buffer a task_complete
-      await session.handleUserInput("/worker:task-complete");
+      await session.completeCurrentTask();
       expect(newWs.send).not.toHaveBeenCalled();
 
       // Send hello_ack cancelled → buffer discarded, task state cleared
       sendMsg(newWs, { type: "hello_ack", workerId: WORKER_ID, status: "cancelled" });
       expect(newWs.send).not.toHaveBeenCalled();
 
-      // Verify task state cleared: subsequent /task-complete sends nothing
-      await session.handleUserInput("/worker:task-complete");
+      // Verify task state cleared: subsequent completeCurrentTask sends nothing
+      await session.completeCurrentTask();
       expect(newWs.send).not.toHaveBeenCalled();
     } finally {
       vi.restoreAllMocks();
@@ -898,7 +891,7 @@ describe("hello_ack handshake — buffering", () => {
       const newWs = reconnectWithNewWs();
       newWs.emit("open");
 
-      await session.handleUserInput("/worker:task-complete");
+      await session.completeCurrentTask();
       expect(newWs.send).not.toHaveBeenCalled();
 
       // hello_ack idle — task was reverted on foreman side; but worker flushes anyway
@@ -1098,7 +1091,7 @@ describe("debounce", () => {
       // User input fires a query before the timer fires.
       // runQueryLoop cancels the debounce, runs the user's query, then drains
       // the pending issue_comment event — total 2 runQuery calls.
-      const userQueryPromise = session.handleUserInput("what's the status?");
+      const userQueryPromise = session.runForQuery("what's the status?");
       await userQueryPromise;
 
       // Advance past the original debounce delay — the cancelled timer must
@@ -1420,9 +1413,15 @@ describe("prIsClosed guard", () => {
   });
 });
 
-import { Workspace } from "../src/agent/workspace.js";
+import { Workspace, registerWorkspaceCommands } from "../src/agent/workspace.js";
+import { _reset, execute } from "../src/agent/commands.js";
 
-// ── workspace slash commands in WorkerSession ─────────────────────────────────
+// ── workspace slash commands via workspaceCommandDeps ─────────────────────────
+//
+// Workspace commands are no longer registered by WorkerSession._registerCommands()
+// (removed in issue #540). They are registered by main() via
+// registerWorkspaceCommands(session.workspaceCommandDeps, true). In tests,
+// we register them directly using the session's workspaceCommandDeps getter.
 
 describe("workspace slash commands in WorkerSession", () => {
   function makeWorkspace(): Workspace {
@@ -1436,7 +1435,7 @@ describe("workspace slash commands in WorkerSession", () => {
     } as unknown as Workspace;
   }
 
-  it("/reset-workspace calls workspace.reset() when clean", async () => {
+  it("/workspace:reset calls workspace.reset() when clean", async () => {
     const workspace = makeWorkspace();
     const confirm = vi.fn().mockResolvedValue(true);
     const sessionWs = new WorkerSession(WORKER_ID, wsFactory, runQuery, display, {
@@ -1449,11 +1448,13 @@ describe("workspace slash commands in WorkerSession", () => {
       },
     });
     sessionWs.start();
-    await sessionWs.handleUserInput("/workspace:reset");
+    _reset();
+    registerWorkspaceCommands(sessionWs.workspaceCommandDeps, true);
+    await execute("workspace:reset", "");
     expect(workspace.reset).toHaveBeenCalledOnce();
   });
 
-  it("/reset-workspace does not reset if user declines", async () => {
+  it("/workspace:reset does not reset if user declines", async () => {
     const workspace = makeWorkspace();
     (workspace.checkSafety as ReturnType<typeof vi.fn>).mockResolvedValue({
       uncommittedFiles: ["M foo.ts"], unpushedCommits: [], noUpstream: false,
@@ -1469,11 +1470,13 @@ describe("workspace slash commands in WorkerSession", () => {
       },
     });
     sessionWs.start();
-    await sessionWs.handleUserInput("/workspace:reset");
+    _reset();
+    registerWorkspaceCommands(sessionWs.workspaceCommandDeps, true);
+    await execute("workspace:reset", "");
     expect(workspace.reset).not.toHaveBeenCalled();
   });
 
-  it("/remove-workspace calls destroy() when approved", async () => {
+  it("/workspace:remove calls destroy() when approved", async () => {
     const workspace = makeWorkspace();
     const confirm = vi.fn().mockResolvedValue(true);
     const originalCwd = process.cwd();
@@ -1487,16 +1490,20 @@ describe("workspace slash commands in WorkerSession", () => {
       },
     });
     sessionWs.start();
-    await sessionWs.handleUserInput("/workspace:remove");
+    _reset();
+    registerWorkspaceCommands(sessionWs.workspaceCommandDeps, true);
+    await execute("workspace:remove", "");
     expect(workspace.destroy).toHaveBeenCalledOnce();
   });
 
-  it("/create-workspace prints 'managed automatically' in worker mode", async () => {
+  it("/workspace:create prints 'managed automatically' in worker mode", async () => {
     const printSpy = vi.spyOn(displayModule, "print").mockImplementation(() => {});
     try {
       const sessionWs = new WorkerSession(WORKER_ID, wsFactory, runQuery, display, {});
       sessionWs.start();
-      await sessionWs.handleUserInput("/workspace:create");
+      _reset();
+      registerWorkspaceCommands(sessionWs.workspaceCommandDeps, true);
+      await execute("workspace:create", "");
       const printed = printSpy.mock.calls.map(([s]) => stripAnsi(s as string)).join("\n");
       expect(printed).toContain("managed automatically");
     } finally {
@@ -1519,7 +1526,7 @@ describe("afterTask callback on /task-complete", () => {
     sendMsg(fakeWs, { type: "task_assigned", taskId: "t1", issue });
     await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
 
-    await sessionWithAfterTask.handleUserInput("/worker:task-complete");
+    await sessionWithAfterTask.completeCurrentTask();
     expect(afterTask).toHaveBeenCalledOnce();
     const sentMsg = JSON.parse(fakeWs.send.mock.calls.at(-1)![0]);
     expect(sentMsg.type).toBe("task_complete");
@@ -1537,7 +1544,7 @@ describe("afterTask callback on /task-complete", () => {
     await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
 
     const sendCountBefore = fakeWs.send.mock.calls.length;
-    await sessionWithAfterTask.handleUserInput("/worker:task-complete");
+    await sessionWithAfterTask.completeCurrentTask();
     const taskCompleteSent = fakeWs.send.mock.calls
       .slice(sendCountBefore)
       .some(([data]: [string]) => JSON.parse(data).type === "task_complete");
@@ -1548,7 +1555,7 @@ describe("afterTask callback on /task-complete", () => {
     const issue = makeIssue();
     sendMsg(fakeWs, { type: "task_assigned", taskId: "t1", issue });
     await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
-    await session.handleUserInput("/worker:task-complete");
+    await session.completeCurrentTask();
     const lastMsg = JSON.parse(fakeWs.send.mock.calls.at(-1)![0]);
     expect(lastMsg.type).toBe("task_complete");
   });

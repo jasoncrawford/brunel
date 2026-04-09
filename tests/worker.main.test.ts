@@ -43,7 +43,7 @@ vi.mock("../src/agent/input.js", async (importOriginal) => {
   };
 });
 
-import { workerMain } from "../src/agent/worker.js";
+import { startWorkerMode } from "../src/agent/index.js";
 import { Workspace, confirmIfUnsafe } from "../src/agent/workspace.js";
 import * as inputModule from "../src/agent/input.js";
 import * as displayModule from "../src/agent/display.js";
@@ -70,7 +70,7 @@ async function runWorkerMain(): Promise<{ exitCalled: boolean; exitCode: number 
   }) as unknown as ReturnType<typeof vi.spyOn>;
 
   try {
-    await workerMain(vi.fn().mockResolvedValue(undefined), WORKER_CONFIG);
+    await startWorkerMode(vi.fn().mockResolvedValue(undefined), WORKER_CONFIG);
     return { exitCalled: false, exitCode: undefined };
   } catch (err) {
     if (err instanceof Error && err.message === "__process_exit__") {
@@ -185,7 +185,7 @@ describe("workerMain exit behavior", () => {
     const chdirSpy = vi.spyOn(process, "chdir").mockImplementation(() => {});
 
     let workerDone = false;
-    const workerPromise = workerMain(runQueryFn, WORKER_CONFIG).then(
+    const workerPromise = startWorkerMode(runQueryFn, WORKER_CONFIG).then(
       () => { workerDone = true; },
       () => { workerDone = true; },
     );
@@ -228,7 +228,7 @@ describe("workerMain exit behavior", () => {
     }) as unknown as ReturnType<typeof vi.spyOn>;
 
     try {
-      await workerMain(vi.fn().mockResolvedValue(undefined), WORKER_CONFIG);
+      await startWorkerMode(vi.fn().mockResolvedValue(undefined), WORKER_CONFIG);
     } catch (err) {
       if (!(err instanceof Error && err.message === "__process_exit__")) throw err;
     } finally {
