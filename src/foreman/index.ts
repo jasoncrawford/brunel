@@ -8,8 +8,9 @@ import type { DependencyGraph } from "./dependencies.js";
 import { loadConfig } from "../config.js";
 import { createDbLogger, createNullDbLogger } from "./db.js";
 import type { DbLogger } from "./db.js";
+import { createMemoryTaskDb } from "./memory-db.js";
 import { TaskManager } from "./models/task-model.js";
-import { Task, initTask } from "./models/task.js";
+import { initTask } from "./models/task.js";
 import { WorkerRegistry } from "./models/worker-registry.js";
 import { createHttpServer } from "./controllers/http-server.js";
 import { createForemanWss } from "./controllers/wss.js";
@@ -49,8 +50,7 @@ if (isMain) {
     flog("Supabase logging enabled");
   } else {
     dbLogger = createNullDbLogger();
-    // No Supabase — Task statics won't be called in production paths
-    // (in-memory mode handled by tests via setupInMemoryTasks)
+    initTask(createMemoryTaskDb(), () => taskManager.emit("changed"));
   }
 
   let foremanWss: ForemanWss;
