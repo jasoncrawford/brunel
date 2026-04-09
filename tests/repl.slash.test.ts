@@ -1,5 +1,21 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { parseSlashCommand, resolveCommandFilePath, resolveContent } from "../src/agent/input.js";
+import { _reset, register } from "../src/agent/commands.js";
+
+// Register the built-in commands that parseSlashCommand relies on via lookup().
+beforeEach(() => {
+  _reset();
+  const noop = async () => {};
+  register("exit",   { description: "Exit", handler: noop });
+  register("clear",  { description: "Clear", handler: noop });
+  register("model",  { description: "Model", handler: noop });
+  register("effort", { description: "Effort", handler: noop });
+  register("workspace:create", { description: "Create workspace", handler: noop });
+  register("workspace:reset",  { description: "Reset workspace", handler: noop });
+  register("workspace:remove", { description: "Remove workspace", handler: noop });
+  register("workspace:prune",  { description: "Prune workspaces", handler: noop });
+  register("worker:task-complete", { description: "Task done", availability: "worker", handler: async () => "task-complete" });
+});
 
 describe("parseSlashCommand", () => {
   it("returns null for non-slash input", () => {
@@ -40,36 +56,27 @@ describe("parseSlashCommand", () => {
   it("recognizes /worker:task-complete (canonical name)", () => {
     expect(parseSlashCommand("/worker:task-complete")).toEqual({ type: "command", name: "worker:task-complete" });
   });
-  it("recognizes /task-complete (alias) and returns canonical name", () => {
-    expect(parseSlashCommand("/task-complete")).toEqual({ type: "command", name: "worker:task-complete" });
-  });
+
   it("recognizes /workspace:create (canonical name)", () => {
     expect(parseSlashCommand("/workspace:create")).toEqual({ type: "command", name: "workspace:create" });
   });
-  it("recognizes /create-workspace (alias) and returns canonical name", () => {
-    expect(parseSlashCommand("/create-workspace")).toEqual({ type: "command", name: "workspace:create" });
-  });
+
   it("recognizes /workspace:reset (canonical name)", () => {
     expect(parseSlashCommand("/workspace:reset")).toEqual({ type: "command", name: "workspace:reset" });
   });
-  it("recognizes /reset-workspace (alias) and returns canonical name", () => {
-    expect(parseSlashCommand("/reset-workspace")).toEqual({ type: "command", name: "workspace:reset" });
-  });
+
   it("recognizes /workspace:remove (canonical name)", () => {
     expect(parseSlashCommand("/workspace:remove")).toEqual({ type: "command", name: "workspace:remove" });
   });
-  it("recognizes /remove-workspace (alias) and returns canonical name", () => {
-    expect(parseSlashCommand("/remove-workspace")).toEqual({ type: "command", name: "workspace:remove" });
-  });
+
   it("recognizes /workspace:prune (canonical name)", () => {
     expect(parseSlashCommand("/workspace:prune")).toEqual({ type: "command", name: "workspace:prune" });
   });
-  it("recognizes /prune (alias) and returns canonical name", () => {
-    expect(parseSlashCommand("/prune")).toEqual({ type: "command", name: "workspace:prune" });
-  });
+
   it("recognizes /model", () => {
     expect(parseSlashCommand("/model")).toEqual({ type: "command", name: "model" });
   });
+
   it("recognizes /effort", () => {
     expect(parseSlashCommand("/effort")).toEqual({ type: "command", name: "effort" });
   });

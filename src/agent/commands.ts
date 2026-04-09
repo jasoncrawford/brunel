@@ -2,33 +2,35 @@
 
 export type Availability = "repl" | "worker" | "both";
 
+export type HandlerResult = void | "exit" | "task-complete";
+export type CommandHandler = (args: string) => Promise<HandlerResult>;
+
 export interface CommandEntry {
   /** Canonical command name, e.g. "workspace:create" */
   name: string;
-  /** Backward-compatible aliases, e.g. ["create-workspace"] */
-  aliases: string[];
   description: string;
   availability: Availability;
+  handler: CommandHandler;
 }
 
-const _entries: CommandEntry[] = [];
+const _entries: Map<string, CommandEntry> = new Map();
 
 /** Register a command in the registry. */
 export function register(
   name: string,
-  opts: { aliases?: string[]; description: string; availability?: Availability },
+  opts: { description: string; availability?: Availability; handler: CommandHandler },
 ): void {
-  _entries.push({
+  _entries.set(name, {
     name,
-    aliases: opts.aliases ?? [],
     description: opts.description,
     availability: opts.availability ?? "both",
+    handler: opts.handler,
   });
 }
 
-/** Look up a command entry by canonical name or alias. */
+/** Look up a command entry by canonical name. */
 export function lookup(name: string): CommandEntry | undefined {
-  return _entries.find(e => e.name === name || e.aliases.includes(name));
+  return _entries.get(name);
 }
 
 /**
@@ -37,37 +39,22 @@ export function lookup(name: string): CommandEntry | undefined {
  * In worker mode, commands with availability "repl" are excluded.
  */
 export function listAll(workerMode = false): CommandEntry[] {
-  return _entries.filter(e =>
+  return Array.from(_entries.values()).filter(e =>
     workerMode ? e.availability !== "repl" : e.availability !== "worker",
   );
 }
 
-// ── Built-in command registrations ───────────────────────────────────────────
+/**
+ * Execute a registered command by name.
+ * Returns the handler's result, or undefined if the command is not found.
+ */
+export async function execute(name: string, args: string): Promise<HandlerResult | undefined> {
+  const entry = _entries.get(name);
+  if (!entry) return undefined;
+  return entry.handler(args);
+}
 
-register("clear",  { description: "Clear the conversation" });
-register("exit",   { description: "Exit the REPL" });
-register("model",  { description: "Select the Claude model to use" });
-register("effort", { description: "Set the effort level for Claude's thinking" });
-
-register("workspace:create", {
-  aliases: ["create-workspace"],
-  description: "Create an isolated git checkout for this session",
-});
-register("workspace:reset", {
-  aliases: ["reset-workspace"],
-  description: "Reset workspace to clean main branch",
-});
-register("workspace:remove", {
-  aliases: ["remove-workspace"],
-  description: "Remove the workspace checkout for this session",
-});
-register("workspace:prune", {
-  aliases: ["prune"],
-  description: "Remove orphaned worker workspace directories",
-});
-
-register("worker:task-complete", {
-  aliases: ["task-complete"],
-  description: "Mark the current task as done",
-  availability: "worker",
-});
+/** Reset the registry (for test isolation). */
+export function _reset(): void {
+  _entries.clear();
+}

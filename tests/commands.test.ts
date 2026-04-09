@@ -1,46 +1,25 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { register, lookup, listAll } from "../src/agent/commands.js";
-import type { CommandEntry } from "../src/agent/commands.js";
+import { register, lookup, listAll, execute, _reset } from "../src/agent/commands.js";
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-/**
- * Create an isolated registry snapshot for testing without polluting the
- * module-level registry. We test the exported functions by calling them and
- * inspecting results that include the built-in registrations.
- */
+beforeEach(() => {
+  _reset();
+});
 
 // ── lookup ────────────────────────────────────────────────────────────────────
 
 describe("lookup", () => {
   it("finds a command by canonical name", () => {
+    register("clear", { description: "Clear", handler: async () => {} });
     const entry = lookup("clear");
     expect(entry).toBeDefined();
     expect(entry!.name).toBe("clear");
   });
 
   it("finds a namespaced command by canonical name", () => {
+    register("workspace:create", { description: "Create workspace", handler: async () => {} });
     const entry = lookup("workspace:create");
     expect(entry).toBeDefined();
     expect(entry!.name).toBe("workspace:create");
-  });
-
-  it("finds a command by alias", () => {
-    const entry = lookup("create-workspace");
-    expect(entry).toBeDefined();
-    expect(entry!.name).toBe("workspace:create");
-  });
-
-  it("finds worker:task-complete by canonical name", () => {
-    const entry = lookup("worker:task-complete");
-    expect(entry).toBeDefined();
-    expect(entry!.name).toBe("worker:task-complete");
-  });
-
-  it("finds worker:task-complete by alias 'task-complete'", () => {
-    const entry = lookup("task-complete");
-    expect(entry).toBeDefined();
-    expect(entry!.name).toBe("worker:task-complete");
   });
 
   it("returns undefined for unknown command", () => {
@@ -55,6 +34,18 @@ describe("lookup", () => {
 // ── listAll ───────────────────────────────────────────────────────────────────
 
 describe("listAll", () => {
+  beforeEach(() => {
+    register("clear",  { description: "Clear the conversation", handler: async () => {} });
+    register("exit",   { description: "Exit the REPL", handler: async () => "exit" });
+    register("model",  { description: "Select model", handler: async () => {} });
+    register("effort", { description: "Set effort", handler: async () => {} });
+    register("workspace:create", { description: "Create workspace", handler: async () => {} });
+    register("workspace:reset",  { description: "Reset workspace", handler: async () => {} });
+    register("workspace:remove", { description: "Remove workspace", handler: async () => {} });
+    register("workspace:prune",  { description: "Prune workspaces", handler: async () => {} });
+    register("worker:task-complete", { description: "Mark task done", availability: "worker", handler: async () => "task-complete" });
+  });
+
   it("non-worker mode excludes worker-only commands", () => {
     const names = listAll(false).map(e => e.name);
     expect(names).not.toContain("worker:task-complete");
@@ -94,58 +85,45 @@ describe("listAll", () => {
   });
 });
 
-// ── Built-in registrations ────────────────────────────────────────────────────
+// ── execute ───────────────────────────────────────────────────────────────────
 
-describe("built-in command entries", () => {
-  it("workspace:create has alias create-workspace", () => {
-    const entry = lookup("workspace:create")!;
-    expect(entry.aliases).toContain("create-workspace");
+describe("execute", () => {
+  it("calls the handler and returns its result", async () => {
+    register("test:cmd", { description: "test", handler: async () => "exit" });
+    const result = await execute("test:cmd", "");
+    expect(result).toBe("exit");
   });
 
-  it("workspace:reset has alias reset-workspace", () => {
-    const entry = lookup("workspace:reset")!;
-    expect(entry.aliases).toContain("reset-workspace");
+  it("passes args to the handler", async () => {
+    let received = "";
+    register("test:args", { description: "test", handler: async (args) => { received = args; } });
+    await execute("test:args", "hello world");
+    expect(received).toBe("hello world");
   });
 
-  it("workspace:remove has alias remove-workspace", () => {
-    const entry = lookup("workspace:remove")!;
-    expect(entry.aliases).toContain("remove-workspace");
+  it("returns undefined for unknown command", async () => {
+    const result = await execute("nonexistent", "");
+    expect(result).toBeUndefined();
   });
 
-  it("workspace:prune has alias prune", () => {
-    const entry = lookup("workspace:prune")!;
-    expect(entry.aliases).toContain("prune");
+  it("handler returning void yields undefined result", async () => {
+    register("test:void", { description: "test", handler: async () => {} });
+    const result = await execute("test:void", "");
+    expect(result).toBeUndefined();
   });
 
-  it("worker:task-complete has alias task-complete", () => {
-    const entry = lookup("worker:task-complete")!;
-    expect(entry.aliases).toContain("task-complete");
-  });
-
-  it("all built-in commands have non-empty descriptions", () => {
-    for (const entry of listAll(true)) {
-      expect(entry.description, `${entry.name} should have description`).toBeTruthy();
-    }
-  });
-
-  it("each entry has a name, aliases array, description, and availability", () => {
-    for (const entry of listAll(true)) {
-      expect(typeof entry.name).toBe("string");
-      expect(Array.isArray(entry.aliases)).toBe(true);
-      expect(typeof entry.description).toBe("string");
-      expect(["repl", "worker", "both"]).toContain(entry.availability);
-    }
+  it("handler can return 'task-complete'", async () => {
+    register("test:tc", { description: "test", handler: async () => "task-complete" });
+    const result = await execute("test:tc", "");
+    expect(result).toBe("task-complete");
   });
 });
 
 // ── register ──────────────────────────────────────────────────────────────────
 
 describe("register", () => {
-  // These tests exercise the register function with new commands and verify
-  // they appear via lookup/listAll after registration.
-
   it("registers a new command that can be looked up", () => {
-    register("test:registered", { description: "A test command" });
+    register("test:registered", { description: "A test command", handler: async () => {} });
     const entry = lookup("test:registered");
     expect(entry).toBeDefined();
     expect(entry!.name).toBe("test:registered");
@@ -153,21 +131,48 @@ describe("register", () => {
   });
 
   it("defaults availability to 'both'", () => {
-    register("test:default-avail", { description: "test" });
+    register("test:default-avail", { description: "test", handler: async () => {} });
     const entry = lookup("test:default-avail")!;
     expect(entry.availability).toBe("both");
   });
 
   it("respects explicit availability", () => {
-    register("test:repl-only", { description: "test", availability: "repl" });
+    register("test:repl-only", { description: "test", availability: "repl", handler: async () => {} });
     const entry = lookup("test:repl-only")!;
     expect(entry.availability).toBe("repl");
   });
 
-  it("registered aliases can be looked up", () => {
-    register("test:aliased", { description: "test", aliases: ["old-name"] });
-    const entry = lookup("old-name");
-    expect(entry).toBeDefined();
-    expect(entry!.name).toBe("test:aliased");
+  it("overwrites a previously registered command with the same name", () => {
+    register("test:overwrite", { description: "first", handler: async () => {} });
+    register("test:overwrite", { description: "second", handler: async () => {} });
+    const entry = lookup("test:overwrite")!;
+    expect(entry.description).toBe("second");
+  });
+});
+
+// ── Built-in command structure ─────────────────────────────────────────────────
+
+describe("each registered entry shape", () => {
+  beforeEach(() => {
+    register("clear",  { description: "Clear", handler: async () => {} });
+    register("exit",   { description: "Exit", availability: "repl", handler: async () => "exit" });
+    register("model",  { description: "Model", handler: async () => {} });
+    register("effort", { description: "Effort", handler: async () => {} });
+    register("worker:task-complete", { description: "Task done", availability: "worker", handler: async () => "task-complete" });
+  });
+
+  it("each entry has name, description, availability, and handler", () => {
+    for (const entry of listAll(true)) {
+      expect(typeof entry.name).toBe("string");
+      expect(typeof entry.description).toBe("string");
+      expect(["repl", "worker", "both"]).toContain(entry.availability);
+      expect(typeof entry.handler).toBe("function");
+    }
+  });
+
+  it("all registered commands have non-empty descriptions", () => {
+    for (const entry of listAll(true)) {
+      expect(entry.description, `${entry.name} should have description`).toBeTruthy();
+    }
   });
 });

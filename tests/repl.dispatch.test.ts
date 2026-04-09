@@ -1,5 +1,21 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { dispatchInput, applyArguments, resolveContent } from "../src/agent/input.js";
+import { _reset, register } from "../src/agent/commands.js";
+
+// Register the built-in commands that dispatchInput relies on via lookup().
+beforeEach(() => {
+  _reset();
+  const noop = async () => {};
+  register("exit",   { description: "Exit", handler: noop });
+  register("clear",  { description: "Clear", handler: noop });
+  register("model",  { description: "Model", handler: noop });
+  register("effort", { description: "Effort", handler: noop });
+  register("workspace:create", { description: "Create workspace", handler: noop });
+  register("workspace:reset",  { description: "Reset workspace", handler: noop });
+  register("workspace:remove", { description: "Remove workspace", handler: noop });
+  register("workspace:prune",  { description: "Prune workspaces", handler: noop });
+  register("worker:task-complete", { description: "Task done", availability: "worker", handler: async () => "task-complete" });
+});
 
 // ── applyArguments ────────────────────────────────────────────────────────────
 
@@ -156,18 +172,8 @@ describe("dispatchInput", () => {
     expect(result).toEqual({ type: "command", name: "workspace:create", args: "" });
   });
 
-  it("/create-workspace (alias) returns canonical workspace:create command", async () => {
-    const result = await dispatchInput("/create-workspace", () => null);
-    expect(result).toEqual({ type: "command", name: "workspace:create", args: "" });
-  });
-
   it("/workspace:reset returns canonical command", async () => {
     const result = await dispatchInput("/workspace:reset", () => null);
-    expect(result).toEqual({ type: "command", name: "workspace:reset", args: "" });
-  });
-
-  it("/reset-workspace (alias) returns canonical workspace:reset command", async () => {
-    const result = await dispatchInput("/reset-workspace", () => null);
     expect(result).toEqual({ type: "command", name: "workspace:reset", args: "" });
   });
 
@@ -176,18 +182,8 @@ describe("dispatchInput", () => {
     expect(result).toEqual({ type: "command", name: "workspace:remove", args: "" });
   });
 
-  it("/remove-workspace (alias) returns canonical workspace:remove command", async () => {
-    const result = await dispatchInput("/remove-workspace", () => null);
-    expect(result).toEqual({ type: "command", name: "workspace:remove", args: "" });
-  });
-
   it("/workspace:prune returns canonical command", async () => {
     const result = await dispatchInput("/workspace:prune", () => null);
-    expect(result).toEqual({ type: "command", name: "workspace:prune", args: "" });
-  });
-
-  it("/prune (alias) returns canonical workspace:prune command", async () => {
-    const result = await dispatchInput("/prune", () => null);
     expect(result).toEqual({ type: "command", name: "workspace:prune", args: "" });
   });
 
@@ -203,11 +199,6 @@ describe("dispatchInput", () => {
 
   it("/worker:task-complete returns canonical command", async () => {
     const result = await dispatchInput("/worker:task-complete", () => null);
-    expect(result).toEqual({ type: "command", name: "worker:task-complete", args: "" });
-  });
-
-  it("/task-complete (alias) returns canonical worker:task-complete command", async () => {
-    const result = await dispatchInput("/task-complete", () => null);
     expect(result).toEqual({ type: "command", name: "worker:task-complete", args: "" });
   });
 });

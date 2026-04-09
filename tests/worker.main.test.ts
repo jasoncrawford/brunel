@@ -14,21 +14,25 @@ vi.mock("ws", async () => {
   };
 });
 
-vi.mock("../src/agent/workspace.js", () => ({
-  Workspace: {
-    create: vi.fn().mockResolvedValue({
-      dir: "/fake/workers/test-worker",
-      destroy: vi.fn().mockResolvedValue(undefined),
-      checkSafety: vi.fn().mockResolvedValue({
-        uncommittedFiles: [],
-        unpushedCommits: [],
-        noUpstream: false,
+vi.mock("../src/agent/workspace.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/agent/workspace.js")>();
+  return {
+    ...actual,
+    Workspace: {
+      create: vi.fn().mockResolvedValue({
+        dir: "/fake/workers/test-worker",
+        destroy: vi.fn().mockResolvedValue(undefined),
+        checkSafety: vi.fn().mockResolvedValue({
+          uncommittedFiles: [],
+          unpushedCommits: [],
+          noUpstream: false,
+        }),
+        reset: vi.fn().mockResolvedValue(undefined),
       }),
-      reset: vi.fn().mockResolvedValue(undefined),
-    }),
-  },
-  confirmIfUnsafe: vi.fn().mockResolvedValue(true),
-}));
+    },
+    confirmIfUnsafe: vi.fn().mockResolvedValue(true),
+  };
+});
 
 vi.mock("../src/agent/input.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/agent/input.js")>();
