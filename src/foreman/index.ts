@@ -6,9 +6,8 @@ import type { Database } from "../database.types.js";
 import { Webhooks } from "@octokit/webhooks";
 import type { DependencyGraph } from "./dependencies.js";
 import { loadConfig } from "../config.js";
-import { createDbLogger, createNullDbLogger } from "./db.js";
+import { createDbLogger } from "./db.js";
 import type { DbLogger } from "./db.js";
-import { createMemoryTaskDb } from "./memory-db.js";
 import { TaskManager } from "./models/task-model.js";
 import { initTask } from "./models/task.js";
 import { WorkerRegistry } from "./models/worker-registry.js";
@@ -40,18 +39,15 @@ if (isMain) {
     ? new Webhooks({ secret: config.webhookSecret })
     : null;
 
-  // Setup DB logger, task module and task manager (share the same Supabase client if configured)
-  let dbLogger: DbLogger;
-  const taskManager = new TaskManager();
-  if (config.supabaseUrl && config.supabaseSecretKey) {
-    const supabase = createClient<Database>(config.supabaseUrl, config.supabaseSecretKey);
-    dbLogger = createDbLogger(supabase);
-    initTask(supabase, () => taskManager.emit("changed"));
-    flog("Supabase logging enabled");
-  } else {
-    dbLogger = createNullDbLogger();
-    initTask(createMemoryTaskDb(), () => taskManager.emit("changed"));
+  // Setup DB logger, task module and task manager (share the same Supabase client)
+  if (!config.supabaseUrl || !config.supabaseSecretKey) {
+    flog("ERROR Supabase is required. Set BRUNEL_SUPABASE_URL and BRUNEL_SUPABASE_SECRET_KEY.");
+    process.exit(1);
   }
+  const supabase = createClient<Database>(config.supabaseUrl, config.supabaseSecretKey);
+  const dbLogger: DbLogger = createDbLogger(supabase);
+  const taskManager = new TaskManager();
+  initTask(supabase, () => taskManager.emit("changed"));
 
   let foremanWss: ForemanWss;
   const server = createHttpServer(webhooks, (id, name, payload) => foremanWss.routeEvent(id, name, payload), dbLogger, taskManager);

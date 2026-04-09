@@ -4,7 +4,7 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Database } from "../database.types.js";
+import type { Database } from "../../src/database.types.js";
 
 type DbRow = Database["public"]["Tables"]["tasks"]["Row"];
 type Filters = Array<{ col: keyof DbRow; op: "eq" | "is"; val: unknown }>;

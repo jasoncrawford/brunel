@@ -41,7 +41,7 @@ import { createForemanWss } from "../../src/foreman/controllers/wss.js";
 import { createHttpServer } from "../../src/foreman/controllers/http-server.js";
 import { TaskManager } from "../../src/foreman/models/task-model.js";
 import { initTask } from "../../src/foreman/models/task.js";
-import { createMemoryTaskDb } from "../../src/foreman/memory-db.js";
+import { createMemoryTaskDb } from "../helpers/memory-db.js";
 import { createAdminWss } from "../../src/foreman/admin-ws.js";
 import { loadDefaultConfig } from "../../src/config.js";
 import type { DependencyGraph } from "../../src/foreman/dependencies.js";

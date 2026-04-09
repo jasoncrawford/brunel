@@ -96,28 +96,7 @@ export class TaskManager extends EventEmitter {
    *  Complete tasks are excluded: the dashboard only shows active tasks. */
   async getTaskSnapshots(graph: DependencyGraph): Promise<TaskSnapshot[]> {
     const tasks = await Task.list();
-    return tasks.filter((t) => !t.completedAt).map((task) => {
-      const isBlockedByDeps = graph !== undefined && this.isBlocked(task.issueNumber, graph);
-      let status = task.status;
-      if (status === "pending" && isBlockedByDeps) status = "blocked";
-      const snapshot: TaskSnapshot = {
-        taskId: task.taskId,
-        issueNumber: task.issueNumber,
-        title: task.title,
-        status,
-        assignedWorkerId: task.workerId ?? undefined,
-        prNumber: task.prNumber ?? undefined,
-        prUrl: task.prNumber != null ? `https://github.com/${task.repo}/pull/${task.prNumber}` : undefined,
-      };
-      if (graph !== undefined) {
-        const blockerSet = graph.get(task.issueNumber) ?? new Set<number>();
-        snapshot.blockers = Array.from(blockerSet).map((n) => ({
-          issueNumber: n,
-          isOpen: this._openIssues.has(n),
-        }));
-      }
-      return snapshot;
-    });
+    return tasks.filter((t) => !t.completedAt).map((t) => t.toSnapshot(graph, this._openIssues));
   }
 
   /** Called when issues/labeled fires: begin tracking the issue. */

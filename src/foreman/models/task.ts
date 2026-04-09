@@ -2,6 +2,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "../../database.types.js";
 import type { TaskStatus } from "../../types.js";
 import type { Row } from "../db.js";
+import type { TaskSnapshot } from "../admin-ws.js";
+import type { DependencyGraph } from "../dependencies.js";
+import { isBlocked } from "../dependencies.js";
 
 let db: SupabaseClient<Database>;
 let onChange: (() => void) | undefined;
@@ -76,6 +79,22 @@ export class Task {
       completedAt: this.completedAt,
       issueClosedAt: this.issueClosedAt,
       prMergedAt: this.prMergedAt,
+    };
+  }
+
+  toSnapshot(graph: DependencyGraph, openIssues: Set<number>): TaskSnapshot {
+    let status: TaskStatus = this.status;
+    if (status === "pending" && isBlocked(this.issueNumber, graph, openIssues)) status = "blocked";
+    const blockerSet = graph.get(this.issueNumber) ?? new Set<number>();
+    return {
+      taskId: this.taskId,
+      issueNumber: this.issueNumber,
+      title: this.title,
+      status,
+      assignedWorkerId: this.workerId ?? undefined,
+      prNumber: this.prNumber ?? undefined,
+      prUrl: this.prNumber != null ? `https://github.com/${this.repo}/pull/${this.prNumber}` : undefined,
+      blockers: Array.from(blockerSet).map((n) => ({ issueNumber: n, isOpen: openIssues.has(n) })),
     };
   }
 
