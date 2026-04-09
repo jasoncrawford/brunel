@@ -17,8 +17,8 @@ export function deriveStatus(row: TaskRow, isBlockedByDeps = false): TaskStatus 
   if (row.completedAt) return "complete";
   if (row.issueClosedAt) return "closed";
   if (row.prMergedAt) return "merged";
-  if (row.workerId) return "assigned";
   if (row.prNumber) return "pushed";
+  if (row.workerId) return "assigned";
   if (isBlockedByDeps) return "blocked";
   return "pending";
 }

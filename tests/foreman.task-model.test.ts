@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { TaskModel } from "../src/foreman/models/task-model.js";
+import { TaskModel, deriveStatus } from "../src/foreman/models/task-model.js";
 import { createMemoryTaskStore } from "../src/foreman/db.js";
 import type { TaskStore } from "../src/foreman/db.js";
 
@@ -249,5 +249,38 @@ describe("TaskModel.listTasks", () => {
     expect(result).toHaveLength(1);
     expect(result[0].taskId).toBe("1");
     expect(store.listTasks).toHaveBeenCalledWith({ status: "pending" });
+  });
+});
+
+// ── deriveStatus ──────────────────────────────────────────────────────────────
+
+describe("deriveStatus", () => {
+  const base = {
+    taskId: "t1",
+    issueNumber: 1,
+    repo: "test/repo",
+    title: "T",
+    body: "",
+    labels: [],
+    workerId: null,
+    prNumber: null,
+    branch: null,
+    createdAt: new Date().toISOString(),
+    assignedAt: null,
+    completedAt: null,
+    issueClosedAt: null,
+    prMergedAt: null,
+  };
+
+  it("returns 'pushed' when prNumber is set, even if workerId is also set", () => {
+    expect(deriveStatus({ ...base, prNumber: 99, workerId: "w1" })).toBe("pushed");
+  });
+
+  it("returns 'assigned' when workerId is set but prNumber is null", () => {
+    expect(deriveStatus({ ...base, workerId: "w1" })).toBe("assigned");
+  });
+
+  it("returns 'pushed' when prNumber is set and workerId is null", () => {
+    expect(deriveStatus({ ...base, prNumber: 99 })).toBe("pushed");
   });
 });
