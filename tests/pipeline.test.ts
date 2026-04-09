@@ -20,7 +20,7 @@ import type { AddressInfo } from "net";
 import type { ForemanMessage } from "../src/types.js";
 import { WorkerRegistry } from "../src/foreman/models/worker-registry.js";
 import { createForemanWss } from "../src/foreman/controllers/wss.js";
-import { TaskManager as TaskModel } from "../src/foreman/models/task-model.js";
+import { TaskManager } from "../src/foreman/models/task-model.js";
 import { Task, initTask } from "../src/foreman/models/task.js";
 import type { DbLogger } from "../src/foreman/db.js";
 import {
@@ -210,7 +210,7 @@ function stubFetchNoBlockers() {
 function buildForeman(opts: {
   dbLogger?: DbLogger;
 } = {}): {
-  taskModel: TaskModel;
+  taskModel: TaskManager;
   registry: WorkerRegistry;
   httpServer: http.Server;
   wss: WebSocketServer;
@@ -220,7 +220,7 @@ function buildForeman(opts: {
   connect: () => Promise<WebSocket>;
   teardown: () => Promise<void>;
 } {
-  const taskModel = new TaskModel();
+  const taskModel = new TaskManager();
   const registry = new WorkerRegistry();
   const httpServer = http.createServer();
   const openClients: WebSocket[] = [];

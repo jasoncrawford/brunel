@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "../../database.types.js";
 import type { TaskStatus } from "../../types.js";
+import type { Row } from "../db.js";
 
 let db: SupabaseClient<Database>;
 let onChange: (() => void) | undefined;
@@ -10,7 +11,7 @@ export function initTask(supabase: SupabaseClient<Database>, onTaskChanged?: () 
   onChange = onTaskChanged;
 }
 
-type DbRow = Database["public"]["Tables"]["tasks"]["Row"];
+type DbRow = Row<"tasks">;
 
 export class Task {
   readonly taskId: string;
@@ -58,6 +59,26 @@ export class Task {
     return `https://github.com/${this.repo}`;
   }
 
+  toJSON() {
+    return {
+      taskId: this.taskId,
+      issueNumber: this.issueNumber,
+      repo: this.repo,
+      title: this.title,
+      body: this.body,
+      labels: this.labels,
+      status: this.status,
+      workerId: this.workerId,
+      prNumber: this.prNumber,
+      branch: this.branch,
+      createdAt: this.createdAt,
+      assignedAt: this.assignedAt,
+      completedAt: this.completedAt,
+      issueClosedAt: this.issueClosedAt,
+      prMergedAt: this.prMergedAt,
+    };
+  }
+
   static fromTest(fields: Partial<DbRow> & { task_id: string; issue_number: number }): Task {
     const row: DbRow = {
       repo: "",
@@ -77,26 +98,50 @@ export class Task {
     return new Task(row);
   }
 
-  static async get(taskId: string): Promise<Task | null> {
-    const { data, error } = await db.from("tasks").select("*").eq("task_id", taskId).maybeSingle();
+  // ── Private helpers ─────────────────────────────────────────────────────────
+
+  private static select() {
+    return db.from("tasks").select("*");
+  }
+
+  private static async findOne(col: string, val: string | number): Promise<Task | null> {
+    const { data, error } = await Task.select().eq(col, val).maybeSingle();
     if (error) throw error;
     return data ? new Task(data) : null;
+  }
+
+  private async save(changes: Partial<DbRow>): Promise<void> {
+    const { error } = await db.from("tasks").update(changes).eq("task_id", this.taskId);
+    if (error) throw error;
+    if ("worker_id" in changes) this.workerId = changes.worker_id ?? null;
+    if ("assigned_at" in changes) this.assignedAt = changes.assigned_at ?? null;
+    if ("completed_at" in changes) this.completedAt = changes.completed_at ?? null;
+    if ("issue_closed_at" in changes) this.issueClosedAt = changes.issue_closed_at ?? null;
+    if ("pr_merged_at" in changes) this.prMergedAt = changes.pr_merged_at ?? null;
+    if ("pr_number" in changes) this.prNumber = changes.pr_number ?? null;
+    if ("branch" in changes) this.branch = changes.branch ?? null;
+    if ("title" in changes) this.title = changes.title!;
+    if ("body" in changes) this.body = changes.body!;
+    if ("labels" in changes) this.labels = changes.labels!;
+    onChange?.();
+  }
+
+  // ── Static finders ──────────────────────────────────────────────────────────
+
+  static async get(taskId: string): Promise<Task | null> {
+    return Task.findOne("task_id", taskId);
   }
 
   static async getByIssue(issueNumber: number): Promise<Task | null> {
-    const { data, error } = await db.from("tasks").select("*").eq("issue_number", issueNumber).maybeSingle();
-    if (error) throw error;
-    return data ? new Task(data) : null;
+    return Task.findOne("issue_number", issueNumber);
   }
 
   static async getByPr(prNumber: number): Promise<Task | null> {
-    const { data, error } = await db.from("tasks").select("*").eq("pr_number", prNumber).maybeSingle();
-    if (error) throw error;
-    return data ? new Task(data) : null;
+    return Task.findOne("pr_number", prNumber);
   }
 
   static async getByWorker(workerId: string): Promise<Task | null> {
-    const { data, error } = await db.from("tasks").select("*").eq("worker_id", workerId).is("completed_at", null).maybeSingle();
+    const { data, error } = await Task.select().eq("worker_id", workerId).is("completed_at", null).maybeSingle();
     if (error) throw error;
     return data ? new Task(data) : null;
   }
@@ -104,7 +149,7 @@ export class Task {
   static async list(opts?: { cancelable?: boolean; limit?: number }): Promise<Task[]> {
     if (!db) return [];
     const limit = opts?.limit ?? 200;
-    let q = db.from("tasks").select("*");
+    let q = Task.select();
     if (opts?.cancelable) {
       q = q.is("worker_id", null).is("completed_at", null).is("issue_closed_at", null).is("pr_merged_at", null);
     }
@@ -123,76 +168,42 @@ export class Task {
     return new Task(data!);
   }
 
+  // ── Instance mutations ──────────────────────────────────────────────────────
+
   async assign(workerId: string): Promise<void> {
-    const now = new Date().toISOString();
-    const { error } = await db.from("tasks").update({ worker_id: workerId, assigned_at: now }).eq("task_id", this.taskId);
-    if (error) throw error;
-    this.workerId = workerId;
-    this.assignedAt = now;
-    onChange?.();
+    await this.save({ worker_id: workerId, assigned_at: new Date().toISOString() });
   }
 
   async complete(): Promise<void> {
-    const now = new Date().toISOString();
-    const { error } = await db.from("tasks").update({ completed_at: now }).eq("task_id", this.taskId);
-    if (error) throw error;
-    this.completedAt = now;
-    onChange?.();
+    await this.save({ completed_at: new Date().toISOString() });
   }
 
   async revert(): Promise<void> {
-    const { error } = await db.from("tasks").update({ worker_id: null }).eq("task_id", this.taskId);
-    if (error) throw error;
-    this.workerId = null;
-    onChange?.();
+    await this.save({ worker_id: null });
   }
 
   async close(): Promise<void> {
-    const now = new Date().toISOString();
-    const { error } = await db.from("tasks").update({ issue_closed_at: now }).eq("task_id", this.taskId);
-    if (error) throw error;
-    this.issueClosedAt = now;
-    onChange?.();
+    await this.save({ issue_closed_at: new Date().toISOString() });
   }
 
   async reopen(): Promise<void> {
-    const { error } = await db.from("tasks").update({ issue_closed_at: null }).eq("task_id", this.taskId);
-    if (error) throw error;
-    this.issueClosedAt = null;
-    onChange?.();
+    await this.save({ issue_closed_at: null });
   }
 
   async registerPr(prNumber: number, branch: string | null): Promise<void> {
-    const { error } = await db.from("tasks").update({ pr_number: prNumber, branch }).eq("task_id", this.taskId);
-    if (error) throw error;
-    this.prNumber = prNumber;
-    this.branch = branch;
-    onChange?.();
+    await this.save({ pr_number: prNumber, branch });
   }
 
   async unregisterPr(): Promise<void> {
-    const { error } = await db.from("tasks").update({ pr_number: null, branch: null }).eq("task_id", this.taskId);
-    if (error) throw error;
-    this.prNumber = null;
-    this.branch = null;
-    onChange?.();
+    await this.save({ pr_number: null, branch: null });
   }
 
   async mergePr(): Promise<void> {
-    const now = new Date().toISOString();
-    const { error } = await db.from("tasks").update({ pr_merged_at: now }).eq("task_id", this.taskId);
-    if (error) throw error;
-    this.prMergedAt = now;
-    onChange?.();
+    await this.save({ pr_merged_at: new Date().toISOString() });
   }
 
   async updateContent(title: string, body: string, labels: string[]): Promise<void> {
-    const { error } = await db.from("tasks").update({ title, body, labels }).eq("task_id", this.taskId);
-    if (error) throw error;
-    this.title = title;
-    this.body = body;
-    this.labels = labels;
-    onChange?.();
+    await this.save({ title, body, labels });
   }
 
   async delete(): Promise<void> {

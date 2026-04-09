@@ -195,5 +195,3 @@ export class TaskManager extends EventEmitter {
   }
 }
 
-// Export TaskModel as alias for backward compatibility with tests that import it directly.
-export { TaskManager as TaskModel };

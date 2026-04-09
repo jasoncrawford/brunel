@@ -39,7 +39,7 @@ import { WebSocket } from "ws";
 import { WorkerRegistry } from "../../src/foreman/models/worker-registry.js";
 import { createForemanWss } from "../../src/foreman/controllers/wss.js";
 import { createHttpServer } from "../../src/foreman/controllers/http-server.js";
-import { TaskManager as TaskModel } from "../../src/foreman/models/task-model.js";
+import { TaskManager } from "../../src/foreman/models/task-model.js";
 import { initTask } from "../../src/foreman/models/task.js";
 import { createMemoryTaskDb } from "../../src/foreman/memory-db.js";
 import { createAdminWss } from "../../src/foreman/admin-ws.js";
@@ -54,7 +54,7 @@ const cfg = await loadDefaultConfig();
 
 const registry = new WorkerRegistry();
 const graph: DependencyGraph = new Map();
-const taskModel = new TaskModel();
+const taskModel = new TaskManager();
 initTask(createMemoryTaskDb(), () => taskModel.emit("changed"));
 
 // Mock workers managed by /test/connect-worker and /test/workers/:id

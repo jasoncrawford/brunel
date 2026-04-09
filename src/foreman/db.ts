@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json } from "../database.types.js";
 
-type Row<T extends keyof Database["public"]["Tables"]> = Database["public"]["Tables"][T]["Row"];
+export type Row<T extends keyof Database["public"]["Tables"]> = Database["public"]["Tables"][T]["Row"];
 import { fmtEvent } from "./event-fmt.js";
 
 // ── Input types ────────────────────────────────────────────────────────────────

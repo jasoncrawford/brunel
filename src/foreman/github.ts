@@ -1,7 +1,7 @@
 import type { TaskIssue } from "../types.js";
 import { fetchBlockers, setBlockers } from "./dependencies.js";
 import type { DependencyGraph } from "./dependencies.js";
-import type { TaskModel } from "./models/task-model.js";
+import type { TaskManager } from "./models/task-model.js";
 
 // ── GitHub API helpers ────────────────────────────────────────────────────────
 
@@ -16,7 +16,7 @@ function ghHeaders(token: string) {
 // ── Exported functions ────────────────────────────────────────────────────────
 
 export async function loadIssuesToQueue(
-  taskModel: TaskModel,
+  taskModel: TaskManager,
   graph: DependencyGraph,
   config: { githubRepo: string; githubToken: string; taskLabel: string; githubApiUrl?: string },
 ): Promise<void> {

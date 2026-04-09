@@ -99,20 +99,7 @@ export function createHttpServer(
   app.get("/api/tasks", async (c) => {
     try {
       const statusFilter = c.req.query("status") as TaskStatus | undefined;
-      const taskList = taskManager ? await Task.list() : [];
-      const tasks = taskList.map((task) => ({
-        taskId: task.taskId,
-        issueNumber: task.issueNumber,
-        repo: task.repo,
-        title: task.title,
-        status: task.status,
-        workerId: task.workerId,
-        prNumber: task.prNumber,
-        branch: task.branch,
-        createdAt: task.createdAt,
-        assignedAt: task.assignedAt,
-        completedAt: task.completedAt,
-      }));
+      const tasks = taskManager ? await Task.list() : [];
       if (statusFilter) {
         return c.json(tasks.filter((t) => t.status === statusFilter));
       }
