@@ -12,7 +12,6 @@ export function setupInMemoryTasks(emitter?: { emit: (event: string) => void }) 
 
   function notifyChange() {
     Task.events.emit("changed");
-    emitter?.emit("changed");
   }
 
   function spyInstanceMethods(task: Task) {

@@ -12,8 +12,8 @@ import { Task } from "./task.js";
 // tracking) that has no DB backing.  DB reads/writes go through Task statics
 // and instance methods.
 //
-// Emits "changed" (via the initTask onChange callback) after every write so
-// the admin dashboard can refresh.
+// Emits "changed" after every Task mutation (by subscribing to Task.events)
+// and after every worker registry change so the admin dashboard can refresh.
 
 export class TaskManager extends EventEmitter {
   // ── Ephemeral in-memory state (no DB backing) ────────────────────────────
@@ -28,6 +28,7 @@ export class TaskManager extends EventEmitter {
     super();
     this._labeledIssues = new Map();
     this._openIssues = new Set();
+    Task.events.on("changed", () => this.emit("changed"));
   }
 
   // ── Read operations (async — always reads from Task statics) ──────────────
