@@ -178,7 +178,9 @@ describe("TaskManager — derived blocked status", () => {
 
   it("getTaskSnapshots derives blocked status when blocker is open", async () => {
     await registerBase(); // issueNumber: 42
+    m.trackIssue(42);
     m.setBlockers(42, [100]);
+    m.markBlockersLoaded(42);
     m.setIssueOpenState(100, true); // blocker is open (not closed)
 
     const snapshots = await m.getTaskSnapshots();

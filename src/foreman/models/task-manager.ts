@@ -160,7 +160,7 @@ export class TaskManager extends EventEmitter {
     const tasks = await Task.list();
     return tasks.filter((t) => !t.completedAt).map((t) => {
       this.hydrateBlockers(t);
-      return t.toSnapshot(this._openIssues);
+      return t.toSnapshot();
     });
   }
 
@@ -187,9 +187,10 @@ export class TaskManager extends EventEmitter {
 
   // ── Private helpers ───────────────────────────────────────────────────────
 
-  /** Annotate a task with in-memory blocker state before returning it. */
+  /** Annotate a task with in-memory blocker state (including open/closed per blocker) before returning it. */
   private hydrateBlockers(task: Task): void {
-    task.blockers = this._blockers.get(task.issueNumber) ?? [];
+    const nums = this._blockers.get(task.issueNumber) ?? [];
+    task.blockers = nums.map(n => ({ issueNumber: n, isOpen: this._openIssues.has(n) }));
     task.blockersLoaded = this._blockersLoaded.has(task.issueNumber);
   }
 }

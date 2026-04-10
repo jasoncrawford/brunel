@@ -114,7 +114,7 @@ export function createForemanWss(
 
   async function tryAssignWork(workerId: string): Promise<void> {
     const task = await taskManager.nextPending(
-      (t) => t.blockersLoaded && !taskManager.isBlocked(t.issueNumber),
+      (t) => t.blockersLoaded && t.status === "pending",
     );
     if (task) {
       registry.assignTask(workerId, task.taskId);

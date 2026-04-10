@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import type { TaskStatus } from "../../types.js";
 import type { Row } from "../db.js";
-import type { TaskSnapshot } from "../admin-ws.js";
+import type { TaskSnapshot, BlockerInfo } from "../admin-ws.js";
 import { fetchNativeBlockers } from "../github.js";
 import { db } from "../db-client.js";
 
@@ -26,8 +26,8 @@ export class Task {
   prMergedAt: string | null;
 
   // ── In-memory blocker state (not persisted to DB) ─────────────────────────
-  /** Merged set of body-parsed + native GitHub blockers for this task. */
-  blockers: number[] = [];
+  /** Merged set of blockers with their current open/closed state — set by TaskManager.hydrateBlockers(). */
+  blockers: BlockerInfo[] = [];
   /** Whether native blockers have been fetched from the GitHub API. */
   blockersLoaded: boolean = false;
 
@@ -54,16 +54,12 @@ export class Task {
     if (this.prMergedAt) return "merged";
     if (this.prNumber !== null) return "pushed";
     if (this.workerId) return "assigned";
+    if (this.blockersLoaded && this.blockers.some(b => b.isOpen)) return "blocked";
     return "pending";
   }
 
   get repoUrl(): string {
     return `https://github.com/${this.repo}`;
-  }
-
-  /** Returns true if any of this task's blockers appear in the open-issues set. */
-  isBlocked(openIssues: Set<number>): boolean {
-    return this.blockers.some(n => openIssues.has(n));
   }
 
   toJSON() {
@@ -86,18 +82,16 @@ export class Task {
     };
   }
 
-  toSnapshot(openIssues: Set<number>): TaskSnapshot {
-    let status: TaskStatus = this.status;
-    if (status === "pending" && this.isBlocked(openIssues)) status = "blocked";
+  toSnapshot(): TaskSnapshot {
     return {
       taskId: this.taskId,
       issueNumber: this.issueNumber,
       title: this.title,
-      status,
+      status: this.status,
       assignedWorkerId: this.workerId ?? undefined,
       prNumber: this.prNumber ?? undefined,
       prUrl: this.prNumber != null ? `https://github.com/${this.repo}/pull/${this.prNumber}` : undefined,
-      blockers: this.blockers.map((n) => ({ issueNumber: n, isOpen: openIssues.has(n) })),
+      blockers: this.blockers,
     };
   }
 
