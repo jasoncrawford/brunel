@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { Task, initTask } from "../src/foreman/models/task.js";
+import { Task } from "../src/foreman/models/task.js";
+import { initDb } from "../src/foreman/db-client.js";
 import { createTestSupabase } from "./helpers/db.js";
 
 const supabase = createTestSupabase();
-initTask(supabase);
+initDb(supabase);
 
 // All task IDs in this file use the "dbt-" prefix and issue numbers in the
 // 9000 range so we don't collide with pipeline.test.ts (which uses issue

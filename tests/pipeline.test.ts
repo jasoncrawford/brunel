@@ -21,7 +21,8 @@ import type { ForemanMessage } from "../src/types.js";
 import { WorkerRegistry } from "../src/foreman/models/worker-registry.js";
 import { createForemanWss } from "../src/foreman/controllers/wss.js";
 import { TaskManager } from "../src/foreman/models/task-model.js";
-import { Task, initTask } from "../src/foreman/models/task.js";
+import { Task } from "../src/foreman/models/task.js";
+import { initDb } from "../src/foreman/db-client.js";
 import type { DbLogger } from "../src/foreman/db.js";
 import {
   createDbLogger,
@@ -34,7 +35,7 @@ import { createTestSupabase } from "./helpers/db.js";
 
 const defaultCfg = await loadDefaultConfig();
 const supabase = createTestSupabase();
-initTask(supabase);
+initDb(supabase);
 const realDbLogger = createDbLogger(supabase);
 const nullDbLogger = createNullDbLogger();
 

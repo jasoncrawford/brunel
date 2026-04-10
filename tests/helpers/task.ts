@@ -11,6 +11,7 @@ export function setupInMemoryTasks(emitter?: { emit: (event: string) => void }) 
   const tasks = new Map<string, Task>();
 
   function notifyChange() {
+    Task.events.emit("changed");
     emitter?.emit("changed");
   }
 
