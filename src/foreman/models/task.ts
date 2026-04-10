@@ -1,22 +1,16 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Database } from "../../database.types.js";
+import { EventEmitter } from "node:events";
 import type { TaskStatus } from "../../types.js";
 import type { Row } from "../db.js";
 import type { TaskSnapshot } from "../admin-ws.js";
 import type { DependencyGraph } from "../dependencies.js";
 import { isBlocked } from "../dependencies.js";
-
-let db: SupabaseClient<Database>;
-let onChange: (() => void) | undefined;
-
-export function initTask(supabase: SupabaseClient<Database>, onTaskChanged?: () => void): void {
-  db = supabase;
-  onChange = onTaskChanged;
-}
+import { db } from "../db-client.js";
 
 type DbRow = Row<"tasks">;
 
 export class Task {
+  static readonly events = new EventEmitter();
+
   readonly taskId: string;
   issueNumber: number;
   repo: string;
@@ -142,7 +136,7 @@ export class Task {
     if ("title" in changes) this.title = changes.title!;
     if ("body" in changes) this.body = changes.body!;
     if ("labels" in changes) this.labels = changes.labels!;
-    onChange?.();
+    Task.events.emit("changed");
   }
 
   // ── Static finders ──────────────────────────────────────────────────────────
@@ -183,7 +177,7 @@ export class Task {
       { onConflict: "task_id" },
     ).select().maybeSingle();
     if (error) throw error;
-    onChange?.();
+    Task.events.emit("changed");
     return new Task(data!);
   }
 
@@ -228,6 +222,6 @@ export class Task {
   async delete(): Promise<void> {
     const { error } = await db.from("tasks").delete().eq("task_id", this.taskId).is("assigned_at", null);
     if (error) throw error;
-    onChange?.();
+    Task.events.emit("changed");
   }
 }

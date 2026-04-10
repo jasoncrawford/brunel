@@ -9,7 +9,7 @@ import { loadConfig } from "../config.js";
 import { createDbLogger } from "./db.js";
 import type { DbLogger } from "./db.js";
 import { TaskManager } from "./models/task-model.js";
-import { initTask } from "./models/task.js";
+import { initDb } from "./db-client.js";
 import { WorkerRegistry } from "./models/worker-registry.js";
 import { createHttpServer } from "./controllers/http-server.js";
 import { createForemanWss } from "./controllers/wss.js";
@@ -47,7 +47,7 @@ if (isMain) {
   const supabase = createClient<Database>(config.supabaseUrl, config.supabaseSecretKey);
   const dbLogger: DbLogger = createDbLogger(supabase);
   const taskManager = new TaskManager();
-  initTask(supabase, () => taskManager.emit("changed"));
+  initDb(supabase);
 
   let foremanWss: ForemanWss;
   const server = createHttpServer(webhooks, (id, name, payload) => foremanWss.routeEvent(id, name, payload), dbLogger, taskManager);
