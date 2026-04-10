@@ -39,7 +39,7 @@ import { WebSocket } from "ws";
 import { WorkerRegistry } from "../../src/foreman/models/worker-registry.js";
 import { createForemanWss } from "../../src/foreman/controllers/wss.js";
 import { createHttpServer } from "../../src/foreman/controllers/http-server.js";
-import { TaskManager } from "../../src/foreman/models/task-model.js";
+import { TaskManager } from "../../src/foreman/models/task-manager.js";
 import { Task } from "../../src/foreman/models/task.js";
 import { initDb } from "../../src/foreman/db-client.js";
 import { createMemoryTaskDb } from "../helpers/memory-db.js";

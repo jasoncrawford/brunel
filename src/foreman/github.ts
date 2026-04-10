@@ -1,7 +1,6 @@
-import type { TaskIssue } from "../types.js";
-import { fetchBlockers, setBlockers } from "./dependencies.js";
-import type { DependencyGraph } from "./dependencies.js";
-import type { TaskManager } from "./models/task-model.js";
+import type { TaskManager } from "./models/task-manager.js";
+import { Task } from "./models/task.js";
+import { fmtError } from "../utils.js";
 
 // ── GitHub API helpers ────────────────────────────────────────────────────────
 
@@ -17,7 +16,6 @@ function ghHeaders(token: string) {
 
 export async function loadIssuesToQueue(
   taskModel: TaskManager,
-  graph: DependencyGraph,
   config: { githubRepo: string; githubToken: string; taskLabel: string; githubApiUrl?: string },
 ): Promise<void> {
   const { githubRepo: repo, githubToken: token, taskLabel, githubApiUrl: apiUrl = "https://api.github.com" } = config;
@@ -33,16 +31,16 @@ export async function loadIssuesToQueue(
   const loadedIssueNumbers: number[] = [];
 
   for (const issue of issues) {
-    const issueData: TaskIssue = {
-      number: issue.number,
-      title: issue.title,
-      body: issue.body ?? "",
-      labels: issue.labels.map((l) => l.name),
-      repoUrl: `https://github.com/${owner}/${repoName}`,
-    };
-    taskModel.trackIssue(issue.number, issueData);
-    const blockers = await fetchBlockers(issue.number, issue.body ?? "", { repo, token, apiUrl });
-    setBlockers(issue.number, blockers, graph);
+    const body = issue.body ?? "";
+    const labels = issue.labels.map((l) => l.name);
+    const repoUrl = `https://github.com/${owner}/${repoName}`;
+
+    // Track as open and upsert into DB (handles both creation and content sync).
+    await taskModel.enqueueIssue(String(issue.number), issue.number, repo, issue.title, body, labels)
+      .catch((err: unknown) => console.error(`[startup] ERROR upserting task #${issue.number}: ${fmtError(err)}`));
+
+    const blockers = await Task.fetchBlockers(issue.number, body, { repo, token, apiUrl });
+    taskModel.setBlockers(issue.number, blockers);
     for (const b of blockers) allBlockerNumbers.add(b);
     loadedIssueNumbers.push(issue.number);
   }
@@ -54,9 +52,20 @@ export async function loadIssuesToQueue(
     }
   }
 
-  // Mark all loaded entries as having their deps resolved
+  // Mark all loaded issues as having their deps resolved.
   for (const num of loadedIssueNumbers) {
-    taskModel.markIssueDepsLoaded(num);
+    taskModel.markBlockersLoaded(num);
+  }
+
+  // Cleanup: delete pending tasks for issues that no longer have the task label.
+  const labeledNums = new Set(loadedIssueNumbers);
+  const allTasks = await Task.list({ cancelable: true });
+  for (const t of allTasks) {
+    if (!labeledNums.has(t.issueNumber)) {
+      await t.delete().catch((err: unknown) =>
+        console.error(`[startup] ERROR deleting stale task #${t.taskId}: ${fmtError(err)}`)
+      );
+    }
   }
 }
 

@@ -3,7 +3,7 @@ import http from "http";
 import { Hono } from "hono";
 import { getRequestListener } from "@hono/node-server";
 import type { DbLogger } from "../db.js";
-import type { TaskManager } from "../models/task-model.js";
+import type { TaskManager } from "../models/task-manager.js";
 import { Task } from "../models/task.js";
 import type { TaskStatus } from "../../types.js";
 import { fmtError } from "../../utils.js";

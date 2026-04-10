@@ -1,13 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { loadIssuesToQueue, fetchIssueStates, fetchNativeBlockers } from "../src/foreman/github.js";
-import { TaskManager } from "../src/foreman/models/task-model.js";
-import { fetchBlockers } from "../src/foreman/dependencies.js";
-import type { DependencyGraph } from "../src/foreman/dependencies.js";
-
-vi.mock("../src/foreman/dependencies.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../src/foreman/dependencies.js")>();
-  return { ...actual, fetchBlockers: vi.fn().mockResolvedValue([]) };
-});
+import { TaskManager } from "../src/foreman/models/task-manager.js";
+import { Task } from "../src/foreman/models/task.js";
+import { setupInMemoryTasks } from "./helpers/task.js";
 
 const mockIssues = [
   { number: 1, title: "First issue", body: "body 1", labels: [{ name: "brunel:ready" }] },
@@ -23,6 +18,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe("loadIssuesToQueue", () => {
@@ -33,19 +29,24 @@ describe("loadIssuesToQueue", () => {
     } as any);
 
     const taskManager = new TaskManager();
-    await loadIssuesToQueue(taskManager, new Map(), CONFIG_OPTS);
+    setupInMemoryTasks(taskManager);
+    vi.spyOn(Task, "fetchBlockers").mockResolvedValue([]);
+
+    await loadIssuesToQueue(taskManager, CONFIG_OPTS);
 
     expect(fetch).toHaveBeenCalledWith(
       expect.stringContaining("owner/repo/issues"),
       expect.objectContaining({ headers: expect.objectContaining({ Authorization: "Bearer token123" }) }),
     );
-    expect(taskManager.getLabeledIssues().get(1)?.issue.title).toBe("First issue");
-    expect(taskManager.getLabeledIssues().get(2)?.issue.body).toBe(""); // null coerced to ""
+    expect((await Task.getByIssue(1))?.title).toBe("First issue");
+    expect((await Task.getByIssue(2))?.body).toBe(""); // null coerced to ""
   });
 
   it("throws on non-ok response", async () => {
     vi.mocked(fetch).mockResolvedValueOnce({ ok: false, status: 403 } as any);
-    await expect(loadIssuesToQueue(new TaskManager(), new Map(), CONFIG_OPTS)).rejects.toThrow("403");
+    const taskManager = new TaskManager();
+    setupInMemoryTasks(taskManager);
+    await expect(loadIssuesToQueue(taskManager, CONFIG_OPTS)).rejects.toThrow("403");
   });
 });
 
@@ -115,8 +116,8 @@ describe("fetchNativeBlockers", () => {
   });
 });
 
-describe("loadIssuesToQueue with dependency graph", () => {
-  it("populates graph and taskManager from blockers returned by fetchBlockers", async () => {
+describe("loadIssuesToQueue with blockers", () => {
+  it("populates taskManager blockers from Task.fetchBlockers result", async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce({
         ok: true,
@@ -129,18 +130,18 @@ describe("loadIssuesToQueue with dependency graph", () => {
         json: async () => ({ number: 99, state: "open" }),
       } as any);
 
-    vi.mocked(fetchBlockers).mockResolvedValueOnce([99]);
-
-    const graph: DependencyGraph = new Map();
     const taskManager = new TaskManager();
-    await loadIssuesToQueue(taskManager, graph, CONFIG_OPTS);
+    setupInMemoryTasks(taskManager);
+    vi.spyOn(Task, "fetchBlockers").mockResolvedValueOnce([99]);
 
-    expect(graph.get(1)).toEqual(new Set([99]));
-    // Issue 1 is tracked (open), and blocker 99 is open
-    expect(taskManager.getLabeledIssues().has(1)).toBe(true);
+    await loadIssuesToQueue(taskManager, CONFIG_OPTS);
+
+    // Issue 1 is tracked and blocked by 99 which is open
+    expect(taskManager.isBlockersLoaded(1)).toBe(true);
+    expect(taskManager.isBlocked(1)).toBe(true);
   });
 
-  it("does not mark closed blocker as open", async () => {
+  it("does not mark closed blocker as blocking", async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce({
         ok: true,
@@ -153,13 +154,13 @@ describe("loadIssuesToQueue with dependency graph", () => {
         json: async () => ({ number: 50, state: "closed" }),
       } as any);
 
-    vi.mocked(fetchBlockers).mockResolvedValueOnce([50]);
+    vi.spyOn(Task, "fetchBlockers").mockResolvedValueOnce([50]);
 
-    const graph: DependencyGraph = new Map();
     const taskManager = new TaskManager();
-    await loadIssuesToQueue(taskManager, graph, CONFIG_OPTS);
+    setupInMemoryTasks(taskManager);
+    await loadIssuesToQueue(taskManager, CONFIG_OPTS);
 
     // Blocker 50 is closed, so isBlocked should be false
-    expect(taskManager.isBlocked(2, graph)).toBe(false);
+    expect(taskManager.isBlocked(2)).toBe(false);
   });
 });

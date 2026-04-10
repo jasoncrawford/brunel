@@ -18,7 +18,7 @@ import { WebSocket, WebSocketServer } from "ws";
 import type { AddressInfo } from "net";
 import { WorkerRegistry } from "../src/foreman/models/worker-registry.js";
 import { createForemanWss } from "../src/foreman/controllers/wss.js";
-import { TaskManager } from "../src/foreman/models/task-model.js";
+import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
 import { setupInMemoryTasks } from "./helpers/task.js";
 import { loadDefaultConfig } from "../src/config.js";
@@ -48,10 +48,8 @@ async function registerReady(
   labels: string[],
 ): Promise<void> {
   await Task.upsert(taskId, issueNumber, repoSlug, title, body, labels);
-  tm.trackIssue(issueNumber, {
-    number: issueNumber, title, body, labels,
-    repoUrl: `https://github.com/${repoSlug}`,
-  }, true);
+  tm.trackIssue(issueNumber);
+  tm.markBlockersLoaded(issueNumber);
 }
 
 function connectWorker(port: number): Promise<WebSocket> {
