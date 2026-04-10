@@ -7,10 +7,10 @@ import { fmtEvent } from "../event-fmt.js";
 import { fmtError } from "../../utils.js";
 import { shortWorkerId } from "../../../shared/utils.js";
 import type { BrunelConfig } from "../../config.js";
-import type { TaskManager } from "../models/task-model.js";
+import type { TaskManager } from "../models/task-manager.js";
 import { Task } from "../models/task.js";
 import type { WorkerRegistry } from "../models/worker-registry.js";
-import { doRouteEvent, reconcile, isMutedEvent, summaryEvent, forwardEvent } from "./event-router.js";
+import { doRouteEvent, isMutedEvent, summaryEvent, forwardEvent } from "./event-router.js";
 import type { EventRouterDeps } from "./event-router.js";
 
 type R = Record<string, unknown>;
@@ -384,7 +384,7 @@ export function createForemanWss(
   return {
     wss,
     routeEvent,
-    reconcile: () => reconcile(routerDeps),
+    reconcile: assignIdleWorkers,
     shutdown,
   };
 }

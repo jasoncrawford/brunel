@@ -13,7 +13,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import http from "http";
 import type { AddressInfo } from "net";
 import { createHttpServer } from "../src/foreman/controllers/http-server.js";
-import { TaskManager } from "../src/foreman/models/task-model.js";
+import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
 import { setupInMemoryTasks } from "./helpers/task.js";
 

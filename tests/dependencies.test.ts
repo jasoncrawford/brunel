@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Task } from "../src/foreman/models/task.js";
-import { TaskManager } from "../src/foreman/models/task-model.js";
+import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { setupInMemoryTasks } from "./helpers/task.js";
 
 describe("Task.parseBodyBlockers", () => {

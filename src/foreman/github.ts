@@ -1,4 +1,4 @@
-import type { TaskManager } from "./models/task-model.js";
+import type { TaskManager } from "./models/task-manager.js";
 import { Task } from "./models/task.js";
 import { fmtError } from "../utils.js";
 
@@ -36,8 +36,7 @@ export async function loadIssuesToQueue(
     const repoUrl = `https://github.com/${owner}/${repoName}`;
 
     // Track as open and upsert into DB (handles both creation and content sync).
-    taskModel.trackIssue(issue.number);
-    await Task.upsert(String(issue.number), issue.number, repo, issue.title, body, labels)
+    await taskModel.enqueueIssue(String(issue.number), issue.number, repo, issue.title, body, labels)
       .catch((err: unknown) => console.error(`[startup] ERROR upserting task #${issue.number}: ${fmtError(err)}`));
 
     const blockers = await Task.fetchBlockers(issue.number, body, { repo, token, apiUrl });

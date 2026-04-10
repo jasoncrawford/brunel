@@ -7,7 +7,7 @@ import { Webhooks } from "@octokit/webhooks";
 import { loadConfig } from "../config.js";
 import { createDbLogger } from "./db.js";
 import type { DbLogger } from "./db.js";
-import { TaskManager } from "./models/task-model.js";
+import { TaskManager } from "./models/task-manager.js";
 import { initDb } from "./db-client.js";
 import { WorkerRegistry } from "./models/worker-registry.js";
 import { createHttpServer } from "./controllers/http-server.js";

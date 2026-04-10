@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import http from "http";
 import { WorkerRegistry } from "../src/foreman/models/worker-registry.js";
 import { createForemanWss } from "../src/foreman/controllers/wss.js";
-import { TaskManager } from "../src/foreman/models/task-model.js";
+import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
 import { setupInMemoryTasks } from "./helpers/task.js";
 import { loadDefaultConfig } from "../src/config.js";

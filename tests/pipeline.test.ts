@@ -20,7 +20,7 @@ import type { AddressInfo } from "net";
 import type { ForemanMessage } from "../src/types.js";
 import { WorkerRegistry } from "../src/foreman/models/worker-registry.js";
 import { createForemanWss } from "../src/foreman/controllers/wss.js";
-import { TaskManager } from "../src/foreman/models/task-model.js";
+import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
 import { initDb } from "../src/foreman/db-client.js";
 import type { DbLogger } from "../src/foreman/db.js";

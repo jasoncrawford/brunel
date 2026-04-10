@@ -1,6 +1,6 @@
 import type { GitHubEvent, ForemanMessage, TaskIssue } from "../../types.js";
 import { fetchIssueStates } from "../github.js";
-import type { TaskManager } from "../models/task-model.js";
+import type { TaskManager } from "../models/task-manager.js";
 import { Task } from "../models/task.js";
 import type { WorkerRegistry } from "../models/worker-registry.js";
 import { shortWorkerId } from "../../../shared/utils.js";
@@ -125,19 +125,9 @@ export function startDepsLoad(deps: EventRouterDeps, issueNumber: number, body: 
         }
       }
       deps.taskManager.markBlockersLoaded(issueNumber);
-      await reconcile(deps);
+      await deps.assignIdleWorkers();
     })
     .catch((err) => deps.flog(`ERROR fetching deps for #${issueNumber}: ${fmtError(err)}`));
-}
-
-// ── Reconciliation ──────────────────────────────────────────────────────────
-// After dissolving _labeledIssues, task creation and stale-task cleanup are
-// handled at the event call sites (trackIssue + Task.upsert on label;
-// untrackIssue + task.delete on unlabel; loadIssuesToQueue on startup).
-// reconcile() now only triggers worker assignment.
-
-export async function reconcile(deps: EventRouterDeps): Promise<void> {
-  await deps.assignIdleWorkers();
 }
 
 // ── Core event routing ──────────────────────────────────────────────────────
@@ -277,13 +267,12 @@ export async function doRouteEvent(deps: EventRouterDeps, name: string, p: Recor
         repoUrl,
       };
 
-      // Track as open and immediately upsert into DB.
-      taskManager.trackIssue(issueNumber);
-      await Task.upsert(String(issueNumber), issueNumber, repo, issueData.title, issueData.body, issueData.labels)
+      // Track as open and persist to DB.
+      await taskManager.enqueueIssue(String(issueNumber), issueNumber, repo, issueData.title, issueData.body, issueData.labels)
         .catch((err: unknown) => flog(`ERROR Failed to persist task #${issueNumber}: ${fmtError(err)}`));
 
       startDepsLoad(deps, issueNumber, issueData.body);
-      await reconcile(deps);
+      await deps.assignIdleWorkers();
       flog(`[task #${issueNumber}] enqueued via ${name}/${action}`);
       return { taskId: String(issueNumber), workerId: null };
     }
@@ -298,16 +287,10 @@ export async function doRouteEvent(deps: EventRouterDeps, name: string, p: Recor
       action === "unlabeled" &&
       (p.label as Record<string, unknown> | undefined)?.name === deps.taskLabel
     ) {
-      taskManager.untrackIssue(issueNumber);
-      // Delete the task from DB (only works for non-assigned tasks).
-      const staleTask = await Task.getByIssue(issueNumber);
-      if (staleTask) {
-        await staleTask.delete().catch((err: unknown) =>
-          flog(`ERROR Failed to delete task #${staleTask.taskId} from DB: ${fmtError(err)}`)
-        );
-      }
+      await taskManager.dequeueIssue(issueNumber)
+        .catch((err: unknown) => flog(`ERROR Failed to dequeue task #${issueNumber}: ${fmtError(err)}`));
       flog(`[task #${issueNumber}] dequeued (label removed)`);
-      await reconcile(deps);
+      await deps.assignIdleWorkers();
       return result(task);
     }
 
@@ -315,7 +298,7 @@ export async function doRouteEvent(deps: EventRouterDeps, name: string, p: Recor
       await taskManager.closeIssue(issueNumber).catch((err: unknown) =>
         flog(`ERROR Failed to close issue #${issueNumber}: ${fmtError(err)}`)
       );
-      await reconcile(deps);
+      await deps.assignIdleWorkers();
       return result(task);
     }
 
@@ -323,7 +306,7 @@ export async function doRouteEvent(deps: EventRouterDeps, name: string, p: Recor
       await taskManager.reopenIssue(issueNumber).catch((err: unknown) =>
         flog(`ERROR Failed to reopen issue #${issueNumber}: ${fmtError(err)}`)
       );
-      await reconcile(deps);
+      await deps.assignIdleWorkers();
       return result(task);
     }
 

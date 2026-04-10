@@ -78,28 +78,35 @@ export class TaskManager extends EventEmitter {
 
   // ── Issue-lifecycle methods ───────────────────────────────────────────────
 
-  /** Called when issues/labeled fires: begin tracking the issue as open. */
+  /** Mark issue as open in memory (used for test setup and startup tracking). */
   trackIssue(issueNumber: number): void {
     this._openIssues.add(issueNumber);
   }
 
-  /** Called when the brunel:ready label is removed: stop tracking the issue. */
-  untrackIssue(issueNumber: number): void {
+  /** Track issue as open and persist it to DB. Called when issues/labeled fires. */
+  async enqueueIssue(taskId: string, issueNumber: number, repo: string, title: string, body: string, labels: string[]): Promise<void> {
+    this._openIssues.add(issueNumber);
+    await Task.upsert(taskId, issueNumber, repo, title, body, labels);
+  }
+
+  /** Stop tracking issue and remove it from DB. Called when brunel:ready label is removed. */
+  async dequeueIssue(issueNumber: number): Promise<void> {
     this._openIssues.delete(issueNumber);
     this._blockers.delete(issueNumber);
     this._blockersLoaded.delete(issueNumber);
+    const task = await Task.getByIssue(issueNumber);
+    if (task) await task.delete();
   }
 
-  /** Called when issues/closed fires: mark the issue as closed or delete it if pending. */
+  /** Called when issues/closed fires: mark the issue as closed.
+   *  Tasks that were ever assigned (assigned_at IS NOT NULL) are kept for historical purposes.
+   *  Tasks that were never assigned are deleted — task.delete() is a no-op when assigned_at is set. */
   async closeIssue(issueNumber: number): Promise<void> {
     this._openIssues.delete(issueNumber);
     const task = await Task.getByIssue(issueNumber);
     if (!task || task.status === "complete") return;
     await task.close();
-    if (!task.workerId) {
-      // Pending/blocked tasks have no active worker — remove rather than keeping a closed row.
-      await task.delete();
-    }
+    await task.delete(); // no-op if ever assigned (assigned_at IS NOT NULL)
   }
 
   /** Called when issues/reopened fires: mark the issue open again. */
