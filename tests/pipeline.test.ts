@@ -18,7 +18,7 @@ import http from "http";
 import { WebSocket, WebSocketServer } from "ws";
 import type { AddressInfo } from "net";
 import type { ForemanMessage } from "../src/types.js";
-import { WorkerRegistry } from "../src/foreman/models/worker-registry.js";
+import { Worker } from "../src/foreman/models/worker-registry.js";
 import { createForemanWss } from "../src/foreman/controllers/wss.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
@@ -212,7 +212,6 @@ function buildForeman(opts: {
   dbLogger?: DbLogger;
 } = {}): {
   taskModel: TaskManager;
-  registry: WorkerRegistry;
   httpServer: http.Server;
   wss: WebSocketServer;
   routeEvent: (id: string, name: string, payload: unknown) => Promise<void>;
@@ -221,12 +220,12 @@ function buildForeman(opts: {
   connect: () => Promise<WebSocket>;
   teardown: () => Promise<void>;
 } {
+  Worker._reset();
   const taskModel = new TaskManager();
-  const registry = new WorkerRegistry();
   const httpServer = http.createServer();
   const openClients: WebSocket[] = [];
 
-  const { wss, routeEvent } = createForemanWss(taskModel, registry, httpServer, {
+  const { wss, routeEvent } = createForemanWss(taskModel, httpServer, {
     ...defaultCfg,
     githubRepo: "owner/repo",
     githubToken: "token",
@@ -271,7 +270,7 @@ function buildForeman(opts: {
   }
 
   // Expose everything; caller must await `ready` before using `port`.
-  const result = { taskModel, registry, httpServer, wss, routeEvent, port, openClients, connect, teardown };
+  const result = { taskModel, httpServer, wss, routeEvent, port, openClients, connect, teardown };
   // Patch port lazily via a getter so callers don't have to await ready separately
   Object.defineProperty(result, "port", { get: () => port });
   void ready; // ensure listen is called (it is already)

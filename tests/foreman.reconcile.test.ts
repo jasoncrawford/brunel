@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import http from "http";
-import { WorkerRegistry } from "../src/foreman/models/worker-registry.js";
+import { Worker } from "../src/foreman/models/worker-registry.js";
 import { createForemanWss } from "../src/foreman/controllers/wss.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
@@ -15,17 +15,16 @@ function makeIssue(n: number): TaskIssue {
   return { number: n, title: `Issue ${n}`, body: "body", labels: [TASK_LABEL], repoUrl: "https://github.com/o/r" };
 }
 
-let registry: WorkerRegistry;
 let taskManager: TaskManager;
 let reconcile: () => Promise<void>;
 let routeEvent: (id: string, name: string, payload: unknown) => Promise<void>;
 
 beforeEach(() => {
+  Worker._reset();
   taskManager = new TaskManager();
   setupInMemoryTasks(taskManager);
-  registry = new WorkerRegistry();
   const server = http.createServer();
-  ({ reconcile, routeEvent } = createForemanWss(taskManager, registry, server, { ...defaultCfg, taskLabel: TASK_LABEL }));
+  ({ reconcile, routeEvent } = createForemanWss(taskManager, server, { ...defaultCfg, taskLabel: TASK_LABEL }));
 });
 
 afterEach(() => {
@@ -39,7 +38,7 @@ describe("reconcile()", () => {
 
   it("does not assign a pending task when its blockersLoaded is false", async () => {
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    registry.register("w1", fakeWs, "idle");
+    Worker.register("w1", fakeWs);
 
     await Task.upsert("42", 42, "test/repo", "T", "b", []);
     taskManager.trackIssue(42); // blockersLoaded defaults to false — NOT calling markBlockersLoaded
@@ -52,7 +51,7 @@ describe("reconcile()", () => {
 
   it("assigns a pending task to an idle worker when blockersLoaded is true", async () => {
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    registry.register("w1", fakeWs, "idle");
+    Worker.register("w1", fakeWs);
 
     await Task.upsert("42", 42, "test/repo", "T", "b", []);
     taskManager.trackIssue(42);
@@ -63,7 +62,7 @@ describe("reconcile()", () => {
 
     expect(fakeWs.send).toHaveBeenCalledWith(expect.stringContaining('"task_assigned"'));
     expect((await Task.get("42"))?.status).toBe("assigned");
-    expect(registry.get("w1")?.status).toBe("busy");
+    expect(Worker.get("w1")?.status).toBe("busy");
   });
 
   it("does NOT remove an assigned task (reconcile never deletes)", async () => {

@@ -10,7 +10,7 @@ Two independent processes: **foreman** (server) and **worker** (agent). They com
 
 MVC structure. Models own state; controllers handle external inputs.
 
-- **Models** (`models/`) — `Task` is the active-record for all DB reads/writes. `TaskManager` owns ephemeral in-memory state only (event queues, branch mappings, blocker state). `WorkerRegistry` tracks connected workers.
+- **Models** (`models/`) — `Task` is the active-record for all DB reads/writes. `TaskManager` owns ephemeral in-memory state only (event queues, branch mappings, blocker state). `Worker` is the active-record for connected workers (module-level registry, static finders, `Worker._reset()` for test isolation).
 - **Controllers** (`controllers/`) — `http-server.ts` handles webhooks + REST + SPA. `wss.ts` handles the WebSocket lifecycle with workers. `event-router.ts` routes GitHub events to the right worker or queue.
 - **Infrastructure** — `db-client.ts` wires the shared Supabase client. `admin-ws.ts` broadcasts to the admin dashboard. `github.ts` wraps GitHub API calls.
 
@@ -80,4 +80,5 @@ Most tests run without Supabase. DB tests (`db.*.test.ts`, `pipeline.test.ts`) r
 - Use `display.print()` (not `console.log`) for output in agent/worker code — it routes through the status-bar-aware renderer so messages don't corrupt the TUI.
 - Prefer event-based designs for real-time UIs: a model holds state and emits on change; the UI subscribes once rather than scattering manual refresh calls.
 - In unit tests, use `setupInMemoryTasks()` from `tests/helpers/task.ts` instead of `initDb()` — it mocks the `Task` layer with an in-memory map.
+- In foreman tests that call `createForemanWss`, call `Worker._reset()` in `beforeEach` to clear the module-level worker registry between tests. `createForemanWss` takes no `registry` parameter — `Worker` is imported directly by `wss.ts` and `event-router.ts`.
 - In browser tests, the server is shared across all tests — use unique issue numbers per test rather than resetting server state.

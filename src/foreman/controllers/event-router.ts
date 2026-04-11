@@ -2,7 +2,7 @@ import type { GitHubEvent, ForemanMessage, TaskIssue } from "../../types.js";
 import { fetchIssueStates } from "../github.js";
 import type { TaskManager } from "../models/task-manager.js";
 import { Task } from "../models/task.js";
-import type { WorkerRegistry } from "../models/worker-registry.js";
+import { Worker } from "../models/worker-registry.js";
 import { shortWorkerId } from "../../../shared/utils.js";
 import { fmtError } from "../../utils.js";
 
@@ -10,7 +10,6 @@ import { fmtError } from "../../utils.js";
 
 export interface EventRouterDeps {
   taskManager: TaskManager;
-  registry: WorkerRegistry;
   repo: string;
   token: string;
   githubApiUrl?: string;
@@ -95,7 +94,7 @@ export function isMutedEvent(name: string): boolean {
 
 export function forwardEvent(deps: EventRouterDeps, task: Task, evt: GitHubEvent, ref: string): void {
   if (task.workerId) {
-    const worker = deps.registry.get(task.workerId);
+    const worker = Worker.get(task.workerId);
     if (worker && worker.currentTaskId !== task.taskId) {
       deps.flog(`[task ${ref}] ${evt.name} dropped — worker ${shortWorkerId(task.workerId)} is now on a different task`);
       return;

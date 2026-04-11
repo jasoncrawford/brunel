@@ -3,86 +3,99 @@ import type { ForemanMessage } from "../../types.js";
 import type { WebSocket as WsSocket } from "ws";
 import type { WorkerSnapshot } from "../admin-ws.js";
 
-export interface WorkerState {
-  workerId: string;
-  ws: WsSocket;
-  status: "idle" | "busy" | "disconnected";
+const registry = new Map<string, Worker>();
+
+export class Worker {
+  static readonly events: EventEmitter = new EventEmitter();
+
+  private constructor(
+    readonly workerId: string,
+    private ws: WsSocket,
+  ) {}
+
+  status: "idle" | "busy" | "disconnected" = "idle";
   currentTaskId?: string;
   disconnectedAt?: Date;
-}
 
-export class WorkerRegistry extends EventEmitter {
-  private workers = new Map<string, WorkerState>();
+  // Static registry operations
 
-  register(workerId: string, ws: WsSocket, status: "idle" | "busy", taskId?: string): void {
-    this.workers.set(workerId, { workerId, ws, status, currentTaskId: taskId });
-    this.emit("changed");
+  static register(workerId: string, ws: WsSocket): Worker {
+    const worker = new Worker(workerId, ws);
+    registry.set(workerId, worker);
+    Worker.events.emit("changed");
+    return worker;
   }
 
-  get(workerId: string): WorkerState | undefined {
-    return this.workers.get(workerId);
+  static get(workerId: string): Worker | undefined {
+    return registry.get(workerId);
   }
 
-  remove(workerId: string) {
-    this.workers.delete(workerId);
-    this.emit("changed");
+  static getIdle(): Worker[] {
+    return [...registry.values()].filter((w) => w.status === "idle");
   }
 
-  markDisconnected(workerId: string) {
-    const w = this.workers.get(workerId);
-    if (!w) return;
-    w.status = "disconnected";
-    w.disconnectedAt = new Date();
-    this.emit("changed");
-  }
-
-  getIdleWorker(): WorkerState | null {
-    for (const w of this.workers.values()) {
-      if (w.status === "idle") return w;
-    }
-    return null;
-  }
-
-  getIdleWorkers(): WorkerState[] {
-    return [...this.workers.values()].filter((w) => w.status === "idle");
-  }
-
-  getWorkerForTask(taskId: string): WorkerState | null {
-    for (const w of this.workers.values()) {
+  static getByTask(taskId: string): Worker | undefined {
+    for (const w of registry.values()) {
       if (w.currentTaskId === taskId) return w;
     }
-    return null;
+    return undefined;
   }
 
-  assignTask(workerId: string, taskId: string) {
-    const w = this.workers.get(workerId);
-    if (!w) return;
-    w.status = "busy";
-    w.currentTaskId = taskId;
-    this.emit("changed");
+  static all(): Worker[] {
+    return [...registry.values()];
   }
 
-  releaseWorker(workerId: string) {
-    const w = this.workers.get(workerId);
-    if (!w) return;
-    w.status = "idle";
-    w.currentTaskId = undefined;
-    this.emit("changed");
+  /** Clear registry — use in tests for isolation. */
+  static _reset(): void {
+    registry.clear();
   }
 
+  // Instance operations
 
-  send(workerId: string, msg: ForemanMessage) {
-    const w = this.workers.get(workerId);
-    if (w?.ws.readyState === 1 /* OPEN */) {
-      w.ws.send(JSON.stringify(msg));
+  assign(taskId: string): void {
+    this.status = "busy";
+    this.currentTaskId = taskId;
+    Worker.events.emit("changed");
+  }
+
+  release(): void {
+    this.status = "idle";
+    this.currentTaskId = undefined;
+    Worker.events.emit("changed");
+  }
+
+  markDisconnected(): void {
+    this.status = "disconnected";
+    this.disconnectedAt = new Date();
+    Worker.events.emit("changed");
+  }
+
+  remove(): void {
+    registry.delete(this.workerId);
+    Worker.events.emit("changed");
+  }
+
+  isCurrentSocket(ws: WsSocket): boolean {
+    return this.ws === ws;
+  }
+
+  send(msg: ForemanMessage): boolean {
+    if (this.ws.readyState === 1 /* OPEN */) {
+      this.ws.send(JSON.stringify(msg));
+      return true;
     }
+    return false;
   }
 
-  getWorkerSnapshots(): WorkerSnapshot[] {
-    return [...this.workers.values()].map((w) => ({
-      workerId: w.workerId,
-      status: w.status,
-      currentTaskId: w.currentTaskId,
-    }));
+  toSnapshot(): WorkerSnapshot {
+    return {
+      workerId: this.workerId,
+      status: this.status,
+      currentTaskId: this.currentTaskId,
+    };
   }
 }
+
+// Disable max-listeners warning — tests call createForemanWss many times,
+// each adding a listener to this static emitter.
+Worker.events.setMaxListeners(0);

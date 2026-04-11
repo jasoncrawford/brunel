@@ -9,7 +9,7 @@ import { shortWorkerId } from "../../../shared/utils.js";
 import type { BrunelConfig } from "../../config.js";
 import type { TaskManager } from "../models/task-manager.js";
 import { Task } from "../models/task.js";
-import type { WorkerRegistry } from "../models/worker-registry.js";
+import { Worker } from "../models/worker-registry.js";
 import { doRouteEvent, isMutedEvent, summaryEvent, forwardEvent } from "./event-router.js";
 import type { EventRouterDeps } from "./event-router.js";
 
@@ -35,7 +35,6 @@ export interface ForemanWss {
 
 export function createForemanWss(
   taskManager: TaskManager,
-  registry: WorkerRegistry,
   server: http.Server,
   config: Pick<BrunelConfig, "taskLabel" | "githubRepo" | "githubToken" | "githubApiUrl" | "workerSecret" | "pingIntervalMs">,
   deps?: {
@@ -73,7 +72,7 @@ export function createForemanWss(
 
   function sendMsg(workerId: string, msg: ForemanMessage, logTaskId?: string): void {
     const taskId = logTaskId ?? (("taskId" in msg ? msg.taskId : null) ?? null);
-    registry.send(workerId, msg);
+    Worker.get(workerId)?.send(msg);
     const msgPayload = msg as unknown as Record<string, unknown>;
     dbLogger?.logForemanMessage({ direction: "sent", workerId, taskId, msgType: msg.type, payload: msgPayload });
     broadcastMessageEvent({ direction: "sent", workerId, taskId, msgType: msg.type, payload: msgPayload });
@@ -87,13 +86,13 @@ export function createForemanWss(
     if (!adminWss) return;
     adminWss.broadcastSnapshot({
       tasks: await taskManager.getTaskSnapshots(),
-      workers: registry.getWorkerSnapshots(),
+      workers: Worker.all().map((w) => w.toSnapshot()),
     });
   }
 
   const debouncedBroadcast = debounce(broadcastSnapshot, 10);
   taskManager.on("changed", debouncedBroadcast);
-  registry.on("changed", debouncedBroadcast);
+  Worker.events.on("changed", debouncedBroadcast);
 
   // Mutex that ensures at most one assignIdleWorkers() runs at a time.
   // Without this, two concurrent webhook events can each call assignIdleWorkers()
@@ -105,7 +104,7 @@ export function createForemanWss(
       // Sequential (not concurrent) to prevent double-assignment: each tryAssignWork
       // must complete its DB write before the next one calls nextPending(), otherwise
       // two workers can both see the same pending task. (Issue #563)
-      for (const w of registry.getIdleWorkers()) {
+      for (const w of Worker.getIdle()) {
         await tryAssignWork(w.workerId).catch(err => flog(`ERROR tryAssignWork: ${fmtError(err)}`));
       }
     });
@@ -117,12 +116,13 @@ export function createForemanWss(
       (t) => t.blockersLoaded && t.status === "pending",
     );
     if (task) {
-      registry.assignTask(workerId, task.taskId);
+      const worker = Worker.get(workerId);
+      worker?.assign(task.taskId);
       try {
         await task.assign(workerId);
       } catch (err) {
         flog(`ERROR Failed to persist assignment for task #${task.taskId}: ${fmtError(err)}`);
-        registry.releaseWorker(workerId);
+        worker?.release();
         log(workerId, "→ idle (DB write failed)");
         return;
       }
@@ -152,7 +152,6 @@ export function createForemanWss(
   // Build the event router deps object
   const routerDeps: EventRouterDeps = {
     taskManager,
-    registry,
     repo,
     token,
     githubApiUrl,
@@ -222,12 +221,13 @@ export function createForemanWss(
       }
 
       function cancelWorker(taskId?: string) {
-        registry.register(workerId, ws, "idle");
+        Worker.register(workerId, ws);
         sendMsg(workerId, { type: "hello_ack", workerId, status: "cancelled" }, taskId);
       }
 
       async function reclaimWorker(task: Task) {
-        registry.register(workerId, ws, "busy", task.taskId);
+        const w = Worker.register(workerId, ws);
+        w.assign(task.taskId);
         // Only call assign if task is not already complete (to preserve task status)
         if (task.status !== "complete") {
           await task.assign(workerId);
@@ -278,7 +278,7 @@ export function createForemanWss(
         } else {
           log(workerId, "hello idle");
         }
-        registry.register(workerId, ws, "idle");
+        Worker.register(workerId, ws);
         sendMsg(workerId, { type: "hello_ack", workerId, status: "idle" });
       }
     }
@@ -295,7 +295,7 @@ export function createForemanWss(
           flog(`ERROR Failed to mark task #${msg.taskId} complete: ${fmtError(err)}`)
         );
       }
-      registry.releaseWorker(workerId);
+      Worker.get(workerId)?.release();
     }
 
     async function handleWorkerGoodbye(msg: Extract<WorkerMessage, { type: "worker_goodbye" }>) {
@@ -309,7 +309,7 @@ export function createForemanWss(
           );
         }
       }
-      registry.remove(workerId);
+      Worker.get(workerId)?.remove();
     }
 
     ws.on("message", (data) => {
@@ -339,12 +339,12 @@ export function createForemanWss(
 
     ws.on("close", (code, reason) => {
       if (workerId) {
-        const currentState = registry.get(workerId);
-        if (currentState && currentState.ws !== ws) return;
+        const currentWorker = Worker.get(workerId);
+        if (currentWorker && !currentWorker.isCurrentSocket(ws)) return;
 
         const reasonStr = reason?.length ? `: ${reason}` : "";
         log(workerId, `disconnected (code ${code}${reasonStr})`);
-        const taskId = currentState?.currentTaskId ?? null;
+        const taskId = currentWorker?.currentTaskId ?? null;
         const disconnPayload = { code, reason: reason?.toString() ?? null };
         dbLogger?.logForemanMessage({
           direction: "received",
@@ -355,9 +355,9 @@ export function createForemanWss(
         });
         broadcastMessageEvent({ direction: "received", workerId, taskId, msgType: "worker_disconnected", payload: disconnPayload });
         if (taskId) {
-          registry.markDisconnected(workerId);
+          currentWorker?.markDisconnected();
         } else {
-          registry.remove(workerId);
+          currentWorker?.remove();
         }
       }
     });

@@ -36,7 +36,7 @@ const _realFetch = globalThis.fetch;
 import http from "http";
 import type { AddressInfo } from "net";
 import { WebSocket } from "ws";
-import { WorkerRegistry } from "../../src/foreman/models/worker-registry.js";
+import { Worker } from "../../src/foreman/models/worker-registry.js";
 import { createForemanWss } from "../../src/foreman/controllers/wss.js";
 import { createHttpServer } from "../../src/foreman/controllers/http-server.js";
 import { TaskManager } from "../../src/foreman/models/task-manager.js";
@@ -45,7 +45,6 @@ import { initDb } from "../../src/foreman/db-client.js";
 import { createMemoryTaskDb } from "../helpers/memory-db.js";
 import { createAdminWss } from "../../src/foreman/admin-ws.js";
 import { loadDefaultConfig } from "../../src/config.js";
-import type { DependencyGraph } from "../../src/foreman/dependencies.js";
 
 const PORT = parseInt(process.env.PORT ?? "14567", 10);
 
@@ -53,8 +52,6 @@ const cfg = await loadDefaultConfig();
 
 // ── Foreman state ─────────────────────────────────────────────────────────────
 
-const registry = new WorkerRegistry();
-const graph: DependencyGraph = new Map();
 const taskModel = new TaskManager();
 initDb(createMemoryTaskDb());
 Task.events.on("changed", () => taskModel.emit("changed"));
@@ -144,13 +141,13 @@ async function handleTestRoute(
 // ── Admin WebSocket ───────────────────────────────────────────────────────────
 
 const adminWss = createAdminWss(server, async () => ({
-  tasks: await taskModel.getTaskSnapshots(graph),
-  workers: registry.getWorkerSnapshots(),
+  tasks: await taskModel.getTaskSnapshots(),
+  workers: Worker.all().map((w) => w.toSnapshot()),
 }));
 
 // ── Foreman WebSocket ─────────────────────────────────────────────────────────
 
-foremanWss = createForemanWss(taskModel, registry, server, cfg, { graph, adminWss });
+foremanWss = createForemanWss(taskModel, server, cfg, { adminWss });
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 

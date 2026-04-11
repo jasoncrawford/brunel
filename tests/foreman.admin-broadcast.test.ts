@@ -16,7 +16,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import http from "http";
 import { WebSocket, WebSocketServer } from "ws";
 import type { AddressInfo } from "net";
-import { WorkerRegistry } from "../src/foreman/models/worker-registry.js";
+import { Worker } from "../src/foreman/models/worker-registry.js";
 import { createForemanWss } from "../src/foreman/controllers/wss.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
@@ -67,7 +67,7 @@ function send(ws: WebSocket, msg: object) {
 // ── Test harness ──────────────────────────────────────────────────────────────
 
 let taskManager: TaskManager;
-let registry: WorkerRegistry;
+
 let httpServer: http.Server;
 let wss: WebSocketServer;
 let adminWss: AdminWss;
@@ -80,16 +80,17 @@ function connect(): Promise<WebSocket> {
 }
 
 beforeEach(() => {
+  Worker._reset();
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
   process.env.GITHUB_REPO = "owner/repo";
   process.env.GITHUB_TOKEN = "token";
 
   taskManager = new TaskManager();
   setupInMemoryTasks(taskManager);
-  registry = new WorkerRegistry();
+
   adminWss = makeMockAdminWss();
   httpServer = http.createServer();
-  ({ wss, routeEvent } = createForemanWss(taskManager, registry, httpServer, defaultCfg, { adminWss }));
+  ({ wss, routeEvent } = createForemanWss(taskManager, httpServer, defaultCfg, { adminWss }));
 
   return new Promise<void>((resolve) => {
     httpServer.listen(0, () => {
