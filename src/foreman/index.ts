@@ -5,8 +5,6 @@ import { createClient } from "@supabase/supabase-js";
 import type { Database } from "../database.types.js";
 import { Webhooks } from "@octokit/webhooks";
 import { loadConfig } from "../config.js";
-import { createDbLogger } from "./db.js";
-import type { DbLogger } from "./db.js";
 import { TaskManager } from "./models/task-manager.js";
 import { initDb } from "./db-client.js";
 import { Worker } from "./models/worker-registry.js";
@@ -36,18 +34,17 @@ if (isMain) {
     ? new Webhooks({ secret: config.webhookSecret })
     : null;
 
-  // Setup DB logger, task module and task manager (share the same Supabase client)
+  // Setup DB and task manager (share the same Supabase client)
   if (!config.supabaseUrl || !config.supabaseSecretKey) {
     flog("ERROR Supabase is required. Set BRUNEL_SUPABASE_URL and BRUNEL_SUPABASE_SECRET_KEY.");
     process.exit(1);
   }
   const supabase = createClient<Database>(config.supabaseUrl, config.supabaseSecretKey);
-  const dbLogger: DbLogger = createDbLogger(supabase);
   const taskManager = new TaskManager();
   initDb(supabase);
 
   let foremanWss: ForemanWss;
-  const server = createHttpServer(webhooks, (id, name, payload) => foremanWss.routeEvent(id, name, payload), dbLogger, taskManager);
+  const server = createHttpServer(webhooks, (id, name, payload) => foremanWss.routeEvent(id, name, payload), taskManager);
 
   // Admin WebSocket broadcaster
   const adminWss = createAdminWss(server, async () => ({
@@ -56,7 +53,6 @@ if (isMain) {
   }));
 
   foremanWss = createForemanWss(taskManager, server, config, {
-    dbLogger,
     adminWss,
   });
 

@@ -12,7 +12,7 @@ import { Task } from "../src/foreman/models/task.js";
 import { setupInMemoryTasks } from "./helpers/task.js";
 import { loadDefaultConfig } from "../src/config.js";
 const defaultCfg = await loadDefaultConfig();
-import type { ForemanMessage } from "../src/types.js";
+import * as Wire from "../src/wire.js";
 import { waitUntil } from "./helpers.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -40,7 +40,7 @@ function connectWorker(port: number): Promise<WebSocket> {
   });
 }
 
-function nextMsg(ws: WebSocket): Promise<ForemanMessage> {
+function nextMsg(ws: WebSocket): Promise<Wire.ForemanMessage> {
   return new Promise((resolve) => {
     ws.once("message", (data) => resolve(JSON.parse(data.toString())));
   });
@@ -51,10 +51,10 @@ function send(ws: WebSocket, msg: object) {
 }
 
 /** Collects messages until predicate returns true; resolves with the matching message. */
-function nextMsgWhere(ws: WebSocket, predicate: (msg: ForemanMessage) => boolean): Promise<ForemanMessage> {
+function nextMsgWhere(ws: WebSocket, predicate: (msg: Wire.ForemanMessage) => boolean): Promise<Wire.ForemanMessage> {
   return new Promise((resolve) => {
     const handler = (data: Buffer | string) => {
-      const msg: ForemanMessage = JSON.parse(data.toString());
+      const msg: Wire.ForemanMessage = JSON.parse(data.toString());
       if (predicate(msg)) {
         ws.off("message", handler);
         resolve(msg);

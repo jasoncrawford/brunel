@@ -1,11 +1,11 @@
 import { EventEmitter } from "node:events";
-import type { TaskStatus } from "../../types.js";
-import type { Row } from "../db.js";
+import type { TaskStatus } from "../../../shared/types.js";
+import type { Database } from "../../database.types.js";
 import type { TaskSnapshot, BlockerInfo } from "../admin-ws.js";
 import { fetchNativeBlockers } from "../github.js";
 import { db } from "../db-client.js";
 
-type DbRow = Row<"tasks">;
+type DbRow = Database["public"]["Tables"]["tasks"]["Row"];
 
 export class Task {
   static readonly events = new EventEmitter();

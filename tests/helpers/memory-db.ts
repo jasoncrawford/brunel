@@ -76,8 +76,24 @@ export function createMemoryTaskDb(): SupabaseClient<Database> {
     return thenable;
   }
 
+  // Stub for tables other than "tasks" — always returns empty results so that
+  // WebhookEvent.query() / ForemanMessage.query() calls don't return task rows
+  // by accident (the real tables don't exist in the in-memory store).
+  const emptyBuilder = {
+    select(_cols?: string) { return emptyBuilder; },
+    eq(_col: string, _val: unknown) { return emptyBuilder; },
+    is(_col: string, _val: unknown) { return emptyBuilder; },
+    order(_col: string, _opts?: unknown) { return emptyBuilder; },
+    limit(_n: number) { return ok([] as DbRow[]); },
+    maybeSingle() { return ok(null as DbRow | null); },
+    insert(_data: unknown) { return ok(null); },
+  };
+
   return {
-    from(_table: string) {
+    from(table: string) {
+      if (table !== "tasks") {
+        return emptyBuilder;
+      }
       return {
         select(_cols?: string) {
           return buildSelectQuery([]);

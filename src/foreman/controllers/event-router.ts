@@ -1,4 +1,5 @@
-import type { GitHubEvent, ForemanMessage, TaskIssue } from "../../types.js";
+import * as Wire from "../../wire.js";
+import type { WebhookEvent } from "../models/webhook-event.js";
 import { fetchIssueStates } from "../github.js";
 import type { TaskManager } from "../models/task-manager.js";
 import { Task } from "../models/task.js";
@@ -14,7 +15,7 @@ export interface EventRouterDeps {
   token: string;
   githubApiUrl?: string;
   taskLabel: string;
-  sendMsg(workerId: string, msg: ForemanMessage, logTaskId?: string): void;
+  sendMsg(workerId: string, msg: Wire.ForemanMessage, logTaskId?: string): void;
   flog(msg: string): void;
   assignIdleWorkers(): Promise<void>;
 }
@@ -92,26 +93,26 @@ export function isMutedEvent(name: string): boolean {
 
 // ── Event forwarding ─────────────────────────────────────────────────────────
 
-export function forwardEvent(deps: EventRouterDeps, task: Task, evt: GitHubEvent, ref: string): void {
+export function forwardEvent(deps: EventRouterDeps, task: Task, evt: WebhookEvent, ref: string): void {
   if (task.workerId) {
     const worker = Worker.get(task.workerId);
     if (worker && worker.currentTaskId !== task.taskId) {
-      deps.flog(`[task ${ref}] ${evt.name} dropped — worker ${shortWorkerId(task.workerId)} is now on a different task`);
+      deps.flog(`[task ${ref}] ${evt.eventName} dropped — worker ${shortWorkerId(task.workerId)} is now on a different task`);
       return;
     }
     if (worker?.status === "disconnected") {
       deps.taskManager.queueEvent(task.taskId, evt);
-      deps.flog(`[task ${ref}] ${evt.name} queued (worker ${shortWorkerId(task.workerId)} disconnected)`);
+      deps.flog(`[task ${ref}] ${evt.eventName} queued (worker ${shortWorkerId(task.workerId)} disconnected)`);
     } else if (worker) {
-      const evtMsg: ForemanMessage = { type: "event_notification", taskId: task.taskId, event: evt };
+      const evtMsg: Wire.ForemanMessage = { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload() };
       deps.sendMsg(task.workerId, evtMsg);
-      deps.flog(`[worker ${shortWorkerId(task.workerId)}] → event_notification ${ref} ${evt.name}`);
+      deps.flog(`[worker ${shortWorkerId(task.workerId)}] → event_notification ${ref} ${evt.eventName}`);
     } else {
-      deps.flog(`[task ${ref}] ${evt.name} DROPPED — worker ${shortWorkerId(task.workerId)} not in registry (disconnected?)`);
+      deps.flog(`[task ${ref}] ${evt.eventName} DROPPED — worker ${shortWorkerId(task.workerId)} not in registry (disconnected?)`);
     }
   } else if (task.status === "pending" || task.status === "blocked") {
     deps.taskManager.queueEvent(task.taskId, evt);
-    deps.flog(`[task ${ref}] ${evt.name} queued (no worker assigned)`);
+    deps.flog(`[task ${ref}] ${evt.eventName} queued (no worker assigned)`);
   }
 }
 
@@ -137,7 +138,7 @@ export function startDepsLoad(deps: EventRouterDeps, issueNumber: number, body: 
 
 export interface RouteResult { taskId: string | null; workerId: string | null; }
 
-export async function doRouteEvent(deps: EventRouterDeps, name: string, p: Record<string, unknown>, evt: GitHubEvent): Promise<RouteResult> {
+export async function doRouteEvent(deps: EventRouterDeps, name: string, p: Record<string, unknown>, evt: WebhookEvent): Promise<RouteResult> {
   function result(task: { taskId: string; workerId: string | null } | null | undefined): RouteResult {
     return { taskId: task?.taskId ?? null, workerId: task?.workerId ?? null };
   }
@@ -262,7 +263,7 @@ export async function doRouteEvent(deps: EventRouterDeps, name: string, p: Recor
       const repoUrl = strProp(p.repository, "html_url") ?? "";
       const labels =
         (issue.labels as Array<{ name: string }> | undefined)?.map((l) => l.name) ?? [];
-      const issueData: TaskIssue = {
+      const issueData: Wire.TaskIssue = {
         number: issueNumber,
         title: String(issue.title ?? ""),
         body: String(issue.body ?? ""),

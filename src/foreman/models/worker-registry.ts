@@ -1,5 +1,5 @@
 import { EventEmitter } from "events";
-import type { ForemanMessage } from "../../types.js";
+import * as Wire from "../../wire.js";
 import type { WebSocket as WsSocket } from "ws";
 import type { WorkerSnapshot } from "../admin-ws.js";
 
@@ -79,7 +79,7 @@ export class Worker {
     return this.ws === ws;
   }
 
-  send(msg: ForemanMessage): boolean {
+  send(msg: Wire.ForemanMessage): boolean {
     if (this.ws.readyState === 1 /* OPEN */) {
       this.ws.send(JSON.stringify(msg));
       return true;

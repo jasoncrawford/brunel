@@ -10,8 +10,8 @@ import { Task } from "../src/foreman/models/task.js";
 import { setupInMemoryTasks } from "./helpers/task.js";
 import { loadDefaultConfig } from "../src/config.js";
 const defaultCfg = await loadDefaultConfig();
-import type { ForemanMessage } from "../src/types.js";
-import type { DbLogger } from "../src/foreman/db.js";
+import * as Wire from "../src/wire.js";
+import { ForemanMessage } from "../src/foreman/models/foreman-message.js";
 import { waitUntil } from "./helpers.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -24,24 +24,24 @@ function connectWorker(port: number): Promise<WebSocket> {
   });
 }
 
-function nextMsg(ws: WebSocket): Promise<ForemanMessage> {
+function nextMsg(ws: WebSocket): Promise<Wire.ForemanMessage> {
   return new Promise((resolve) => {
     ws.once("message", (data) => resolve(JSON.parse(data.toString())));
   });
 }
 
 /** FIFO queue that buffers all messages — safe against hello_ack + task_assigned in same TCP packet. */
-function makeQueue(ws: WebSocket): { next: () => Promise<ForemanMessage> } {
-  const pending: ForemanMessage[] = [];
-  const waiters: Array<(m: ForemanMessage) => void> = [];
+function makeQueue(ws: WebSocket): { next: () => Promise<Wire.ForemanMessage> } {
+  const pending: Wire.ForemanMessage[] = [];
+  const waiters: Array<(m: Wire.ForemanMessage) => void> = [];
   ws.on("message", (data: Buffer | string) => {
-    const msg = JSON.parse(data.toString()) as ForemanMessage;
+    const msg = JSON.parse(data.toString()) as Wire.ForemanMessage;
     const waiter = waiters.shift();
     if (waiter) waiter(msg);
     else pending.push(msg);
   });
   return {
-    next(): Promise<ForemanMessage> {
+    next(): Promise<Wire.ForemanMessage> {
       if (pending.length > 0) return Promise.resolve(pending.shift()!);
       return new Promise((r) => waiters.push(r));
     },
@@ -291,7 +291,7 @@ describe("foreman WebSocket protocol", () => {
     await routeEvent("evt-1", "issue_comment", { issue: { number: 1 } });
     const events = taskManager.drainEvents("1");
     expect(events).toHaveLength(1);
-    expect(events[0].name).toBe("issue_comment");
+    expect(events[0].eventName).toBe("issue_comment");
   });
 
   it("invalid JSON from worker does not crash the server", async () => {
@@ -494,7 +494,7 @@ describe("hello_ack handshake", () => {
     await routeEvent("evt-1", "issue_comment", { issue: { number: 1 } });
 
     const ws = await connect();
-    const messages: ForemanMessage[] = [];
+    const messages: Wire.ForemanMessage[] = [];
     ws.on("message", (data) => messages.push(JSON.parse(data.toString())));
     send(ws, { type: "worker_hello", workerId: "w1", taskId: "1", status: "busy" });
     await waitUntil(() => messages.length >= 2);
@@ -700,22 +700,13 @@ describe("worker WebSocket connection", () => {
 });
 
 describe("worker disconnect DB logging", () => {
-  it("calls dbLogger.logForemanMessage with worker_disconnected when a registered worker disconnects", async () => {
-    const mockDbLogger: DbLogger = {
-      logWebhookEvent: vi.fn(),
-      logForemanMessage: vi.fn(),
-      queryLog: vi.fn().mockResolvedValue([]),
-      queryTaskEvents: vi.fn().mockResolvedValue([]),
-      queryWorkerMessages: vi.fn().mockResolvedValue([]),
-    };
+  it("calls ForemanMessage.log with worker_disconnected when a registered worker disconnects", async () => {
+    const logSpy = vi.spyOn(ForemanMessage, "log").mockReturnValue(undefined);
 
     const server = http.createServer();
     const localTm = new TaskManager();
     setupInMemoryTasks(localTm);
-    const { wss: testWss } = createForemanWss(
-      localTm, server,
-      defaultCfg, { dbLogger: mockDbLogger },
-    );
+    const { wss: testWss } = createForemanWss(localTm, server, defaultCfg);
     const testPort = await new Promise<number>((r) => server.listen(0, () => r((server.address() as AddressInfo).port)));
 
     const ws = new WebSocket(`ws://localhost:${testPort}/worker`);
@@ -729,7 +720,7 @@ describe("worker disconnect DB logging", () => {
     });
     await waitUntil(() => !Worker.get("w-disc-1") || Worker.get("w-disc-1")?.status === "disconnected");
 
-    const calls = (mockDbLogger.logForemanMessage as ReturnType<typeof vi.fn>).mock.calls;
+    const calls = logSpy.mock.calls;
     const disconnectCall = calls.find((c) => c[0].msgType === "worker_disconnected");
     expect(disconnectCall).toBeDefined();
     expect(disconnectCall![0]).toMatchObject({
@@ -744,13 +735,7 @@ describe("worker disconnect DB logging", () => {
   });
 
   it("includes the current taskId in the disconnect event when worker had an active task", async () => {
-    const mockDbLogger: DbLogger = {
-      logWebhookEvent: vi.fn(),
-      logForemanMessage: vi.fn(),
-      queryLog: vi.fn().mockResolvedValue([]),
-      queryTaskEvents: vi.fn().mockResolvedValue([]),
-      queryWorkerMessages: vi.fn().mockResolvedValue([]),
-    };
+    const logSpy = vi.spyOn(ForemanMessage, "log").mockReturnValue(undefined);
 
     const localTm = new TaskManager();
     setupInMemoryTasks(localTm);
@@ -759,10 +744,7 @@ describe("worker disconnect DB logging", () => {
     localTm.markBlockersLoaded(42);
 
     const server = http.createServer();
-    const { wss: testWss } = createForemanWss(
-      localTm, server,
-      defaultCfg, { dbLogger: mockDbLogger },
-    );
+    const { wss: testWss } = createForemanWss(localTm, server, defaultCfg);
     const testPort = await new Promise<number>((r) => server.listen(0, () => r((server.address() as AddressInfo).port)));
 
     const ws = new WebSocket(`ws://localhost:${testPort}/worker`);
@@ -780,7 +762,7 @@ describe("worker disconnect DB logging", () => {
     });
     await waitUntil(() => Worker.get("w-disc-2")?.status === "disconnected");
 
-    const calls = (mockDbLogger.logForemanMessage as ReturnType<typeof vi.fn>).mock.calls;
+    const calls = logSpy.mock.calls;
     const disconnectCall = calls.find((c) => c[0].msgType === "worker_disconnected");
     expect(disconnectCall).toBeDefined();
     expect(disconnectCall![0].taskId).toBe("42");
@@ -830,7 +812,7 @@ describe("disconnected worker state", () => {
 
     const queued = taskManager.drainEvents("1");
     expect(queued).toHaveLength(1);
-    expect(queued[0].name).toBe("issue_comment");
+    expect(queued[0].eventName).toBe("issue_comment");
   });
 
   it("reconnecting worker (busy) from disconnected state drains queued events", async () => {
@@ -1104,20 +1086,11 @@ describe("graceful shutdown", () => {
   });
 
   it("logs worker_disconnected with code 1001 when shutdown closes a registered worker", async () => {
-    const mockDbLogger: DbLogger = {
-      logWebhookEvent: vi.fn(),
-      logForemanMessage: vi.fn(),
-      queryLog: vi.fn().mockResolvedValue([]),
-      queryTaskEvents: vi.fn().mockResolvedValue([]),
-      queryWorkerMessages: vi.fn().mockResolvedValue([]),
-    };
+    const logSpy = vi.spyOn(ForemanMessage, "log").mockReturnValue(undefined);
     const srv = http.createServer();
     const localTm = new TaskManager();
     setupInMemoryTasks(localTm);
-    const { wss: testWss, shutdown: localShutdown } = createForemanWss(
-      localTm, srv,
-      defaultCfg, { dbLogger: mockDbLogger },
-    );
+    const { wss: testWss, shutdown: localShutdown } = createForemanWss(localTm, srv, defaultCfg);
     const testPort = await new Promise<number>((r) => srv.listen(0, () => r((srv.address() as AddressInfo).port)));
 
     const ws = new WebSocket(`ws://localhost:${testPort}/worker`);
@@ -1127,7 +1100,7 @@ describe("graceful shutdown", () => {
 
     await localShutdown();
 
-    const calls = (mockDbLogger.logForemanMessage as ReturnType<typeof vi.fn>).mock.calls;
+    const calls = logSpy.mock.calls;
     const disconnectCall = calls.find((c) => c[0].msgType === "worker_disconnected");
     expect(disconnectCall).toBeDefined();
     expect(disconnectCall![0]).toMatchObject({

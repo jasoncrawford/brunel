@@ -1,5 +1,3 @@
-import type { GitHubEvent } from "../types.js";
-
 // ── Event formatting helpers (foreman-side copy of display.ts formatting) ────
 // These live here so the foreman module has zero imports from display.ts,
 // which is a TUI module that belongs to the agent/worker side.
@@ -22,7 +20,7 @@ function trunc(s: string, n = 80) {
   return s.length > n ? s.slice(0, n - 1) + "…" : s;
 }
 
-function fmtEventDetails(event: GitHubEvent): string {
+function fmtEventDetails(event: { name: string; payload: Record<string, unknown> }): string {
   const p = event.payload;
   switch (event.name) {
     case "check_run": {
@@ -77,7 +75,7 @@ function fmtEventDetails(event: GitHubEvent): string {
   }
 }
 
-export function fmtEvent(event: GitHubEvent): string {
+export function fmtEvent(event: { name: string; payload: Record<string, unknown> }): string {
   const nameAction = `${event.name}${event.payload["action"] ? `/${event.payload["action"]}` : ""}`;
   const details = fmtEventDetails(event);
   return `${nameAction}${details ? ` — ${details}` : ""}`;

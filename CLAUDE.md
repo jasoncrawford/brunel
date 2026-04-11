@@ -10,7 +10,7 @@ Two independent processes: **foreman** (server) and **worker** (agent). They com
 
 MVC structure. Models own state; controllers handle external inputs.
 
-- **Models** (`models/`) — `Task` is the active-record for all DB reads/writes. `TaskManager` owns ephemeral in-memory state only (event queues, branch mappings, blocker state). `Worker` is the active-record for connected workers (module-level registry, static finders, `Worker._reset()` for test isolation).
+- **Models** (`models/`) — `Task` is the active-record for tasks. `WebhookEvent` is the active-record for incoming GitHub webhook events (`webhook_events` table); `WebhookEvent.fromIncoming()` builds an in-memory instance and `toWorkerPayload()` maps `eventName` → `name` for the wire protocol. `ForemanMessage` is the active-record for foreman↔worker messages (`foreman_messages` table); `ForemanMessage.buildSummary()` is the single source of truth for log entry summaries. `queryActivityLog()` (in `activity-log.ts`) merges both tables by timestamp. `TaskManager` owns ephemeral in-memory state only (event queues, branch mappings, blocker state). `Worker` is the active-record for connected workers (module-level registry, static finders, `Worker._reset()` for test isolation).
 - **Controllers** (`controllers/`) — `http-server.ts` handles webhooks + REST + SPA. `wss.ts` handles the WebSocket lifecycle with workers. `event-router.ts` routes GitHub events to the right worker or queue.
 - **Infrastructure** — `db-client.ts` wires the shared Supabase client. `admin-ws.ts` broadcasts to the admin dashboard. `github.ts` wraps GitHub API calls.
 
@@ -22,7 +22,7 @@ Key files: `worker.ts` (WS protocol + task lifecycle), `display.ts` (TUI renderi
 
 ### Shared
 
-- `src/` root — `config.ts` (unified config loader), `types.ts` (shared wire types), `utils.ts`
+- `src/` root — `config.ts` (unified config loader), `wire.ts` (wire protocol types: `ForemanMessage` for foreman→worker messages, `WebhookEvent` for event payloads delivered to workers, `WorkerMessage` for worker→foreman messages, `TaskIssue` for issue data), `utils.ts`
 - `shared/` — utilities needed by both the Node backend and the Vite frontend
 
 ## Task lifecycle
@@ -83,7 +83,8 @@ See **`docs/type-system.md`** for the full design. In brief: one server model cl
 
 - Use `display.print()` (not `console.log`) for output in agent/worker code — it routes through the status-bar-aware renderer so messages don't corrupt the TUI.
 - Prefer event-based designs for real-time UIs: a model holds state and emits on change; the UI subscribes once rather than scattering manual refresh calls.
-- In unit tests, use `setupInMemoryTasks()` from `tests/helpers/task.ts` instead of `initDb()` — it mocks the `Task` layer with an in-memory map.
+- In unit tests, use `setupInMemoryTasks()` from `tests/helpers/task.ts` instead of `initDb()` — it mocks the `Task` layer with an in-memory map. `WebhookEvent.log()` and `ForemanMessage.log()` are fire-and-forget and guarded with `if (!db) return` inside a try-catch, so they silently no-op when Supabase is not initialized.
+- Wire protocol types (foreman↔worker) live in `src/wire.ts` and are imported as `import * as Wire from "./wire.js"`. The DB model class for foreman messages is `ForemanMessage` (in `src/foreman/models/foreman-message.ts`), distinct from the wire type `Wire.ForemanMessage`.
 - In agent tests that need slash commands, create a `CommandRegistry` instance directly (`new CommandRegistry()`) and populate it via `registerTestCommands()` from `tests/helpers.ts` (which returns the registry). Pass the registry to functions like `dispatchInput`, `parseSlashCommand`, etc.; call `registry.listCommandNames()` and `registry.listCommands()` directly on the registry (with injectable `listDir`/`readFile` args for testing). When calling `registerWorkspaceCommands` or `registerWorkerCommands` in tests, pass a pre-scoped registry (e.g. `registry.scoped("workspace")`) — scoping is always the caller's responsibility.
 - In foreman tests that call `createForemanWss`, call `Worker._reset()` in `beforeEach` to clear the module-level worker registry between tests. `createForemanWss` takes no `registry` parameter — `Worker` is imported directly by `wss.ts` and `event-router.ts`.
 - In browser tests, the server is shared across all tests — use unique issue numbers per test rather than resetting server state.

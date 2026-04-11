@@ -1,8 +1,7 @@
-// ── Shared types for foreman/worker protocol ──────────────────────────────────
+// ── Wire protocol types for foreman/worker communication ──────────────────────
 
-export type { TaskStatus } from "../shared/types.js";
-
-export interface GitHubEvent {
+/** A GitHub event received by a worker via event_notification. */
+export interface WebhookEvent {
   id: string;           // x-github-delivery header value
   name: string;         // e.g. "check_run", "pull_request_review_comment"
   payload: Record<string, unknown>;
@@ -25,5 +24,5 @@ export type WorkerMessage =
 // Foreman → Worker messages
 export type ForemanMessage =
   | { type: "task_assigned"; taskId: string; issue: TaskIssue }
-  | { type: "event_notification"; taskId: string; event: GitHubEvent }
+  | { type: "event_notification"; taskId: string; event: WebhookEvent }
   | { type: "hello_ack"; workerId: string; status: "idle" | "busy" | "cancelled" };

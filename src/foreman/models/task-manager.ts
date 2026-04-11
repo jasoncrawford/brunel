@@ -1,5 +1,5 @@
 import { EventEmitter } from "events";
-import type { GitHubEvent } from "../../types.js";
+import type { WebhookEvent } from "./webhook-event.js";
 import type { TaskSnapshot } from "../admin-ws.js";
 import { loadIssuesToQueue } from "../github.js";
 import { EventQueue } from "../event-queue.js";
@@ -64,11 +64,11 @@ export class TaskManager extends EventEmitter {
 
   // ── Memory-only write operations (ephemeral data) ─────────────────────────
 
-  queueEvent(taskId: string, event: GitHubEvent): void {
+  queueEvent(taskId: string, event: WebhookEvent): void {
     this.eventQueue.enqueue(taskId, event);
   }
 
-  drainEvents(taskId: string): GitHubEvent[] {
+  drainEvents(taskId: string): WebhookEvent[] {
     return this.eventQueue.drain(taskId);
   }
 

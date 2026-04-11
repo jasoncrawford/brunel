@@ -5,7 +5,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from "vitest";
 import { stripAnsi } from "./helpers.js";
 import { printForemanMessage, stopStatus, setVerbose } from "../src/agent/display.js";
-import type { ForemanMessage } from "../src/types.js";
+import * as Wire from "../src/wire.js";
 
 function captureOutput(fn: () => void): string {
   let output = "";
@@ -31,7 +31,7 @@ afterEach(() => {
 
 describe("printForemanMessage", () => {
   it("task_assigned prints issue number and title (verbose only)", () => {
-    const msg: ForemanMessage = {
+    const msg: Wire.ForemanMessage = {
       type: "task_assigned",
       taskId: "task-1",
       issue: { number: 42, title: "Fix the bug", body: "", labels: [], repoUrl: "https://github.com/owner/repo" },
@@ -48,7 +48,7 @@ describe("printForemanMessage", () => {
   });
 
   it("task_assigned output is a single line (no embedded newlines in content)", () => {
-    const msg: ForemanMessage = {
+    const msg: Wire.ForemanMessage = {
       type: "task_assigned",
       taskId: "task-1",
       issue: { number: 7, title: "Multi word title", body: "", labels: [], repoUrl: "https://github.com/owner/repo" },
@@ -60,7 +60,7 @@ describe("printForemanMessage", () => {
   });
 
   it("event_notification, VERBOSE=false → silent", () => {
-    const msg: ForemanMessage = {
+    const msg: Wire.ForemanMessage = {
       type: "event_notification",
       taskId: "task-1",
       event: { id: "evt-1", name: "issue_comment", payload: {} },
@@ -71,7 +71,7 @@ describe("printForemanMessage", () => {
 
   it("event_notification, VERBOSE=true → prints event name", () => {
     setVerbose(true);
-    const msg: ForemanMessage = {
+    const msg: Wire.ForemanMessage = {
       type: "event_notification",
       taskId: "task-1",
       event: { id: "evt-1", name: "issue_comment", payload: {} },
@@ -84,7 +84,7 @@ describe("printForemanMessage", () => {
     setVerbose(true);
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-17T14:05:03.000Z"));
-    const msg: ForemanMessage = {
+    const msg: Wire.ForemanMessage = {
       type: "event_notification",
       taskId: "task-1",
       event: { id: "evt-1", name: "issue_comment", payload: {} },
@@ -96,7 +96,7 @@ describe("printForemanMessage", () => {
 
   it("event_notification, VERBOSE=true → includes check_run details", () => {
     setVerbose(true);
-    const msg: ForemanMessage = {
+    const msg: Wire.ForemanMessage = {
       type: "event_notification",
       taskId: "task-1",
       event: {
@@ -113,7 +113,7 @@ describe("printForemanMessage", () => {
 
   it("event_notification, VERBOSE=true → includes action in name/action format when payload has action", () => {
     setVerbose(true);
-    const msg: ForemanMessage = {
+    const msg: Wire.ForemanMessage = {
       type: "event_notification",
       taskId: "task-1",
       event: { id: "evt-1", name: "check_suite", payload: { action: "completed" } },
@@ -125,7 +125,7 @@ describe("printForemanMessage", () => {
 
   it("event_notification, VERBOSE=true → output is a single line (no embedded newlines in content)", () => {
     setVerbose(true);
-    const msg: ForemanMessage = {
+    const msg: Wire.ForemanMessage = {
       type: "event_notification",
       taskId: "task-1",
       event: { id: "evt-2", name: "pull_request", payload: {} },
@@ -139,28 +139,28 @@ describe("printForemanMessage", () => {
 
 describe("printForemanMessage - hello_ack", () => {
   it("hello_ack, VERBOSE=false → silent", () => {
-    const msg: ForemanMessage = { type: "hello_ack", workerId: "w-1", status: "idle" };
+    const msg: Wire.ForemanMessage = { type: "hello_ack", workerId: "w-1", status: "idle" };
     const output = captureOutput(() => printForemanMessage(msg));
     expect(stripAnsi(output).trim()).toBe("");
   });
 
   it("hello_ack, VERBOSE=true → prints ack status", () => {
     setVerbose(true);
-    const msg: ForemanMessage = { type: "hello_ack", workerId: "w-1", status: "idle" };
+    const msg: Wire.ForemanMessage = { type: "hello_ack", workerId: "w-1", status: "idle" };
     const output = captureOutput(() => printForemanMessage(msg));
     expect(stripAnsi(output)).toContain("idle");
   });
 
   it("hello_ack, VERBOSE=true → includes status for busy", () => {
     setVerbose(true);
-    const msg: ForemanMessage = { type: "hello_ack", workerId: "w-1", status: "busy" };
+    const msg: Wire.ForemanMessage = { type: "hello_ack", workerId: "w-1", status: "busy" };
     const output = captureOutput(() => printForemanMessage(msg));
     expect(stripAnsi(output)).toContain("busy");
   });
 
   it("hello_ack, VERBOSE=true → includes status for cancelled", () => {
     setVerbose(true);
-    const msg: ForemanMessage = { type: "hello_ack", workerId: "w-1", status: "cancelled" };
+    const msg: Wire.ForemanMessage = { type: "hello_ack", workerId: "w-1", status: "cancelled" };
     const output = captureOutput(() => printForemanMessage(msg));
     expect(stripAnsi(output)).toContain("cancelled");
   });
