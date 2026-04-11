@@ -10,7 +10,7 @@ import type { EffortValue } from "./effort.js";
 import * as Wire from "../wire.js";
 import { Workspace, confirmIfUnsafe } from "./workspace.js";
 import type { WorkspaceCommandDeps } from "./workspace.js";
-import { fmtError, generateWorkerId } from "../utils.js";
+import { fmtError } from "../utils.js";
 import type { CommandRegistry } from "./command-registry.js";
 import { pick } from "./input.js";
 
@@ -68,7 +68,7 @@ export function debounceMs(events: Wire.WebhookEvent[]): number {
   return 3000;
 }
 
-// ── WorkerStatusModel ─────────────────────────────────────────────────────────
+// ── AgentStatus ───────────────────────────────────────────────────────────────
 
 export type WorkerConnectionStatus = "connected" | "disconnected" | "reconnecting" | "handshaking";
 
@@ -80,16 +80,16 @@ export type WorkerStatusPatch = {
   prNumber?: number | undefined;
   branch?: string;
   model?: string | undefined;
-  effort?: string | undefined;
+  effort?: EffortValue | undefined;
 };
 
 /**
- * Reactive model for worker status bar state. Emits "change" whenever state
+ * Reactive model for agent status bar state. Emits "change" whenever state
  * changes so the display can subscribe and refresh without manual refresh calls.
  * When reconnectAt is set the model starts a 1-second interval to emit "change"
  * (driving the countdown display); the interval stops when reconnectAt is cleared.
  */
-export class WorkerStatusModel extends EventEmitter {
+export class AgentStatus extends EventEmitter {
   private _connectionStatus: WorkerConnectionStatus = "disconnected";
   private _disconnectCode: number | undefined;
   private _reconnectAt: number | undefined;
@@ -97,11 +97,20 @@ export class WorkerStatusModel extends EventEmitter {
   private _prNumber: number | undefined;
   private _branch = "";
   private _model: string | undefined;
-  private _effort: string | undefined;
+  private _effort: EffortValue | undefined;
   private _countdownTimer: ReturnType<typeof setInterval> | null = null;
 
-  constructor(public readonly workerId: string) {
+  constructor(public readonly agentId: string, initial?: Omit<WorkerStatusPatch, "reconnectAt">) {
     super();
+    if (initial) {
+      if ("connectionStatus" in initial) this._connectionStatus = initial.connectionStatus!;
+      if ("disconnectCode" in initial) this._disconnectCode = initial.disconnectCode;
+      if ("taskNumber" in initial) this._taskNumber = initial.taskNumber;
+      if ("prNumber" in initial) this._prNumber = initial.prNumber;
+      if ("branch" in initial) this._branch = initial.branch!;
+      if ("model" in initial) this._model = initial.model;
+      if ("effort" in initial) this._effort = initial.effort;
+    }
   }
 
   get connectionStatus(): WorkerConnectionStatus { return this._connectionStatus; }
@@ -111,7 +120,7 @@ export class WorkerStatusModel extends EventEmitter {
   get prNumber(): number | undefined { return this._prNumber; }
   get branch(): string { return this._branch; }
   get model(): string | undefined { return this._model; }
-  get effort(): string | undefined { return this._effort; }
+  get effort(): EffortValue | undefined { return this._effort; }
 
   /** Apply a partial update and emit "change". Multiple fields in one call = one event. */
   update(patch: WorkerStatusPatch): void {
@@ -147,7 +156,7 @@ export class WorkerStatusModel extends EventEmitter {
       ? Math.max(0, Math.ceil((this._reconnectAt - Date.now()) / 1000))
       : undefined;
     return display.fmtWorkerStatus({
-      workerId: this.workerId,
+      workerId: this.agentId,
       model: this._model,
       effort: this._effort,
       taskNumber: this._taskNumber,
@@ -162,7 +171,7 @@ export class WorkerStatusModel extends EventEmitter {
 
 // ── WorkerSession ─────────────────────────────────────────────────────────────
 
-export type WsFactory = (workerId: string, taskId?: string) => WebSocket;
+export type WsFactory = (agentId: string, taskId?: string) => WebSocket;
 export type RunQuery = (prompt: string, sessionId: string | undefined, abortController?: AbortController, model?: string, effort?: EffortValue) => Promise<string | undefined>;
 export type WorkerDisplay = {
   print: (line: string | null) => void;
@@ -240,37 +249,19 @@ export class WorkerSession {
   // behave as if already registered.
   private connectionState: "hello_sent" | "registered" = "registered";
   private bufferedMessages: BufferableMessage[] = [];
-  private _currentModel: string | undefined;
-  private _currentEffort: EffortValue | undefined;
-
-  // Reactive status bar model: emits "change" on any state mutation, so the
-  // display subscription in start() automatically refreshes without manual calls.
-  private statusModel: WorkerStatusModel;
 
   constructor(
-    public readonly workerId: string,
+    private agentStatus: AgentStatus,
     private wsFactory: WsFactory,
     private display: WorkerDisplay,
     private options: WorkerSessionOptions = {},
-  ) {
-    this.statusModel = new WorkerStatusModel(workerId);
-  }
+  ) {}
 
-  get currentModel(): string | undefined { return this._currentModel; }
-  set currentModel(model: string | undefined) {
-    this._currentModel = model;
-    this.statusModel.update({ model });
-  }
-
-  get currentEffort(): EffortValue | undefined { return this._currentEffort; }
-  set currentEffort(effort: EffortValue | undefined) {
-    this._currentEffort = effort;
-    this.statusModel.update({ effort });
-  }
+  get agentId(): string { return this.agentStatus.agentId; }
 
   /** Returns the formatted worker status bar text. Used by startPersistentStatus and tests. */
   getStatusText(): string {
-    return this.statusModel.getStatusText();
+    return this.agentStatus.getStatusText();
   }
 
   private async refreshBranch(): Promise<void> {
@@ -281,14 +272,14 @@ export class WorkerSession {
     } catch {
       branch = "";
     }
-    this.statusModel.update({ branch });
+    this.agentStatus.update({ branch });
   }
 
   start(): void {
     // Subscribe to model changes — the display refreshes automatically whenever
     // any status field changes, without needing explicit refreshStatus() calls.
-    this.statusModel.on("change", () => this.display.updatePersistentStatus?.());
-    this.display.startPersistentStatus?.(() => this.statusModel.getStatusText());
+    this.agentStatus.on("change", () => this.display.updatePersistentStatus?.());
+    this.display.startPersistentStatus?.(() => this.agentStatus.getStatusText());
     this.display.setOnToolResultCallback?.((toolName) => {
       // Refresh the branch display after each Bash tool completes so the status
       // bar reflects branch changes (e.g. git checkout) without waiting for the
@@ -351,12 +342,12 @@ export class WorkerSession {
     }
     this.sendTaskMessage({
       type: "task_complete",
-      workerId: this.workerId,
+      workerId: this.agentStatus.agentId,
       taskId: this.currentTaskId,
     });
     this.currentTaskId = undefined;
     this.currentIssue = undefined;
-    this.statusModel.update({ taskNumber: undefined, prNumber: undefined, branch: "" });
+    this.agentStatus.update({ taskNumber: undefined, prNumber: undefined, branch: "" });
     this.display.print(display.c.sageGreen("Task complete. Waiting for next task..."));
     return "task-complete";
   }
@@ -380,7 +371,7 @@ export class WorkerSession {
       config: this.options.workspaceCtx ? {
         workspaceDir: this.options.workspaceCtx.workspaceDir,
         repoUrl: this.options.workspaceCtx.repoUrl,
-        sessionId: this.workerId,
+        sessionId: this.agentStatus.agentId,
       } : undefined,
       originalCwd: this.options.workspaceCtx?.originalCwd ?? process.cwd(),
       confirm: this.options.workspaceCtx?.confirm ?? (() => Promise.resolve(false)),
@@ -424,7 +415,7 @@ export class WorkerSession {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({
         type: "worker_goodbye",
-        workerId: this.workerId,
+        workerId: this.agentStatus.agentId,
         taskId: this.currentTaskId,
       }));
     }
@@ -476,8 +467,8 @@ export class WorkerSession {
 
   private connect(): void {
     // Clearing reconnectAt stops the countdown timer in the model.
-    this.statusModel.update({ connectionStatus: "reconnecting", reconnectAt: undefined });
-    const ws = this.wsFactory(this.workerId, this.currentTaskId);
+    this.agentStatus.update({ connectionStatus: "reconnecting", reconnectAt: undefined });
+    const ws = this.wsFactory(this.agentStatus.agentId, this.currentTaskId);
     this.ws = ws;
 
     const pingIntervalMs = this.options.pingIntervalMs ?? 25_000;
@@ -490,7 +481,7 @@ export class WorkerSession {
 
     ws.on("open", () => {
       this.connectionState = "hello_sent";
-      this.statusModel.update({ connectionStatus: "handshaking" });
+      this.agentStatus.update({ connectionStatus: "handshaking" });
 
       // Heartbeat: detect silent connection drops (network loss, laptop sleep, etc.)
       // Each tick sends a ping. If no pong/ping arrives before the next tick, the
@@ -533,7 +524,7 @@ export class WorkerSession {
       if (ws !== this.ws) return; // stale close from a previous connection
       const delay = 2000 + Math.random() * 3000;
       // Setting reconnectAt starts a 1-second countdown timer in the model.
-      this.statusModel.update({
+      this.agentStatus.update({
         connectionStatus: "disconnected",
         disconnectCode: code,
         reconnectAt: Date.now() + delay,
@@ -563,7 +554,7 @@ export class WorkerSession {
         this.pendingEvents = [];
         this.currentTaskId = undefined;
         this.currentIssue = undefined;
-        this.statusModel.update({
+        this.agentStatus.update({
           connectionStatus: "connected",
           disconnectCode: undefined,
           taskNumber: undefined,
@@ -582,7 +573,7 @@ export class WorkerSession {
       } else {
         // "idle" or "busy": transition to registered and flush buffered messages.
         this.connectionState = "registered";
-        this.statusModel.update({ connectionStatus: "connected", disconnectCode: undefined });
+        this.agentStatus.update({ connectionStatus: "connected", disconnectCode: undefined });
         this.flushBuffer();
       }
       return;
@@ -592,7 +583,7 @@ export class WorkerSession {
       this.currentTaskId = msg.taskId;
       this.currentIssue = msg.issue;
       this.prIsClosed = false;
-      this.statusModel.update({ taskNumber: msg.issue.number, prNumber: undefined });
+      this.agentStatus.update({ taskNumber: msg.issue.number, prNumber: undefined });
       void this.refreshBranch();
       const initialPrompt = buildInitialPrompt(msg.issue, !!this.options.workspaceCtx);
       this.display.print(display.c.sageGreen(initialPrompt));
@@ -612,9 +603,9 @@ export class WorkerSession {
         const pr = event.payload["pull_request"] as { number?: number; merged?: boolean } | undefined;
         if (action === "closed" && !pr?.merged) {
           // PR was closed without merging — clear the PR from the status bar.
-          this.statusModel.update({ prNumber: undefined });
+          this.agentStatus.update({ prNumber: undefined });
         } else if (pr?.number != null) {
-          this.statusModel.update({ prNumber: pr.number });
+          this.agentStatus.update({ prNumber: pr.number });
         }
       }
 
@@ -692,18 +683,17 @@ export function registerWorkerCommands(session: WorkerSession | undefined, regis
  * a cleanup function — does NOT call main(). The caller (main itself) owns
  * the query loop and calls cleanup() after the loop exits.
  */
-export async function startWorkerMode(config: WorkerModeConfig): Promise<{
+export async function startWorkerMode(config: WorkerModeConfig, agentStatus: AgentStatus): Promise<{
   session: WorkerSession;
   cleanup: () => Promise<void>;
 }> {
   display.setVerbose(config.verbose);
 
-  const workerId = generateWorkerId();
   const originalCwd = process.cwd();
   const workspaceDir = config.workspaceDir ?? path.join(os.homedir(), ".brunel", "workers");
   const repoUrl = config.repoUrl ?? `https://${config.githubToken}@github.com/${config.githubRepo}.git`;
 
-  const workspace = await Workspace.create(workspaceDir, workerId, repoUrl);
+  const workspace = await Workspace.create(workspaceDir, agentStatus.agentId, repoUrl);
   process.chdir(workspace.dir);
 
   const confirm = async (msg: string): Promise<boolean> => {
@@ -728,12 +718,12 @@ export async function startWorkerMode(config: WorkerModeConfig): Promise<{
 
   let shuttingDown = false;
 
-  const wsFactory: WsFactory = (wid, taskId) => {
+  const wsFactory: WsFactory = (agentId, taskId) => {
     const ws = new WebSocket(`${config.foremanUrl}/worker`);
     ws.on("open", () => {
       ws.send(JSON.stringify({
         type: "worker_hello",
-        workerId: wid,
+        workerId: agentId,
         taskId,
         status: taskId ? "busy" : "idle",
       }));
@@ -750,13 +740,13 @@ export async function startWorkerMode(config: WorkerModeConfig): Promise<{
     setOnToolResultCallback: display.setOnToolResultCallback,
   };
 
-  const session = new WorkerSession(workerId, wsFactory, workerDisplay, {
+  agentStatus.update({ model: config.model, effort: config.effort });
+
+  const session = new WorkerSession(agentStatus, wsFactory, workerDisplay, {
     afterTask,
     workspaceCtx: { workspace, originalCwd, workspaceDir, repoUrl, confirm },
     pingIntervalMs: config.pingIntervalMs,
   });
-  session.currentModel = config.model;
-  session.currentEffort = config.effort;
 
   const shutdown = async () => {
     if (shuttingDown) return;

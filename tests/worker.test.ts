@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "events";
-import { WorkerSession, classifyEvent, debounceMs } from "../src/agent/worker.js";
+import { AgentStatus, WorkerSession, classifyEvent, debounceMs } from "../src/agent/worker.js";
 import * as Wire from "../src/wire.js";
 import { stripAnsi } from "./helpers.js";
 import * as displayModule from "../src/agent/display.js";
@@ -19,7 +19,7 @@ class FakeWs extends EventEmitter {
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-const WORKER_ID = "test-worker-id";
+const AGENT_ID = "test-worker-id";
 
 function makeIssue(n = 1): Wire.TaskIssue {
   return { number: n, title: `Issue ${n}`, body: `Body ${n}`, labels: [], repoUrl: "https://github.com/owner/repo" };
@@ -58,7 +58,7 @@ beforeEach(() => {
     updatePersistentStatus: vi.fn(),
     setOnToolResultCallback: vi.fn(),
   };
-  session = new WorkerSession(WORKER_ID, wsFactory, display);
+  session = new WorkerSession(new AgentStatus(AGENT_ID), wsFactory, display);
   session.start();
 });
 
@@ -217,7 +217,7 @@ describe("completeCurrentTask", () => {
     await session.completeCurrentTask();
 
     const sent = JSON.parse(fakeWs.send.mock.calls[0][0]);
-    expect(sent).toEqual({ type: "task_complete", workerId: WORKER_ID, taskId: "42" });
+    expect(sent).toEqual({ type: "task_complete", workerId: AGENT_ID, taskId: "42" });
   });
 
   it("returns 'task-complete' so the main loop can hide the prompt", async () => {
@@ -344,7 +344,7 @@ describe("reconnect", () => {
     vi.advanceTimersByTime(5001);
 
     const secondCall = wsFactory.mock.calls[1];
-    expect(secondCall[0]).toBe(WORKER_ID);
+    expect(secondCall[0]).toBe(AGENT_ID);
     expect(secondCall[1]).toBe("42");
     vi.useRealTimers();
   });
@@ -519,7 +519,7 @@ describe("connection status bar", () => {
 describe("status bar content", () => {
   it("shows worker ID prefix in status text", () => {
     const text = stripAnsi(session.getStatusText());
-    expect(text).toContain(`worker ${WORKER_ID.slice(0, 8)}`);
+    expect(text).toContain(`worker ${AGENT_ID.slice(0, 8)}`);
   });
 
   it("shows no current task when no task assigned", () => {
@@ -647,10 +647,10 @@ describe("hello_ack handshake — buffering", () => {
       expect(newWs.send).not.toHaveBeenCalled();
 
       // Send hello_ack → buffer should be flushed
-      sendMsg(newWs, { type: "hello_ack", workerId: WORKER_ID, status: "busy" });
+      sendMsg(newWs, { type: "hello_ack", workerId: AGENT_ID, status: "busy" });
       expect(newWs.send).toHaveBeenCalledOnce();
       const sent = JSON.parse(newWs.send.mock.calls[0][0]);
-      expect(sent).toEqual({ type: "task_complete", workerId: WORKER_ID, taskId: "42" });
+      expect(sent).toEqual({ type: "task_complete", workerId: AGENT_ID, taskId: "42" });
     } finally {
       vi.restoreAllMocks();
       vi.useRealTimers();
@@ -672,7 +672,7 @@ describe("hello_ack handshake — buffering", () => {
       expect(newWs.send).not.toHaveBeenCalled();
 
       // Send hello_ack cancelled → buffer discarded, task state cleared
-      sendMsg(newWs, { type: "hello_ack", workerId: WORKER_ID, status: "cancelled" });
+      sendMsg(newWs, { type: "hello_ack", workerId: AGENT_ID, status: "cancelled" });
       expect(newWs.send).not.toHaveBeenCalled();
 
       // Verify task state cleared: subsequent completeCurrentTask sends nothing
@@ -695,7 +695,7 @@ describe("hello_ack handshake — buffering", () => {
       newWs.emit("open");
 
       display.print.mockClear();
-      sendMsg(newWs, { type: "hello_ack", workerId: WORKER_ID, status: "cancelled" });
+      sendMsg(newWs, { type: "hello_ack", workerId: AGENT_ID, status: "cancelled" });
 
       const printed = display.print.mock.calls.map(args => stripAnsi(String(args[0]))).join("\n");
       expect(printed).toContain("cancelled");
@@ -721,7 +721,7 @@ describe("hello_ack handshake — buffering", () => {
       let callCount = 0;
       const wsFactoryWs = vi.fn().mockImplementation(() => callCount++ === 0 ? wsA : wsB);
 
-      const sessionWithWs = new WorkerSession(WORKER_ID, wsFactoryWs, display, {
+      const sessionWithWs = new WorkerSession(new AgentStatus(AGENT_ID), wsFactoryWs, display, {
         workspaceCtx: { workspace, originalCwd: "/original", workspaceDir: "/tmp/workers", repoUrl: "https://github.com/owner/repo", confirm: vi.fn() },
       });
       sessionWithWs.start(); // uses wsA
@@ -737,7 +737,7 @@ describe("hello_ack handshake — buffering", () => {
       // wsB is now the active connection
       wsB.emit("open");
 
-      sendMsg(wsB, { type: "hello_ack", workerId: WORKER_ID, status: "cancelled" });
+      sendMsg(wsB, { type: "hello_ack", workerId: AGENT_ID, status: "cancelled" });
 
       await vi.waitFor(() => expect(workspace.reset).toHaveBeenCalledOnce());
     } finally {
@@ -758,7 +758,7 @@ describe("hello_ack handshake — buffering", () => {
       // Simulate reconnect and receive cancelled ack while query is still running
       const newWs = reconnectWithNewWs();
       newWs.emit("open");
-      sendMsg(newWs, { type: "hello_ack", workerId: WORKER_ID, status: "cancelled" });
+      sendMsg(newWs, { type: "hello_ack", workerId: AGENT_ID, status: "cancelled" });
 
       // The running query's AbortController must be aborted
       expect(ac.signal.aborted).toBe(true);
@@ -785,7 +785,7 @@ describe("hello_ack handshake — buffering", () => {
       expect(newWs.send).not.toHaveBeenCalled();
 
       // hello_ack idle — task was reverted on foreman side; but worker flushes anyway
-      sendMsg(newWs, { type: "hello_ack", workerId: WORKER_ID, status: "idle" });
+      sendMsg(newWs, { type: "hello_ack", workerId: AGENT_ID, status: "idle" });
       expect(newWs.send).toHaveBeenCalledOnce();
       const sent = JSON.parse(newWs.send.mock.calls[0][0]);
       expect(sent.type).toBe("task_complete");
@@ -796,9 +796,9 @@ describe("hello_ack handshake — buffering", () => {
   });
 
   it("hello_ack is passed to display.printForemanMessage", () => {
-    sendMsg(fakeWs, { type: "hello_ack", workerId: WORKER_ID, status: "idle" });
+    sendMsg(fakeWs, { type: "hello_ack", workerId: AGENT_ID, status: "idle" });
     expect(display.printForemanMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ type: "hello_ack", workerId: WORKER_ID, status: "idle" })
+      expect.objectContaining({ type: "hello_ack", workerId: AGENT_ID, status: "idle" })
     );
   });
 });
@@ -1327,7 +1327,7 @@ describe("workspace slash commands in WorkerSession", () => {
   it("/workspace:reset calls workspace.reset() when clean", async () => {
     const workspace = makeWorkspace();
     const confirm = vi.fn().mockResolvedValue(true);
-    const sessionWs = new WorkerSession(WORKER_ID, wsFactory, display, {
+    const sessionWs = new WorkerSession(new AgentStatus(AGENT_ID), wsFactory, display, {
       workspaceCtx: {
         workspace,
         originalCwd: "/original",
@@ -1349,7 +1349,7 @@ describe("workspace slash commands in WorkerSession", () => {
       uncommittedFiles: ["M foo.ts"], unpushedCommits: [], noUpstream: false,
     });
     const confirm = vi.fn().mockResolvedValue(false);
-    const sessionWs = new WorkerSession(WORKER_ID, wsFactory, display, {
+    const sessionWs = new WorkerSession(new AgentStatus(AGENT_ID), wsFactory, display, {
       workspaceCtx: {
         workspace,
         originalCwd: "/original",
@@ -1369,7 +1369,7 @@ describe("workspace slash commands in WorkerSession", () => {
     const workspace = makeWorkspace();
     const confirm = vi.fn().mockResolvedValue(true);
     const originalCwd = process.cwd();
-    const sessionWs = new WorkerSession(WORKER_ID, wsFactory, display, {
+    const sessionWs = new WorkerSession(new AgentStatus(AGENT_ID), wsFactory, display, {
       workspaceCtx: {
         workspace,
         originalCwd,
@@ -1388,7 +1388,7 @@ describe("workspace slash commands in WorkerSession", () => {
   it("/workspace:create prints 'managed automatically' in worker mode", async () => {
     const printSpy = vi.spyOn(displayModule, "print").mockImplementation(() => {});
     try {
-      const sessionWs = new WorkerSession(WORKER_ID, wsFactory, display, {});
+      const sessionWs = new WorkerSession(new AgentStatus(AGENT_ID), wsFactory, display, {});
       sessionWs.start();
       const wsReg4 = new CommandRegistry();
       registerWorkspaceCommands(sessionWs.workspaceCommandDeps, wsReg4.scoped("workspace"), true);
@@ -1407,7 +1407,7 @@ describe("afterTask callback on /worker:complete", () => {
   it("calls afterTask before sending task_complete to foreman", async () => {
     const afterTask = vi.fn().mockResolvedValue(undefined);
     const sessionWithAfterTask = new WorkerSession(
-      WORKER_ID, wsFactory, display, { afterTask }
+      new AgentStatus(AGENT_ID), wsFactory, display, { afterTask }
     );
     sessionWithAfterTask.start();
 
@@ -1424,7 +1424,7 @@ describe("afterTask callback on /worker:complete", () => {
   it("does not send task_complete if afterTask throws", async () => {
     const afterTask = vi.fn().mockRejectedValue(new Error("reset failed"));
     const sessionWithAfterTask = new WorkerSession(
-      WORKER_ID, wsFactory, display, { afterTask }
+      new AgentStatus(AGENT_ID), wsFactory, display, { afterTask }
     );
     sessionWithAfterTask.start();
 
@@ -1463,7 +1463,7 @@ describe("sendGoodbye", () => {
 
     expect(fakeWs.send).toHaveBeenCalledOnce();
     const sent = JSON.parse(fakeWs.send.mock.calls[0][0]);
-    expect(sent).toEqual({ type: "worker_goodbye", workerId: WORKER_ID, taskId: "42" });
+    expect(sent).toEqual({ type: "worker_goodbye", workerId: AGENT_ID, taskId: "42" });
   });
 
   it("sends worker_goodbye with undefined taskId when no task is active", () => {
@@ -1473,7 +1473,7 @@ describe("sendGoodbye", () => {
     expect(fakeWs.send).toHaveBeenCalledOnce();
     const sent = JSON.parse(fakeWs.send.mock.calls[0][0]);
     expect(sent.type).toBe("worker_goodbye");
-    expect(sent.workerId).toBe(WORKER_ID);
+    expect(sent.workerId).toBe(AGENT_ID);
     expect(sent.taskId).toBeUndefined();
   });
 
@@ -1493,7 +1493,7 @@ describe("heartbeat", () => {
   function makeHeartbeatSession(pingIntervalMs = 100) {
     const ws = new FakeWs();
     const factory = vi.fn().mockReturnValue(ws);
-    const s = new WorkerSession(WORKER_ID, factory, display, { pingIntervalMs });
+    const s = new WorkerSession(new AgentStatus(AGENT_ID), factory, display, { pingIntervalMs });
     s.start();
     return { ws, factory, s };
   }

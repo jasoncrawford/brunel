@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { generateWorkerId, WORKER_NAMES } from "../src/utils.js";
+import { generateAgentId, WORKER_NAMES } from "../src/utils.js";
 import { shortWorkerId } from "../shared/utils.js";
 
-describe("generateWorkerId", () => {
-  it("returns a string with a worker name prefix followed by a UUID", () => {
-    const id = generateWorkerId();
+describe("generateAgentId", () => {
+  it("returns a string with an agent name prefix followed by a UUID", () => {
+    const id = generateAgentId();
     // Format: <name>-<uuid>
     const parts = id.split("-");
     // UUID has 5 parts; name adds 1 more at the front
@@ -13,7 +13,7 @@ describe("generateWorkerId", () => {
   });
 
   it("contains a valid UUID after the name prefix", () => {
-    const id = generateWorkerId();
+    const id = generateAgentId();
     const uuidPart = id.slice(id.indexOf("-") + 1);
     expect(uuidPart).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
@@ -22,14 +22,14 @@ describe("generateWorkerId", () => {
 
   it("uses lowercase names", () => {
     for (let i = 0; i < 20; i++) {
-      const id = generateWorkerId();
+      const id = generateAgentId();
       const name = id.split("-")[0];
       expect(name).toBe(name.toLowerCase());
     }
   });
 
   it("generates unique IDs", () => {
-    const ids = new Set(Array.from({ length: 100 }, () => generateWorkerId()));
+    const ids = new Set(Array.from({ length: 100 }, () => generateAgentId()));
     expect(ids.size).toBe(100);
   });
 
@@ -52,7 +52,7 @@ describe("shortWorkerId", () => {
   });
 
   it("works for generated worker IDs", () => {
-    const id = generateWorkerId();
+    const id = generateAgentId();
     const short = shortWorkerId(id);
     const namePart = id.split("-")[0];
     const uuidFirst8 = id.slice(namePart.length + 1, namePart.length + 9);
