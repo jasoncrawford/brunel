@@ -117,9 +117,9 @@ export const WORKER_NAMES = [
   "zephaniah",
 ];
 
-/** Generate a human-readable worker ID by prepending a random human name to a UUID.
+/** Generate a human-readable agent ID by prepending a random human name to a UUID.
  * E.g. "patience-a9bdda00-1234-5678-abcd-ef0123456789" */
-export function generateWorkerId(): string {
+export function generateAgentId(): string {
   const idx = randomInt(WORKER_NAMES.length);
   return `${WORKER_NAMES[idx]}-${crypto.randomUUID()}`;
 }

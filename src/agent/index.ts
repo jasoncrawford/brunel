@@ -13,7 +13,7 @@ import { AgentStatus, WorkerSession, registerWorkerCommands, startWorkerMode } f
 import type { RunQuery, WorkerModeConfig } from "./worker.js";
 import { loadConfig } from "../config.js";
 import { Workspace, confirmIfUnsafe, registerWorkspaceCommands } from "./workspace.js";
-import { fmtError, generateWorkerId } from "../utils.js";
+import { fmtError, generateAgentId } from "../utils.js";
 import { handleModelCommand, getCachedModels, _resetCachedModels, setCachedModels } from "./model.js";
 import type { ModelInfo, FetchModelsFn } from "./model.js";
 import { handleEffortCommand } from "./effort.js";
@@ -251,9 +251,8 @@ export async function main(
   initialEffort?: EffortValue,
 ): Promise<void> {
   // Generate agentId unconditionally — used as both workspace identity and foreman identity.
-  const agentId = generateWorkerId();
-  const agentStatus = new AgentStatus(agentId);
-  agentStatus.update({ model: initialModel, effort: initialEffort });
+  const agentId = generateAgentId();
+  const agentStatus = new AgentStatus(agentId, { model: initialModel, effort: initialEffort });
 
   // Worker mode setup: create workspace, session, signal handlers.
   const workerCtx = workerConfig ? await startWorkerMode(workerConfig, agentStatus) : undefined;

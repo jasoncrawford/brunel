@@ -100,8 +100,17 @@ export class AgentStatus extends EventEmitter {
   private _effort: EffortValue | undefined;
   private _countdownTimer: ReturnType<typeof setInterval> | null = null;
 
-  constructor(public readonly agentId: string) {
+  constructor(public readonly agentId: string, initial?: Omit<WorkerStatusPatch, "reconnectAt">) {
     super();
+    if (initial) {
+      if ("connectionStatus" in initial) this._connectionStatus = initial.connectionStatus!;
+      if ("disconnectCode" in initial) this._disconnectCode = initial.disconnectCode;
+      if ("taskNumber" in initial) this._taskNumber = initial.taskNumber;
+      if ("prNumber" in initial) this._prNumber = initial.prNumber;
+      if ("branch" in initial) this._branch = initial.branch!;
+      if ("model" in initial) this._model = initial.model;
+      if ("effort" in initial) this._effort = initial.effort;
+    }
   }
 
   get connectionStatus(): WorkerConnectionStatus { return this._connectionStatus; }
