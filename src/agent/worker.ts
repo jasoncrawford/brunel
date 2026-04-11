@@ -771,13 +771,14 @@ export async function startWorkerMode(config: WorkerModeConfig): Promise<{
   };
 
   // SIGINT: interrupt the running query if one is active; otherwise prompt and shut down.
+  // This lets the user press ^C to interrupt a running tool without killing the worker.
   process.on("SIGINT", () => {
     if (!session.interrupt()) {
       void shutdown();
     }
   });
 
-  // SIGTERM: send goodbye then force-destroy without prompting.
+  // SIGTERM is a system/orchestrator signal: send goodbye then force-destroy without prompting.
   process.on("SIGTERM", () => {
     session.sendGoodbye();
     void workspace.destroy().then(() => process.exit(0));
