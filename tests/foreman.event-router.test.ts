@@ -3,8 +3,9 @@
  * queue a GitHub event to a worker.
  *
  * Covers the bug reported in issue #601: comments on a completed task were
- * forwarded to the worker that completed it (because task.workerId is still
- * set after completion but the task status is "complete").
+ * forwarded to the worker that had moved on to a new task. The fix checks the
+ * registry's currentTaskId rather than task status — mirroring the worker-side
+ * guard — so any case where the worker has moved on is caught.
  */
 import { describe, it, expect, vi } from "vitest";
 import { forwardEvent } from "../src/foreman/controllers/event-router.js";
@@ -35,22 +36,34 @@ function makeDeps(registryGet: ReturnType<typeof vi.fn> = vi.fn()): EventRouterD
   } as unknown as ReturnType<typeof makeDeps>;
 }
 
-function connectedWorker() {
-  return vi.fn().mockReturnValue({ status: "connected" });
+/** Registry returns a worker currently assigned to the given task. */
+function workerOnTask(taskId: string) {
+  return vi.fn().mockReturnValue({ status: "busy", currentTaskId: taskId });
 }
 
-// ── Tests for terminal task states ─────────────────────────────────────────────
+/** Registry returns a worker that has moved on to a different task (or is idle). */
+function workerOnDifferentTask() {
+  return vi.fn().mockReturnValue({ status: "busy", currentTaskId: "other-task-id" });
+}
 
-describe("forwardEvent — completed tasks are dropped; closed/merged tasks still receive events", () => {
-  it("does not forward events to the worker when the task is complete", () => {
-    // A completed task still has workerId set (complete() only sets completedAt).
+/** Registry returns a worker that is idle (currentTaskId cleared after completion). */
+function idleWorker() {
+  return vi.fn().mockReturnValue({ status: "idle", currentTaskId: undefined });
+}
+
+// ── Core bug fix: worker that has moved on ─────────────────────────────────────
+
+describe("forwardEvent — worker has moved on to a different task", () => {
+  it("drops the event when the registry shows the worker is now on a different task", () => {
+    // Simulates the bug: task T1 completes, worker is assigned T2,
+    // but task.workerId for T1 still points to that worker.
     const task = Task.fromTest({
       task_id: "42",
       issue_number: 42,
       worker_id: "worker-1",
       completed_at: new Date().toISOString(),
     });
-    const deps = makeDeps(connectedWorker());
+    const deps = makeDeps(workerOnDifferentTask());
 
     forwardEvent(deps, task, makeEvent(), "#42");
 
@@ -58,22 +71,55 @@ describe("forwardEvent — completed tasks are dropped; closed/merged tasks stil
     expect(deps.taskManager.queueEvent).not.toHaveBeenCalled();
   });
 
-  it("still queues events for closed tasks — worker may still be active", () => {
-    // A closed issue doesn't mean the worker is done; it still needs events.
+  it("drops the event when the registry shows the worker is now idle (task completed, no new task yet)", () => {
     const task = Task.fromTest({
       task_id: "42",
       issue_number: 42,
-      issue_closed_at: new Date().toISOString(),
+      worker_id: "worker-1",
+      completed_at: new Date().toISOString(),
     });
-    task.blockersLoaded = true; // status would be "closed" (no worker), falls through to pending/blocked check
-    const deps = makeDeps();
+    const deps = makeDeps(idleWorker());
 
     forwardEvent(deps, task, makeEvent(), "#42");
 
-    // "closed" with no worker: status is "closed" so neither pending/blocked branch fires.
-    // The important thing is that forwardEvent does NOT drop it early.
-    // (No worker assigned and not pending/blocked → naturally not queued, but not dropped.)
-    expect(deps.flog).not.toHaveBeenCalledWith(expect.stringContaining("dropped"));
+    expect(deps.sendMsg).not.toHaveBeenCalled();
+    expect(deps.taskManager.queueEvent).not.toHaveBeenCalled();
+  });
+
+  it("logs a drop message when the worker has moved on", () => {
+    const task = Task.fromTest({
+      task_id: "42",
+      issue_number: 42,
+      worker_id: "worker-1",
+      completed_at: new Date().toISOString(),
+    });
+    const deps = makeDeps(workerOnDifferentTask());
+
+    forwardEvent(deps, task, makeEvent("issue_comment"), "#42");
+
+    expect(deps.flog).toHaveBeenCalledWith(expect.stringContaining("dropped"));
+    expect(deps.flog).toHaveBeenCalledWith(expect.stringContaining("different task"));
+  });
+});
+
+// ── Active tasks still receive events (regression guard) ───────────────────────
+
+describe("forwardEvent — active tasks still receive events", () => {
+  it("forwards the event when the registry confirms the worker is still on this task", () => {
+    const task = Task.fromTest({
+      task_id: "42",
+      issue_number: 42,
+      worker_id: "worker-1",
+    });
+    const deps = makeDeps(workerOnTask("42"));
+
+    forwardEvent(deps, task, makeEvent(), "#42");
+
+    expect(deps.sendMsg).toHaveBeenCalledOnce();
+    expect(deps.sendMsg).toHaveBeenCalledWith(
+      "worker-1",
+      expect.objectContaining({ type: "event_notification" }),
+    );
   });
 
   it("still forwards events to the worker when the task's PR is merged", () => {
@@ -84,7 +130,7 @@ describe("forwardEvent — completed tasks are dropped; closed/merged tasks stil
       worker_id: "worker-1",
       pr_merged_at: new Date().toISOString(),
     });
-    const deps = makeDeps(connectedWorker());
+    const deps = makeDeps(workerOnTask("42"));
 
     forwardEvent(deps, task, makeEvent(), "#42");
 
@@ -92,40 +138,19 @@ describe("forwardEvent — completed tasks are dropped; closed/merged tasks stil
     expect(deps.flog).not.toHaveBeenCalledWith(expect.stringContaining("dropped"));
   });
 
-  it("logs a drop message for completed tasks", () => {
+  it("still forwards events when the task's issue is closed but worker is still on it", () => {
     const task = Task.fromTest({
       task_id: "42",
       issue_number: 42,
       worker_id: "worker-1",
-      completed_at: new Date().toISOString(),
+      issue_closed_at: new Date().toISOString(),
     });
-    const deps = makeDeps(connectedWorker());
-
-    forwardEvent(deps, task, makeEvent("issue_comment"), "#42");
-
-    expect(deps.flog).toHaveBeenCalledWith(expect.stringContaining("dropped"));
-    expect(deps.flog).toHaveBeenCalledWith(expect.stringContaining("complete"));
-  });
-});
-
-// ── Tests for active task states (regression guard) ────────────────────────────
-
-describe("forwardEvent — active tasks still receive events", () => {
-  it("sends event_notification to a connected worker for an assigned task", () => {
-    const task = Task.fromTest({
-      task_id: "42",
-      issue_number: 42,
-      worker_id: "worker-1",
-    });
-    const deps = makeDeps(connectedWorker());
+    const deps = makeDeps(workerOnTask("42"));
 
     forwardEvent(deps, task, makeEvent(), "#42");
 
     expect(deps.sendMsg).toHaveBeenCalledOnce();
-    expect(deps.sendMsg).toHaveBeenCalledWith(
-      "worker-1",
-      expect.objectContaining({ type: "event_notification" }),
-    );
+    expect(deps.flog).not.toHaveBeenCalledWith(expect.stringContaining("dropped"));
   });
 
   it("queues event for a pending task with no worker", () => {
