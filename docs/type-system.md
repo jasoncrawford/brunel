@@ -101,6 +101,6 @@ Payload types within the union reference the shared Wire interfaces directly rat
 | What | Where |
 |---|---|
 | Server model classes | `src/foreman/models/*.ts` |
-| Wire interfaces and protocol unions | `src/wire.ts` |
+| Wire interfaces and protocol unions | `shared/wire.ts` |
 | Shared domain types (enums, value objects) | `shared/types.ts` |
 | Frontend-only UI state | `frontend/src/` (local, not in wire.ts) |
