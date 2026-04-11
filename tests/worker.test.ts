@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "events";
 import { WorkerSession, classifyEvent, debounceMs } from "../src/agent/worker.js";
-import type { ForemanMessage, GitHubEvent, TaskIssue } from "../src/types.js";
+import type { ForWorkerMsg, WorkerEvent, TaskIssue } from "../src/types.js";
 import { stripAnsi } from "./helpers.js";
 import * as displayModule from "../src/agent/display.js";
 
@@ -25,11 +25,11 @@ function makeIssue(n = 1): TaskIssue {
   return { number: n, title: `Issue ${n}`, body: `Body ${n}`, labels: [], repoUrl: "https://github.com/owner/repo" };
 }
 
-function makeEvent(name = "push"): GitHubEvent {
+function makeEvent(name = "push"): WorkerEvent {
   return { id: "evt-1", name, payload: {} };
 }
 
-function sendMsg(ws: FakeWs, msg: ForemanMessage) {
+function sendMsg(ws: FakeWs, msg: ForWorkerMsg) {
   ws.emit("message", Buffer.from(JSON.stringify(msg)));
 }
 
@@ -39,7 +39,7 @@ let fakeWs: FakeWs;
 let wsFactory: ReturnType<typeof vi.fn>;
 let display: {
   print: ReturnType<typeof vi.fn>;
-  printForemanMessage: ReturnType<typeof vi.fn>;
+  printForWorkerMsg: ReturnType<typeof vi.fn>;
   startPersistentStatus: ReturnType<typeof vi.fn>;
   stopPersistentStatus: ReturnType<typeof vi.fn>;
   updatePersistentStatus: ReturnType<typeof vi.fn>;
@@ -52,7 +52,7 @@ beforeEach(() => {
   wsFactory = vi.fn().mockReturnValue(fakeWs);
   display = {
     print: vi.fn(),
-    printForemanMessage: vi.fn(),
+    printForWorkerMsg: vi.fn(),
     startPersistentStatus: vi.fn(),
     stopPersistentStatus: vi.fn(),
     updatePersistentStatus: vi.fn(),
@@ -88,10 +88,10 @@ describe("task_assigned", () => {
     expect(sent.taskId).toBe("42");
   });
 
-  it("calls display.printForemanMessage for task_assigned", () => {
+  it("calls display.printForWorkerMsg for task_assigned", () => {
     const issue = makeIssue();
     sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-    expect(display.printForemanMessage).toHaveBeenCalledWith(
+    expect(display.printForWorkerMsg).toHaveBeenCalledWith(
       expect.objectContaining({ type: "task_assigned" })
     );
   });
@@ -538,7 +538,7 @@ describe("status bar content", () => {
     const issue = makeIssue(1);
     sendMsg(fakeWs, { type: "task_assigned", taskId: "t1", issue });
 
-    const prEvent: GitHubEvent = {
+    const prEvent: WorkerEvent = {
       id: "pr-evt",
       name: "pull_request",
       payload: { action: "opened", pull_request: { number: 99, title: "My PR" } },
@@ -553,7 +553,7 @@ describe("status bar content", () => {
     sendMsg(fakeWs, { type: "task_assigned", taskId: "t1", issue: issue1 });
 
     // Set PR number
-    const prEvent: GitHubEvent = {
+    const prEvent: WorkerEvent = {
       id: "pr-evt",
       name: "pull_request",
       payload: { action: "opened", pull_request: { number: 55, title: "PR" } },
@@ -575,7 +575,7 @@ describe("status bar content", () => {
     sendMsg(fakeWs, { type: "task_assigned", taskId: "t1", issue });
 
     // First set the PR number via opened event
-    const prOpenedEvent: GitHubEvent = {
+    const prOpenedEvent: WorkerEvent = {
       id: "pr-opened",
       name: "pull_request",
       payload: { action: "opened", pull_request: { number: 77, merged: false } },
@@ -584,7 +584,7 @@ describe("status bar content", () => {
     expect(stripAnsi(session.getStatusText())).toContain("PR #77");
 
     // Now close the PR without merging
-    const prClosedEvent: GitHubEvent = {
+    const prClosedEvent: WorkerEvent = {
       id: "pr-closed",
       name: "pull_request",
       payload: { action: "closed", pull_request: { number: 77, merged: false } },
@@ -597,7 +597,7 @@ describe("status bar content", () => {
     const issue = makeIssue(1);
     sendMsg(fakeWs, { type: "task_assigned", taskId: "t1", issue });
 
-    const prOpenedEvent: GitHubEvent = {
+    const prOpenedEvent: WorkerEvent = {
       id: "pr-opened",
       name: "pull_request",
       payload: { action: "opened", pull_request: { number: 88, merged: false } },
@@ -606,7 +606,7 @@ describe("status bar content", () => {
     expect(stripAnsi(session.getStatusText())).toContain("PR #88");
 
     // Close via merge — PR should stay shown until task completes
-    const prMergedEvent: GitHubEvent = {
+    const prMergedEvent: WorkerEvent = {
       id: "pr-merged",
       name: "pull_request",
       payload: { action: "closed", pull_request: { number: 88, merged: true } },
@@ -795,9 +795,9 @@ describe("hello_ack handshake — buffering", () => {
     }
   });
 
-  it("hello_ack is passed to display.printForemanMessage", () => {
+  it("hello_ack is passed to display.printForWorkerMsg", () => {
     sendMsg(fakeWs, { type: "hello_ack", workerId: WORKER_ID, status: "idle" });
-    expect(display.printForemanMessage).toHaveBeenCalledWith(
+    expect(display.printForWorkerMsg).toHaveBeenCalledWith(
       expect.objectContaining({ type: "hello_ack", workerId: WORKER_ID, status: "idle" })
     );
   });
@@ -806,7 +806,7 @@ describe("hello_ack handshake — buffering", () => {
 // ── classifyEvent ─────────────────────────────────────────────────────────────
 
 describe("classifyEvent", () => {
-  function evt(name: string, action?: string, extra?: Record<string, unknown>): GitHubEvent {
+  function evt(name: string, action?: string, extra?: Record<string, unknown>): WorkerEvent {
     return { id: "e1", name, payload: { ...(action ? { action } : {}), ...extra } };
   }
 
@@ -1064,13 +1064,13 @@ describe("interrupt()", () => {
 // ── debounceMs ────────────────────────────────────────────────────────────────
 
 describe("debounceMs", () => {
-  function csEvt(conclusion: string): GitHubEvent {
+  function csEvt(conclusion: string): WorkerEvent {
     return { id: "e1", name: "check_suite", payload: { action: "completed", check_suite: { conclusion } } };
   }
-  function prEvt(action: string): GitHubEvent {
+  function prEvt(action: string): WorkerEvent {
     return { id: "e2", name: "pull_request", payload: { action } };
   }
-  function commentEvt(): GitHubEvent {
+  function commentEvt(): WorkerEvent {
     return { id: "e3", name: "issue_comment", payload: { action: "created" } };
   }
 
@@ -1125,7 +1125,7 @@ describe("event-type-specific debounce timers", () => {
       sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
       session.takeNextPrompt();
 
-      const csEvt: GitHubEvent = { id: "e1", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success" } } };
+      const csEvt: WorkerEvent = { id: "e1", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success" } } };
       sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: csEvt });
 
       // Should NOT fire after 3s (old default)
@@ -1147,7 +1147,7 @@ describe("event-type-specific debounce timers", () => {
       sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
       session.takeNextPrompt();
 
-      const csEvt: GitHubEvent = { id: "e1", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "failure" } } };
+      const csEvt: WorkerEvent = { id: "e1", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "failure" } } };
       sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: csEvt });
 
       await vi.advanceTimersByTimeAsync(3001);
@@ -1164,7 +1164,7 @@ describe("event-type-specific debounce timers", () => {
       sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
       session.takeNextPrompt();
 
-      const prEvt: GitHubEvent = { id: "e1", name: "pull_request", payload: { action: "closed", pull_request: { number: 1 } } };
+      const prEvt: WorkerEvent = { id: "e1", name: "pull_request", payload: { action: "closed", pull_request: { number: 1 } } };
       sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: prEvt });
 
       // Advance by just 1ms — fires immediately (0ms debounce)
@@ -1183,7 +1183,7 @@ describe("event-type-specific debounce timers", () => {
       session.takeNextPrompt();
 
       // Success sets 30s timer
-      const successEvt: GitHubEvent = { id: "e1", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success" } } };
+      const successEvt: WorkerEvent = { id: "e1", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success" } } };
       sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: successEvt });
 
       // Advance 3s — still waiting (30s timer)
@@ -1191,7 +1191,7 @@ describe("event-type-specific debounce timers", () => {
       expect(session.hasPendingPrompts()).toBe(false);
 
       // Failure arrives — resets timer to 3s
-      const failEvt: GitHubEvent = { id: "e2", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "failure" } } };
+      const failEvt: WorkerEvent = { id: "e2", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "failure" } } };
       sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: failEvt });
 
       // Advance 3s more — should fire now
@@ -1214,14 +1214,14 @@ describe("prIsClosed guard", () => {
       session.takeNextPrompt();
 
       // Close the PR — should trigger prompt after debounce
-      const closedEvt: GitHubEvent = { id: "e1", name: "pull_request", payload: { action: "closed", pull_request: { number: 1 } } };
+      const closedEvt: WorkerEvent = { id: "e1", name: "pull_request", payload: { action: "closed", pull_request: { number: 1 } } };
       sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: closedEvt });
       await vi.runAllTimersAsync();
       expect(session.hasPendingPrompts()).toBe(true);
       session.takeNextPrompt(); // consume PR closed prompt
 
       // check_suite event should be silently dropped (prIsClosed = true)
-      const csEvt: GitHubEvent = { id: "e2", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success" } } };
+      const csEvt: WorkerEvent = { id: "e2", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success" } } };
       sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: csEvt });
       await vi.runAllTimersAsync();
       expect(session.hasPendingPrompts()).toBe(false);
@@ -1238,7 +1238,7 @@ describe("prIsClosed guard", () => {
       session.takeNextPrompt();
 
       // Close the PR
-      const closedEvt: GitHubEvent = { id: "e1", name: "pull_request", payload: { action: "closed", pull_request: { number: 1 } } };
+      const closedEvt: WorkerEvent = { id: "e1", name: "pull_request", payload: { action: "closed", pull_request: { number: 1 } } };
       sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: closedEvt });
       await vi.runAllTimersAsync();
       session.takeNextPrompt(); // consume
@@ -1248,7 +1248,7 @@ describe("prIsClosed guard", () => {
       session.takeNextPrompt(); // consume new task prompt
 
       // check_suite event should now work normally (not dropped)
-      const csEvt: GitHubEvent = { id: "e2", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success" } } };
+      const csEvt: WorkerEvent = { id: "e2", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success" } } };
       sendMsg(fakeWs, { type: "event_notification", taskId: "99", event: csEvt });
       await vi.runAllTimersAsync();
       expect(session.hasPendingPrompts()).toBe(true);
@@ -1265,13 +1265,13 @@ describe("prIsClosed guard", () => {
       session.takeNextPrompt();
 
       // Close the PR
-      const closedEvt: GitHubEvent = { id: "e1", name: "pull_request", payload: { action: "closed", pull_request: { number: 1 } } };
+      const closedEvt: WorkerEvent = { id: "e1", name: "pull_request", payload: { action: "closed", pull_request: { number: 1 } } };
       sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: closedEvt });
       await vi.runAllTimersAsync();
       session.takeNextPrompt(); // consume
 
       // issue_comment/created should NOT be dropped — still actionable after PR closed
-      const commentEvt: GitHubEvent = { id: "e2", name: "issue_comment", payload: { action: "created" } };
+      const commentEvt: WorkerEvent = { id: "e2", name: "issue_comment", payload: { action: "created" } };
       sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: commentEvt });
       await vi.runAllTimersAsync();
       expect(session.hasPendingPrompts()).toBe(true);
@@ -1297,7 +1297,7 @@ describe("prIsClosed guard", () => {
       await vi.runAllTimersAsync();
 
       // check_suite event should now work normally (not dropped)
-      const csEvt: GitHubEvent = { id: "e3", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success" } } };
+      const csEvt: WorkerEvent = { id: "e3", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success" } } };
       sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: csEvt });
       await vi.runAllTimersAsync();
       expect(session.hasPendingPrompts()).toBe(true);

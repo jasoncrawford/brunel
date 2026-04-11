@@ -17,17 +17,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import http from "http";
 import { WebSocket, WebSocketServer } from "ws";
 import type { AddressInfo } from "net";
-import type { ForemanMessage } from "../src/types.js";
+import type { ForWorkerMsg } from "../src/types.js";
 import { Worker } from "../src/foreman/models/worker-registry.js";
 import { createForemanWss } from "../src/foreman/controllers/wss.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
 import { initDb } from "../src/foreman/db-client.js";
-import type { DbLogger } from "../src/foreman/db.js";
-import {
-  createDbLogger,
-  createNullDbLogger,
-} from "../src/foreman/db.js";
 import { loadDefaultConfig } from "../src/config.js";
 import { createTestSupabase } from "./helpers/db.js";
 
@@ -36,23 +31,21 @@ import { createTestSupabase } from "./helpers/db.js";
 const defaultCfg = await loadDefaultConfig();
 const supabase = createTestSupabase();
 initDb(supabase);
-const realDbLogger = createDbLogger(supabase);
-const nullDbLogger = createNullDbLogger();
 
 // ── Generic helpers ───────────────────────────────────────────────────────────
 
 /** FIFO queue that buffers all incoming WebSocket messages. */
-function makeQueue(ws: WebSocket): { next: () => Promise<ForemanMessage>; isEmpty: () => boolean } {
-  const pending: ForemanMessage[] = [];
-  const waiters: Array<(m: ForemanMessage) => void> = [];
+function makeQueue(ws: WebSocket): { next: () => Promise<ForWorkerMsg>; isEmpty: () => boolean } {
+  const pending: ForWorkerMsg[] = [];
+  const waiters: Array<(m: ForWorkerMsg) => void> = [];
   ws.on("message", (data: Buffer | string) => {
-    const msg = JSON.parse(data.toString()) as ForemanMessage;
+    const msg = JSON.parse(data.toString()) as ForWorkerMsg;
     const waiter = waiters.shift();
     if (waiter) waiter(msg);
     else pending.push(msg);
   });
   return {
-    next(): Promise<ForemanMessage> {
+    next(): Promise<ForWorkerMsg> {
       if (pending.length > 0) return Promise.resolve(pending.shift()!);
       return new Promise((r) => waiters.push(r));
     },
@@ -208,9 +201,7 @@ function stubFetchNoBlockers() {
  * Builds a foreman + HTTP server pair.  Returns a cleanup function.
  * The caller is responsible for closing any open WebSocket clients first.
  */
-function buildForeman(opts: {
-  dbLogger?: DbLogger;
-} = {}): {
+function buildForeman(): {
   taskModel: TaskManager;
   httpServer: http.Server;
   wss: WebSocketServer;
@@ -229,8 +220,6 @@ function buildForeman(opts: {
     ...defaultCfg,
     githubRepo: "owner/repo",
     githubToken: "token",
-  }, {
-    dbLogger: opts.dbLogger ?? nullDbLogger,
   });
 
   // port is assigned synchronously when listen() resolves; we'll resolve it
@@ -541,7 +530,7 @@ describe("pipeline: PR events forwarded and logged to DB", () => {
       supabase.from("webhook_events").delete().in("delivery_id", ["evt-1", "evt-pr", "evt-cr"]),
       supabase.from("foreman_messages").delete().eq("worker_id", "w-pr"),
     ]);
-    foreman = buildForeman({ dbLogger: realDbLogger });
+    foreman = buildForeman();
     await new Promise<void>((resolve) =>
       foreman.httpServer.once("listening", resolve),
     );

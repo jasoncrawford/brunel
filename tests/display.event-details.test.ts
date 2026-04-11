@@ -4,7 +4,7 @@
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { fmtTime, fmtEventDetails } from "../src/agent/display.js";
-import type { GitHubEvent } from "../src/types.js";
+import type { WorkerEvent } from "../src/types.js";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -24,7 +24,7 @@ describe("fmtTime", () => {
 
 describe("fmtEventDetails - check_run", () => {
   it("includes check run name and conclusion", () => {
-    const event: GitHubEvent = {
+    const event: WorkerEvent = {
       id: "evt-1",
       name: "check_run",
       payload: {
@@ -38,7 +38,7 @@ describe("fmtEventDetails - check_run", () => {
   });
 
   it("uses status when conclusion is missing", () => {
-    const event: GitHubEvent = {
+    const event: WorkerEvent = {
       id: "evt-2",
       name: "check_run",
       payload: {
@@ -54,7 +54,7 @@ describe("fmtEventDetails - check_run", () => {
 
 describe("fmtEventDetails - check_suite", () => {
   it("includes conclusion", () => {
-    const event: GitHubEvent = {
+    const event: WorkerEvent = {
       id: "evt-3",
       name: "check_suite",
       payload: {
@@ -68,7 +68,7 @@ describe("fmtEventDetails - check_suite", () => {
 
 describe("fmtEventDetails - issue_comment", () => {
   it("includes truncated body", () => {
-    const event: GitHubEvent = {
+    const event: WorkerEvent = {
       id: "evt-4",
       name: "issue_comment",
       payload: {
@@ -81,7 +81,7 @@ describe("fmtEventDetails - issue_comment", () => {
 
   it("truncates long body", () => {
     const longBody = "A".repeat(200);
-    const event: GitHubEvent = {
+    const event: WorkerEvent = {
       id: "evt-5",
       name: "issue_comment",
       payload: { action: "created", comment: { body: longBody } },
@@ -94,7 +94,7 @@ describe("fmtEventDetails - issue_comment", () => {
 
 describe("fmtEventDetails - pull_request_review_comment", () => {
   it("includes truncated body", () => {
-    const event: GitHubEvent = {
+    const event: WorkerEvent = {
       id: "evt-6",
       name: "pull_request_review_comment",
       payload: {
@@ -108,7 +108,7 @@ describe("fmtEventDetails - pull_request_review_comment", () => {
 
 describe("fmtEventDetails - pull_request_review", () => {
   it("includes review state", () => {
-    const event: GitHubEvent = {
+    const event: WorkerEvent = {
       id: "evt-7",
       name: "pull_request_review",
       payload: {
@@ -120,7 +120,7 @@ describe("fmtEventDetails - pull_request_review", () => {
   });
 
   it("includes truncated body when present", () => {
-    const event: GitHubEvent = {
+    const event: WorkerEvent = {
       id: "evt-8",
       name: "pull_request_review",
       payload: {
@@ -136,7 +136,7 @@ describe("fmtEventDetails - pull_request_review", () => {
 
 describe("fmtEventDetails - pull_request", () => {
   it("includes PR number and title", () => {
-    const event: GitHubEvent = {
+    const event: WorkerEvent = {
       id: "evt-9",
       name: "pull_request",
       payload: {
@@ -152,7 +152,7 @@ describe("fmtEventDetails - pull_request", () => {
 
 describe("fmtEventDetails - push", () => {
   it("includes ref and commit count", () => {
-    const event: GitHubEvent = {
+    const event: WorkerEvent = {
       id: "evt-10",
       name: "push",
       payload: {
@@ -168,7 +168,7 @@ describe("fmtEventDetails - push", () => {
 
 describe("fmtEventDetails - workflow_run", () => {
   it("includes workflow name and conclusion", () => {
-    const event: GitHubEvent = {
+    const event: WorkerEvent = {
       id: "evt-11",
       name: "workflow_run",
       payload: {
@@ -184,7 +184,7 @@ describe("fmtEventDetails - workflow_run", () => {
 
 describe("fmtEventDetails - delete", () => {
   it("includes ref_type and ref for a branch deletion", () => {
-    const event: GitHubEvent = {
+    const event: WorkerEvent = {
       id: "evt-12",
       name: "delete",
       payload: { ref_type: "branch", ref: "feature/my-branch" },
@@ -195,7 +195,7 @@ describe("fmtEventDetails - delete", () => {
   });
 
   it("includes ref_type and ref for a tag deletion", () => {
-    const event: GitHubEvent = {
+    const event: WorkerEvent = {
       id: "evt-13",
       name: "delete",
       payload: { ref_type: "tag", ref: "v1.2.3" },
@@ -208,7 +208,7 @@ describe("fmtEventDetails - delete", () => {
 
 describe("fmtEventDetails - issues labeled", () => {
   it("includes label name for issues/labeled", () => {
-    const event: GitHubEvent = {
+    const event: WorkerEvent = {
       id: "evt-14",
       name: "issues",
       payload: {
@@ -222,7 +222,7 @@ describe("fmtEventDetails - issues labeled", () => {
   });
 
   it("returns empty string for issues events without a label", () => {
-    const event: GitHubEvent = {
+    const event: WorkerEvent = {
       id: "evt-15",
       name: "issues",
       payload: { action: "closed", issue: { number: 42, title: "Something" } },
@@ -233,7 +233,7 @@ describe("fmtEventDetails - issues labeled", () => {
 
 describe("fmtEventDetails - unknown event", () => {
   it("returns empty string for unknown event types", () => {
-    const event: GitHubEvent = {
+    const event: WorkerEvent = {
       id: "evt-16",
       name: "some_unknown_event",
       payload: {},

@@ -17,6 +17,12 @@ import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
 import { setupInMemoryTasks } from "./helpers/task.js";
 
+vi.mock("../src/foreman/models/activity-log.js", () => ({
+  queryActivityLog: vi.fn().mockResolvedValue([]),
+}));
+
+import { queryActivityLog } from "../src/foreman/models/activity-log.js";
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function startServer(server: http.Server): Promise<number> {
@@ -68,6 +74,7 @@ let routeEvent: ReturnType<typeof vi.fn>;
 
 beforeEach(async () => {
   routeEvent = vi.fn();
+  vi.mocked(queryActivityLog).mockResolvedValue([]);
   server = createHttpServer(null, routeEvent);
   port = await startServer(server);
 });
@@ -122,70 +129,53 @@ describe("GET /health", () => {
 });
 
 describe("GET /api/log", () => {
-  it("returns 200 with an empty JSON array when no dbLogger is provided", async () => {
+  it("returns 200 with an empty JSON array when queryActivityLog returns empty", async () => {
     const res = await request(port, "GET", "/api/log");
     expect(res.status).toBe(200);
     expect(JSON.parse(res.body)).toEqual([]);
   });
 
-  it("returns log entries from dbLogger", async () => {
+  it("returns log entries from queryActivityLog", async () => {
     const entries = [{ id: 1, summary: "test" }];
-    const dbLogger = { queryLog: vi.fn().mockResolvedValue(entries) } as never;
-    const s = createHttpServer(null, vi.fn(), dbLogger);
-    const p = await startServer(s);
-    try {
-      const res = await request(p, "GET", "/api/log");
-      expect(res.status).toBe(200);
-      expect(JSON.parse(res.body)).toEqual(entries);
-    } finally {
-      await stopServer(s);
-    }
+    vi.mocked(queryActivityLog).mockResolvedValue(entries as never);
+    const res = await request(port, "GET", "/api/log");
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body)).toEqual(entries);
+    expect(queryActivityLog).toHaveBeenCalledWith({ limit: 100 });
   });
 });
 
 describe("GET /api/tasks/:id/events", () => {
-  it("returns 200 with an empty JSON array when no dbLogger is provided", async () => {
+  it("returns 200 with an empty JSON array when queryActivityLog returns empty", async () => {
     const res = await request(port, "GET", "/api/tasks/42/events");
     expect(res.status).toBe(200);
     expect(JSON.parse(res.body)).toEqual([]);
   });
 
-  it("returns task events from dbLogger", async () => {
+  it("returns task events from queryActivityLog", async () => {
     const entries = [{ id: 1, taskId: "42" }];
-    const dbLogger = { queryTaskEvents: vi.fn().mockResolvedValue(entries) } as never;
-    const s = createHttpServer(null, vi.fn(), dbLogger);
-    const p = await startServer(s);
-    try {
-      const res = await request(p, "GET", "/api/tasks/42/events");
-      expect(res.status).toBe(200);
-      expect(JSON.parse(res.body)).toEqual(entries);
-      expect(dbLogger.queryTaskEvents).toHaveBeenCalledWith("42");
-    } finally {
-      await stopServer(s);
-    }
+    vi.mocked(queryActivityLog).mockResolvedValue(entries as never);
+    const res = await request(port, "GET", "/api/tasks/42/events");
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body)).toEqual(entries);
+    expect(queryActivityLog).toHaveBeenCalledWith({ taskId: "42" });
   });
 });
 
 describe("GET /api/workers/:id/messages", () => {
-  it("returns 200 with an empty JSON array when no dbLogger is provided", async () => {
+  it("returns 200 with an empty JSON array when queryActivityLog returns empty", async () => {
     const res = await request(port, "GET", "/api/workers/w1/messages");
     expect(res.status).toBe(200);
     expect(JSON.parse(res.body)).toEqual([]);
   });
 
-  it("returns worker messages from dbLogger", async () => {
+  it("returns worker messages from queryActivityLog", async () => {
     const entries = [{ id: 1, workerId: "w1" }];
-    const dbLogger = { queryWorkerMessages: vi.fn().mockResolvedValue(entries) } as never;
-    const s = createHttpServer(null, vi.fn(), dbLogger);
-    const p = await startServer(s);
-    try {
-      const res = await request(p, "GET", "/api/workers/w1/messages");
-      expect(res.status).toBe(200);
-      expect(JSON.parse(res.body)).toEqual(entries);
-      expect(dbLogger.queryWorkerMessages).toHaveBeenCalledWith("w1");
-    } finally {
-      await stopServer(s);
-    }
+    vi.mocked(queryActivityLog).mockResolvedValue(entries as never);
+    const res = await request(port, "GET", "/api/workers/w1/messages");
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body)).toEqual(entries);
+    expect(queryActivityLog).toHaveBeenCalledWith({ workerId: "w1" });
   });
 });
 
@@ -197,7 +187,6 @@ describe("GET /api/tasks", () => {
   });
 
   it("returns active tasks with derived status and date fields, excluding complete", async () => {
-    const createdAt = "2026-01-01T00:00:00.000Z";
     const tm = new TaskManager();
     setupInMemoryTasks(tm);
 
@@ -205,7 +194,7 @@ describe("GET /api/tasks", () => {
     const t2 = await Task.upsert("2", 2, "test/repo", "Done bug", "Description", []);
     await t2.complete();
 
-    const s = createHttpServer(null, vi.fn(), undefined, tm);
+    const s = createHttpServer(null, vi.fn(), tm);
     const p = await startServer(s);
     try {
       const res = await request(p, "GET", "/api/tasks");
@@ -233,7 +222,7 @@ describe("GET /api/tasks", () => {
     const t = await Task.upsert("42", 42, "test/repo", "Fix bug", "Description", []);
     await t.complete();
 
-    const s = createHttpServer(null, vi.fn(), undefined, tm);
+    const s = createHttpServer(null, vi.fn(), tm);
     const p = await startServer(s);
     try {
       const res = await request(p, "GET", "/api/tasks?status=complete");
@@ -255,7 +244,7 @@ describe("GET /api/tasks", () => {
     await t1.complete();
     await Task.upsert("2", 2, "test/repo", "T2", "b", []);
 
-    const s = createHttpServer(null, vi.fn(), undefined, tm);
+    const s = createHttpServer(null, vi.fn(), tm);
     const p = await startServer(s);
     try {
       const res = await request(p, "GET", "/api/tasks?status=complete");

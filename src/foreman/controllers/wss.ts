@@ -1,7 +1,8 @@
 import http from "http";
 import { WebSocketServer, WebSocket } from "ws";
-import type { WorkerMessage, ForemanMessage, GitHubEvent } from "../../types.js";
-import { type DbLogger, buildMessageSummary } from "../db.js";
+import type { WorkerMessage, ForWorkerMsg } from "../../types.js";
+import { ForemanMessage } from "../models/foreman-message.js";
+import { WebhookEvent } from "../models/webhook-event.js";
 import type { AdminWss } from "../admin-ws.js";
 import { fmtEvent } from "../event-fmt.js";
 import { fmtError } from "../../utils.js";
@@ -38,7 +39,6 @@ export function createForemanWss(
   server: http.Server,
   config: Pick<BrunelConfig, "taskLabel" | "githubRepo" | "githubToken" | "githubApiUrl" | "workerSecret" | "pingIntervalMs">,
   deps?: {
-    dbLogger?: DbLogger;
     adminWss?: AdminWss;
   },
 ): ForemanWss {
@@ -46,7 +46,6 @@ export function createForemanWss(
   const repo = config.githubRepo;
   const token = config.githubToken;
   const githubApiUrl = config.githubApiUrl;
-  const dbLogger = deps?.dbLogger;
   const adminWss = deps?.adminWss;
   const workerSecret = config.workerSecret;
 
@@ -59,7 +58,7 @@ export function createForemanWss(
 
   function broadcastMessageEvent(data: { direction: string; workerId: string | null; taskId: string | null; msgType: string; payload?: Record<string, unknown> }) {
     if (!adminWss) return;
-    const summary = buildMessageSummary(data.direction, data.msgType, data.taskId, data.payload ?? {});
+    const summary = ForemanMessage.buildSummary(data.direction, data.msgType, data.taskId, data.payload ?? {});
     adminWss.broadcastLogEvent({
       kind: "message",
       id: nextBroadcastId++,
@@ -70,11 +69,11 @@ export function createForemanWss(
     });
   }
 
-  function sendMsg(workerId: string, msg: ForemanMessage, logTaskId?: string): void {
+  function sendMsg(workerId: string, msg: ForWorkerMsg, logTaskId?: string): void {
     const taskId = logTaskId ?? (("taskId" in msg ? msg.taskId : null) ?? null);
     Worker.get(workerId)?.send(msg);
     const msgPayload = msg as unknown as Record<string, unknown>;
-    dbLogger?.logForemanMessage({ direction: "sent", workerId, taskId, msgType: msg.type, payload: msgPayload });
+    ForemanMessage.log({ direction: "sent", workerId, taskId, msgType: msg.type, payload: msgPayload });
     broadcastMessageEvent({ direction: "sent", workerId, taskId, msgType: msg.type, payload: msgPayload });
   }
 
@@ -128,7 +127,7 @@ export function createForemanWss(
       }
 
       const queued = taskManager.drainEvents(task.taskId);
-      const assignMsg: ForemanMessage = {
+      const assignMsg: ForWorkerMsg = {
         type: "task_assigned",
         taskId: task.taskId,
         issue: {
@@ -142,9 +141,9 @@ export function createForemanWss(
       sendMsg(workerId, assignMsg);
       log(workerId, `→ task_assigned #${task.issueNumber} "${task.title}"`);
       for (const evt of queued) {
-        const evtMsg: ForemanMessage = { type: "event_notification", taskId: task.taskId, event: evt };
+        const evtMsg: ForWorkerMsg = { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload() };
         sendMsg(workerId, evtMsg);
-        log(workerId, `→ event_notification #${task.issueNumber} ${evt.name} (queued)`);
+        log(workerId, `→ event_notification #${task.issueNumber} ${evt.eventName} (queued)`);
       }
     }
   }
@@ -163,14 +162,14 @@ export function createForemanWss(
 
   async function routeEvent(id: string, name: string, payload: unknown) {
     const p = payload as Record<string, unknown>;
-    const evt: GitHubEvent = { id, name, payload: p };
+    const evt = WebhookEvent.fromIncoming(id, name, p);
 
     const { taskId, workerId } = await doRouteEvent(routerDeps, name, p, evt);
 
     const action = typeof p.action === "string" ? p.action : null;
     const webhookIssueNumber = typeof (p.issue as R | undefined)?.number === "number" ? (p.issue as R).number as number : null;
     const webhookPrNumber = typeof (p.pull_request as R | undefined)?.number === "number" ? (p.pull_request as R).number as number : null;
-    dbLogger?.logWebhookEvent({
+    WebhookEvent.log({
       deliveryId: id,
       eventName: name,
       action,
@@ -189,7 +188,7 @@ export function createForemanWss(
       timestamp: new Date().toISOString(),
       taskId,
       workerId,
-      summary: fmtEvent(evt),
+      summary: fmtEvent({ name: evt.eventName, payload: evt.payload }),
     });
   }
 
@@ -215,8 +214,8 @@ export function createForemanWss(
 
       function flushQueuedEvents(taskId: string, issueRef: string | number) {
         for (const evt of taskManager.drainEvents(taskId)) {
-          sendMsg(workerId, { type: "event_notification", taskId, event: evt });
-          log(workerId, `→ event_notification #${issueRef} ${evt.name} (queued)`);
+          sendMsg(workerId, { type: "event_notification", taskId, event: evt.toWorkerPayload() });
+          log(workerId, `→ event_notification #${issueRef} ${evt.eventName} (queued)`);
         }
       }
 
@@ -320,7 +319,7 @@ export function createForemanWss(
         const rcvWorkerId = workerId || ((msg as { workerId?: string }).workerId ?? null);
         const rcvTaskId = (msg as { taskId?: string }).taskId ?? null;
         const rcvPayload = msg as unknown as Record<string, unknown>;
-        dbLogger?.logForemanMessage({
+        ForemanMessage.log({
           direction: "received",
           workerId: rcvWorkerId,
           taskId: rcvTaskId,
@@ -346,7 +345,7 @@ export function createForemanWss(
         log(workerId, `disconnected (code ${code}${reasonStr})`);
         const taskId = currentWorker?.currentTaskId ?? null;
         const disconnPayload = { code, reason: reason?.toString() ?? null };
-        dbLogger?.logForemanMessage({
+        ForemanMessage.log({
           direction: "received",
           workerId,
           taskId,

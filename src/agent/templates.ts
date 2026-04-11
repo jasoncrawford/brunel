@@ -1,4 +1,4 @@
-import type { GitHubEvent, TaskIssue } from "../types.js";
+import type { WorkerEvent, TaskIssue } from "../types.js";
 
 export function formatCommentLocation(
   path: unknown,
@@ -40,7 +40,7 @@ You are working in ${workspaceContext}. Use your branch-discipline skill, and re
 Do not work on any other issues: leave task assignment to the foreman. Do not merge any PRs or set them to auto-merge: leave merging to the user after UAT.`;
 }
 
-export function buildEventPrompt(events: GitHubEvent[]): string {
+export function buildEventPrompt(events: WorkerEvent[]): string {
   const coalesced = coalesceEvents(events);
   const sorted = sortEvents(coalesced);
 
@@ -59,8 +59,8 @@ export function buildEventPrompt(events: GitHubEvent[]): string {
   return body;
 }
 
-export function coalesceEvents(events: GitHubEvent[]): GitHubEvent[] {
-  const result: GitHubEvent[] = [];
+export function coalesceEvents(events: WorkerEvent[]): WorkerEvent[] {
+  const result: WorkerEvent[] = [];
 
   // Separate check_suite events
   const checkSuites = events.filter(e => e.name === "check_suite");
@@ -139,7 +139,7 @@ const SORT_PRIORITY: Record<string, number> = {
   pull_request: 5,
 };
 
-function sortEvents(events: GitHubEvent[]): GitHubEvent[] {
+function sortEvents(events: WorkerEvent[]): WorkerEvent[] {
   return [...events].sort((a, b) => {
     const pa = SORT_PRIORITY[a.name] ?? 4;
     const pb = SORT_PRIORITY[b.name] ?? 4;
@@ -147,7 +147,7 @@ function sortEvents(events: GitHubEvent[]): GitHubEvent[] {
   });
 }
 
-export function fmtEventList(events: GitHubEvent[]): string {
+export function fmtEventList(events: WorkerEvent[]): string {
   return events.map(e => {
     const action = e.payload["action"] as string | undefined;
     return action ? `${e.name}/${action}` : e.name;
@@ -157,10 +157,10 @@ export function fmtEventList(events: GitHubEvent[]): string {
 // ── Event formatter table ─────────────────────────────────────────────────────
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export type EventTemplateFmt = (payload: any, event: GitHubEvent) => string;
+export type EventTemplateFmt = (payload: any, event: WorkerEvent) => string;
 export type EventTemplateFmtTable = Record<string, EventTemplateFmt>;
 
-export function resolveEventTemplate(table: EventTemplateFmtTable, key: string, event: GitHubEvent): string {
+export function resolveEventTemplate(table: EventTemplateFmtTable, key: string, event: WorkerEvent): string {
   const fmt = table[key] ?? table._default;
   if (!fmt) return "";
   return fmt(event.payload, event);

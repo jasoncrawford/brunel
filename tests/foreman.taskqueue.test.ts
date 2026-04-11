@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
 import { setupInMemoryTasks } from "./helpers/task.js";
-import type { GitHubEvent } from "../src/types.js";
+import { WebhookEvent } from "../src/foreman/models/webhook-event.js";
 
 const repoSlug = "test/repo";
 
@@ -58,7 +58,7 @@ describe("TaskManager — queue operations", () => {
 
   it("queueEvent appends to task event queue", async () => {
     await registerBase();
-    const evt: GitHubEvent = { id: "e1", name: "check_run", payload: {} };
+    const evt = WebhookEvent.fromIncoming("e1", "check_run", {});
     m.queueEvent("42", evt);
     const drained = m.drainEvents("42");
     expect(drained).toHaveLength(1);
@@ -66,7 +66,7 @@ describe("TaskManager — queue operations", () => {
 
   it("drainEvents returns all events and clears the queue", async () => {
     await registerBase();
-    const evt: GitHubEvent = { id: "e1", name: "check_run", payload: {} };
+    const evt = WebhookEvent.fromIncoming("e1", "check_run", {});
     m.queueEvent("42", evt);
     const drained = m.drainEvents("42");
     expect(drained).toHaveLength(1);

@@ -12,7 +12,7 @@ import { forwardEvent } from "../src/foreman/controllers/event-router.js";
 import type { EventRouterDeps } from "../src/foreman/controllers/event-router.js";
 import { Task } from "../src/foreman/models/task.js";
 import { Worker } from "../src/foreman/models/worker-registry.js";
-import type { GitHubEvent } from "../src/types.js";
+import { WebhookEvent } from "../src/foreman/models/webhook-event.js";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -20,8 +20,8 @@ function fakeWs() {
   return { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
 }
 
-function makeEvent(name = "issue_comment"): GitHubEvent {
-  return { id: "evt-1", name, payload: {} };
+function makeEvent(name = "issue_comment"): WebhookEvent {
+  return WebhookEvent.fromIncoming("evt-1", name, {});
 }
 
 function makeDeps(): EventRouterDeps & { sendMsg: ReturnType<typeof vi.fn>; flog: ReturnType<typeof vi.fn> } {

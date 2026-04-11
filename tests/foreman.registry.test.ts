@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Worker } from "../src/foreman/models/worker-registry.js";
-import type { ForemanMessage } from "../src/types.js";
+import type { ForWorkerMsg } from "../src/types.js";
 
 function fakeWs() {
   return { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
@@ -62,7 +62,7 @@ describe("Worker", () => {
   it("send serializes message and calls ws.send", () => {
     const ws = fakeWs();
     const w = Worker.register("w1", ws);
-    const msg: ForemanMessage = { type: "task_assigned", taskId: "1", issue: { number: 1, title: "T", body: "", labels: [], repoUrl: "https://github.com/o/r" } };
+    const msg: ForWorkerMsg = { type: "task_assigned", taskId: "1", issue: { number: 1, title: "T", body: "", labels: [], repoUrl: "https://github.com/o/r" } };
     w.send(msg);
     expect(ws.send).toHaveBeenCalledWith(JSON.stringify(msg));
   });

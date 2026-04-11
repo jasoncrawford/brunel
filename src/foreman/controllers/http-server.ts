@@ -2,9 +2,9 @@ import { Webhooks } from "@octokit/webhooks";
 import http from "http";
 import { Hono } from "hono";
 import { getRequestListener } from "@hono/node-server";
-import type { DbLogger } from "../db.js";
 import type { TaskManager } from "../models/task-manager.js";
 import { Task } from "../models/task.js";
+import { queryActivityLog } from "../models/activity-log.js";
 import type { TaskStatus } from "../../types.js";
 import { fmtError } from "../../utils.js";
 import { summaryEvent, isMutedEvent } from "./event-router.js";
@@ -21,7 +21,6 @@ function printEvent(id: string, name: string, payload: unknown) {
 export function createHttpServer(
   webhooks: InstanceType<typeof Webhooks> | null,
   routeEvent: (id: string, name: string, payload: unknown) => void | Promise<void>,
-  dbLogger?: DbLogger,
   taskManager?: TaskManager,
 ): http.Server {
   const app = new Hono();
@@ -68,7 +67,7 @@ export function createHttpServer(
   // ── REST API ───────────────────────────────────────────────────────────────
   app.get("/api/log", async (c) => {
     try {
-      const entries = dbLogger ? await dbLogger.queryLog({ limit: 100 }) : [];
+      const entries = await queryActivityLog({ limit: 100 });
       return c.json(entries);
     } catch (err) {
       flog(`ERROR API query failed: ${fmtError(err)}`);
@@ -78,7 +77,8 @@ export function createHttpServer(
 
   app.get("/api/tasks/:id/events", async (c) => {
     try {
-      const entries = dbLogger ? await dbLogger.queryTaskEvents(c.req.param("id")) : [];
+      const taskId = c.req.param("id");
+      const entries = await queryActivityLog({ taskId });
       return c.json(entries);
     } catch (err) {
       flog(`ERROR API query failed: ${fmtError(err)}`);
@@ -88,7 +88,8 @@ export function createHttpServer(
 
   app.get("/api/workers/:id/messages", async (c) => {
     try {
-      const entries = dbLogger ? await dbLogger.queryWorkerMessages(c.req.param("id")) : [];
+      const workerId = c.req.param("id");
+      const entries = await queryActivityLog({ workerId });
       return c.json(entries);
     } catch (err) {
       flog(`ERROR API query failed: ${fmtError(err)}`);
