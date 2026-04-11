@@ -8,7 +8,7 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { CanUseTool, PermissionMode, PermissionResult } from "@anthropic-ai/claude-agent-sdk";
 import * as display from "./display.js";
 import { setVerbose, setThinkOutLoud } from "./display.js";
-import { ask, listCommands, dispatchInput, pick, pickMultiple, pickQuestion } from "./input.js";
+import { ask, dispatchInput, pick, pickMultiple, pickQuestion } from "./input.js";
 import type { PickQuestionResult } from "./input.js";
 import { WorkerSession, registerWorkerCommands, startWorkerMode } from "./worker.js";
 import type { RunQuery, WorkerModeConfig } from "./worker.js";
@@ -20,7 +20,7 @@ import type { ModelInfo, FetchModelsFn } from "./model.js";
 import { handleEffortCommand } from "./effort.js";
 import type { EffortValue } from "./effort.js";
 import { CommandRegistry } from "./command-registry.js";
-export { parseSlashCommand, resolveCommandFilePath, resolveContent, dispatchInput, matchCommands, listCommandNames, listCommands, ask } from "./input.js";
+export { parseSlashCommand, resolveCommandFilePath, resolveContent, dispatchInput, matchCommands, ask } from "./input.js";
 export type { SlashCommandResult, DispatchResult, ListDir } from "./input.js";
 export { handleModelCommand, getCachedModels, _resetCachedModels } from "./model.js";
 export { handleEffortCommand } from "./effort.js";
@@ -378,7 +378,7 @@ export async function main(
     // empty promptLine suppresses the drawFresh callback so incoming messages
     // are printed cleanly without a prompt preceding or following them.
     const promptStr = session ? (showPrompt ? "\n[agent] > " : "") : "\n> ";
-    const input = await ask(promptStr, () => listCommands(registry), wsAbort);
+    const input = await ask(promptStr, () => registry.listCommands(), wsAbort);
 
     // ^D / ^C on empty buffer — treat as exit.
     if (input === "__eof__") {
