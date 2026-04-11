@@ -70,3 +70,4 @@ export async function handleEffortCommand(
   print(display.c.darkGray(`Effort set to ${chosen.value}.`));
   return chosen.value as EffortValue;
 }
+

@@ -8,7 +8,7 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { CanUseTool, PermissionMode, PermissionResult } from "@anthropic-ai/claude-agent-sdk";
 import * as display from "./display.js";
 import { setVerbose, setThinkOutLoud } from "./display.js";
-import { ask, listWorkerCommands, dispatchInput, pick, pickMultiple, pickQuestion } from "./input.js";
+import { ask, listCommands, dispatchInput, pick, pickMultiple, pickQuestion } from "./input.js";
 import type { PickQuestionResult } from "./input.js";
 import { WorkerSession, registerWorkerCommands, startWorkerMode } from "./worker.js";
 import type { RunQuery, WorkerModeConfig } from "./worker.js";
@@ -19,8 +19,8 @@ import { handleModelCommand, getCachedModels, _resetCachedModels, setCachedModel
 import type { ModelInfo, FetchModelsFn } from "./model.js";
 import { handleEffortCommand } from "./effort.js";
 import type { EffortValue } from "./effort.js";
-import { _reset, register, execute } from "./commands.js";
-export { parseSlashCommand, resolveCommandFilePath, resolveContent, dispatchInput, matchCommands, listCommandNames, listWorkerCommandNames, listWorkerCommands, ask } from "./input.js";
+import { CommandRegistry } from "./command-registry.js";
+export { parseSlashCommand, resolveCommandFilePath, resolveContent, dispatchInput, matchCommands, listCommandNames, listCommands, ask } from "./input.js";
 export type { SlashCommandResult, DispatchResult, ListDir } from "./input.js";
 export { handleModelCommand, getCachedModels, _resetCachedModels } from "./model.js";
 export { handleEffortCommand } from "./effort.js";
@@ -294,47 +294,54 @@ export async function main(
     process.stdin.pause();
   };
 
-  // Register all commands. Commands are always present in the registry for
-  // both REPL and worker modes; worker-only commands degrade gracefully when
-  // not connected to a foreman.
-  _reset();
+  // Register all commands. All commands are present in both REPL and worker
+  // modes; commands that require a foreman connection degrade gracefully.
+  const registry = new CommandRegistry();
   registerWorkspaceCommands(
     session
       ? session.workspaceCommandDeps
       : { workspace: workspaceRef, config: workspaceCfg ? { ...workspaceCfg, sessionId: sessionId_ } : undefined, originalCwd, confirm },
+    registry.scoped("workspace"),
     !!session,
   );
-  registerWorkerCommands(session);
-  register("exit", {
+  registerWorkerCommands(session, registry.scoped("worker"));
+  registry.register("exit", {
     description: "Exit",
     handler: async () => {
       if (!session) await doExit();
       return "exit";
     },
   });
-  register("clear", {
+  registry.register("clear", {
     description: "Clear the conversation",
     handler: async () => {
       sessionId = undefined;
       display.print(display.clearBreak());
     },
   });
-  register("model", {
+  registry.register("model", {
     description: "Select the Claude model to use",
     handler: async (args) => {
-      const pickModelFn = (opts: string[], idx: number) =>
-        pick(opts, { currentIdx: idx, escapable: true });
-      const newModel = await handleModelCommand(args, currentModel, pickModelFn, fetchModelsFn, display.print);
+      const newModel = await handleModelCommand(
+        args,
+        currentModel,
+        (opts, idx) => pick(opts, { currentIdx: idx, escapable: true }),
+        fetchModelsFn,
+        display.print,
+      );
       currentModel = newModel;
       if (session) session.currentModel = newModel;
     },
   });
-  register("effort", {
+  registry.register("effort", {
     description: "Set the effort level for Claude's thinking",
     handler: async (args) => {
-      const pickEffortFn = (opts: string[], idx: number) =>
-        pick(opts, { currentIdx: idx, escapable: true });
-      const newEffort = await handleEffortCommand(args, currentEffort, pickEffortFn, display.print);
+      const newEffort = await handleEffortCommand(
+        args,
+        currentEffort,
+        (opts, idx) => pick(opts, { currentIdx: idx, escapable: true }),
+        display.print,
+      );
       currentEffort = newEffort;
       if (session) session.currentEffort = newEffort;
     },
@@ -371,7 +378,7 @@ export async function main(
     // empty promptLine suppresses the drawFresh callback so incoming messages
     // are printed cleanly without a prompt preceding or following them.
     const promptStr = session ? (showPrompt ? "\n[agent] > " : "") : "\n> ";
-    const input = await ask(promptStr, listWorkerCommands, wsAbort);
+    const input = await ask(promptStr, () => listCommands(registry), wsAbort);
 
     // ^D / ^C on empty buffer — treat as exit.
     if (input === "__eof__") {
@@ -398,7 +405,7 @@ export async function main(
       continue;
     }
 
-    const action = await dispatchInput(input);
+    const action = await dispatchInput(input, registry);
 
     if (action.type === "skip") continue;
 
@@ -408,7 +415,7 @@ export async function main(
     }
 
     if (action.type === "command") {
-      const result = await execute(action.name, action.args);
+      const result = await registry.execute(action.name, action.args);
       if (result === "exit") break;
       if (result === "task-complete") showPrompt = false;
       continue;

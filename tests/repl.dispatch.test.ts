@@ -1,8 +1,11 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { dispatchInput, applyArguments, resolveContent } from "../src/agent/input.js";
 import { registerTestCommands } from "./helpers.js";
+import type { CommandRegistry } from "../src/agent/command-registry.js";
 
-beforeEach(async () => registerTestCommands());
+let registry: CommandRegistry;
+
+beforeEach(async () => { registry = await registerTestCommands(); });
 
 // ── applyArguments ────────────────────────────────────────────────────────────
 
@@ -86,37 +89,37 @@ describe("resolveContent", () => {
 
 describe("dispatchInput", () => {
   it("empty input returns { type: 'skip' }", async () => {
-    const result = await dispatchInput("", () => null);
+    const result = await dispatchInput("", registry, () => null);
     expect(result).toEqual({ type: "skip" });
   });
 
   it("/exit returns { type: 'command', name: 'exit', args: '' }", async () => {
-    const result = await dispatchInput("/exit", () => null);
+    const result = await dispatchInput("/exit", registry, () => null);
     expect(result).toEqual({ type: "command", name: "exit", args: "" });
   });
 
   it("/clear returns { type: 'command', name: 'clear', args: '' }", async () => {
-    const result = await dispatchInput("/clear", () => null);
+    const result = await dispatchInput("/clear", registry, () => null);
     expect(result).toEqual({ type: "command", name: "clear", args: "" });
   });
 
   it("/unknown with no file returns { type: 'unknown_command', command }", async () => {
-    const result = await dispatchInput("/unknown", () => null);
+    const result = await dispatchInput("/unknown", registry, () => null);
     expect(result).toEqual({ type: "unknown_command", command: "unknown" });
   });
 
   it("/known with file returns { type: 'query', prompt: fileContent }", async () => {
-    const result = await dispatchInput("/mycommand", (_path) => "Do something creative.");
+    const result = await dispatchInput("/mycommand", registry, (_path) => "Do something creative.");
     expect(result).toEqual({ type: "query", prompt: "Do something creative." });
   });
 
   it("plain text returns { type: 'query', prompt: input }", async () => {
-    const result = await dispatchInput("hello world", () => null);
+    const result = await dispatchInput("hello world", registry, () => null);
     expect(result).toEqual({ type: "query", prompt: "hello world" });
   });
 
   it("/command with extra args appends args to prompt", async () => {
-    const result = await dispatchInput("/mycommand some extra args", (_path) => "Base prompt.");
+    const result = await dispatchInput("/mycommand some extra args", registry, (_path) => "Base prompt.");
     expect(result).toEqual({ type: "query", prompt: "Base prompt.\nARGUMENTS: some extra args" });
   });
 
@@ -126,7 +129,7 @@ describe("dispatchInput", () => {
       if (path === `${home}/.claude/skills/my-skill/SKILL.md`) return "Do $ARGUMENTS please.";
       return null;
     };
-    const result = await dispatchInput("/my-skill the thing", readFile);
+    const result = await dispatchInput("/my-skill the thing", registry, readFile);
     expect(result).toEqual({ type: "query", prompt: "Do the thing please." });
   });
 
@@ -136,7 +139,7 @@ describe("dispatchInput", () => {
       if (path === `${home}/.claude/skills/my-skill/SKILL.md`) return "Do a thing.";
       return null;
     };
-    const result = await dispatchInput("/my-skill extra args", readFile);
+    const result = await dispatchInput("/my-skill extra args", registry, readFile);
     expect(result).toEqual({ type: "query", prompt: "Do a thing.\nARGUMENTS: extra args" });
   });
 
@@ -150,42 +153,42 @@ describe("dispatchInput", () => {
       if (path === "/plugins/myplugin/1.0/skills/foo/SKILL.md") return "Plugin skill $ARGUMENTS.";
       return null;
     };
-    const result = await dispatchInput("/myplugin:foo bar baz", readFile);
+    const result = await dispatchInput("/myplugin:foo bar baz", registry, readFile);
     expect(result).toEqual({ type: "query", prompt: "Plugin skill bar baz." });
   });
 
   it("/workspace:create returns canonical command", async () => {
-    const result = await dispatchInput("/workspace:create", () => null);
+    const result = await dispatchInput("/workspace:create", registry, () => null);
     expect(result).toEqual({ type: "command", name: "workspace:create", args: "" });
   });
 
   it("/workspace:reset returns canonical command", async () => {
-    const result = await dispatchInput("/workspace:reset", () => null);
+    const result = await dispatchInput("/workspace:reset", registry, () => null);
     expect(result).toEqual({ type: "command", name: "workspace:reset", args: "" });
   });
 
   it("/workspace:remove returns canonical command", async () => {
-    const result = await dispatchInput("/workspace:remove", () => null);
+    const result = await dispatchInput("/workspace:remove", registry, () => null);
     expect(result).toEqual({ type: "command", name: "workspace:remove", args: "" });
   });
 
   it("/workspace:prune returns canonical command", async () => {
-    const result = await dispatchInput("/workspace:prune", () => null);
+    const result = await dispatchInput("/workspace:prune", registry, () => null);
     expect(result).toEqual({ type: "command", name: "workspace:prune", args: "" });
   });
 
   it("/model returns command with args", async () => {
-    const result = await dispatchInput("/model", () => null);
+    const result = await dispatchInput("/model", registry, () => null);
     expect(result).toEqual({ type: "command", name: "model", args: "" });
   });
 
   it("/model opus passes args to command", async () => {
-    const result = await dispatchInput("/model opus", () => null);
+    const result = await dispatchInput("/model opus", registry, () => null);
     expect(result).toEqual({ type: "command", name: "model", args: "opus" });
   });
 
   it("/worker:complete returns canonical command", async () => {
-    const result = await dispatchInput("/worker:complete", () => null);
+    const result = await dispatchInput("/worker:complete", registry, () => null);
     expect(result).toEqual({ type: "command", name: "worker:complete", args: "" });
   });
 });

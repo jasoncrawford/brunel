@@ -112,3 +112,4 @@ export async function handleModelCommand(
   print(display.c.darkGray(`Model set to ${chosen.displayName}.`));
   return chosen.value;
 }
+

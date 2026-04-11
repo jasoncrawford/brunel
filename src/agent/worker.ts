@@ -11,7 +11,7 @@ import type { ForemanMessage, GitHubEvent, TaskIssue, WorkerMessage } from "../t
 import { Workspace, confirmIfUnsafe } from "./workspace.js";
 import type { WorkspaceCommandDeps } from "./workspace.js";
 import { fmtError, generateWorkerId } from "../utils.js";
-import { scoped } from "./commands.js";
+import type { CommandRegistry } from "./command-registry.js";
 import { pick } from "./input.js";
 
 const execAsync = promisify(exec);
@@ -669,17 +669,13 @@ export class WorkerSession {
 // ── Worker command registration ────────────────────────────────────────────────
 
 /**
- * Register the worker-namespace commands. Call this at startup in both REPL
- * and worker modes — commands are always present in the registry and degrade
+ * Register the worker-namespace commands into the given registry (which should
+ * already be scoped, e.g. registry.scoped("worker")). Commands degrade
  * gracefully when not connected to a foreman.
- *
- * Follows the same pattern as registerWorkspaceCommands in workspace.ts.
  */
-export function registerWorkerCommands(session: WorkerSession | undefined): void {
-  const workerReg = scoped("worker");
-  workerReg("complete", {
+export function registerWorkerCommands(session: WorkerSession | undefined, registry: CommandRegistry): void {
+  registry.register("complete", {
     description: "Mark the current task as done",
-    availability: "worker",
     handler: async () => {
       if (!session) {
         display.print(display.c.boldRed("Not connected to a foreman."));

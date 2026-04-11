@@ -1,71 +1,74 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { parseSlashCommand, resolveCommandFilePath, resolveContent } from "../src/agent/input.js";
 import { registerTestCommands } from "./helpers.js";
+import type { CommandRegistry } from "../src/agent/command-registry.js";
 
-beforeEach(async () => registerTestCommands());
+let registry: CommandRegistry;
+
+beforeEach(async () => { registry = await registerTestCommands(); });
 
 describe("parseSlashCommand", () => {
   it("returns null for non-slash input", () => {
-    expect(parseSlashCommand("hello")).toBeNull();
+    expect(parseSlashCommand("hello", registry)).toBeNull();
   });
 
   it("returns null for empty string", () => {
-    expect(parseSlashCommand("")).toBeNull();
+    expect(parseSlashCommand("", registry)).toBeNull();
   });
 
   it("returns null for bare slash", () => {
-    expect(parseSlashCommand("/")).toBeNull();
+    expect(parseSlashCommand("/", registry)).toBeNull();
   });
 
   it("recognizes /exit as builtin", () => {
-    expect(parseSlashCommand("/exit")).toEqual({ type: "command", name: "exit" });
+    expect(parseSlashCommand("/exit", registry)).toEqual({ type: "command", name: "exit" });
   });
 
   it("recognizes /clear as builtin", () => {
-    expect(parseSlashCommand("/clear")).toEqual({ type: "command", name: "clear" });
+    expect(parseSlashCommand("/clear", registry)).toEqual({ type: "command", name: "clear" });
   });
 
   it("returns unknown for unrecognized command with no file", () => {
-    const result = parseSlashCommand("/unknown");
+    const result = parseSlashCommand("/unknown", registry);
     expect(result).toEqual({ type: "unknown_command", command: "unknown" });
   });
 
   it("parses command name from input with arguments", () => {
-    const result = parseSlashCommand("/foo some args");
+    const result = parseSlashCommand("/foo some args", registry);
     expect(result).toEqual({ type: "unknown_command", command: "foo" });
   });
 
   it("parses command name with colon namespace", () => {
-    const result = parseSlashCommand("/foo:bar");
+    const result = parseSlashCommand("/foo:bar", registry);
     expect(result).toEqual({ type: "unknown_command", command: "foo:bar" });
   });
 
   it("recognizes /worker:complete (canonical name)", () => {
-    expect(parseSlashCommand("/worker:complete")).toEqual({ type: "command", name: "worker:complete" });
+    expect(parseSlashCommand("/worker:complete", registry)).toEqual({ type: "command", name: "worker:complete" });
   });
 
   it("recognizes /workspace:create (canonical name)", () => {
-    expect(parseSlashCommand("/workspace:create")).toEqual({ type: "command", name: "workspace:create" });
+    expect(parseSlashCommand("/workspace:create", registry)).toEqual({ type: "command", name: "workspace:create" });
   });
 
   it("recognizes /workspace:reset (canonical name)", () => {
-    expect(parseSlashCommand("/workspace:reset")).toEqual({ type: "command", name: "workspace:reset" });
+    expect(parseSlashCommand("/workspace:reset", registry)).toEqual({ type: "command", name: "workspace:reset" });
   });
 
   it("recognizes /workspace:remove (canonical name)", () => {
-    expect(parseSlashCommand("/workspace:remove")).toEqual({ type: "command", name: "workspace:remove" });
+    expect(parseSlashCommand("/workspace:remove", registry)).toEqual({ type: "command", name: "workspace:remove" });
   });
 
   it("recognizes /workspace:prune (canonical name)", () => {
-    expect(parseSlashCommand("/workspace:prune")).toEqual({ type: "command", name: "workspace:prune" });
+    expect(parseSlashCommand("/workspace:prune", registry)).toEqual({ type: "command", name: "workspace:prune" });
   });
 
   it("recognizes /model", () => {
-    expect(parseSlashCommand("/model")).toEqual({ type: "command", name: "model" });
+    expect(parseSlashCommand("/model", registry)).toEqual({ type: "command", name: "model" });
   });
 
   it("recognizes /effort", () => {
-    expect(parseSlashCommand("/effort")).toEqual({ type: "command", name: "effort" });
+    expect(parseSlashCommand("/effort", registry)).toEqual({ type: "command", name: "effort" });
   });
 });
 
