@@ -11,7 +11,7 @@ import * as display from "./display.js";
 import { setVerbose, setThinkOutLoud } from "./display.js";
 import { ask, listWorkerCommands, dispatchInput, pick, pickMultiple, pickQuestion } from "./input.js";
 import type { PickQuestionResult } from "./input.js";
-import { WorkerSession, WS_TASK_ASSIGNED, WS_EVENT, registerWorkerCommands } from "./worker.js";
+import { WorkerSession, WS_PROMPT, registerWorkerCommands } from "./worker.js";
 import type { RunQuery, WsFactory, WorkerDisplay } from "./worker.js";
 import { loadConfig } from "../config.js";
 import { Workspace, confirmIfUnsafe, registerWorkspaceCommands } from "./workspace.js";
@@ -245,6 +245,7 @@ function createFetchModelsFn(permConfig: { permissionMode: PermissionMode }): Fe
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 async function main(
+  runQueryFn: RunQuery,
   permConfig: { permissionMode: PermissionMode; allowDangerouslySkipPermissions: boolean },
   workspaceCfg?: { workspaceDir: string; repoUrl: string },
   initialModel?: string,
@@ -315,7 +316,6 @@ async function main(
     description: "Clear the conversation",
     handler: async () => {
       sessionId = undefined;
-      session?.clearSession();
       display.print(display.clearBreak());
     },
   });
@@ -340,11 +340,26 @@ async function main(
     },
   });
 
-  // Unified query handler: runs a prompt through the right pathway depending
-  // on whether we're connected to a foreman or in standalone REPL mode.
-  const handleQuery = session
-    ? async (prompt: string) => { await session.runForQuery(prompt); }
-    : async (prompt: string) => { sessionId = await runQuery(permConfig, prompt, sessionId, undefined, currentModel, currentEffort); };
+  /**
+   * Run a single prompt through runQueryFn. Notifies the session before/after
+   * so it can track the AbortController for interrupt() and drain pending events
+   * when the query finishes. Returns true if the query completed normally,
+   * false if interrupted or errored (caller should stop draining pending prompts).
+   */
+  const runPrompt = async (prompt: string): Promise<boolean> => {
+    const ac = new AbortController();
+    session?.notifyQueryStart(ac);
+    try {
+      sessionId = await runQueryFn(prompt, sessionId, ac, currentModel, currentEffort) ?? sessionId;
+      return !ac.signal.aborted;
+    } catch (err) {
+      console.error(display.c.boldRed(`\nERROR: ${fmtError(err)}`));
+      logFull("ERROR", err instanceof Error ? { message: err.message, stack: err.stack } : err);
+      return false;
+    } finally {
+      session?.notifyQueryEnd(ac.signal.aborted);
+    }
+  };
 
   // In worker mode, the prompt starts hidden — the agent waits for the foreman
   // to assign a task and is not ready for interactive input until then.
@@ -368,11 +383,17 @@ async function main(
     // same tick as the ask() call; never a user action).
     if (input === "__abort__") continue;
 
-    // WS sentinel: a task or event arrived from the foreman. Hide the prompt,
-    // wait for the triggered query loop to finish, then show the prompt again.
-    if (input === WS_TASK_ASSIGNED || input === WS_EVENT) {
+    // WS_PROMPT: a task prompt or debounced event prompt is ready. Hide the
+    // prompt, drain all queued prompts through runQueryFn, then show the prompt
+    // again. Stops draining if a prompt is interrupted or errors.
+    if (input === WS_PROMPT) {
       showPrompt = false;
-      await session!.waitUntilIdle();
+      while (session?.hasPendingPrompts()) {
+        const item = session.takeNextPrompt()!;
+        if (item.fresh) sessionId = undefined; // new task → fresh conversation
+        const ok = await runPrompt(item.prompt);
+        if (!ok) break;
+      }
       showPrompt = true;
       continue;
     }
@@ -395,11 +416,16 @@ async function main(
 
     if (action.type !== "query") continue;
 
-    try {
-      await handleQuery(action.prompt);
-    } catch (err) {
-      console.error(display.c.boldRed(`\nERROR: ${fmtError(err)}`));
-      logFull("ERROR", err instanceof Error ? { message: err.message, stack: err.stack } : err);
+    await runPrompt(action.prompt);
+
+    // Drain any foreman prompts that arrived during the user's query.
+    if (session) {
+      while (session.hasPendingPrompts()) {
+        const item = session.takeNextPrompt()!;
+        if (item.fresh) sessionId = undefined;
+        const ok = await runPrompt(item.prompt);
+        if (!ok) break;
+      }
     }
   }
 }
@@ -492,7 +518,7 @@ export async function startWorkerMode(
     setOnToolResultCallback: display.setOnToolResultCallback,
   };
 
-  const session = new WorkerSession(workerId, wsFactory, runQueryFn, workerDisplay, {
+  const session = new WorkerSession(workerId, wsFactory, workerDisplay, {
     afterTask,
     workspaceCtx: { workspace, originalCwd, workspaceDir, repoUrl, confirm },
     pingIntervalMs: config.pingIntervalMs,
@@ -527,7 +553,7 @@ export async function startWorkerMode(
     allowDangerouslySkipPermissions: false,
   };
 
-  await main(permConfig, undefined, config.model, config.effort, session);
+  await main(runQueryFn, permConfig, undefined, config.model, config.effort, session);
 
   // Post-loop cleanup: send goodbye, destroy workspace, exit.
   session.sendGoodbye();
@@ -580,6 +606,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     display.print(display.c.lavender(`  Permissions: ${permConfig.permissionMode} | Model: ${config.model ?? "default"} | Effort: ${config.effort ?? "auto"} | Output: ${config.verbose ? "verbose" : "quiet"} | Log: ${LOG_FILE}`));
     display.print(display.c.lavender(`  Type /exit to quit, /clear to start a new session.`));
     display.print(display.c.sageGreen(display.hr("═")));
-    void main(permConfig, workspaceCfg, config.model, config.effort);
+    void main(boundRunQuery, permConfig, workspaceCfg, config.model, config.effort);
   }
 }
