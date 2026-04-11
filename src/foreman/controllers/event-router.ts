@@ -96,7 +96,7 @@ export function isMutedEvent(name: string): boolean {
 export function forwardEvent(deps: EventRouterDeps, task: Task, evt: GitHubEvent, ref: string): void {
   // Never forward events for tasks that are no longer active.
   const { status } = task;
-  if (status === "complete" || status === "closed" || status === "merged") {
+  if (status === "complete") {
     deps.flog(`[task ${ref}] ${evt.name} dropped — task is ${status}`);
     return;
   }

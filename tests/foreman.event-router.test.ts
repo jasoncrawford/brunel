@@ -41,7 +41,7 @@ function connectedWorker() {
 
 // ── Tests for terminal task states ─────────────────────────────────────────────
 
-describe("forwardEvent — completed/closed/merged tasks", () => {
+describe("forwardEvent — completed tasks are dropped; closed/merged tasks still receive events", () => {
   it("does not forward events to the worker when the task is complete", () => {
     // A completed task still has workerId set (complete() only sets completedAt).
     const task = Task.fromTest({
@@ -58,21 +58,26 @@ describe("forwardEvent — completed/closed/merged tasks", () => {
     expect(deps.taskManager.queueEvent).not.toHaveBeenCalled();
   });
 
-  it("does not queue events for closed tasks (no worker assigned)", () => {
+  it("still queues events for closed tasks — worker may still be active", () => {
+    // A closed issue doesn't mean the worker is done; it still needs events.
     const task = Task.fromTest({
       task_id: "42",
       issue_number: 42,
       issue_closed_at: new Date().toISOString(),
     });
+    task.blockersLoaded = true; // status would be "closed" (no worker), falls through to pending/blocked check
     const deps = makeDeps();
 
     forwardEvent(deps, task, makeEvent(), "#42");
 
-    expect(deps.sendMsg).not.toHaveBeenCalled();
-    expect(deps.taskManager.queueEvent).not.toHaveBeenCalled();
+    // "closed" with no worker: status is "closed" so neither pending/blocked branch fires.
+    // The important thing is that forwardEvent does NOT drop it early.
+    // (No worker assigned and not pending/blocked → naturally not queued, but not dropped.)
+    expect(deps.flog).not.toHaveBeenCalledWith(expect.stringContaining("dropped"));
   });
 
-  it("does not forward events to the worker when the task's PR is merged", () => {
+  it("still forwards events to the worker when the task's PR is merged", () => {
+    // PR merged ≠ task complete; the worker may still be doing cleanup work.
     const task = Task.fromTest({
       task_id: "42",
       issue_number: 42,
@@ -83,8 +88,8 @@ describe("forwardEvent — completed/closed/merged tasks", () => {
 
     forwardEvent(deps, task, makeEvent(), "#42");
 
-    expect(deps.sendMsg).not.toHaveBeenCalled();
-    expect(deps.taskManager.queueEvent).not.toHaveBeenCalled();
+    expect(deps.sendMsg).toHaveBeenCalledOnce();
+    expect(deps.flog).not.toHaveBeenCalledWith(expect.stringContaining("dropped"));
   });
 
   it("logs a drop message for completed tasks", () => {
