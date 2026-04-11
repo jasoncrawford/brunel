@@ -1,5 +1,5 @@
-import type { TaskStatus } from "../../shared/types.ts";
-export type { TaskStatus };
+import type { TaskStatus, TaskRow } from "../../shared/types.ts";
+export type { TaskStatus, TaskRow };
 
 export interface BlockerInfo {
   issueNumber: number;
@@ -36,17 +36,3 @@ export type AdminMessage =
   | { type: "snapshot"; tasks: TaskSnapshot[]; workers: WorkerSnapshot[] }
   | { type: "initial_log"; entries: LogEntry[] }
   | { type: "log_event"; entry: LogEntry };
-
-export interface TaskRow {
-  taskId: string;
-  issueNumber: number;
-  repo: string;
-  title: string;
-  status: TaskStatus;
-  workerId: string | null;
-  prNumber: number | null;
-  branch: string | null;
-  createdAt: string;
-  assignedAt: string | null;
-  completedAt: string | null;
-}

@@ -15,7 +15,7 @@
  */
 
 import { createClient } from "@supabase/supabase-js";
-import type { Database } from "../src/database.types.js";
+import type { Database } from "../shared/database.types.js";
 import { loadConfig } from "../src/config.js";
 import { Task, initTask } from "../src/foreman/models/task.js";
 

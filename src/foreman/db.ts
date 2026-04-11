@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Database, Json } from "../database.types.js";
+import type { Database, Json } from "../../shared/database.types.js";
 
 export type Row<T extends keyof Database["public"]["Tables"]> = Database["public"]["Tables"][T]["Row"];
 import { fmtEvent } from "./event-fmt.js";

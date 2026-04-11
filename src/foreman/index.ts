@@ -2,7 +2,7 @@
 
 import "dotenv/config";
 import { createClient } from "@supabase/supabase-js";
-import type { Database } from "../database.types.js";
+import type { Database } from "../../shared/database.types.js";
 import { Webhooks } from "@octokit/webhooks";
 import { loadConfig } from "../config.js";
 import { createDbLogger } from "./db.js";

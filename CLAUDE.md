@@ -108,9 +108,9 @@ npm test
 
 Supabase (hosted Postgres). Migrations live in `supabase/migrations/`. The GitHub Actions workflow at `.github/workflows/migrate.yml` runs `supabase db push` automatically on push to `main` when migration files change, and can also be triggered manually via `workflow_dispatch`.
 
-TypeScript types are generated from the schema and committed at `src/database.types.ts`. After adding a migration, regenerate with:
+TypeScript types are generated from the schema and committed at `shared/database.types.ts`. After adding a migration, regenerate with:
 ```
-supabase gen types typescript --local > src/database.types.ts
+supabase gen types typescript --local > shared/database.types.ts
 ```
 The `Database` type is passed to `createClient<Database>()` wherever a Supabase client is created, so TypeScript enforces the schema on all queries.
 

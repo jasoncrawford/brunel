@@ -1,6 +1,6 @@
 import { execSync } from "child_process";
 import { createClient } from "@supabase/supabase-js";
-import type { Database } from "../src/database.types.js";
+import type { Database } from "../shared/database.types.js";
 
 /**
  * Vitest global setup: runs once before the entire test suite.

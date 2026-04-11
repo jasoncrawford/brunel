@@ -1,4 +1,4 @@
-// Generated from Supabase schema via: supabase gen types typescript --local > src/database.types.ts
+// Generated from Supabase schema via: supabase gen types typescript --local > shared/database.types.ts
 // Regenerate after any migration.
 
 export type Json =

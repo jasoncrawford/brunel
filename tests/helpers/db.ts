@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Database } from "../../src/database.types.js";
+import type { Database } from "../../shared/database.types.js";
 
 /**
  * Creates a Supabase client pointed at the local test instance.
