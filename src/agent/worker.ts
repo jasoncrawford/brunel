@@ -594,6 +594,12 @@ export class WorkerSession {
       this.display.print(display.c.sageGreen(initialPrompt));
       void this.runQueryLoop(initialPrompt);
     } else if (msg.type === "event_notification") {
+      // Ignore stale events forwarded for tasks we're no longer working on.
+      if (msg.taskId !== this.currentTaskId) {
+        this.display.print(display.c.darkGray(`[worker] ignoring event_notification for task ${msg.taskId} (current: ${this.currentTaskId ?? "none"})`));
+        return;
+      }
+
       const { event } = msg;
       const action = event.payload["action"] as string | undefined;
 
