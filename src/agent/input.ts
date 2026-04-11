@@ -1,6 +1,6 @@
 import fs from "fs";
 import * as display from "./display.js";
-import type { CommandRegistry } from "./commands.js";
+import type { CommandRegistry } from "./command-registry.js";
 
 // ── Stash ─────────────────────────────────────────────────────────────────────
 
@@ -237,27 +237,14 @@ export function listCommands(
   registry: CommandRegistry,
   listDir: ListDir = defaultListDir,
   readFile: (path: string) => string | null = defaultReadFile,
-  workerMode = false,
 ): CommandSuggestion[] {
-  const names = listCommandNames(registry, listDir, readFile, workerMode);
+  const names = listCommandNames(registry, listDir, readFile);
   return names.map(name => {
     const entry = registry.lookup(name);
     if (entry) return { name, description: entry.description };
     const content = resolveContent(name, readFile);
     return { name, description: content ? extractDescription(content) : "" };
   });
-}
-
-/**
- * listCommands for worker mode (includes worker-only builtins such as
- * "task-complete").
- */
-export function listWorkerCommands(
-  registry: CommandRegistry,
-  listDir: ListDir = defaultListDir,
-  readFile: (path: string) => string | null = defaultReadFile,
-): CommandSuggestion[] {
-  return listCommands(registry, listDir, readFile, true);
 }
 
 export type ListDir = (dir: string) => Array<{ name: string; isDir: boolean }> | null;
@@ -292,34 +279,19 @@ function defaultListDir(dir: string): Array<{ name: string; isDir: boolean }> | 
  * Return all available command names: builtins (from the registry) plus any
  * .md files under ~/.claude/commands/ (recursively) and skill names.
  * Subdirectory names become colon-separated prefixes: foo/bar.md → "foo:bar".
- * Worker-only commands (availability "worker") are excluded unless workerMode is true.
  * The listDir and readFile parameters are injectable for testing.
  */
 export function listCommandNames(
   registry: CommandRegistry,
   listDir: ListDir = defaultListDir,
   readFile: (path: string) => string | null = defaultReadFile,
-  workerMode = false,
 ): string[] {
-  const builtins = registry.listAll(workerMode).map(e => e.name);
+  const builtins = registry.listAll().map(e => e.name);
   const home = process.env.HOME ?? process.env.USERPROFILE ?? ""; // "" → walks "/.claude/commands" which will silently return null
   const commandsDir = `${home}/.claude/commands`;
   const fileCommands = walkDir(commandsDir, "", listDir);
   const skillNames = listSkillNames(listDir, readFile);
   return [...new Set([...builtins, ...fileCommands, ...skillNames])].sort();
-}
-
-/**
- * Return all available command names for worker mode — same as listCommandNames
- * but includes worker-only builtins (e.g. "task-complete").
- * The listDir and readFile parameters are injectable for testing.
- */
-export function listWorkerCommandNames(
-  registry: CommandRegistry,
-  listDir: ListDir = defaultListDir,
-  readFile: (path: string) => string | null = defaultReadFile,
-): string[] {
-  return listCommandNames(registry, listDir, readFile, true);
 }
 
 /**

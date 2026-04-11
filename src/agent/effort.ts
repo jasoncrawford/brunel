@@ -1,6 +1,5 @@
 import * as display from "./display.js";
 import type { PickResult } from "./input.js";
-import type { CommandRegistry } from "./commands.js";
 
 // ── Effort levels ───────────────────────────────────────────────────────────
 
@@ -72,30 +71,3 @@ export async function handleEffortCommand(
   return chosen.value as EffortValue;
 }
 
-// ── Registration ─────────────────────────────────────────────────────────────
-
-export type EffortCommandDeps = {
-  getCurrentEffort: () => EffortValue | undefined;
-  setCurrentEffort: (e: EffortValue | undefined) => void;
-  pickFn: (opts: string[], idx: number) => Promise<PickResult>;
-  print: (msg: string) => void;
-};
-
-/**
- * Register the /effort command into the given registry.
- * Called from index.ts at startup with closures over mutable effort state.
- */
-export function registerEffortCommand(registry: CommandRegistry, deps: EffortCommandDeps): void {
-  registry.register("effort", {
-    description: "Set the effort level for Claude's thinking",
-    handler: async (args) => {
-      const newEffort = await handleEffortCommand(
-        args,
-        deps.getCurrentEffort(),
-        deps.pickFn,
-        deps.print,
-      );
-      deps.setCurrentEffort(newEffort);
-    },
-  });
-}

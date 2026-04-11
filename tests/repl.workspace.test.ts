@@ -12,7 +12,7 @@ vi.mock("../src/agent/display.js", async (importOriginal) => {
 
 import { Workspace, registerWorkspaceCommands, type WorkspaceCommandDeps } from "../src/agent/workspace.js";
 import * as display from "../src/agent/display.js";
-import { CommandRegistry } from "../src/agent/commands.js";
+import { CommandRegistry } from "../src/agent/command-registry.js";
 import { stripAnsi } from "./helpers.js";
 
 const cfg = { workspaceDir: "/base", repoUrl: "https://x@github.com/owner/repo.git", sessionId: "test-session-uuid" };
@@ -48,7 +48,7 @@ function makeAndRegister(overrides: Partial<WorkspaceCommandDeps> = {}) {
     confirm: vi.fn().mockResolvedValue(true),
     ...overrides,
   };
-  registerWorkspaceCommands(deps, registry);
+  registerWorkspaceCommands(deps, registry.scoped("workspace"));
   return deps;
 }
 

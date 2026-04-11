@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { CommandRegistry } from "../src/agent/commands.js";
+import { CommandRegistry } from "../src/agent/command-registry.js";
 import { registerTestCommands } from "./helpers.js";
 
 let registry: CommandRegistry;
@@ -39,42 +39,21 @@ describe("lookup", () => {
 describe("listAll", () => {
   beforeEach(async () => { registry = await registerTestCommands(); });
 
-  it("non-worker mode excludes worker-only commands", () => {
-    const names = registry.listAll(false).map(e => e.name);
-    expect(names).not.toContain("worker:complete");
-  });
-
-  it("non-worker mode includes both-mode commands", () => {
-    const names = registry.listAll(false).map(e => e.name);
+  it("includes all registered commands", () => {
+    const names = registry.listAll().map(e => e.name);
     expect(names).toContain("clear");
     expect(names).toContain("exit");
     expect(names).toContain("model");
     expect(names).toContain("effort");
+    expect(names).toContain("worker:complete");
   });
 
-  it("non-worker mode includes workspace commands", () => {
-    const names = registry.listAll(false).map(e => e.name);
+  it("includes workspace commands", () => {
+    const names = registry.listAll().map(e => e.name);
     expect(names).toContain("workspace:create");
     expect(names).toContain("workspace:reset");
     expect(names).toContain("workspace:remove");
     expect(names).toContain("workspace:prune");
-  });
-
-  it("worker mode includes worker-only commands", () => {
-    const names = registry.listAll(true).map(e => e.name);
-    expect(names).toContain("worker:complete");
-  });
-
-  it("worker mode includes both-mode commands", () => {
-    const names = registry.listAll(true).map(e => e.name);
-    expect(names).toContain("clear");
-    expect(names).toContain("model");
-    expect(names).toContain("effort");
-  });
-
-  it("defaults to non-worker mode", () => {
-    const names = registry.listAll().map(e => e.name);
-    expect(names).not.toContain("worker:complete");
   });
 });
 
@@ -123,18 +102,6 @@ describe("register", () => {
     expect(entry!.description).toBe("A test command");
   });
 
-  it("defaults availability to 'both'", () => {
-    registry.register("test:default-avail", { description: "test", handler: async () => {} });
-    const entry = registry.lookup("test:default-avail")!;
-    expect(entry.availability).toBe("both");
-  });
-
-  it("respects explicit availability", () => {
-    registry.register("test:repl-only", { description: "test", availability: "repl", handler: async () => {} });
-    const entry = registry.lookup("test:repl-only")!;
-    expect(entry.availability).toBe("repl");
-  });
-
   it("overwrites a previously registered command with the same name", () => {
     registry.register("test:overwrite", { description: "first", handler: async () => {} });
     registry.register("test:overwrite", { description: "second", handler: async () => {} });
@@ -143,28 +110,58 @@ describe("register", () => {
   });
 });
 
+// ── scoped ────────────────────────────────────────────────────────────────────
+
+describe("scoped", () => {
+  it("prefixes registered names with the scope", () => {
+    registry.scoped("workspace").register("create", { description: "Create", handler: async () => {} });
+    expect(registry.lookup("workspace:create")).toBeDefined();
+    expect(registry.lookup("workspace:create")!.name).toBe("workspace:create");
+  });
+
+  it("scoped registry can be further scoped", () => {
+    registry.scoped("a").scoped("b").register("c", { description: "Nested", handler: async () => {} });
+    expect(registry.lookup("a:b:c")).toBeDefined();
+  });
+
+  it("root and scoped registries share the same store", () => {
+    const ws = registry.scoped("workspace");
+    ws.register("create", { description: "Create", handler: async () => {} });
+    registry.register("exit", { description: "Exit", handler: async () => {} });
+    expect(registry.listAll().map(e => e.name)).toContain("workspace:create");
+    expect(registry.listAll().map(e => e.name)).toContain("exit");
+  });
+
+  it("execute works on full canonical name after scoped registration", async () => {
+    const ws = registry.scoped("workspace");
+    let called = false;
+    ws.register("create", { description: "Create", handler: async () => { called = true; } });
+    await registry.execute("workspace:create", "");
+    expect(called).toBe(true);
+  });
+});
+
 // ── Built-in command structure ─────────────────────────────────────────────────
 
 describe("each registered entry shape", () => {
   beforeEach(() => {
     registry.register("clear",  { description: "Clear", handler: async () => {} });
-    registry.register("exit",   { description: "Exit", availability: "repl", handler: async () => "exit" });
+    registry.register("exit",   { description: "Exit", handler: async () => "exit" });
     registry.register("model",  { description: "Model", handler: async () => {} });
     registry.register("effort", { description: "Effort", handler: async () => {} });
-    registry.register("worker:complete", { description: "Task done", availability: "worker", handler: async () => "task-complete" });
+    registry.register("worker:complete", { description: "Task done", handler: async () => "task-complete" });
   });
 
-  it("each entry has name, description, availability, and handler", () => {
-    for (const entry of registry.listAll(true)) {
+  it("each entry has name, description, and handler", () => {
+    for (const entry of registry.listAll()) {
       expect(typeof entry.name).toBe("string");
       expect(typeof entry.description).toBe("string");
-      expect(["repl", "worker", "both"]).toContain(entry.availability);
       expect(typeof entry.handler).toBe("function");
     }
   });
 
   it("all registered commands have non-empty descriptions", () => {
-    for (const entry of registry.listAll(true)) {
+    for (const entry of registry.listAll()) {
       expect(entry.description, `${entry.name} should have description`).toBeTruthy();
     }
   });

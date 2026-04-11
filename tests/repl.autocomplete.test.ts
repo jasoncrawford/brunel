@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PassThrough } from "stream";
-import { ask, matchCommands, filterCommands, listCommandNames, listWorkerCommandNames, listCommands, parseFrontmatter, listSkillNames, type ListDir, type CommandSuggestion } from "../src/agent/input.js";
-import { CommandRegistry } from "../src/agent/commands.js";
+import { ask, matchCommands, filterCommands, listCommandNames, listCommands, parseFrontmatter, listSkillNames, type ListDir, type CommandSuggestion } from "../src/agent/input.js";
+import { CommandRegistry } from "../src/agent/command-registry.js";
 import { registerTestCommands } from "./helpers.js";
 
 // ── Test harness for ask() integration tests ──────────────────────────────────
@@ -323,7 +323,7 @@ describe("listCommandNames", () => {
 
   it("returns only builtins when directory is missing", () => {
     const result = listCommandNames(registry, () => null);
-    expect(result).toEqual(["clear", "effort", "exit", "model", "workspace:create", "workspace:prune", "workspace:remove", "workspace:reset"]);
+    expect(result).toEqual(["clear", "effort", "exit", "model", "worker:complete", "workspace:create", "workspace:prune", "workspace:remove", "workspace:reset"]);
   });
 
   it("includes a file at root level", () => {
@@ -406,10 +406,9 @@ describe("listCommandNames", () => {
     expect(result).toContain("my-skill");
   });
 
-  it("does not include worker:complete (worker-only command)", () => {
+  it("includes worker:complete", () => {
     const result = listCommandNames(registry, () => null);
-    expect(result).not.toContain("worker:complete");
-    expect(result).not.toContain("complete");
+    expect(result).toContain("worker:complete");
   });
 
   it("deduplicates when skill name matches a command name", () => {
@@ -518,28 +517,6 @@ describe("listCommands", () => {
     const result = listCommands(registry, () => null);
     const names = result.map(c => c.name);
     expect(names).toEqual([...names].sort());
-  });
-});
-
-// ── listWorkerCommandNames ────────────────────────────────────────────────────
-
-describe("listWorkerCommandNames", () => {
-  beforeEach(async () => { registry = await registerTestCommands(); });
-
-  it("includes worker:complete", () => {
-    const result = listWorkerCommandNames(registry, () => null);
-    expect(result).toContain("worker:complete");
-  });
-
-  it("also includes clear and exit", () => {
-    const result = listWorkerCommandNames(registry, () => null);
-    expect(result).toContain("clear");
-    expect(result).toContain("exit");
-  });
-
-  it("result is sorted alphabetically", () => {
-    const result = listWorkerCommandNames(registry, () => null);
-    expect(result).toEqual([...result].sort());
   });
 });
 

@@ -1,4 +1,4 @@
-import type { CommandRegistry } from "../src/agent/commands.js";
+import type { CommandRegistry } from "../src/agent/command-registry.js";
 
 export function stripAnsi(s: string): string {
   return s.replace(/\x1b\[[0-9;]*m/g, "");
@@ -18,7 +18,7 @@ export async function waitUntil(predicate: () => boolean): Promise<void> {
  * Call this in beforeEach for tests that query the command registry.
  */
 export async function registerTestCommands(): Promise<CommandRegistry> {
-  const { CommandRegistry } = await import("../src/agent/commands.js");
+  const { CommandRegistry } = await import("../src/agent/command-registry.js");
   const { registerWorkspaceCommands } = await import("../src/agent/workspace.js");
   const registry = new CommandRegistry();
   registerWorkspaceCommands({
@@ -26,15 +26,14 @@ export async function registerTestCommands(): Promise<CommandRegistry> {
     config: undefined,
     originalCwd: process.cwd(),
     confirm: async () => true,
-  }, registry);
+  }, registry.scoped("workspace"));
   const noop = async () => {};
   registry.register("exit",   { description: "Exit", handler: noop });
   registry.register("clear",  { description: "Clear the conversation", handler: noop });
   registry.register("model",  { description: "Select the Claude model to use", handler: noop });
   registry.register("effort", { description: "Set the effort level for Claude's thinking", handler: noop });
-  registry.register("worker:complete", {
+  registry.scoped("worker").register("complete", {
     description: "Mark the current task as done",
-    availability: "worker",
     handler: async () => "task-complete",
   });
   return registry;
