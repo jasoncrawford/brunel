@@ -22,7 +22,7 @@ Key files: `worker.ts` (WS protocol + task lifecycle), `display.ts` (TUI renderi
 
 ### Shared
 
-- `src/` root — `config.ts` (unified config loader), `wire.ts` (wire protocol types: `ForemanMessage` for foreman→worker messages, `WebhookEvent` for event payloads delivered to workers, `WorkerMessage` for worker→foreman messages, `TaskIssue` for issue data), `types.ts` (re-exports `TaskStatus` only), `utils.ts`
+- `src/` root — `config.ts` (unified config loader), `wire.ts` (wire protocol types: `ForemanMessage` for foreman→worker messages, `WebhookEvent` for event payloads delivered to workers, `WorkerMessage` for worker→foreman messages, `TaskIssue` for issue data), `utils.ts`
 - `shared/` — utilities needed by both the Node backend and the Vite frontend
 
 ## Task lifecycle
