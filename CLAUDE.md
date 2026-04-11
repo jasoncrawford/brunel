@@ -80,5 +80,6 @@ Most tests run without Supabase. DB tests (`db.*.test.ts`, `pipeline.test.ts`) r
 - Use `display.print()` (not `console.log`) for output in agent/worker code — it routes through the status-bar-aware renderer so messages don't corrupt the TUI.
 - Prefer event-based designs for real-time UIs: a model holds state and emits on change; the UI subscribes once rather than scattering manual refresh calls.
 - In unit tests, use `setupInMemoryTasks()` from `tests/helpers/task.ts` instead of `initDb()` — it mocks the `Task` layer with an in-memory map.
+- In agent tests that need slash commands, create a `CommandRegistry` instance directly (`new CommandRegistry()`) and populate it via `registerTestCommands()` from `tests/helpers.ts` (which returns the registry). Pass the registry to functions like `dispatchInput`, `parseSlashCommand`, `listCommandNames`, etc.
 - In foreman tests that call `createForemanWss`, call `Worker._reset()` in `beforeEach` to clear the module-level worker registry between tests. `createForemanWss` takes no `registry` parameter — `Worker` is imported directly by `wss.ts` and `event-router.ts`.
 - In browser tests, the server is shared across all tests — use unique issue numbers per test rather than resetting server state.
