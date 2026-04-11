@@ -18,7 +18,7 @@ MVC structure. Models own state; controllers handle external inputs.
 
 A unified REPL + worker loop. `main()` in `index.ts` runs both interactive and worker modes; `startWorkerMode()` in `worker.ts` sets up the WebSocket session and returns before `main()` takes over the query loop.
 
-Key files: `worker.ts` (WS protocol + task lifecycle), `display.ts` (TUI rendering), `commands.ts` (slash command registry), `workspace.ts` (git/npm workspace management), `templates.ts` (prompt templates).
+Key files: `worker.ts` (WS protocol + task lifecycle), `display.ts` (TUI rendering), `commands.ts` (`CommandRegistry` + `ScopedCommandRegistry` classes — instantiated in `index.ts` and injected into all modules), `workspace.ts` (git/npm workspace management), `templates.ts` (prompt templates).
 
 ### Shared
 
