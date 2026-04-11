@@ -5,7 +5,7 @@ type DbRow = Database["public"]["Tables"]["foreman_messages"]["Row"];
 
 // ── Model ──────────────────────────────────────────────────────────────────────
 
-export class MessageLog {
+export class ForemanMessage {
   readonly id: number;
   readonly createdAt: string;
   readonly direction: string;
@@ -52,37 +52,37 @@ export class MessageLog {
 
   // ── Queries ──────────────────────────────────────────────────────────────────
 
-  static async queryForTask(taskId: string): Promise<MessageLog[]> {
+  static async queryForTask(taskId: string): Promise<ForemanMessage[]> {
     const { data } = await db.from("foreman_messages")
       .select("*")
       .eq("task_id", taskId)
       .order("created_at", { ascending: false })
       .limit(500);
-    return (data ?? []).map((r) => new MessageLog(r));
+    return (data ?? []).map((r) => new ForemanMessage(r));
   }
 
-  static async queryForWorker(workerId: string): Promise<MessageLog[]> {
+  static async queryForWorker(workerId: string): Promise<ForemanMessage[]> {
     const { data } = await db.from("foreman_messages")
       .select("*")
       .eq("worker_id", workerId)
       .order("created_at", { ascending: false })
       .limit(500);
-    return (data ?? []).map((r) => new MessageLog(r));
+    return (data ?? []).map((r) => new ForemanMessage(r));
   }
 
-  static async query(opts: { limit?: number } = {}): Promise<MessageLog[]> {
+  static async query(opts: { limit?: number } = {}): Promise<ForemanMessage[]> {
     const { data } = await db.from("foreman_messages")
       .select("*")
       .order("created_at", { ascending: false })
       .limit(opts.limit ?? 100);
-    return (data ?? []).map((r) => new MessageLog(r));
+    return (data ?? []).map((r) => new ForemanMessage(r));
   }
 
   // ── Display helper ───────────────────────────────────────────────────────────
 
   /** Human-readable summary for the admin dashboard log. */
   format(): string {
-    return MessageLog.buildSummary(this.direction, this.msgType, this.taskId, this.payload);
+    return ForemanMessage.buildSummary(this.direction, this.msgType, this.taskId, this.payload);
   }
 
   // ── Shared summary builder (single source of truth for log entry summaries) ──

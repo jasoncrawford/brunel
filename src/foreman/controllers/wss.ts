@@ -1,7 +1,7 @@
 import http from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import * as Wire from "../../wire.js";
-import { MessageLog } from "../models/message-log.js";
+import { ForemanMessage } from "../models/foreman-message.js";
 import { WebhookEvent } from "../models/webhook-event.js";
 import type { AdminWss } from "../admin-ws.js";
 import { fmtEvent } from "../event-fmt.js";
@@ -58,7 +58,7 @@ export function createForemanWss(
 
   function broadcastMessageEvent(data: { direction: string; workerId: string | null; taskId: string | null; msgType: string; payload?: Record<string, unknown> }) {
     if (!adminWss) return;
-    const summary = MessageLog.buildSummary(data.direction, data.msgType, data.taskId, data.payload ?? {});
+    const summary = ForemanMessage.buildSummary(data.direction, data.msgType, data.taskId, data.payload ?? {});
     adminWss.broadcastLogEvent({
       kind: "message",
       id: nextBroadcastId++,
@@ -73,7 +73,7 @@ export function createForemanWss(
     const taskId = logTaskId ?? (("taskId" in msg ? msg.taskId : null) ?? null);
     Worker.get(workerId)?.send(msg);
     const msgPayload = msg as unknown as Record<string, unknown>;
-    MessageLog.log({ direction: "sent", workerId, taskId, msgType: msg.type, payload: msgPayload });
+    ForemanMessage.log({ direction: "sent", workerId, taskId, msgType: msg.type, payload: msgPayload });
     broadcastMessageEvent({ direction: "sent", workerId, taskId, msgType: msg.type, payload: msgPayload });
   }
 
@@ -319,7 +319,7 @@ export function createForemanWss(
         const rcvWorkerId = workerId || ((msg as { workerId?: string }).workerId ?? null);
         const rcvTaskId = (msg as { taskId?: string }).taskId ?? null;
         const rcvPayload = msg as unknown as Record<string, unknown>;
-        MessageLog.log({
+        ForemanMessage.log({
           direction: "received",
           workerId: rcvWorkerId,
           taskId: rcvTaskId,
@@ -345,7 +345,7 @@ export function createForemanWss(
         log(workerId, `disconnected (code ${code}${reasonStr})`);
         const taskId = currentWorker?.currentTaskId ?? null;
         const disconnPayload = { code, reason: reason?.toString() ?? null };
-        MessageLog.log({
+        ForemanMessage.log({
           direction: "received",
           workerId,
           taskId,

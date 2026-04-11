@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { WebhookEvent } from "../src/foreman/models/webhook-event.js";
-import { MessageLog } from "../src/foreman/models/message-log.js";
+import { ForemanMessage } from "../src/foreman/models/foreman-message.js";
 import { queryActivityLog } from "../src/foreman/models/activity-log.js";
 import { initDb } from "../src/foreman/db-client.js";
 import { createTestSupabase } from "./helpers/db.js";
@@ -71,9 +71,9 @@ describe("WebhookEvent.log", () => {
   });
 });
 
-describe("MessageLog.log", () => {
+describe("ForemanMessage.log", () => {
   it("stores a foreman_messages row", async () => {
-    MessageLog.log({
+    ForemanMessage.log({
       direction: "sent",
       workerId: "wid",
       taskId: "42",
@@ -97,53 +97,53 @@ describe("MessageLog.log", () => {
   });
 });
 
-describe("MessageLog.buildSummary for worker_disconnected", () => {
+describe("ForemanMessage.buildSummary for worker_disconnected", () => {
   it("includes close code in summary for worker_disconnected with no reason", () => {
-    const summary = MessageLog.buildSummary("received", "worker_disconnected", null, { code: 1006, reason: null });
+    const summary = ForemanMessage.buildSummary("received", "worker_disconnected", null, { code: 1006, reason: null });
     expect(summary).toMatch(/1006/);
   });
 
   it("includes close code and reason in summary for worker_disconnected with a reason", () => {
-    const summary = MessageLog.buildSummary("received", "worker_disconnected", null, { code: 1001, reason: "Going Away" });
+    const summary = ForemanMessage.buildSummary("received", "worker_disconnected", null, { code: 1001, reason: "Going Away" });
     expect(summary).toMatch(/1001/);
     expect(summary).toMatch(/Going Away/);
   });
 
   it("uses standard direction+msgType summary for non-disconnect messages", () => {
-    const summary = MessageLog.buildSummary("sent", "task_assigned", "42", {});
+    const summary = ForemanMessage.buildSummary("sent", "task_assigned", "42", {});
     expect(summary).toBe("sent task_assigned");
   });
 });
 
-describe("MessageLog.buildSummary richer summaries", () => {
+describe("ForemanMessage.buildSummary richer summaries", () => {
   it("includes 'idle' status for worker_hello when idle", () => {
-    const summary = MessageLog.buildSummary("received", "worker_hello", null,
+    const summary = ForemanMessage.buildSummary("received", "worker_hello", null,
       { type: "worker_hello", workerId: "w1", status: "idle" });
     expect(summary).toContain("idle");
   });
 
   it("includes 'busy' status and taskId for worker_hello when busy", () => {
-    const summary = MessageLog.buildSummary("received", "worker_hello", "42",
+    const summary = ForemanMessage.buildSummary("received", "worker_hello", "42",
       { type: "worker_hello", workerId: "w1", status: "busy", taskId: "42" });
     expect(summary).toContain("busy");
     expect(summary).toContain("42");
   });
 
   it("includes the forwarded event name for event_notification", () => {
-    const summary = MessageLog.buildSummary("sent", "event_notification", "42",
+    const summary = ForemanMessage.buildSummary("sent", "event_notification", "42",
       { type: "event_notification", taskId: "42", event: { id: "e1", name: "check_run", payload: { action: "completed" } } });
     expect(summary).toContain("check_run");
   });
 
   it("includes 'idle' status for hello_ack when idle", () => {
-    const summary = MessageLog.buildSummary("sent", "hello_ack", null,
+    const summary = ForemanMessage.buildSummary("sent", "hello_ack", null,
       { type: "hello_ack", workerId: "w1", status: "idle" });
     expect(summary).toContain("hello_ack");
     expect(summary).toContain("idle");
   });
 
   it("includes 'busy' status and taskId for hello_ack when busy", () => {
-    const summary = MessageLog.buildSummary("sent", "hello_ack", "42",
+    const summary = ForemanMessage.buildSummary("sent", "hello_ack", "42",
       { type: "hello_ack", workerId: "w1", status: "busy" });
     expect(summary).toContain("hello_ack");
     expect(summary).toContain("busy");
@@ -151,7 +151,7 @@ describe("MessageLog.buildSummary richer summaries", () => {
   });
 
   it("includes 'cancelled' status and taskId for hello_ack when cancelled", () => {
-    const summary = MessageLog.buildSummary("sent", "hello_ack", "42",
+    const summary = ForemanMessage.buildSummary("sent", "hello_ack", "42",
       { type: "hello_ack", workerId: "w1", status: "cancelled" });
     expect(summary).toContain("hello_ack");
     expect(summary).toContain("cancelled");
@@ -246,7 +246,7 @@ describe("queryActivityLog", () => {
       repo: null, sender: null, issueNumber: 42,
       prNumber: null, branch: null, taskId: "42", workerId: "w1", payload: {},
     });
-    MessageLog.log({
+    ForemanMessage.log({
       direction: "sent", workerId: "w1", taskId: "42",
       msgType: "task_assigned", payload: {},
     });

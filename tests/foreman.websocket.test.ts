@@ -11,7 +11,7 @@ import { setupInMemoryTasks } from "./helpers/task.js";
 import { loadDefaultConfig } from "../src/config.js";
 const defaultCfg = await loadDefaultConfig();
 import * as Wire from "../src/wire.js";
-import { MessageLog } from "../src/foreman/models/message-log.js";
+import { ForemanMessage } from "../src/foreman/models/foreman-message.js";
 import { waitUntil } from "./helpers.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -700,8 +700,8 @@ describe("worker WebSocket connection", () => {
 });
 
 describe("worker disconnect DB logging", () => {
-  it("calls MessageLog.log with worker_disconnected when a registered worker disconnects", async () => {
-    const logSpy = vi.spyOn(MessageLog, "log").mockReturnValue(undefined);
+  it("calls ForemanMessage.log with worker_disconnected when a registered worker disconnects", async () => {
+    const logSpy = vi.spyOn(ForemanMessage, "log").mockReturnValue(undefined);
 
     const server = http.createServer();
     const localTm = new TaskManager();
@@ -735,7 +735,7 @@ describe("worker disconnect DB logging", () => {
   });
 
   it("includes the current taskId in the disconnect event when worker had an active task", async () => {
-    const logSpy = vi.spyOn(MessageLog, "log").mockReturnValue(undefined);
+    const logSpy = vi.spyOn(ForemanMessage, "log").mockReturnValue(undefined);
 
     const localTm = new TaskManager();
     setupInMemoryTasks(localTm);
@@ -1086,7 +1086,7 @@ describe("graceful shutdown", () => {
   });
 
   it("logs worker_disconnected with code 1001 when shutdown closes a registered worker", async () => {
-    const logSpy = vi.spyOn(MessageLog, "log").mockReturnValue(undefined);
+    const logSpy = vi.spyOn(ForemanMessage, "log").mockReturnValue(undefined);
     const srv = http.createServer();
     const localTm = new TaskManager();
     setupInMemoryTasks(localTm);
