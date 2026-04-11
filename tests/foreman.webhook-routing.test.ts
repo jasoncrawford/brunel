@@ -9,7 +9,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import http from "http";
 import { WebSocket, WebSocketServer } from "ws";
 import type { AddressInfo } from "net";
-import { WorkerRegistry } from "../src/foreman/models/worker-registry.js";
+import { Worker } from "../src/foreman/models/worker-registry.js";
 import { createForemanWss } from "../src/foreman/controllers/wss.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
@@ -210,7 +210,6 @@ function checkSuitePayload(prNumber: number, conclusion: string) {
 // ── Test harness ──────────────────────────────────────────────────────────────
 
 let taskManager: TaskManager;
-let registry: WorkerRegistry;
 let httpServer: http.Server;
 let wss: WebSocketServer;
 let routeEvent: (id: string, name: string, payload: unknown) => Promise<void>;
@@ -222,6 +221,7 @@ function connect(): Promise<WebSocket> {
 }
 
 beforeEach(() => {
+  Worker._reset();
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ data: { repository: { issue: { blockedBy: { nodes: [] } } } } }) }));
   process.env.GITHUB_REPO = "owner/repo";
   process.env.GITHUB_TOKEN = "token";
@@ -229,9 +229,8 @@ beforeEach(() => {
 
   taskManager = new TaskManager();
   setupInMemoryTasks(taskManager);
-  registry = new WorkerRegistry();
   httpServer = http.createServer();
-  ({ wss, routeEvent } = createForemanWss(taskManager, registry, httpServer, defaultCfg));
+  ({ wss, routeEvent } = createForemanWss(taskManager, httpServer, defaultCfg));
 
   return new Promise<void>((resolve) => {
     httpServer.listen(0, () => {
@@ -277,7 +276,7 @@ describe("webhook-triggered task routing", () => {
     // Worker connects idle (no tasks yet)
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
-    await waitUntil(() => !!registry.get("w1"));
+    await waitUntil(() => !!Worker.get("w1"));
 
     // Webhook fires: issue #42 gets labeled brunel:ready.
     // then startDepsLoad completes async → reconcile() assigns the task.
@@ -291,7 +290,7 @@ describe("webhook-triggered task routing", () => {
     expect((msg as any).issue.title).toBe("Issue 42");
     expect((msg as any).issue.repoUrl).toBe("https://github.com/owner/repo");
     expect((await Task.get("42"))?.status).toBe("assigned");
-    expect(registry.get("w1")?.status).toBe("busy");
+    expect(Worker.get("w1")?.status).toBe("busy");
   });
 
   it("issues/labeled with non-task label does not enqueue or assign", async () => {
@@ -360,7 +359,7 @@ describe("webhook-triggered task routing", () => {
   it("issues/opened with task label in issue labels assigns task to idle worker", async () => {
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
-    await waitUntil(() => !!registry.get("w1"));
+    await waitUntil(() => !!Worker.get("w1"));
 
     // Webhook fires: issue #99 opened with task label.
     // then startDepsLoad completes async → reconcile() assigns the task.
@@ -372,7 +371,7 @@ describe("webhook-triggered task routing", () => {
     expect(msg.type).toBe("task_assigned");
     expect((msg as any).issue.number).toBe(99);
     expect((await Task.get("99"))?.status).toBe("assigned");
-    expect(registry.get("w1")?.status).toBe("busy");
+    expect(Worker.get("w1")?.status).toBe("busy");
   });
 
   it("issues/opened without task label does not enqueue", async () => {
@@ -704,7 +703,7 @@ describe("foreman event filtering", () => {
   it('issues/unlabeled with task label does not remove an already-assigned task', async () => {
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
-    await waitUntil(() => !!registry.get("w1"));
+    await waitUntil(() => !!Worker.get("w1"));
 
     const reply = nextMsgWhere(ws, (m) => m.type === "task_assigned");
     routeEvent("evt-labeled", "issues", labeledPayload(42, "brunel:ready"));

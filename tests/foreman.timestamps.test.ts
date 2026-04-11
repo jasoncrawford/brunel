@@ -5,7 +5,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import http from "http";
 import { WebSocket, WebSocketServer } from "ws";
 import type { AddressInfo } from "net";
-import { WorkerRegistry } from "../src/foreman/models/worker-registry.js";
+import { Worker } from "../src/foreman/models/worker-registry.js";
 import { createForemanWss } from "../src/foreman/controllers/wss.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
@@ -70,7 +70,6 @@ const ISO_TIMESTAMP_PREFIX = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z /;
 // ── Test harness ──────────────────────────────────────────────────────────────
 
 let taskManager: TaskManager;
-let registry: WorkerRegistry;
 let httpServer: http.Server;
 let wss: WebSocketServer;
 let routeEvent: (id: string, name: string, payload: unknown) => Promise<void>;
@@ -83,6 +82,7 @@ function connect(): Promise<WebSocket> {
 }
 
 beforeEach(() => {
+  Worker._reset();
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
   process.env.GITHUB_REPO = "owner/repo";
   process.env.GITHUB_TOKEN = "token";
@@ -94,9 +94,8 @@ beforeEach(() => {
 
   taskManager = new TaskManager();
   setupInMemoryTasks(taskManager);
-  registry = new WorkerRegistry();
   httpServer = http.createServer();
-  ({ wss, routeEvent } = createForemanWss(taskManager, registry, httpServer, defaultCfg));
+  ({ wss, routeEvent } = createForemanWss(taskManager, httpServer, defaultCfg));
 
   return new Promise<void>((resolve) => {
     httpServer.listen(0, () => {
@@ -140,7 +139,7 @@ describe("foreman log timestamps", () => {
   it("worker hello log lines start with ISO 8601 timestamp", async () => {
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "worker-abc123", status: "idle" });
-    await waitUntil(() => !!registry.get("worker-abc123"));
+    await waitUntil(() => !!Worker.get("worker-abc123"));
 
     expect(logLines.length).toBeGreaterThan(0);
     for (const line of logLines) {
@@ -181,7 +180,7 @@ describe("foreman log timestamps", () => {
   it("task enqueue log line starts with ISO 8601 timestamp", async () => {
     const ws = await connect();
     send(ws, { type: "worker_hello", workerId: "worker-abc123", status: "idle" });
-    await waitUntil(() => !!registry.get("worker-abc123"));
+    await waitUntil(() => !!Worker.get("worker-abc123"));
 
     logLines.length = 0;
     routeEvent("evt-1", "issues", {

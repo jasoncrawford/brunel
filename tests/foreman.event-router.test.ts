@@ -7,49 +7,39 @@
  * registry's currentTaskId rather than task status — mirroring the worker-side
  * guard — so any case where the worker has moved on is caught.
  */
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { forwardEvent } from "../src/foreman/controllers/event-router.js";
 import type { EventRouterDeps } from "../src/foreman/controllers/event-router.js";
 import { Task } from "../src/foreman/models/task.js";
+import { Worker } from "../src/foreman/models/worker-registry.js";
 import type { GitHubEvent } from "../src/types.js";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
+
+function fakeWs() {
+  return { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
+}
 
 function makeEvent(name = "issue_comment"): GitHubEvent {
   return { id: "evt-1", name, payload: {} };
 }
 
-function makeDeps(registryGet: ReturnType<typeof vi.fn> = vi.fn()): EventRouterDeps & { sendMsg: ReturnType<typeof vi.fn>; queueEvent: ReturnType<typeof vi.fn>; flog: ReturnType<typeof vi.fn> } {
+function makeDeps(): EventRouterDeps & { sendMsg: ReturnType<typeof vi.fn>; flog: ReturnType<typeof vi.fn> } {
   const queueEvent = vi.fn();
   const sendMsg = vi.fn();
   const flog = vi.fn();
   return {
     taskManager: { queueEvent } as unknown as EventRouterDeps["taskManager"],
-    registry: { get: registryGet } as unknown as EventRouterDeps["registry"],
     repo: "owner/repo",
     token: "token",
     taskLabel: "brunel:ready",
     sendMsg,
     flog,
     assignIdleWorkers: vi.fn().mockResolvedValue(undefined),
-    queueEvent,
   } as unknown as ReturnType<typeof makeDeps>;
 }
 
-/** Registry returns a worker currently assigned to the given task. */
-function workerOnTask(taskId: string) {
-  return vi.fn().mockReturnValue({ status: "busy", currentTaskId: taskId });
-}
-
-/** Registry returns a worker that has moved on to a different task (or is idle). */
-function workerOnDifferentTask() {
-  return vi.fn().mockReturnValue({ status: "busy", currentTaskId: "other-task-id" });
-}
-
-/** Registry returns a worker that is idle (currentTaskId cleared after completion). */
-function idleWorker() {
-  return vi.fn().mockReturnValue({ status: "idle", currentTaskId: undefined });
-}
+beforeEach(() => { Worker._reset(); });
 
 // ── Core bug fix: worker that has moved on ─────────────────────────────────────
 
@@ -63,7 +53,9 @@ describe("forwardEvent — worker has moved on to a different task", () => {
       worker_id: "worker-1",
       completed_at: new Date().toISOString(),
     });
-    const deps = makeDeps(workerOnDifferentTask());
+    const w = Worker.register("worker-1", fakeWs());
+    w.assign("other-task-id"); // worker has moved on to a different task
+    const deps = makeDeps();
 
     forwardEvent(deps, task, makeEvent(), "#42");
 
@@ -78,7 +70,8 @@ describe("forwardEvent — worker has moved on to a different task", () => {
       worker_id: "worker-1",
       completed_at: new Date().toISOString(),
     });
-    const deps = makeDeps(idleWorker());
+    Worker.register("worker-1", fakeWs()); // idle with no currentTaskId
+    const deps = makeDeps();
 
     forwardEvent(deps, task, makeEvent(), "#42");
 
@@ -93,7 +86,9 @@ describe("forwardEvent — worker has moved on to a different task", () => {
       worker_id: "worker-1",
       completed_at: new Date().toISOString(),
     });
-    const deps = makeDeps(workerOnDifferentTask());
+    const w = Worker.register("worker-1", fakeWs());
+    w.assign("other-task-id");
+    const deps = makeDeps();
 
     forwardEvent(deps, task, makeEvent("issue_comment"), "#42");
 
@@ -111,7 +106,9 @@ describe("forwardEvent — active tasks still receive events", () => {
       issue_number: 42,
       worker_id: "worker-1",
     });
-    const deps = makeDeps(workerOnTask("42"));
+    const w = Worker.register("worker-1", fakeWs());
+    w.assign("42");
+    const deps = makeDeps();
 
     forwardEvent(deps, task, makeEvent(), "#42");
 
@@ -130,7 +127,9 @@ describe("forwardEvent — active tasks still receive events", () => {
       worker_id: "worker-1",
       pr_merged_at: new Date().toISOString(),
     });
-    const deps = makeDeps(workerOnTask("42"));
+    const w = Worker.register("worker-1", fakeWs());
+    w.assign("42");
+    const deps = makeDeps();
 
     forwardEvent(deps, task, makeEvent(), "#42");
 
@@ -145,7 +144,9 @@ describe("forwardEvent — active tasks still receive events", () => {
       worker_id: "worker-1",
       issue_closed_at: new Date().toISOString(),
     });
-    const deps = makeDeps(workerOnTask("42"));
+    const w = Worker.register("worker-1", fakeWs());
+    w.assign("42");
+    const deps = makeDeps();
 
     forwardEvent(deps, task, makeEvent(), "#42");
 

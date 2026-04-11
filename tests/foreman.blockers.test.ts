@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { WorkerRegistry } from "../src/foreman/models/worker-registry.js";
+import { Worker } from "../src/foreman/models/worker-registry.js";
 import { createForemanWss } from "../src/foreman/controllers/wss.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
@@ -15,6 +15,7 @@ describe("foreman — blocker transitions via routeEvent", () => {
   let taskManager: TaskManager;
 
   beforeEach(() => {
+    Worker._reset();
     taskManager = new TaskManager();
     setupInMemoryTasks(taskManager);
   });
@@ -24,7 +25,6 @@ describe("foreman — blocker transitions via routeEvent", () => {
   });
 
   it("task derives blocked status when blocker is open", async () => {
-    const registry = new WorkerRegistry();
     const server = http.createServer();
 
     await Task.upsert("10", 10, "owner/repo", "T", "b", []);
@@ -33,7 +33,7 @@ describe("foreman — blocker transitions via routeEvent", () => {
     taskManager.markBlockersLoaded(10);
     taskManager.setIssueOpenState(5, true); // blocker is open
 
-    const { wss } = createForemanWss(taskManager, registry, server, { ...defaultCfg, taskLabel: "brunel:ready", workerReclaimTimeoutMs: 300_000 });
+    const { wss } = createForemanWss(taskManager, server, { ...defaultCfg, taskLabel: "brunel:ready", workerReclaimTimeoutMs: 300_000 });
     wss.close();
 
     const snapshots = await taskManager.getTaskSnapshots();
@@ -41,7 +41,6 @@ describe("foreman — blocker transitions via routeEvent", () => {
   });
 
   it("task derives pending status when blocker is closed", async () => {
-    const registry = new WorkerRegistry();
     const server = http.createServer();
 
     await Task.upsert("10", 10, "owner/repo", "T", "b", []);
@@ -50,7 +49,7 @@ describe("foreman — blocker transitions via routeEvent", () => {
     taskManager.markBlockersLoaded(10);
     taskManager.setIssueOpenState(5, true);
 
-    const { wss, routeEvent } = createForemanWss(taskManager, registry, server, { ...defaultCfg, taskLabel: "brunel:ready" });
+    const { wss, routeEvent } = createForemanWss(taskManager, server, { ...defaultCfg, taskLabel: "brunel:ready" });
     wss.close();
 
     // Initially blocked
@@ -69,7 +68,6 @@ describe("foreman — blocker transitions via routeEvent", () => {
   });
 
   it("task remains blocked when other blockers are still open", async () => {
-    const registry = new WorkerRegistry();
     const server = http.createServer();
 
     await Task.upsert("10", 10, "owner/repo", "T", "b", []);
@@ -80,7 +78,7 @@ describe("foreman — blocker transitions via routeEvent", () => {
     taskManager.setIssueOpenState(5, true);
     taskManager.setIssueOpenState(6, true);
 
-    const { wss, routeEvent } = createForemanWss(taskManager, registry, server, { ...defaultCfg, taskLabel: "brunel:ready" });
+    const { wss, routeEvent } = createForemanWss(taskManager, server, { ...defaultCfg, taskLabel: "brunel:ready" });
     wss.close();
 
     // Initially blocked

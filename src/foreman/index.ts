@@ -9,7 +9,7 @@ import { createDbLogger } from "./db.js";
 import type { DbLogger } from "./db.js";
 import { TaskManager } from "./models/task-manager.js";
 import { initDb } from "./db-client.js";
-import { WorkerRegistry } from "./models/worker-registry.js";
+import { Worker } from "./models/worker-registry.js";
 import { createHttpServer } from "./controllers/http-server.js";
 import { createForemanWss } from "./controllers/wss.js";
 import type { ForemanWss } from "./controllers/wss.js";
@@ -32,7 +32,6 @@ const isMain = process.argv[1] === fileURLToPath(import.meta.url);
 if (isMain) {
   const config = await loadConfig(process.argv);
 
-  const registry = new WorkerRegistry();
   const webhooks = config.webhookSecret
     ? new Webhooks({ secret: config.webhookSecret })
     : null;
@@ -53,10 +52,10 @@ if (isMain) {
   // Admin WebSocket broadcaster
   const adminWss = createAdminWss(server, async () => ({
     tasks: await taskManager.getTaskSnapshots(),
-    workers: registry.getWorkerSnapshots(),
+    workers: Worker.all().map((w) => w.toSnapshot()),
   }));
 
-  foremanWss = createForemanWss(taskManager, registry, server, config, {
+  foremanWss = createForemanWss(taskManager, server, config, {
     dbLogger,
     adminWss,
   });

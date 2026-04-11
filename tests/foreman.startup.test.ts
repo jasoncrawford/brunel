@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { WorkerRegistry } from "../src/foreman/models/worker-registry.js";
+import { Worker } from "../src/foreman/models/worker-registry.js";
 import { createForemanWss } from "../src/foreman/controllers/wss.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
@@ -71,7 +71,7 @@ function closeClient(ws: WebSocket): Promise<void> {
 // ── Test harness ──────────────────────────────────────────────────────────────
 
 let taskManager: TaskManager;
-let registry: WorkerRegistry;
+
 let httpServer: http.Server;
 let wss: WebSocketServer;
 let port: number;
@@ -82,7 +82,7 @@ function connect(msg: object): Promise<WebSocket> {
 }
 
 beforeEach(() => {
-  registry = new WorkerRegistry();
+  Worker._reset();
   httpServer = http.createServer();
   taskManager = new TaskManager();
   setupInMemoryTasks(taskManager);
@@ -121,7 +121,7 @@ describe("tryAssignWork — assign persistence", () => {
   it("task.assign is called and task status becomes assigned before task_assigned is sent", async () => {
     await registerReady(taskManager, "42", 42, "owner/repo", "Test task", "body", []);
 
-    ({ wss } = createForemanWss(taskManager, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
+    ({ wss } = createForemanWss(taskManager, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
 
     port = await startServer();
     const ws = await connect({ type: "worker_hello", workerId: "w1", status: "idle" });
@@ -142,18 +142,18 @@ describe("tryAssignWork — assign persistence", () => {
     const task = await Task.get("42");
     vi.spyOn(task!, "assign").mockRejectedValue(new Error("db down"));
 
-    ({ wss } = createForemanWss(taskManager, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
+    ({ wss } = createForemanWss(taskManager, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
 
     port = await startServer();
     const ws = await connect({ type: "worker_hello", workerId: "w1", status: "idle" });
-    await waitUntil(() => registry.get("w1")?.status === "idle");
+    await waitUntil(() => Worker.get("w1")?.status === "idle");
 
     expect((await Task.get("42"))?.status).toBe("pending");
   });
 
   it("works transparently with in-memory task store", async () => {
     await registerReady(taskManager, "42", 42, "owner/repo", "Test task", "body", []);
-    ({ wss } = createForemanWss(taskManager, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
+    ({ wss } = createForemanWss(taskManager, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
 
     port = await startServer();
     const ws = await connect({ type: "worker_hello", workerId: "w1", status: "idle" });
@@ -174,7 +174,7 @@ describe("startup reconnect behaviour", () => {
     const t = await Task.get("42");
     await t!.assign("w1"); // simulate what main block does after startup restore
 
-    ({ wss } = createForemanWss(taskManager, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
+    ({ wss } = createForemanWss(taskManager, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
 
     port = await startServer();
     const ws = await connect({ type: "worker_hello", workerId: "w1", status: "idle" });
@@ -191,11 +191,11 @@ describe("startup reconnect behaviour", () => {
     const t = await Task.get("42");
     await t!.assign("original-worker"); // simulate startup loading
 
-    ({ wss } = createForemanWss(taskManager, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
+    ({ wss } = createForemanWss(taskManager, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
 
     port = await startServer();
     const ws = await connect({ type: "worker_hello", workerId: "new-worker", status: "idle" });
-    await waitUntil(() => registry.get("new-worker")?.status === "idle");
+    await waitUntil(() => Worker.get("new-worker")?.status === "idle");
 
     // new-worker should NOT get task 42 — it belongs to original-worker
     expect((await Task.get("42"))?.status).toBe("assigned");
@@ -207,12 +207,12 @@ describe("startup reconnect behaviour", () => {
     const t = await Task.get("42");
     await t!.assign("w1");
 
-    ({ wss } = createForemanWss(taskManager, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
+    ({ wss } = createForemanWss(taskManager, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
 
     port = await startServer();
     await connect({ type: "worker_hello", workerId: "w1", status: "busy", taskId: "42" });
 
-    await waitUntil(() => registry.get("w1")?.status === "busy");
+    await waitUntil(() => Worker.get("w1")?.status === "busy");
     expect((await Task.get("42"))?.status).toBe("assigned");
     expect((await Task.get("42"))?.workerId).toBe("w1");
   });
@@ -227,7 +227,7 @@ describe("PR tracking persistence", () => {
     await t!.assign("w1");
     const spyRegisterPr = vi.spyOn(t!, "registerPr");
 
-    const result = createForemanWss(taskManager, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" });
+    const result = createForemanWss(taskManager, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" });
     ({ wss } = result);
 
     await result.routeEvent("evt-1", "pull_request", {
@@ -248,7 +248,7 @@ describe("PR tracking persistence", () => {
     await t!.assign("w1");
     const spyRegisterPr = vi.spyOn(t!, "registerPr");
 
-    const result = createForemanWss(taskManager, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" });
+    const result = createForemanWss(taskManager, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" });
     ({ wss } = result);
 
     await result.routeEvent("evt-1", "pull_request", {
@@ -294,7 +294,7 @@ async function restoreTasksFromDb(rows: Array<{
 
 describe("startup — restore tasks from tasks table (DB is source of truth)", () => {
   it("assigned task from store is visible in the snapshot", async () => {
-    ({ wss } = createForemanWss(taskManager, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
+    ({ wss } = createForemanWss(taskManager, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
 
     port = await startServer();
 
@@ -312,7 +312,7 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
   });
 
   it("pending task from store can be assigned by nextPending", async () => {
-    ({ wss } = createForemanWss(taskManager, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
+    ({ wss } = createForemanWss(taskManager, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
 
     port = await startServer();
 
@@ -329,7 +329,7 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
   });
 
   it("PR number and branch are restored from store", async () => {
-    ({ wss } = createForemanWss(taskManager, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
+    ({ wss } = createForemanWss(taskManager, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
 
     port = await startServer();
 
@@ -345,7 +345,7 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
   });
 
   it("complete tasks from store are skipped", async () => {
-    ({ wss } = createForemanWss(taskManager, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
+    ({ wss } = createForemanWss(taskManager, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
 
     port = await startServer();
 
@@ -365,7 +365,7 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
     // 2. GitHub data is loaded into labeledIssues (via loadIssuesToQueue)
     // 3. reconcile() is called to sync labeledIssues → taskQueue
     // 4. Worker connects and must receive the real body/labels in task_assigned
-    const { wss: fwss, reconcile } = createForemanWss(taskManager, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" });
+    const { wss: fwss, reconcile } = createForemanWss(taskManager, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" });
     wss = fwss;
 
     port = await startServer();
@@ -399,7 +399,7 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
     // 1. Task is restored from DB with worker_id set (loadActiveTasksFromDb)
     // 2. GitHub sync calls Task.upsert() again for the same task (loadIssuesFromGithub)
     // 3. reconcile() runs — MUST NOT assign the task to a different idle worker
-    const { wss: fwss, reconcile } = createForemanWss(taskManager, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" });
+    const { wss: fwss, reconcile } = createForemanWss(taskManager, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" });
     wss = fwss;
 
     port = await startServer();
@@ -425,7 +425,7 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
 
     // Step 4: an idle worker connects — must NOT receive the already-assigned task
     const ws = await connect({ type: "worker_hello", workerId: "new-worker", status: "idle" });
-    await waitUntil(() => registry.get("new-worker")?.status === "idle");
+    await waitUntil(() => Worker.get("new-worker")?.status === "idle");
 
     expect((await Task.get("42"))?.workerId).toBe("original-worker");
   });
@@ -477,14 +477,14 @@ describe("startup reconnect — worker reconnects to complete task", () => {
     await t!.assign("w1");
     await t!.complete(); // issue closed while worker was active
 
-    ({ wss } = createForemanWss(taskManager, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
+    ({ wss } = createForemanWss(taskManager, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
 
     port = await startServer();
     await connect({ type: "worker_hello", workerId: "w1", status: "busy", taskId: "42" });
 
-    await waitUntil(() => registry.get("w1") !== undefined);
+    await waitUntil(() => Worker.get("w1") !== undefined);
     // Worker should be reclaimed as busy to allow finalization work
-    expect(registry.get("w1")?.status).toBe("busy");
+    expect(Worker.get("w1")?.status).toBe("busy");
     // Task should stay complete
     expect((await Task.get("42"))?.status).toBe("complete");
   });
@@ -495,21 +495,21 @@ describe("startup reconnect — worker reconnects to complete task", () => {
     await t!.assign("w1");
     await t!.complete();
 
-    ({ wss } = createForemanWss(taskManager, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
+    ({ wss } = createForemanWss(taskManager, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
 
     port = await startServer();
     const ws = await connect({ type: "worker_hello", workerId: "w1", status: "busy", taskId: "42" });
 
-    await waitUntil(() => registry.get("w1") !== undefined);
+    await waitUntil(() => Worker.get("w1") !== undefined);
     // Spy on complete after the task is already obtained
     const t2 = await Task.get("42");
     const spyComplete = vi.spyOn(t2!, "complete");
 
     ws.send(JSON.stringify({ type: "task_complete", workerId: "w1", taskId: "42" }));
-    await waitUntil(() => registry.get("w1")?.status === "idle");
+    await waitUntil(() => Worker.get("w1")?.status === "idle");
 
     // The task was already complete; task_complete is still a no-op (idempotent)
-    expect(registry.get("w1")?.status).toBe("idle");
+    expect(Worker.get("w1")?.status).toBe("idle");
   });
 });
 
@@ -521,19 +521,19 @@ describe("task_complete marks task complete", () => {
     const t = await Task.get("42");
     await t!.assign("w1");
 
-    ({ wss } = createForemanWss(taskManager, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
+    ({ wss } = createForemanWss(taskManager, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
 
     port = await startServer();
     const ws = await connect({ type: "worker_hello", workerId: "w1", status: "busy", taskId: "42" });
 
-    await waitUntil(() => registry.get("w1")?.status === "busy");
+    await waitUntil(() => Worker.get("w1")?.status === "busy");
 
     // Get fresh task reference and spy on complete
     const t2 = await Task.get("42");
     const spyComplete = vi.spyOn(t2!, "complete");
 
     ws.send(JSON.stringify({ type: "task_complete", workerId: "w1", taskId: "42" }));
-    await waitUntil(() => registry.get("w1")?.status === "idle");
+    await waitUntil(() => Worker.get("w1")?.status === "idle");
 
     expect(spyComplete).toHaveBeenCalled();
   });

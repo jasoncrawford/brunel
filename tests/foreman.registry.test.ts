@@ -1,151 +1,198 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { WorkerRegistry } from "../src/foreman/models/worker-registry.js";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { Worker } from "../src/foreman/models/worker-registry.js";
 import type { ForemanMessage } from "../src/types.js";
 
 function fakeWs() {
   return { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
 }
 
-describe("WorkerRegistry", () => {
-  let reg: WorkerRegistry;
-  beforeEach(() => { reg = new WorkerRegistry(); });
+beforeEach(() => { Worker._reset(); });
 
+describe("Worker", () => {
   it("registers a worker and retrieves it", () => {
-    reg.register("w1", fakeWs(), "idle");
-    expect(reg.get("w1")).toMatchObject({ workerId: "w1", status: "idle" });
+    Worker.register("w1", fakeWs());
+    expect(Worker.get("w1")).toMatchObject({ workerId: "w1", status: "idle" });
   });
 
-  it("getIdleWorker returns an idle worker", () => {
-    reg.register("w1", fakeWs(), "idle");
-    expect(reg.getIdleWorker()?.workerId).toBe("w1");
+  it("getIdle returns an idle worker", () => {
+    Worker.register("w1", fakeWs());
+    expect(Worker.getIdle().map(w => w.workerId)).toContain("w1");
   });
 
-  it("getIdleWorker returns null when all busy", () => {
-    reg.register("w1", fakeWs(), "busy");
-    expect(reg.getIdleWorker()).toBeNull();
+  it("getIdle returns empty array when all busy", () => {
+    const w = Worker.register("w1", fakeWs());
+    w.assign("42");
+    expect(Worker.getIdle()).toHaveLength(0);
   });
 
-  it("assignTask marks worker busy with taskId", () => {
-    reg.register("w1", fakeWs(), "idle");
-    reg.assignTask("w1", "42");
-    const w = reg.get("w1")!;
+  it("assign marks worker busy with taskId", () => {
+    const w = Worker.register("w1", fakeWs());
+    w.assign("42");
     expect(w.status).toBe("busy");
     expect(w.currentTaskId).toBe("42");
   });
 
-  it("releaseWorker marks worker idle and clears taskId", () => {
-    reg.register("w1", fakeWs(), "busy");
-    reg.assignTask("w1", "42");
-    reg.releaseWorker("w1");
-    const w = reg.get("w1")!;
+  it("release marks worker idle and clears taskId", () => {
+    const w = Worker.register("w1", fakeWs());
+    w.assign("42");
+    w.release();
     expect(w.status).toBe("idle");
     expect(w.currentTaskId).toBeUndefined();
   });
 
-  it("remove deletes the worker", () => {
-    reg.register("w1", fakeWs(), "idle");
-    reg.remove("w1");
-    expect(reg.get("w1")).toBeUndefined();
+  it("remove deletes the worker from the registry", () => {
+    const w = Worker.register("w1", fakeWs());
+    w.remove();
+    expect(Worker.get("w1")).toBeUndefined();
   });
 
-  it("getWorkerForTask returns worker assigned to that task", () => {
-    reg.register("w1", fakeWs(), "idle");
-    reg.assignTask("w1", "42");
-    expect(reg.getWorkerForTask("42")?.workerId).toBe("w1");
+  it("getByTask returns worker assigned to that task", () => {
+    const w = Worker.register("w1", fakeWs());
+    w.assign("42");
+    expect(Worker.getByTask("42")?.workerId).toBe("w1");
+  });
+
+  it("all returns all registered workers", () => {
+    Worker.register("w1", fakeWs());
+    Worker.register("w2", fakeWs());
+    expect(Worker.all().map(w => w.workerId)).toEqual(expect.arrayContaining(["w1", "w2"]));
+    expect(Worker.all()).toHaveLength(2);
   });
 
   it("send serializes message and calls ws.send", () => {
     const ws = fakeWs();
-    reg.register("w1", ws, "idle");
+    const w = Worker.register("w1", ws);
     const msg: ForemanMessage = { type: "task_assigned", taskId: "1", issue: { number: 1, title: "T", body: "", labels: [], repoUrl: "https://github.com/o/r" } };
-    reg.send("w1", msg);
+    w.send(msg);
     expect(ws.send).toHaveBeenCalledWith(JSON.stringify(msg));
+  });
+
+  it("send returns true when OPEN", () => {
+    const ws = fakeWs();
+    const w = Worker.register("w1", ws);
+    const result = w.send({ type: "task_assigned", taskId: "1", issue: { number: 1, title: "T", body: "", labels: [], repoUrl: "https://github.com/o/r" } });
+    expect(result).toBe(true);
+  });
+
+  it("toSnapshot returns WorkerSnapshot", () => {
+    const w = Worker.register("w1", fakeWs());
+    w.assign("42");
+    expect(w.toSnapshot()).toEqual({ workerId: "w1", status: "busy", currentTaskId: "42" });
   });
 
   describe("markDisconnected", () => {
     it("sets status to disconnected and records disconnectedAt", () => {
-      reg.register("w1", fakeWs(), "busy");
-      reg.assignTask("w1", "42");
-      reg.markDisconnected("w1");
-      const w = reg.get("w1")!;
+      const w = Worker.register("w1", fakeWs());
+      w.assign("42");
+      w.markDisconnected();
       expect(w.status).toBe("disconnected");
       expect(w.currentTaskId).toBe("42");
       expect(w.disconnectedAt).toBeInstanceOf(Date);
     });
 
-    it("is a no-op for unknown worker", () => {
-      expect(() => reg.markDisconnected("unknown")).not.toThrow();
+    it("getIdle does not return a disconnected worker", () => {
+      const w = Worker.register("w1", fakeWs());
+      w.markDisconnected();
+      expect(Worker.getIdle()).toHaveLength(0);
     });
 
-    it("getIdleWorker does not return a disconnected worker", () => {
-      reg.register("w1", fakeWs(), "idle");
-      reg.markDisconnected("w1");
-      expect(reg.getIdleWorker()).toBeNull();
-    });
-
-    it("send does not call ws.send on a disconnected worker", () => {
+    it("send does not call ws.send on a closed socket", () => {
       const ws = fakeWs();
       ws.readyState = 3; // CLOSED
-      reg.register("w1", ws, "busy");
-      reg.markDisconnected("w1");
-      reg.send("w1", { type: "task_assigned", taskId: "1", issue: { number: 1, title: "T", body: "", labels: [], repoUrl: "https://github.com/o/r" } });
+      const w = Worker.register("w1", ws);
+      w.markDisconnected();
+      w.send({ type: "task_assigned", taskId: "1", issue: { number: 1, title: "T", body: "", labels: [], repoUrl: "https://github.com/o/r" } });
       expect(ws.send).not.toHaveBeenCalled();
     });
 
-    it("getWorkerSnapshots includes disconnected workers", () => {
-      reg.register("w1", fakeWs(), "busy");
-      reg.assignTask("w1", "42");
-      reg.markDisconnected("w1");
-      const snapshots = reg.getWorkerSnapshots();
+    it("send returns false when socket is closed", () => {
+      const ws = fakeWs();
+      ws.readyState = 3;
+      const w = Worker.register("w1", ws);
+      const result = w.send({ type: "task_assigned", taskId: "1", issue: { number: 1, title: "T", body: "", labels: [], repoUrl: "https://github.com/o/r" } });
+      expect(result).toBe(false);
+    });
+
+    it("all includes disconnected workers", () => {
+      const w = Worker.register("w1", fakeWs());
+      w.assign("42");
+      w.markDisconnected();
+      const snapshots = Worker.all().map(x => x.toSnapshot());
       expect(snapshots).toHaveLength(1);
       expect(snapshots[0].status).toBe("disconnected");
       expect(snapshots[0].currentTaskId).toBe("42");
     });
   });
+
+  it("isCurrentSocket returns true for the registered socket", () => {
+    const ws = fakeWs();
+    const w = Worker.register("w1", ws);
+    expect(w.isCurrentSocket(ws)).toBe(true);
+  });
+
+  it("isCurrentSocket returns false for a different socket", () => {
+    const ws1 = fakeWs();
+    const ws2 = fakeWs();
+    const w = Worker.register("w1", ws1);
+    expect(w.isCurrentSocket(ws2)).toBe(false);
+  });
+
+  it("re-registering with a new socket replaces the entry", () => {
+    const ws1 = fakeWs();
+    const ws2 = fakeWs();
+    Worker.register("w1", ws1);
+    const w = Worker.register("w1", ws2);
+    expect(Worker.get("w1")).toBe(w);
+    expect(w.isCurrentSocket(ws2)).toBe(true);
+  });
 });
 
 
-describe("WorkerRegistry changed events", () => {
-  let reg: WorkerRegistry;
-  beforeEach(() => { reg = new WorkerRegistry(); });
+describe("Worker changed events", () => {
+  beforeEach(() => { Worker._reset(); });
 
   it("register emits changed", () => {
     const changed = vi.fn();
-    reg.on("changed", changed);
-    reg.register("w1", fakeWs(), "idle");
+    Worker.events.on("changed", changed);
+    Worker.register("w1", fakeWs());
     expect(changed).toHaveBeenCalledOnce();
+    Worker.events.off("changed", changed);
   });
 
   it("remove emits changed", () => {
-    reg.register("w1", fakeWs(), "idle");
+    const w = Worker.register("w1", fakeWs());
     const changed = vi.fn();
-    reg.on("changed", changed);
-    reg.remove("w1");
+    Worker.events.on("changed", changed);
+    w.remove();
     expect(changed).toHaveBeenCalledOnce();
+    Worker.events.off("changed", changed);
   });
 
   it("markDisconnected emits changed", () => {
-    reg.register("w1", fakeWs(), "busy");
+    const w = Worker.register("w1", fakeWs());
     const changed = vi.fn();
-    reg.on("changed", changed);
-    reg.markDisconnected("w1");
+    Worker.events.on("changed", changed);
+    w.markDisconnected();
     expect(changed).toHaveBeenCalledOnce();
+    Worker.events.off("changed", changed);
   });
 
-  it("assignTask emits changed", () => {
-    reg.register("w1", fakeWs(), "idle");
+  it("assign emits changed", () => {
+    const w = Worker.register("w1", fakeWs());
     const changed = vi.fn();
-    reg.on("changed", changed);
-    reg.assignTask("w1", "42");
+    Worker.events.on("changed", changed);
+    w.assign("42");
     expect(changed).toHaveBeenCalledOnce();
+    Worker.events.off("changed", changed);
   });
 
-  it("releaseWorker emits changed", () => {
-    reg.register("w1", fakeWs(), "busy");
-    reg.assignTask("w1", "42");
+  it("release emits changed", () => {
+    const w = Worker.register("w1", fakeWs());
+    w.assign("42");
     const changed = vi.fn();
-    reg.on("changed", changed);
-    reg.releaseWorker("w1");
+    Worker.events.on("changed", changed);
+    w.release();
     expect(changed).toHaveBeenCalledOnce();
+    Worker.events.off("changed", changed);
   });
 });
