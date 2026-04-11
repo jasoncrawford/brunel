@@ -1,5 +1,4 @@
 import "dotenv/config";
-import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import fs from "fs";
@@ -10,11 +9,11 @@ import * as display from "./display.js";
 import { setVerbose, setThinkOutLoud } from "./display.js";
 import { ask, dispatchInput, pick, pickMultiple, pickQuestion } from "./input.js";
 import type { PickQuestionResult } from "./input.js";
-import { WorkerSession, registerWorkerCommands, startWorkerMode } from "./worker.js";
+import { AgentStatus, WorkerSession, registerWorkerCommands, startWorkerMode } from "./worker.js";
 import type { RunQuery, WorkerModeConfig } from "./worker.js";
 import { loadConfig } from "../config.js";
 import { Workspace, confirmIfUnsafe, registerWorkspaceCommands } from "./workspace.js";
-import { fmtError } from "../utils.js";
+import { fmtError, generateWorkerId } from "../utils.js";
 import { handleModelCommand, getCachedModels, _resetCachedModels, setCachedModels } from "./model.js";
 import type { ModelInfo, FetchModelsFn } from "./model.js";
 import { handleEffortCommand } from "./effort.js";
@@ -251,18 +250,21 @@ export async function main(
   initialModel?: string,
   initialEffort?: EffortValue,
 ): Promise<void> {
+  // Generate agentId unconditionally — used as both workspace identity and foreman identity.
+  const agentId = generateWorkerId();
+  const agentStatus = new AgentStatus(agentId);
+  agentStatus.update({ model: initialModel, effort: initialEffort });
+
   // Worker mode setup: create workspace, session, signal handlers.
-  const workerCtx = workerConfig ? await startWorkerMode(workerConfig) : undefined;
+  const workerCtx = workerConfig ? await startWorkerMode(workerConfig, agentStatus) : undefined;
   const session = workerCtx?.session;
 
   const fetchModelsFn = createFetchModelsFn(permConfig);
-  let currentModel: string | undefined = workerConfig?.model ?? initialModel;
-  let currentEffort: EffortValue | undefined = workerConfig?.effort ?? initialEffort;
 
   // Print the startup banner.
   display.print(display.c.sageGreen(display.hr("═")));
   display.print(display.c.skyBlue(display.s.bold("  Brunel Agent")));
-  display.print(display.c.lavender(`  Permissions: ${permConfig.permissionMode} | Model: ${currentModel ?? "default"} | Effort: ${currentEffort ?? "auto"} | Output: ${display.verbose ? "verbose" : "quiet"} | Log: ${workerConfig?.logFile ?? LOG_FILE}`));
+  display.print(display.c.lavender(`  Permissions: ${permConfig.permissionMode} | Model: ${agentStatus.model ?? "default"} | Effort: ${agentStatus.effort ?? "auto"} | Output: ${display.verbose ? "verbose" : "quiet"} | Log: ${workerConfig?.logFile ?? LOG_FILE}`));
   display.print(display.c.sageGreen(display.hr("═")));
 
   process.stdout.write("\x1b[?2004h"); // enable bracketed paste mode
@@ -271,7 +273,6 @@ export async function main(
   process.stdin.setEncoding("utf8");
 
   let sessionId: string | undefined;
-  const sessionId_ = crypto.randomUUID();
   const originalCwd = process.cwd();
   const workspaceRef: { current: Workspace | undefined } = { current: undefined };
 
@@ -300,7 +301,7 @@ export async function main(
   registerWorkspaceCommands(
     session
       ? session.workspaceCommandDeps
-      : { workspace: workspaceRef, config: workspaceCfg ? { ...workspaceCfg, sessionId: sessionId_ } : undefined, originalCwd, confirm },
+      : { workspace: workspaceRef, config: workspaceCfg ? { ...workspaceCfg, sessionId: agentId } : undefined, originalCwd, confirm },
     registry.scoped("workspace"),
     !!session,
   );
@@ -324,13 +325,12 @@ export async function main(
     handler: async (args) => {
       const newModel = await handleModelCommand(
         args,
-        currentModel,
+        agentStatus.model,
         (opts, idx) => pick(opts, { currentIdx: idx, escapable: true }),
         fetchModelsFn,
         display.print,
       );
-      currentModel = newModel;
-      if (session) session.currentModel = newModel;
+      agentStatus.update({ model: newModel });
     },
   });
   registry.register("effort", {
@@ -338,12 +338,11 @@ export async function main(
     handler: async (args) => {
       const newEffort = await handleEffortCommand(
         args,
-        currentEffort,
+        agentStatus.effort,
         (opts, idx) => pick(opts, { currentIdx: idx, escapable: true }),
         display.print,
       );
-      currentEffort = newEffort;
-      if (session) session.currentEffort = newEffort;
+      agentStatus.update({ effort: newEffort });
     },
   });
 
@@ -357,7 +356,7 @@ export async function main(
     const ac = new AbortController();
     session?.notifyQueryStart(ac);
     try {
-      sessionId = await runQueryFn(prompt, sessionId, ac, currentModel, currentEffort) ?? sessionId;
+      sessionId = await runQueryFn(prompt, sessionId, ac, agentStatus.model, agentStatus.effort) ?? sessionId;
       return !ac.signal.aborted;
     } catch (err) {
       console.error(display.c.boldRed(`\nERROR: ${fmtError(err)}`));
