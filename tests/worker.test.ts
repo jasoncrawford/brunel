@@ -1308,7 +1308,7 @@ describe("prIsClosed guard", () => {
 });
 
 import { Workspace, registerWorkspaceCommands } from "../src/agent/workspace.js";
-import { _reset, execute } from "../src/agent/commands.js";
+import { CommandRegistry } from "../src/agent/commands.js";
 
 // ── workspace slash commands via workspaceCommandDeps ─────────────────────────
 
@@ -1337,9 +1337,9 @@ describe("workspace slash commands in WorkerSession", () => {
       },
     });
     sessionWs.start();
-    _reset();
-    registerWorkspaceCommands(sessionWs.workspaceCommandDeps, true);
-    await execute("workspace:reset", "");
+    const wsReg1 = new CommandRegistry();
+    registerWorkspaceCommands(sessionWs.workspaceCommandDeps, wsReg1, true);
+    await wsReg1.execute("workspace:reset", "");
     expect(workspace.reset).toHaveBeenCalledOnce();
   });
 
@@ -1359,9 +1359,9 @@ describe("workspace slash commands in WorkerSession", () => {
       },
     });
     sessionWs.start();
-    _reset();
-    registerWorkspaceCommands(sessionWs.workspaceCommandDeps, true);
-    await execute("workspace:reset", "");
+    const wsReg2 = new CommandRegistry();
+    registerWorkspaceCommands(sessionWs.workspaceCommandDeps, wsReg2, true);
+    await wsReg2.execute("workspace:reset", "");
     expect(workspace.reset).not.toHaveBeenCalled();
   });
 
@@ -1379,9 +1379,9 @@ describe("workspace slash commands in WorkerSession", () => {
       },
     });
     sessionWs.start();
-    _reset();
-    registerWorkspaceCommands(sessionWs.workspaceCommandDeps, true);
-    await execute("workspace:remove", "");
+    const wsReg3 = new CommandRegistry();
+    registerWorkspaceCommands(sessionWs.workspaceCommandDeps, wsReg3, true);
+    await wsReg3.execute("workspace:remove", "");
     expect(workspace.destroy).toHaveBeenCalledOnce();
   });
 
@@ -1390,9 +1390,9 @@ describe("workspace slash commands in WorkerSession", () => {
     try {
       const sessionWs = new WorkerSession(WORKER_ID, wsFactory, display, {});
       sessionWs.start();
-      _reset();
-      registerWorkspaceCommands(sessionWs.workspaceCommandDeps, true);
-      await execute("workspace:create", "");
+      const wsReg4 = new CommandRegistry();
+      registerWorkspaceCommands(sessionWs.workspaceCommandDeps, wsReg4, true);
+      await wsReg4.execute("workspace:create", "");
       const printed = printSpy.mock.calls.map(([s]) => stripAnsi(s as string)).join("\n");
       expect(printed).toContain("managed automatically");
     } finally {

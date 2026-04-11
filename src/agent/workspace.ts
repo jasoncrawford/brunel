@@ -4,7 +4,7 @@ import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
 import * as display from "./display.js";
 import { fmtError } from "../utils.js";
-import { scoped } from "./commands.js";
+import type { CommandRegistry } from "./commands.js";
 
 const execFileAsync = promisify(execFileCb);
 
@@ -191,14 +191,14 @@ export interface WorkspaceCommandDeps {
 
 /**
  * Register workspace commands into the command registry.
- * Call this once at startup (or in tests via beforeEach after _reset()).
+ * Call this once at startup (or in tests via beforeEach after registry._reset()).
  * If workerMode is true, workspace:create prints "managed automatically" instead
  * of creating a workspace (workers have their workspace managed by the foreman).
  */
-export function registerWorkspaceCommands(deps: WorkspaceCommandDeps, workerMode = false): void {
-  const reg = scoped("workspace");
+export function registerWorkspaceCommands(deps: WorkspaceCommandDeps, registry: CommandRegistry, workerMode = false): void {
+  const reg = registry.scoped("workspace");
 
-  reg("create", {
+  reg.register("create", {
     description: "Create an isolated git checkout for this session",
     handler: async () => {
       if (workerMode) {
@@ -220,7 +220,7 @@ export function registerWorkspaceCommands(deps: WorkspaceCommandDeps, workerMode
     },
   });
 
-  reg("reset", {
+  reg.register("reset", {
     description: "Reset workspace to clean main branch",
     handler: async () => {
       const ws = deps.workspace.current;
@@ -235,7 +235,7 @@ export function registerWorkspaceCommands(deps: WorkspaceCommandDeps, workerMode
     },
   });
 
-  reg("remove", {
+  reg.register("remove", {
     description: "Remove the workspace checkout for this session",
     handler: async () => {
       const ws = deps.workspace.current;
@@ -252,7 +252,7 @@ export function registerWorkspaceCommands(deps: WorkspaceCommandDeps, workerMode
     },
   });
 
-  reg("prune", {
+  reg.register("prune", {
     description: "Remove orphaned worker workspace directories",
     handler: async () => {
       if (!deps.config) {

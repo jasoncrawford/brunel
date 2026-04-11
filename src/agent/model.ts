@@ -1,5 +1,6 @@
 import * as display from "./display.js";
 import type { PickResult } from "./input.js";
+import type { CommandRegistry } from "./commands.js";
 
 // ── Model cache ──────────────────────────────────────────────────────────────
 
@@ -111,4 +112,34 @@ export async function handleModelCommand(
   }
   print(display.c.darkGray(`Model set to ${chosen.displayName}.`));
   return chosen.value;
+}
+
+// ── Registration ─────────────────────────────────────────────────────────────
+
+export type ModelCommandDeps = {
+  getCurrentModel: () => string | undefined;
+  setCurrentModel: (m: string | undefined) => void;
+  fetchModelsFn: FetchModelsFn | undefined;
+  pickFn: (opts: string[], idx: number) => Promise<PickResult>;
+  print: (msg: string) => void;
+};
+
+/**
+ * Register the /model command into the given registry.
+ * Called from index.ts at startup with closures over mutable model state.
+ */
+export function registerModelCommand(registry: CommandRegistry, deps: ModelCommandDeps): void {
+  registry.register("model", {
+    description: "Select the Claude model to use",
+    handler: async (args) => {
+      const newModel = await handleModelCommand(
+        args,
+        deps.getCurrentModel(),
+        deps.pickFn,
+        deps.fetchModelsFn,
+        deps.print,
+      );
+      deps.setCurrentModel(newModel);
+    },
+  });
 }

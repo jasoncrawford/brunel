@@ -1,6 +1,6 @@
 import fs from "fs";
 import * as display from "./display.js";
-import { lookup, listAll } from "./commands.js";
+import type { CommandRegistry } from "./commands.js";
 
 // ── Stash ─────────────────────────────────────────────────────────────────────
 
@@ -58,11 +58,11 @@ export type SlashCommandResult =
  * Looks up the command name (and any aliases) in the registry.
  * Returns the canonical command name on match.
  */
-export function parseSlashCommand(input: string): SlashCommandResult | null {
+export function parseSlashCommand(input: string, registry: CommandRegistry): SlashCommandResult | null {
   if (!input.startsWith("/")) return null;
   const command = input.slice(1).split(/\s+/)[0];
   if (!command) return null;
-  const entry = lookup(command);
+  const entry = registry.lookup(command);
   if (entry) return { type: "command", name: entry.name };
   return { type: "unknown_command", command };
 }
@@ -150,11 +150,12 @@ export type DispatchResult =
  */
 export async function dispatchInput(
   input: string,
+  registry: CommandRegistry,
   readFile: (path: string) => string | null = defaultReadFile,
 ): Promise<DispatchResult> {
   if (!input) return { type: "skip" };
 
-  const slash = parseSlashCommand(input);
+  const slash = parseSlashCommand(input, registry);
   if (slash) {
     if (slash.type === "command") {
       // Extract everything after "/commandName" as args
@@ -233,13 +234,14 @@ function extractDescription(content: string): string {
  * line of the command file / skill).
  */
 export function listCommands(
+  registry: CommandRegistry,
   listDir: ListDir = defaultListDir,
   readFile: (path: string) => string | null = defaultReadFile,
   workerMode = false,
 ): CommandSuggestion[] {
-  const names = listCommandNames(listDir, readFile, workerMode);
+  const names = listCommandNames(registry, listDir, readFile, workerMode);
   return names.map(name => {
-    const entry = lookup(name);
+    const entry = registry.lookup(name);
     if (entry) return { name, description: entry.description };
     const content = resolveContent(name, readFile);
     return { name, description: content ? extractDescription(content) : "" };
@@ -251,10 +253,11 @@ export function listCommands(
  * "task-complete").
  */
 export function listWorkerCommands(
+  registry: CommandRegistry,
   listDir: ListDir = defaultListDir,
   readFile: (path: string) => string | null = defaultReadFile,
 ): CommandSuggestion[] {
-  return listCommands(listDir, readFile, true);
+  return listCommands(registry, listDir, readFile, true);
 }
 
 export type ListDir = (dir: string) => Array<{ name: string; isDir: boolean }> | null;
@@ -293,11 +296,12 @@ function defaultListDir(dir: string): Array<{ name: string; isDir: boolean }> | 
  * The listDir and readFile parameters are injectable for testing.
  */
 export function listCommandNames(
+  registry: CommandRegistry,
   listDir: ListDir = defaultListDir,
   readFile: (path: string) => string | null = defaultReadFile,
   workerMode = false,
 ): string[] {
-  const builtins = listAll(workerMode).map(e => e.name);
+  const builtins = registry.listAll(workerMode).map(e => e.name);
   const home = process.env.HOME ?? process.env.USERPROFILE ?? ""; // "" → walks "/.claude/commands" which will silently return null
   const commandsDir = `${home}/.claude/commands`;
   const fileCommands = walkDir(commandsDir, "", listDir);
@@ -311,10 +315,11 @@ export function listCommandNames(
  * The listDir and readFile parameters are injectable for testing.
  */
 export function listWorkerCommandNames(
+  registry: CommandRegistry,
   listDir: ListDir = defaultListDir,
   readFile: (path: string) => string | null = defaultReadFile,
 ): string[] {
-  return listCommandNames(listDir, readFile, true);
+  return listCommandNames(registry, listDir, readFile, true);
 }
 
 /**
@@ -384,7 +389,7 @@ export function listSkillNames(
 
 export function ask(
   promptStr: string,
-  getCommands: () => CommandSuggestion[] = () => listCommands(),
+  getCommands: () => CommandSuggestion[] = () => [],
   abort?: Promise<string>,
 ): Promise<string> {
   return new Promise((resolve) => {

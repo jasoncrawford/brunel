@@ -11,7 +11,7 @@ import type { ForemanMessage, GitHubEvent, TaskIssue, WorkerMessage } from "../t
 import { Workspace, confirmIfUnsafe } from "./workspace.js";
 import type { WorkspaceCommandDeps } from "./workspace.js";
 import { fmtError, generateWorkerId } from "../utils.js";
-import { scoped } from "./commands.js";
+import type { CommandRegistry } from "./commands.js";
 import { pick } from "./input.js";
 
 const execAsync = promisify(exec);
@@ -675,9 +675,9 @@ export class WorkerSession {
  *
  * Follows the same pattern as registerWorkspaceCommands in workspace.ts.
  */
-export function registerWorkerCommands(session: WorkerSession | undefined): void {
-  const workerReg = scoped("worker");
-  workerReg("complete", {
+export function registerWorkerCommands(session: WorkerSession | undefined, registry: CommandRegistry): void {
+  const workerReg = registry.scoped("worker");
+  workerReg.register("complete", {
     description: "Mark the current task as done",
     availability: "worker",
     handler: async () => {

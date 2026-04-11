@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PassThrough } from "stream";
 import { ask, matchCommands, filterCommands, listCommandNames, listWorkerCommandNames, listCommands, parseFrontmatter, listSkillNames, type ListDir, type CommandSuggestion } from "../src/agent/input.js";
-import { _reset } from "../src/agent/commands.js";
+import { CommandRegistry } from "../src/agent/commands.js";
 import { registerTestCommands } from "./helpers.js";
 
 // ── Test harness for ask() integration tests ──────────────────────────────────
@@ -14,6 +14,7 @@ function makeStdin() {
 }
 
 let origStdin: NodeJS.ReadStream;
+let registry: CommandRegistry;
 
 function withFakeStdin(fn: (stdin: PassThrough) => Promise<void>): Promise<void> {
   const stdin = makeStdin();
@@ -26,7 +27,7 @@ function withFakeStdin(fn: (stdin: PassThrough) => Promise<void>): Promise<void>
 beforeEach(() => {
   origStdin = process.stdin;
   vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-  _reset();
+  registry = new CommandRegistry();
 });
 
 afterEach(() => {
@@ -312,16 +313,16 @@ describe("filterCommands", () => {
 // ── listCommandNames ──────────────────────────────────────────────────────────
 
 describe("listCommandNames", () => {
-  beforeEach(async () => registerTestCommands());
+  beforeEach(async () => { registry = await registerTestCommands(); });
 
   it("always includes builtins clear and exit", () => {
-    const result = listCommandNames(() => null);
+    const result = listCommandNames(registry, () => null);
     expect(result).toContain("clear");
     expect(result).toContain("exit");
   });
 
   it("returns only builtins when directory is missing", () => {
-    const result = listCommandNames(() => null);
+    const result = listCommandNames(registry, () => null);
     expect(result).toEqual(["clear", "effort", "exit", "model", "workspace:create", "workspace:prune", "workspace:remove", "workspace:reset"]);
   });
 
@@ -330,7 +331,7 @@ describe("listCommandNames", () => {
       if (dir.endsWith("commands")) return [{ name: "brainstorm.md", isDir: false }];
       return null;
     };
-    const result = listCommandNames(listDir);
+    const result = listCommandNames(registry, listDir);
     expect(result).toContain("brainstorm");
   });
 
@@ -340,7 +341,7 @@ describe("listCommandNames", () => {
       if (dir.endsWith("/foo")) return [{ name: "bar.md", isDir: false }];
       return null;
     };
-    const result = listCommandNames(listDir);
+    const result = listCommandNames(registry, listDir);
     expect(result).toContain("foo:bar");
   });
 
@@ -351,7 +352,7 @@ describe("listCommandNames", () => {
       if (dir.endsWith("/b")) return [{ name: "c.md", isDir: false }];
       return null;
     };
-    const result = listCommandNames(listDir);
+    const result = listCommandNames(registry, listDir);
     expect(result).toContain("a:b:c");
   });
 
@@ -360,7 +361,7 @@ describe("listCommandNames", () => {
       if (dir.endsWith("commands")) return [{ name: "clear.md", isDir: false }];
       return null;
     };
-    const result = listCommandNames(listDir);
+    const result = listCommandNames(registry, listDir);
     const clears = result.filter(c => c === "clear");
     expect(clears).toHaveLength(1);
   });
@@ -374,7 +375,7 @@ describe("listCommandNames", () => {
       ];
       return null;
     };
-    const result = listCommandNames(listDir);
+    const result = listCommandNames(registry, listDir);
     expect(result).not.toContain("notes");
     expect(result).not.toContain("script");
     expect(result).toContain("valid");
@@ -388,7 +389,7 @@ describe("listCommandNames", () => {
       ];
       return null;
     };
-    const result = listCommandNames(listDir);
+    const result = listCommandNames(registry, listDir);
     expect(result).toEqual([...result].sort());
   });
 
@@ -401,12 +402,12 @@ describe("listCommandNames", () => {
       if (path.endsWith("SKILL.md")) return "---\nname: my-skill\n---\n";
       return null;
     };
-    const result = listCommandNames(listDir, readFile);
+    const result = listCommandNames(registry, listDir, readFile);
     expect(result).toContain("my-skill");
   });
 
   it("does not include worker:complete (worker-only command)", () => {
-    const result = listCommandNames(() => null);
+    const result = listCommandNames(registry, () => null);
     expect(result).not.toContain("worker:complete");
     expect(result).not.toContain("complete");
   });
@@ -421,7 +422,7 @@ describe("listCommandNames", () => {
       if (path.endsWith("SKILL.md")) return "---\nname: shared\n---\n";
       return null;
     };
-    const result = listCommandNames(listDir, readFile);
+    const result = listCommandNames(registry, listDir, readFile);
     const shared = result.filter(c => c === "shared");
     expect(shared).toHaveLength(1);
   });
@@ -430,10 +431,10 @@ describe("listCommandNames", () => {
 // ── listCommands ─────────────────────────────────────────────────────────────
 
 describe("listCommands", () => {
-  beforeEach(async () => registerTestCommands());
+  beforeEach(async () => { registry = await registerTestCommands(); });
 
   it("returns CommandSuggestion objects with name and description", () => {
-    const result = listCommands(() => null);
+    const result = listCommands(registry, () => null);
     expect(result.length).toBeGreaterThan(0);
     for (const cmd of result) {
       expect(cmd).toHaveProperty("name");
@@ -442,7 +443,7 @@ describe("listCommands", () => {
   });
 
   it("builtins have non-empty descriptions", () => {
-    const result = listCommands(() => null);
+    const result = listCommands(registry, () => null);
     const clear = result.find(c => c.name === "clear");
     expect(clear).toBeDefined();
     expect(clear!.description).toBeTruthy();
@@ -460,7 +461,7 @@ describe("listCommands", () => {
       if (path.endsWith("SKILL.md")) return "---\nname: my-skill\ndescription: Does a great thing\n---\n# Body\nSome content";
       return null;
     };
-    const result = listCommands(listDir, readFile);
+    const result = listCommands(registry, listDir, readFile);
     const skill = result.find(c => c.name === "my-skill");
     expect(skill).toBeDefined();
     expect(skill!.description).toBe("Does a great thing");
@@ -475,7 +476,7 @@ describe("listCommands", () => {
       if (path.endsWith("SKILL.md")) return "---\nname: my-skill\n---\n# First line heading\nMore content";
       return null;
     };
-    const result = listCommands(listDir, readFile);
+    const result = listCommands(registry, listDir, readFile);
     const skill = result.find(c => c.name === "my-skill");
     expect(skill).toBeDefined();
     expect(skill!.description).toBe("# First line heading");
@@ -491,7 +492,7 @@ describe("listCommands", () => {
       if (path === `${home}/.claude/commands/mycmd.md`) return "---\ndescription: My command description\n---\nDo something";
       return null;
     };
-    const result = listCommands(listDir, readFile);
+    const result = listCommands(registry, listDir, readFile);
     const cmd = result.find(c => c.name === "mycmd");
     expect(cmd).toBeDefined();
     expect(cmd!.description).toBe("My command description");
@@ -507,14 +508,14 @@ describe("listCommands", () => {
       if (path === `${home}/.claude/commands/mycmd.md`) return "Do something useful\nMore text";
       return null;
     };
-    const result = listCommands(listDir, readFile);
+    const result = listCommands(registry, listDir, readFile);
     const cmd = result.find(c => c.name === "mycmd");
     expect(cmd).toBeDefined();
     expect(cmd!.description).toBe("Do something useful");
   });
 
   it("result is sorted alphabetically by name", () => {
-    const result = listCommands(() => null);
+    const result = listCommands(registry, () => null);
     const names = result.map(c => c.name);
     expect(names).toEqual([...names].sort());
   });
@@ -523,21 +524,21 @@ describe("listCommands", () => {
 // ── listWorkerCommandNames ────────────────────────────────────────────────────
 
 describe("listWorkerCommandNames", () => {
-  beforeEach(async () => registerTestCommands());
+  beforeEach(async () => { registry = await registerTestCommands(); });
 
   it("includes worker:complete", () => {
-    const result = listWorkerCommandNames(() => null);
+    const result = listWorkerCommandNames(registry, () => null);
     expect(result).toContain("worker:complete");
   });
 
   it("also includes clear and exit", () => {
-    const result = listWorkerCommandNames(() => null);
+    const result = listWorkerCommandNames(registry, () => null);
     expect(result).toContain("clear");
     expect(result).toContain("exit");
   });
 
   it("result is sorted alphabetically", () => {
-    const result = listWorkerCommandNames(() => null);
+    const result = listWorkerCommandNames(registry, () => null);
     expect(result).toEqual([...result].sort());
   });
 });

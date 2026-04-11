@@ -15,11 +15,11 @@ import type { RunQuery, WorkerModeConfig } from "./worker.js";
 import { loadConfig } from "../config.js";
 import { Workspace, confirmIfUnsafe, registerWorkspaceCommands } from "./workspace.js";
 import { fmtError } from "../utils.js";
-import { handleModelCommand, getCachedModels, _resetCachedModels, setCachedModels } from "./model.js";
+import { handleModelCommand, getCachedModels, _resetCachedModels, setCachedModels, registerModelCommand } from "./model.js";
 import type { ModelInfo, FetchModelsFn } from "./model.js";
-import { handleEffortCommand } from "./effort.js";
+import { handleEffortCommand, registerEffortCommand } from "./effort.js";
 import type { EffortValue } from "./effort.js";
-import { _reset, register, execute } from "./commands.js";
+import { CommandRegistry } from "./commands.js";
 export { parseSlashCommand, resolveCommandFilePath, resolveContent, dispatchInput, matchCommands, listCommandNames, listWorkerCommandNames, listWorkerCommands, ask } from "./input.js";
 export type { SlashCommandResult, DispatchResult, ListDir } from "./input.js";
 export { handleModelCommand, getCachedModels, _resetCachedModels } from "./model.js";
@@ -297,47 +297,41 @@ export async function main(
   // Register all commands. Commands are always present in the registry for
   // both REPL and worker modes; worker-only commands degrade gracefully when
   // not connected to a foreman.
-  _reset();
+  const registry = new CommandRegistry();
   registerWorkspaceCommands(
     session
       ? session.workspaceCommandDeps
       : { workspace: workspaceRef, config: workspaceCfg ? { ...workspaceCfg, sessionId: sessionId_ } : undefined, originalCwd, confirm },
+    registry,
     !!session,
   );
-  registerWorkerCommands(session);
-  register("exit", {
+  registerWorkerCommands(session, registry);
+  registry.register("exit", {
     description: "Exit",
     handler: async () => {
       if (!session) await doExit();
       return "exit";
     },
   });
-  register("clear", {
+  registry.register("clear", {
     description: "Clear the conversation",
     handler: async () => {
       sessionId = undefined;
       display.print(display.clearBreak());
     },
   });
-  register("model", {
-    description: "Select the Claude model to use",
-    handler: async (args) => {
-      const pickModelFn = (opts: string[], idx: number) =>
-        pick(opts, { currentIdx: idx, escapable: true });
-      const newModel = await handleModelCommand(args, currentModel, pickModelFn, fetchModelsFn, display.print);
-      currentModel = newModel;
-      if (session) session.currentModel = newModel;
-    },
+  registerModelCommand(registry, {
+    getCurrentModel: () => currentModel,
+    setCurrentModel: (m) => { currentModel = m; if (session) session.currentModel = m; },
+    fetchModelsFn,
+    pickFn: (opts, idx) => pick(opts, { currentIdx: idx, escapable: true }),
+    print: display.print,
   });
-  register("effort", {
-    description: "Set the effort level for Claude's thinking",
-    handler: async (args) => {
-      const pickEffortFn = (opts: string[], idx: number) =>
-        pick(opts, { currentIdx: idx, escapable: true });
-      const newEffort = await handleEffortCommand(args, currentEffort, pickEffortFn, display.print);
-      currentEffort = newEffort;
-      if (session) session.currentEffort = newEffort;
-    },
+  registerEffortCommand(registry, {
+    getCurrentEffort: () => currentEffort,
+    setCurrentEffort: (e) => { currentEffort = e; if (session) session.currentEffort = e; },
+    pickFn: (opts, idx) => pick(opts, { currentIdx: idx, escapable: true }),
+    print: display.print,
   });
 
   /**
@@ -371,7 +365,7 @@ export async function main(
     // empty promptLine suppresses the drawFresh callback so incoming messages
     // are printed cleanly without a prompt preceding or following them.
     const promptStr = session ? (showPrompt ? "\n[agent] > " : "") : "\n> ";
-    const input = await ask(promptStr, listWorkerCommands, wsAbort);
+    const input = await ask(promptStr, () => listWorkerCommands(registry), wsAbort);
 
     // ^D / ^C on empty buffer — treat as exit.
     if (input === "__eof__") {
@@ -398,7 +392,7 @@ export async function main(
       continue;
     }
 
-    const action = await dispatchInput(input);
+    const action = await dispatchInput(input, registry);
 
     if (action.type === "skip") continue;
 
@@ -408,7 +402,7 @@ export async function main(
     }
 
     if (action.type === "command") {
-      const result = await execute(action.name, action.args);
+      const result = await registry.execute(action.name, action.args);
       if (result === "exit") break;
       if (result === "task-complete") showPrompt = false;
       continue;
