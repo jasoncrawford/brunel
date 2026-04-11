@@ -17,7 +17,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import http from "http";
 import { WebSocket, WebSocketServer } from "ws";
 import type { AddressInfo } from "net";
-import type { ForWorkerMsg } from "../src/types.js";
+import * as Wire from "../src/wire.js";
 import { Worker } from "../src/foreman/models/worker-registry.js";
 import { createForemanWss } from "../src/foreman/controllers/wss.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
@@ -35,17 +35,17 @@ initDb(supabase);
 // ── Generic helpers ───────────────────────────────────────────────────────────
 
 /** FIFO queue that buffers all incoming WebSocket messages. */
-function makeQueue(ws: WebSocket): { next: () => Promise<ForWorkerMsg>; isEmpty: () => boolean } {
-  const pending: ForWorkerMsg[] = [];
-  const waiters: Array<(m: ForWorkerMsg) => void> = [];
+function makeQueue(ws: WebSocket): { next: () => Promise<Wire.ForemanMessage>; isEmpty: () => boolean } {
+  const pending: Wire.ForemanMessage[] = [];
+  const waiters: Array<(m: Wire.ForemanMessage) => void> = [];
   ws.on("message", (data: Buffer | string) => {
-    const msg = JSON.parse(data.toString()) as ForWorkerMsg;
+    const msg = JSON.parse(data.toString()) as Wire.ForemanMessage;
     const waiter = waiters.shift();
     if (waiter) waiter(msg);
     else pending.push(msg);
   });
   return {
-    next(): Promise<ForWorkerMsg> {
+    next(): Promise<Wire.ForemanMessage> {
       if (pending.length > 0) return Promise.resolve(pending.shift()!);
       return new Promise((r) => waiters.push(r));
     },

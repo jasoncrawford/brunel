@@ -7,7 +7,7 @@ import { WebSocket } from "ws";
 import * as display from "./display.js";
 import { buildInitialPrompt, buildEventPrompt } from "./templates.js";
 import type { EffortValue } from "./effort.js";
-import type { ForWorkerMsg, WorkerEvent, TaskIssue, WorkerMessage } from "../types.js";
+import * as Wire from "../wire.js";
 import { Workspace, confirmIfUnsafe } from "./workspace.js";
 import type { WorkspaceCommandDeps } from "./workspace.js";
 import { fmtError, generateWorkerId } from "../utils.js";
@@ -18,7 +18,7 @@ const execAsync = promisify(exec);
 
 // ── Event classification ───────────────────────────────────────────────────────
 
-export function classifyEvent(event: WorkerEvent): "actionable" | "log_only" {
+export function classifyEvent(event: Wire.WebhookEvent): "actionable" | "log_only" {
   const action = event.payload["action"] as string | undefined;
 
   switch (event.name) {
@@ -51,7 +51,7 @@ export function classifyEvent(event: WorkerEvent): "actionable" | "log_only" {
 
 // ── Debounce duration ──────────────────────────────────────────────────────────
 
-export function debounceMs(events: WorkerEvent[]): number {
+export function debounceMs(events: Wire.WebhookEvent[]): number {
   if (events.some(e => e.name === "pull_request" && e.payload["action"] === "closed")) {
     return 0;
   }
@@ -166,7 +166,7 @@ export type WsFactory = (workerId: string, taskId?: string) => WebSocket;
 export type RunQuery = (prompt: string, sessionId: string | undefined, abortController?: AbortController, model?: string, effort?: EffortValue) => Promise<string | undefined>;
 export type WorkerDisplay = {
   print: (line: string | null) => void;
-  printForWorkerMsg: (msg: ForWorkerMsg) => void;
+  printForemanMessage: (msg: Wire.ForemanMessage) => void;
   startPersistentStatus?: (getText: () => string) => void;
   stopPersistentStatus?: () => void;
   updatePersistentStatus?: () => void;
@@ -211,7 +211,7 @@ export const WS_PROMPT = "__ws_prompt__";
 export type QueuedPrompt = { prompt: string; fresh: boolean };
 
 // Messages that must wait for hello_ack before being sent.
-type BufferableMessage = Extract<WorkerMessage, { type: "task_complete" }>;
+type BufferableMessage = Extract<Wire.WorkerMessage, { type: "task_complete" }>;
 
 /**
  * WebSocket client and task lifecycle manager. WorkerSession owns the foreman
@@ -225,8 +225,8 @@ type BufferableMessage = Extract<WorkerMessage, { type: "task_complete" }>;
  */
 export class WorkerSession {
   private currentTaskId: string | undefined;
-  private currentIssue: TaskIssue | undefined;
-  private pendingEvents: WorkerEvent[] = [];
+  private currentIssue: Wire.TaskIssue | undefined;
+  private pendingEvents: Wire.WebhookEvent[] = [];
   private pendingPrompts: QueuedPrompt[] = [];
   private ws: WebSocket | undefined;
   private resolveWsInput: ((v: string) => void) | null = null;
@@ -523,7 +523,7 @@ export class WorkerSession {
     });
 
     ws.on("message", (data: Buffer | string) => {
-      let msg: ForWorkerMsg;
+      let msg: Wire.ForemanMessage;
       try { msg = JSON.parse(data.toString()); } catch { return; }
       this.handleMessage(msg);
     });
@@ -550,8 +550,8 @@ export class WorkerSession {
     });
   }
 
-  private handleMessage(msg: ForWorkerMsg): void {
-    this.display.printForWorkerMsg(msg);
+  private handleMessage(msg: Wire.ForemanMessage): void {
+    this.display.printForemanMessage(msg);
 
     if (msg.type === "hello_ack") {
       if (msg.status === "cancelled") {
@@ -625,13 +625,13 @@ export class WorkerSession {
         this.prIsClosed = false;
         // process normally
       } else if (this.prIsClosed && event.name === "check_suite") {
-        // Post-merge check suite: already logged via printForWorkerMsg; silently drop.
+        // Post-merge check suite: already logged via printForemanMessage; silently drop.
         return;
       }
 
       const classification = classifyEvent(event);
       if (classification === "log_only") {
-        // Already logged via printForWorkerMsg above; no further action.
+        // Already logged via printForemanMessage above; no further action.
         return;
       }
 
@@ -658,7 +658,7 @@ export class WorkerSession {
     }
   }
 
-  private buildAndLogEventPrompt(events: WorkerEvent[]): string {
+  private buildAndLogEventPrompt(events: Wire.WebhookEvent[]): string {
     const prompt = buildEventPrompt(events);
     this.display.print(display.c.sageGreen(prompt));
     return prompt;
@@ -743,7 +743,7 @@ export async function startWorkerMode(config: WorkerModeConfig): Promise<{
 
   const workerDisplay: WorkerDisplay = {
     print: display.print,
-    printForWorkerMsg: display.printForWorkerMsg,
+    printForemanMessage: display.printForemanMessage,
     startPersistentStatus: display.startPersistentStatus,
     stopPersistentStatus: display.stopPersistentStatus,
     updatePersistentStatus: display.updatePersistentStatus,

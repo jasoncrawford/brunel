@@ -10,8 +10,8 @@ import { Task } from "../src/foreman/models/task.js";
 import { setupInMemoryTasks } from "./helpers/task.js";
 import { loadDefaultConfig } from "../src/config.js";
 const defaultCfg = await loadDefaultConfig();
-import type { ForWorkerMsg } from "../src/types.js";
-import { ForemanMessage } from "../src/foreman/models/foreman-message.js";
+import * as Wire from "../src/wire.js";
+import { MessageLog } from "../src/foreman/models/message-log.js";
 import { waitUntil } from "./helpers.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -24,24 +24,24 @@ function connectWorker(port: number): Promise<WebSocket> {
   });
 }
 
-function nextMsg(ws: WebSocket): Promise<ForWorkerMsg> {
+function nextMsg(ws: WebSocket): Promise<Wire.ForemanMessage> {
   return new Promise((resolve) => {
     ws.once("message", (data) => resolve(JSON.parse(data.toString())));
   });
 }
 
 /** FIFO queue that buffers all messages — safe against hello_ack + task_assigned in same TCP packet. */
-function makeQueue(ws: WebSocket): { next: () => Promise<ForWorkerMsg> } {
-  const pending: ForWorkerMsg[] = [];
-  const waiters: Array<(m: ForWorkerMsg) => void> = [];
+function makeQueue(ws: WebSocket): { next: () => Promise<Wire.ForemanMessage> } {
+  const pending: Wire.ForemanMessage[] = [];
+  const waiters: Array<(m: Wire.ForemanMessage) => void> = [];
   ws.on("message", (data: Buffer | string) => {
-    const msg = JSON.parse(data.toString()) as ForWorkerMsg;
+    const msg = JSON.parse(data.toString()) as Wire.ForemanMessage;
     const waiter = waiters.shift();
     if (waiter) waiter(msg);
     else pending.push(msg);
   });
   return {
-    next(): Promise<ForWorkerMsg> {
+    next(): Promise<Wire.ForemanMessage> {
       if (pending.length > 0) return Promise.resolve(pending.shift()!);
       return new Promise((r) => waiters.push(r));
     },
@@ -494,7 +494,7 @@ describe("hello_ack handshake", () => {
     await routeEvent("evt-1", "issue_comment", { issue: { number: 1 } });
 
     const ws = await connect();
-    const messages: ForWorkerMsg[] = [];
+    const messages: Wire.ForemanMessage[] = [];
     ws.on("message", (data) => messages.push(JSON.parse(data.toString())));
     send(ws, { type: "worker_hello", workerId: "w1", taskId: "1", status: "busy" });
     await waitUntil(() => messages.length >= 2);
@@ -700,8 +700,8 @@ describe("worker WebSocket connection", () => {
 });
 
 describe("worker disconnect DB logging", () => {
-  it("calls ForemanMessage.log with worker_disconnected when a registered worker disconnects", async () => {
-    const logSpy = vi.spyOn(ForemanMessage, "log").mockReturnValue(undefined);
+  it("calls MessageLog.log with worker_disconnected when a registered worker disconnects", async () => {
+    const logSpy = vi.spyOn(MessageLog, "log").mockReturnValue(undefined);
 
     const server = http.createServer();
     const localTm = new TaskManager();
@@ -735,7 +735,7 @@ describe("worker disconnect DB logging", () => {
   });
 
   it("includes the current taskId in the disconnect event when worker had an active task", async () => {
-    const logSpy = vi.spyOn(ForemanMessage, "log").mockReturnValue(undefined);
+    const logSpy = vi.spyOn(MessageLog, "log").mockReturnValue(undefined);
 
     const localTm = new TaskManager();
     setupInMemoryTasks(localTm);
@@ -1086,7 +1086,7 @@ describe("graceful shutdown", () => {
   });
 
   it("logs worker_disconnected with code 1001 when shutdown closes a registered worker", async () => {
-    const logSpy = vi.spyOn(ForemanMessage, "log").mockReturnValue(undefined);
+    const logSpy = vi.spyOn(MessageLog, "log").mockReturnValue(undefined);
     const srv = http.createServer();
     const localTm = new TaskManager();
     setupInMemoryTasks(localTm);

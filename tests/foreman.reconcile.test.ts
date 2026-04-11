@@ -7,11 +7,11 @@ import { Task } from "../src/foreman/models/task.js";
 import { setupInMemoryTasks } from "./helpers/task.js";
 import { loadDefaultConfig } from "../src/config.js";
 const defaultCfg = await loadDefaultConfig();
-import type { TaskIssue } from "../src/types.js";
+import * as Wire from "../src/wire.js";
 
 const TASK_LABEL = "brunel:ready";
 
-function makeIssue(n: number): TaskIssue {
+function makeIssue(n: number): Wire.TaskIssue {
   return { number: n, title: `Issue ${n}`, body: "body", labels: [TASK_LABEL], repoUrl: "https://github.com/o/r" };
 }
 

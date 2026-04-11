@@ -1,6 +1,6 @@
 import type { LogEntry } from "../admin-ws.js";
 import { WebhookEvent } from "./webhook-event.js";
-import { ForemanMessage } from "./foreman-message.js";
+import { MessageLog } from "./message-log.js";
 
 // ── Cross-table activity log query ─────────────────────────────────────────────
 // Merges webhook_events and foreman_messages by timestamp for the admin dashboard.
@@ -14,22 +14,22 @@ export interface QueryActivityLogOpts {
 export async function queryActivityLog(opts: QueryActivityLogOpts = {}): Promise<LogEntry[]> {
   const limit = opts.limit ?? 100;
   let webhooks: WebhookEvent[];
-  let messages: ForemanMessage[];
+  let messages: MessageLog[];
 
   if (opts.taskId) {
     [webhooks, messages] = await Promise.all([
       WebhookEvent.queryForTask(opts.taskId),
-      ForemanMessage.queryForTask(opts.taskId),
+      MessageLog.queryForTask(opts.taskId),
     ]);
   } else if (opts.workerId) {
     [webhooks, messages] = await Promise.all([
       WebhookEvent.queryForWorker(opts.workerId),
-      ForemanMessage.queryForWorker(opts.workerId),
+      MessageLog.queryForWorker(opts.workerId),
     ]);
   } else {
     [webhooks, messages] = await Promise.all([
       WebhookEvent.query({ limit }),
-      ForemanMessage.query({ limit }),
+      MessageLog.query({ limit }),
     ]);
   }
 

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { buildInitialPrompt, buildEventPrompt, fmtEventList, resolveEventTemplate, coalesceEvents, EVENT_FMT, formatCommentLocation, type EventTemplateFmtTable } from "../src/agent/templates.js";
-import type { WorkerEvent } from "../src/types.js";
+import * as Wire from "../src/wire.js";
 
 describe("buildInitialPrompt", () => {
   it("includes issue number, title, body, labels, and repoUrl", () => {
@@ -91,7 +91,7 @@ describe("buildInitialPrompt", () => {
 
 describe("buildEventPrompt", () => {
   it("returns multi-event fallback for 2+ events", () => {
-    const events: WorkerEvent[] = [
+    const events: Wire.WebhookEvent[] = [
       { id: "e1", name: "issue_comment", payload: {} },
       { id: "e2", name: "pull_request_review", payload: {} },
     ];
@@ -100,7 +100,7 @@ describe("buildEventPrompt", () => {
   });
 
   it("renders individual event prompts — no raw template literals", () => {
-    const events: WorkerEvent[] = [
+    const events: Wire.WebhookEvent[] = [
       { id: "e1", name: "issue_comment", payload: {} },
       { id: "e2", name: "pull_request_review", payload: {} },
     ];
@@ -109,7 +109,7 @@ describe("buildEventPrompt", () => {
   });
 
   it("pull_request_review — contains PR number, review state, and body", () => {
-    const evt: WorkerEvent = {
+    const evt: Wire.WebhookEvent = {
       id: "e1",
       name: "pull_request_review",
       payload: {
@@ -124,7 +124,7 @@ describe("buildEventPrompt", () => {
   });
 
   it("pull_request_review_comment — contains PR number, file path, and body", () => {
-    const evt: WorkerEvent = {
+    const evt: Wire.WebhookEvent = {
       id: "e1",
       name: "pull_request_review_comment",
       payload: {
@@ -139,7 +139,7 @@ describe("buildEventPrompt", () => {
   });
 
   it("pull_request_review_comment with line number → includes line in location", () => {
-    const events: WorkerEvent[] = [
+    const events: Wire.WebhookEvent[] = [
       {
         id: "e1",
         name: "pull_request_review_comment",
@@ -155,7 +155,7 @@ describe("buildEventPrompt", () => {
   });
 
   it("issue_comment — contains issue number and comment body", () => {
-    const evt: WorkerEvent = {
+    const evt: Wire.WebhookEvent = {
       id: "e1",
       name: "issue_comment",
       payload: {
@@ -169,14 +169,14 @@ describe("buildEventPrompt", () => {
   });
 
   it("unknown event type — returns empty string (unrecognised events are log_only, never reach prompt builder)", () => {
-    const evt: WorkerEvent = { id: "e1", name: "deployment", payload: {} };
+    const evt: Wire.WebhookEvent = { id: "e1", name: "deployment", payload: {} };
     const p = buildEventPrompt([evt]);
     expect(p).toBe("");
   });
 
   describe("pull_request/closed", () => {
     it("merged PR — includes PR number and 'merged'", () => {
-      const evt: WorkerEvent = {
+      const evt: Wire.WebhookEvent = {
         id: "e1",
         name: "pull_request",
         payload: {
@@ -190,7 +190,7 @@ describe("buildEventPrompt", () => {
     });
 
     it("closed-without-merge PR — includes PR number and 'closed without merging'", () => {
-      const evt: WorkerEvent = {
+      const evt: Wire.WebhookEvent = {
         id: "e1",
         name: "pull_request",
         payload: {
@@ -208,7 +208,7 @@ describe("buildEventPrompt", () => {
 
 describe("check_suite success prompt", () => {
   it("includes instruction to wait for remaining tests before acting", () => {
-    const events: WorkerEvent[] = [
+    const events: Wire.WebhookEvent[] = [
       { id: "e1", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success", name: "CI" } } },
     ];
     const p = buildEventPrompt(events);
@@ -217,7 +217,7 @@ describe("check_suite success prompt", () => {
   });
 
   it("branch-review prompt reminds to check docs", () => {
-    const events: WorkerEvent[] = [
+    const events: Wire.WebhookEvent[] = [
       { id: "e1", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success", name: "CI" } } },
     ];
     const p = buildEventPrompt(events);
@@ -228,18 +228,18 @@ describe("check_suite success prompt", () => {
 
 describe("fmtEventList", () => {
   it("formats a single event with action as name/action", () => {
-    const events: WorkerEvent[] = [{ id: "e1", name: "check_suite", payload: { action: "completed" } }];
+    const events: Wire.WebhookEvent[] = [{ id: "e1", name: "check_suite", payload: { action: "completed" } }];
     expect(fmtEventList(events)).toBe("check_suite/completed");
   });
 
   it("formats a single event without action as just the name", () => {
-    const events: WorkerEvent[] = [{ id: "e1", name: "deployment", payload: {} }];
+    const events: Wire.WebhookEvent[] = [{ id: "e1", name: "deployment", payload: {} }];
     expect(fmtEventList(events)).toBe("deployment");
     expect(fmtEventList(events)).not.toContain("deployment/");
   });
 
   it("formats multiple events as comma-separated name/action pairs", () => {
-    const events: WorkerEvent[] = [
+    const events: Wire.WebhookEvent[] = [
       { id: "e1", name: "issue_comment", payload: { action: "created" } },
       { id: "e2", name: "check_suite", payload: { action: "completed" } },
     ];
@@ -255,7 +255,7 @@ describe("resolveEventTemplate", () => {
       push: () => "pushed!",
       _default: (_p, event) => `unknown: ${event.name}`,
     };
-    const evt: WorkerEvent = { id: "e1", name: "push", payload: {} };
+    const evt: Wire.WebhookEvent = { id: "e1", name: "push", payload: {} };
     expect(resolveEventTemplate(table, "push", evt)).toBe("pushed!");
   });
 
@@ -263,7 +263,7 @@ describe("resolveEventTemplate", () => {
     const table: EventTemplateFmtTable = {
       _default: (_p, event) => `fallback: ${event.name}`,
     };
-    const evt: WorkerEvent = { id: "e1", name: "delete", payload: {} };
+    const evt: Wire.WebhookEvent = { id: "e1", name: "delete", payload: {} };
     expect(resolveEventTemplate(table, "delete", evt)).toBe("fallback: delete");
   });
 
@@ -271,7 +271,7 @@ describe("resolveEventTemplate", () => {
     const table: EventTemplateFmtTable = {
       push: () => "pushed!",
     };
-    const evt: WorkerEvent = { id: "e1", name: "unknown", payload: {} };
+    const evt: Wire.WebhookEvent = { id: "e1", name: "unknown", payload: {} };
     expect(resolveEventTemplate(table, "unknown", evt)).toBe("");
   });
 
@@ -279,14 +279,14 @@ describe("resolveEventTemplate", () => {
     const table: EventTemplateFmtTable = {
       push: (p) => `ref: ${p.ref}`,
     };
-    const evt: WorkerEvent = { id: "e1", name: "push", payload: { ref: "refs/heads/main" } };
+    const evt: Wire.WebhookEvent = { id: "e1", name: "push", payload: { ref: "refs/heads/main" } };
     expect(resolveEventTemplate(table, "push", evt)).toBe("ref: refs/heads/main");
   });
 });
 
 describe("EVENT_FMT table", () => {
   it("check_suite action_required triggers failure message", () => {
-    const evt: WorkerEvent = {
+    const evt: Wire.WebhookEvent = {
       id: "e1",
       name: "check_suite",
       payload: { check_suite: { conclusion: "action_required" } },
@@ -297,7 +297,7 @@ describe("EVENT_FMT table", () => {
   });
 
   it("check_suite/completed success — prompts to verify merge-readiness", () => {
-    const evt: WorkerEvent = {
+    const evt: Wire.WebhookEvent = {
       id: "e1",
       name: "check_suite",
       payload: { check_suite: { conclusion: "success" } },
@@ -307,7 +307,7 @@ describe("EVENT_FMT table", () => {
   });
 
   it("pull_request/closed merged — instructs cleanup", () => {
-    const evt: WorkerEvent = {
+    const evt: Wire.WebhookEvent = {
       id: "e1",
       name: "pull_request",
       payload: { action: "closed", pull_request: { number: 5, merged: true } },
@@ -318,7 +318,7 @@ describe("EVENT_FMT table", () => {
   });
 
   it("pull_request/closed — instructs worker to delete the branch", () => {
-    const evt: WorkerEvent = {
+    const evt: Wire.WebhookEvent = {
       id: "e1",
       name: "pull_request",
       payload: { action: "closed", pull_request: { number: 5, merged: true } },
@@ -328,7 +328,7 @@ describe("EVENT_FMT table", () => {
   });
 
   it("pull_request/closed not merged — asks how to proceed", () => {
-    const evt: WorkerEvent = {
+    const evt: Wire.WebhookEvent = {
       id: "e1",
       name: "pull_request",
       payload: { action: "closed", pull_request: { number: 7, merged: false } },
@@ -338,7 +338,7 @@ describe("EVENT_FMT table", () => {
   });
 
   it("pull_request/closed — instructs to use skills for general practices", () => {
-    const evt: WorkerEvent = {
+    const evt: Wire.WebhookEvent = {
       id: "e1",
       name: "pull_request",
       payload: { action: "closed", pull_request: { number: 5, merged: true } },
@@ -349,7 +349,7 @@ describe("EVENT_FMT table", () => {
   });
 
   it("pull_request/closed — instructs to use CLAUDE.md for project-specific conventions", () => {
-    const evt: WorkerEvent = {
+    const evt: Wire.WebhookEvent = {
       id: "e1",
       name: "pull_request",
       payload: { action: "closed", pull_request: { number: 5, merged: true } },
@@ -360,7 +360,7 @@ describe("EVENT_FMT table", () => {
   });
 
   it("pull_request/closed — warns not to use project memories", () => {
-    const evt: WorkerEvent = {
+    const evt: Wire.WebhookEvent = {
       id: "e1",
       name: "pull_request",
       payload: { action: "closed", pull_request: { number: 5, merged: true } },
@@ -374,7 +374,7 @@ describe("EVENT_FMT table", () => {
 
 describe("pull_request/opened", () => {
   it("includes PR number and prompt to check docs", () => {
-    const evt: WorkerEvent = {
+    const evt: Wire.WebhookEvent = {
       id: "e1",
       name: "pull_request",
       payload: {
@@ -392,7 +392,7 @@ describe("pull_request/opened", () => {
 
 describe("pull_request/auto_merge_enabled", () => {
   it("includes PR number and branch-review instruction", () => {
-    const evt: WorkerEvent = {
+    const evt: Wire.WebhookEvent = {
       id: "e1",
       name: "pull_request",
       payload: {
@@ -408,7 +408,7 @@ describe("pull_request/auto_merge_enabled", () => {
   });
 
   it("returns empty string for other pull_request actions", () => {
-    const evt: WorkerEvent = {
+    const evt: Wire.WebhookEvent = {
       id: "e1",
       name: "pull_request",
       payload: { action: "labeled", pull_request: { number: 1 } },
@@ -419,7 +419,7 @@ describe("pull_request/auto_merge_enabled", () => {
 
 describe("coalesceEvents", () => {
   it("multiple failing check suites → one _check_suites event with status: failed listing only failed names", () => {
-    const events: WorkerEvent[] = [
+    const events: Wire.WebhookEvent[] = [
       { id: "e1", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "failure", name: "CI / test" } } },
       { id: "e2", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "failure", name: "CI / lint" } } },
     ];
@@ -432,7 +432,7 @@ describe("coalesceEvents", () => {
   });
 
   it("multiple passing check suites → one _check_suites event with status: succeeded listing all names", () => {
-    const events: WorkerEvent[] = [
+    const events: Wire.WebhookEvent[] = [
       { id: "e1", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success", name: "CI / test" } } },
       { id: "e2", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success", name: "CI / lint" } } },
     ];
@@ -445,7 +445,7 @@ describe("coalesceEvents", () => {
   });
 
   it("mixed failing + passing check suites → status: failed, only failed names in failed array", () => {
-    const events: WorkerEvent[] = [
+    const events: Wire.WebhookEvent[] = [
       { id: "e1", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "failure", name: "CI / test" } } },
       { id: "e2", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success", name: "CI / lint" } } },
     ];
@@ -457,7 +457,7 @@ describe("coalesceEvents", () => {
   });
 
   it("single check suite → still coalesced into _check_suites for consistent rendering", () => {
-    const events: WorkerEvent[] = [
+    const events: Wire.WebhookEvent[] = [
       { id: "e1", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success", name: "CI" } } },
     ];
     const result = coalesceEvents(events);
@@ -466,7 +466,7 @@ describe("coalesceEvents", () => {
   });
 
   it("check suite uses app.name when name is absent", () => {
-    const events: WorkerEvent[] = [
+    const events: Wire.WebhookEvent[] = [
       { id: "e1", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success", app: { name: "GitHub Actions" } } } },
     ];
     const result = coalesceEvents(events);
@@ -474,7 +474,7 @@ describe("coalesceEvents", () => {
   });
 
   it("review + review comments → _code_review event with comments array", () => {
-    const events: WorkerEvent[] = [
+    const events: Wire.WebhookEvent[] = [
       { id: "e1", name: "pull_request_review", payload: { pull_request: { number: 5 }, review: { state: "changes_requested", body: "Please fix" } } },
       { id: "e2", name: "pull_request_review_comment", payload: { pull_request: { number: 5 }, comment: { path: "src/foo.ts", body: "This is wrong" } } },
     ];
@@ -489,7 +489,7 @@ describe("coalesceEvents", () => {
   });
 
   it("review alone → _code_review with empty comments array", () => {
-    const events: WorkerEvent[] = [
+    const events: Wire.WebhookEvent[] = [
       { id: "e1", name: "pull_request_review", payload: { pull_request: { number: 5 }, review: { state: "approved", body: "" } } },
     ];
     const result = coalesceEvents(events);
@@ -499,7 +499,7 @@ describe("coalesceEvents", () => {
   });
 
   it("review comment with line number → included in coalesced comments", () => {
-    const events: WorkerEvent[] = [
+    const events: Wire.WebhookEvent[] = [
       {
         id: "e1",
         name: "pull_request_review_comment",
@@ -516,7 +516,7 @@ describe("coalesceEvents", () => {
   });
 
   it("review comment with line range → both line and startLine included", () => {
-    const events: WorkerEvent[] = [
+    const events: Wire.WebhookEvent[] = [
       {
         id: "e1",
         name: "pull_request_review_comment",
@@ -533,7 +533,7 @@ describe("coalesceEvents", () => {
   });
 
   it("mixed types (check suites + issue_comment) → both preserved", () => {
-    const events: WorkerEvent[] = [
+    const events: Wire.WebhookEvent[] = [
       { id: "e1", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success", name: "CI" } } },
       { id: "e2", name: "issue_comment", payload: { issue: { number: 1 }, comment: { body: "LGTM" } } },
     ];
@@ -546,7 +546,7 @@ describe("coalesceEvents", () => {
 
 describe("buildEventPrompt — pipeline behavior", () => {
   it("single event → no 'Multiple events have happened' prefix", () => {
-    const events: WorkerEvent[] = [
+    const events: Wire.WebhookEvent[] = [
       { id: "e1", name: "issue_comment", payload: { issue: { number: 1 }, comment: { body: "hello" } } },
     ];
     const p = buildEventPrompt(events);
@@ -554,7 +554,7 @@ describe("buildEventPrompt — pipeline behavior", () => {
   });
 
   it("multiple events after coalescing → 'Multiple events have happened:' prefix", () => {
-    const events: WorkerEvent[] = [
+    const events: Wire.WebhookEvent[] = [
       { id: "e1", name: "issue_comment", payload: { issue: { number: 1 }, comment: { body: "hello" } } },
       { id: "e2", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success", name: "CI" } } },
     ];
@@ -563,7 +563,7 @@ describe("buildEventPrompt — pipeline behavior", () => {
   });
 
   it("multiple check suites coalesce to one → no 'Multiple events' prefix", () => {
-    const events: WorkerEvent[] = [
+    const events: Wire.WebhookEvent[] = [
       { id: "e1", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success", name: "CI / test" } } },
       { id: "e2", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success", name: "CI / lint" } } },
     ];
@@ -572,7 +572,7 @@ describe("buildEventPrompt — pipeline behavior", () => {
   });
 
   it("multiple events → joined with separator", () => {
-    const events: WorkerEvent[] = [
+    const events: Wire.WebhookEvent[] = [
       { id: "e1", name: "issue_comment", payload: { issue: { number: 1 }, comment: { body: "hello" } } },
       { id: "e2", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success", name: "CI" } } },
     ];
@@ -581,7 +581,7 @@ describe("buildEventPrompt — pipeline behavior", () => {
   });
 
   it("issue_comment sorts before _check_suites in multi-event output", () => {
-    const events: WorkerEvent[] = [
+    const events: Wire.WebhookEvent[] = [
       { id: "e1", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success", name: "CI" } } },
       { id: "e2", name: "issue_comment", payload: { issue: { number: 1 }, comment: { body: "UAT comment" } } },
     ];
@@ -594,7 +594,7 @@ describe("buildEventPrompt — pipeline behavior", () => {
 
 describe("EVENT_FMT — new entries", () => {
   it("_check_suites with failures → lists only failed suite names and instructs to fix", () => {
-    const evt: WorkerEvent = {
+    const evt: Wire.WebhookEvent = {
       id: "e1",
       name: "_check_suites",
       payload: { status: "failed", failed: ["CI / test", "CI / lint"], succeeded: ["CI / build"] },
@@ -608,7 +608,7 @@ describe("EVENT_FMT — new entries", () => {
   });
 
   it("_check_suites all succeeded → lists all suite names and instructs to verify merge-readiness", () => {
-    const evt: WorkerEvent = {
+    const evt: Wire.WebhookEvent = {
       id: "e1",
       name: "_check_suites",
       payload: { status: "succeeded", failed: [], succeeded: ["CI / test", "CI / build"] },
@@ -621,7 +621,7 @@ describe("EVENT_FMT — new entries", () => {
   });
 
   it("_check_suites succeeded prompt ends with branch-review instruction", () => {
-    const evt: WorkerEvent = {
+    const evt: Wire.WebhookEvent = {
       id: "e1",
       name: "_check_suites",
       payload: { status: "succeeded", failed: [], succeeded: ["CI"] },
@@ -632,7 +632,7 @@ describe("EVENT_FMT — new entries", () => {
   });
 
   it("check_suite success prompt ends with branch-review instruction", () => {
-    const evt: WorkerEvent = {
+    const evt: Wire.WebhookEvent = {
       id: "e1",
       name: "check_suite",
       payload: { check_suite: { conclusion: "success" } },
@@ -643,7 +643,7 @@ describe("EVENT_FMT — new entries", () => {
   });
 
   it("branch-review prompt advises not to sleep or poll", () => {
-    const evt: WorkerEvent = {
+    const evt: Wire.WebhookEvent = {
       id: "e1",
       name: "_check_suites",
       payload: { status: "succeeded", failed: [], succeeded: ["CI"] },
@@ -654,7 +654,7 @@ describe("EVENT_FMT — new entries", () => {
   });
 
   it("_code_review renders PR number, review state, body, and inline comments", () => {
-    const evt: WorkerEvent = {
+    const evt: Wire.WebhookEvent = {
       id: "e1",
       name: "_code_review",
       payload: {
@@ -672,7 +672,7 @@ describe("EVENT_FMT — new entries", () => {
   });
 
   it("_code_review with no comments renders without error", () => {
-    const evt: WorkerEvent = {
+    const evt: Wire.WebhookEvent = {
       id: "e1",
       name: "_code_review",
       payload: {
@@ -688,7 +688,7 @@ describe("EVENT_FMT — new entries", () => {
   });
 
   it("_code_review inline comment with line number → includes 'line N' in output", () => {
-    const evt: WorkerEvent = {
+    const evt: Wire.WebhookEvent = {
       id: "e1",
       name: "_code_review",
       payload: {
@@ -702,7 +702,7 @@ describe("EVENT_FMT — new entries", () => {
   });
 
   it("_code_review inline comment with line range → includes 'lines N-M' in output", () => {
-    const evt: WorkerEvent = {
+    const evt: Wire.WebhookEvent = {
       id: "e1",
       name: "_code_review",
       payload: {
@@ -716,7 +716,7 @@ describe("EVENT_FMT — new entries", () => {
   });
 
   it("_code_review inline comment with no line → just shows path (file-level)", () => {
-    const evt: WorkerEvent = {
+    const evt: Wire.WebhookEvent = {
       id: "e1",
       name: "_code_review",
       payload: {

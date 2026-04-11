@@ -1,24 +1,9 @@
 import type { Database, Json } from "../../database.types.js";
 import { db } from "../db-client.js";
 import { fmtEvent } from "../event-fmt.js";
+import * as Wire from "../../wire.js";
 
 type DbRow = Database["public"]["Tables"]["webhook_events"]["Row"];
-
-// ── Input type ─────────────────────────────────────────────────────────────────
-
-export interface WebhookEventData {
-  deliveryId: string | null;
-  eventName: string;
-  action: string | null;
-  repo: string | null;
-  sender: string | null;
-  issueNumber: number | null;
-  prNumber: number | null;
-  branch: string | null;
-  taskId: string | null;
-  workerId: string | null;
-  payload: Record<string, unknown>;
-}
 
 // ── Model ──────────────────────────────────────────────────────────────────────
 
@@ -87,7 +72,19 @@ export class WebhookEvent {
   // ── Persistence ─────────────────────────────────────────────────────────────
 
   /** Fire-and-forget insert into webhook_events. No-op if DB is not initialized. */
-  static log(data: WebhookEventData): void {
+  static log(data: {
+    deliveryId: string | null;
+    eventName: string;
+    action: string | null;
+    repo: string | null;
+    sender: string | null;
+    issueNumber: number | null;
+    prNumber: number | null;
+    branch: string | null;
+    taskId: string | null;
+    workerId: string | null;
+    payload: Record<string, unknown>;
+  }): void {
     try {
       if (!db) return;
       void Promise.resolve(db.from("webhook_events").insert({
@@ -141,7 +138,7 @@ export class WebhookEvent {
   // ── Wire / display helpers ───────────────────────────────────────────────────
 
   /** Returns the payload for forwarding to workers via event_notification. */
-  toWorkerPayload(): { id: string; name: string; payload: Record<string, unknown> } {
+  toWorkerPayload(): Wire.WebhookEvent {
     return {
       id: this.deliveryId ?? "",
       name: this.eventName,

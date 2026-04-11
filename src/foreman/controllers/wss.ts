@@ -1,7 +1,7 @@
 import http from "http";
 import { WebSocketServer, WebSocket } from "ws";
-import type { WorkerMessage, ForWorkerMsg } from "../../types.js";
-import { ForemanMessage } from "../models/foreman-message.js";
+import * as Wire from "../../wire.js";
+import { MessageLog } from "../models/message-log.js";
 import { WebhookEvent } from "../models/webhook-event.js";
 import type { AdminWss } from "../admin-ws.js";
 import { fmtEvent } from "../event-fmt.js";
@@ -58,7 +58,7 @@ export function createForemanWss(
 
   function broadcastMessageEvent(data: { direction: string; workerId: string | null; taskId: string | null; msgType: string; payload?: Record<string, unknown> }) {
     if (!adminWss) return;
-    const summary = ForemanMessage.buildSummary(data.direction, data.msgType, data.taskId, data.payload ?? {});
+    const summary = MessageLog.buildSummary(data.direction, data.msgType, data.taskId, data.payload ?? {});
     adminWss.broadcastLogEvent({
       kind: "message",
       id: nextBroadcastId++,
@@ -69,11 +69,11 @@ export function createForemanWss(
     });
   }
 
-  function sendMsg(workerId: string, msg: ForWorkerMsg, logTaskId?: string): void {
+  function sendMsg(workerId: string, msg: Wire.ForemanMessage, logTaskId?: string): void {
     const taskId = logTaskId ?? (("taskId" in msg ? msg.taskId : null) ?? null);
     Worker.get(workerId)?.send(msg);
     const msgPayload = msg as unknown as Record<string, unknown>;
-    ForemanMessage.log({ direction: "sent", workerId, taskId, msgType: msg.type, payload: msgPayload });
+    MessageLog.log({ direction: "sent", workerId, taskId, msgType: msg.type, payload: msgPayload });
     broadcastMessageEvent({ direction: "sent", workerId, taskId, msgType: msg.type, payload: msgPayload });
   }
 
@@ -127,7 +127,7 @@ export function createForemanWss(
       }
 
       const queued = taskManager.drainEvents(task.taskId);
-      const assignMsg: ForWorkerMsg = {
+      const assignMsg: Wire.ForemanMessage = {
         type: "task_assigned",
         taskId: task.taskId,
         issue: {
@@ -141,7 +141,7 @@ export function createForemanWss(
       sendMsg(workerId, assignMsg);
       log(workerId, `→ task_assigned #${task.issueNumber} "${task.title}"`);
       for (const evt of queued) {
-        const evtMsg: ForWorkerMsg = { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload() };
+        const evtMsg: Wire.ForemanMessage = { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload() };
         sendMsg(workerId, evtMsg);
         log(workerId, `→ event_notification #${task.issueNumber} ${evt.eventName} (queued)`);
       }
@@ -204,7 +204,7 @@ export function createForemanWss(
   wss.on("connection", (ws) => {
     let workerId = "";
 
-    async function handleWorkerHello(msg: Extract<WorkerMessage, { type: "worker_hello" }>) {
+    async function handleWorkerHello(msg: Extract<Wire.WorkerMessage, { type: "worker_hello" }>) {
       if (workerSecret && msg.workerSecret !== workerSecret) {
         ws.close(4001, "unauthorized");
         return;
@@ -282,7 +282,7 @@ export function createForemanWss(
       }
     }
 
-    async function handleTaskComplete(msg: Extract<WorkerMessage, { type: "task_complete" }>) {
+    async function handleTaskComplete(msg: Extract<Wire.WorkerMessage, { type: "task_complete" }>) {
       log(workerId, `task_complete #${msg.taskId}`);
       const task = await Task.get(msg.taskId);
       if (task && task.workerId !== workerId) {
@@ -297,7 +297,7 @@ export function createForemanWss(
       Worker.get(workerId)?.release();
     }
 
-    async function handleWorkerGoodbye(msg: Extract<WorkerMessage, { type: "worker_goodbye" }>) {
+    async function handleWorkerGoodbye(msg: Extract<Wire.WorkerMessage, { type: "worker_goodbye" }>) {
       log(workerId, `worker_goodbye (task=${msg.taskId ?? "none"})`);
       if (msg.taskId) {
         const task = await Task.get(msg.taskId);
@@ -313,13 +313,13 @@ export function createForemanWss(
 
     ws.on("message", (data) => {
       void (async () => {
-        let msg: WorkerMessage;
+        let msg: Wire.WorkerMessage;
         try { msg = JSON.parse(data.toString()); } catch { return; }
 
         const rcvWorkerId = workerId || ((msg as { workerId?: string }).workerId ?? null);
         const rcvTaskId = (msg as { taskId?: string }).taskId ?? null;
         const rcvPayload = msg as unknown as Record<string, unknown>;
-        ForemanMessage.log({
+        MessageLog.log({
           direction: "received",
           workerId: rcvWorkerId,
           taskId: rcvTaskId,
@@ -345,7 +345,7 @@ export function createForemanWss(
         log(workerId, `disconnected (code ${code}${reasonStr})`);
         const taskId = currentWorker?.currentTaskId ?? null;
         const disconnPayload = { code, reason: reason?.toString() ?? null };
-        ForemanMessage.log({
+        MessageLog.log({
           direction: "received",
           workerId,
           taskId,

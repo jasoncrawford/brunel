@@ -3,19 +3,9 @@ import { db } from "../db-client.js";
 
 type DbRow = Database["public"]["Tables"]["foreman_messages"]["Row"];
 
-// ── Input type ─────────────────────────────────────────────────────────────────
-
-export interface ForemanMessageData {
-  direction: "sent" | "received";
-  workerId: string | null;
-  taskId: string | null;
-  msgType: string;
-  payload: Record<string, unknown>;
-}
-
 // ── Model ──────────────────────────────────────────────────────────────────────
 
-export class ForemanMessage {
+export class MessageLog {
   readonly id: number;
   readonly createdAt: string;
   readonly direction: string;
@@ -37,7 +27,13 @@ export class ForemanMessage {
   // ── Persistence ─────────────────────────────────────────────────────────────
 
   /** Fire-and-forget insert into foreman_messages. No-op if DB is not initialized. */
-  static log(data: ForemanMessageData): void {
+  static log(data: {
+    direction: "sent" | "received";
+    workerId: string | null;
+    taskId: string | null;
+    msgType: string;
+    payload: Record<string, unknown>;
+  }): void {
     try {
       if (!db) return;
       void Promise.resolve(db.from("foreman_messages").insert({
@@ -56,37 +52,37 @@ export class ForemanMessage {
 
   // ── Queries ──────────────────────────────────────────────────────────────────
 
-  static async queryForTask(taskId: string): Promise<ForemanMessage[]> {
+  static async queryForTask(taskId: string): Promise<MessageLog[]> {
     const { data } = await db.from("foreman_messages")
       .select("*")
       .eq("task_id", taskId)
       .order("created_at", { ascending: false })
       .limit(500);
-    return (data ?? []).map((r) => new ForemanMessage(r));
+    return (data ?? []).map((r) => new MessageLog(r));
   }
 
-  static async queryForWorker(workerId: string): Promise<ForemanMessage[]> {
+  static async queryForWorker(workerId: string): Promise<MessageLog[]> {
     const { data } = await db.from("foreman_messages")
       .select("*")
       .eq("worker_id", workerId)
       .order("created_at", { ascending: false })
       .limit(500);
-    return (data ?? []).map((r) => new ForemanMessage(r));
+    return (data ?? []).map((r) => new MessageLog(r));
   }
 
-  static async query(opts: { limit?: number } = {}): Promise<ForemanMessage[]> {
+  static async query(opts: { limit?: number } = {}): Promise<MessageLog[]> {
     const { data } = await db.from("foreman_messages")
       .select("*")
       .order("created_at", { ascending: false })
       .limit(opts.limit ?? 100);
-    return (data ?? []).map((r) => new ForemanMessage(r));
+    return (data ?? []).map((r) => new MessageLog(r));
   }
 
   // ── Display helper ───────────────────────────────────────────────────────────
 
   /** Human-readable summary for the admin dashboard log. */
   format(): string {
-    return ForemanMessage.buildSummary(this.direction, this.msgType, this.taskId, this.payload);
+    return MessageLog.buildSummary(this.direction, this.msgType, this.taskId, this.payload);
   }
 
   // ── Shared summary builder (single source of truth for log entry summaries) ──

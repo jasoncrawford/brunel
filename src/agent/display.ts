@@ -1,4 +1,4 @@
-import type { ForWorkerMsg, WorkerEvent } from "../types.js";
+import * as Wire from "../wire.js";
 import { shortWorkerId } from "../../shared/utils.js";
 
 // ── Display width ─────────────────────────────────────────────────────────────
@@ -128,7 +128,7 @@ function asObj(v: unknown): Record<string, unknown> | null {
 function str(v: unknown): string { return typeof v === "string" ? v : ""; }
 function num(v: unknown): number { return typeof v === "number" ? v : 0; }
 
-export function fmtEventDetails(event: WorkerEvent): string {
+export function fmtEventDetails(event: Wire.WebhookEvent): string {
   const p = event.payload;
   switch (event.name) {
     case "check_run": {
@@ -183,7 +183,7 @@ export function fmtEventDetails(event: WorkerEvent): string {
   }
 }
 
-export function fmtEvent(event: WorkerEvent): string {
+export function fmtEvent(event: Wire.WebhookEvent): string {
   const nameAction = `${event.name}${event.payload["action"] ? `/${event.payload["action"]}` : ""}`;
   const details = fmtEventDetails(event);
   return `${nameAction}${details ? ` — ${details}` : ""}`;
@@ -651,7 +651,7 @@ export const MESSAGE_FMT: FmtTable = {
 
 export const FOREMAN_MESSAGE_FMT: FmtTable = {
   task_assigned:      { verbose: (m) => c.darkGray(`Task assigned: #${m.issue.number}, ${m.issue.title}`) },
-  event_notification: { verbose: (m) => c.darkGray(`Event received [${fmtTime()}]: ${fmtEvent(m.event as WorkerEvent)}`) },
+  event_notification: { verbose: (m) => c.darkGray(`Event received [${fmtTime()}]: ${fmtEvent(m.event as Wire.WebhookEvent)}`) },
   hello_ack:          { verbose: (m) => c.darkGray(`hello_ack: ${m.status}`) },
   _default:           (m) => c.darkGray(`Unknown foreman message: ${m.type}`),
 };
@@ -978,7 +978,7 @@ export function printMessage(msg: unknown) {
 }
 
 
-export function printForWorkerMsg(msg: ForWorkerMsg) {
+export function printForemanMessage(msg: Wire.ForemanMessage) {
   print(resolve(FOREMAN_MESSAGE_FMT, msg.type, msg));
 }
 

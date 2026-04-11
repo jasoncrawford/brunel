@@ -1,4 +1,4 @@
-import type { ForWorkerMsg, TaskIssue } from "../../types.js";
+import * as Wire from "../../wire.js";
 import type { WebhookEvent } from "../models/webhook-event.js";
 import { fetchIssueStates } from "../github.js";
 import type { TaskManager } from "../models/task-manager.js";
@@ -15,7 +15,7 @@ export interface EventRouterDeps {
   token: string;
   githubApiUrl?: string;
   taskLabel: string;
-  sendMsg(workerId: string, msg: ForWorkerMsg, logTaskId?: string): void;
+  sendMsg(workerId: string, msg: Wire.ForemanMessage, logTaskId?: string): void;
   flog(msg: string): void;
   assignIdleWorkers(): Promise<void>;
 }
@@ -104,7 +104,7 @@ export function forwardEvent(deps: EventRouterDeps, task: Task, evt: WebhookEven
       deps.taskManager.queueEvent(task.taskId, evt);
       deps.flog(`[task ${ref}] ${evt.eventName} queued (worker ${shortWorkerId(task.workerId)} disconnected)`);
     } else if (worker) {
-      const evtMsg: ForWorkerMsg = { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload() };
+      const evtMsg: Wire.ForemanMessage = { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload() };
       deps.sendMsg(task.workerId, evtMsg);
       deps.flog(`[worker ${shortWorkerId(task.workerId)}] → event_notification ${ref} ${evt.eventName}`);
     } else {
@@ -263,7 +263,7 @@ export async function doRouteEvent(deps: EventRouterDeps, name: string, p: Recor
       const repoUrl = strProp(p.repository, "html_url") ?? "";
       const labels =
         (issue.labels as Array<{ name: string }> | undefined)?.map((l) => l.name) ?? [];
-      const issueData: TaskIssue = {
+      const issueData: Wire.TaskIssue = {
         number: issueNumber,
         title: String(issue.title ?? ""),
         body: String(issue.body ?? ""),
