@@ -214,11 +214,11 @@ describe("GET /api/tasks", () => {
       // complete task is excluded by default
       expect(body).toHaveLength(1);
       expect(body[0]).toMatchObject({
-        task_id: "1",
+        taskId: "1",
         repo: "test/repo",
         status: "pending",
-        worker_id: null,
-        completed_at: null,
+        workerId: null,
+        completedAt: null,
       });
     } finally {
       vi.restoreAllMocks();
@@ -240,7 +240,7 @@ describe("GET /api/tasks", () => {
       expect(res.status).toBe(200);
       const body = JSON.parse(res.body);
       expect(body).toHaveLength(1);
-      expect(body[0]).toMatchObject({ task_id: "42", status: "complete" });
+      expect(body[0]).toMatchObject({ taskId: "42", status: "complete" });
     } finally {
       vi.restoreAllMocks();
       await stopServer(s);
@@ -262,7 +262,7 @@ describe("GET /api/tasks", () => {
       expect(res.status).toBe(200);
       const body = JSON.parse(res.body);
       expect(body).toHaveLength(1);
-      expect(body[0].task_id).toBe("1");
+      expect(body[0].taskId).toBe("1");
       expect(body[0].status).toBe("complete");
     } finally {
       vi.restoreAllMocks();

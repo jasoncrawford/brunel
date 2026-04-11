@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import type { TaskStatus } from "../../types.js";
+import type { TaskStatus, TaskRow } from "../../../shared/types.js";
 import type { Row } from "../db.js";
 import type { TaskSnapshot, BlockerInfo } from "../admin-ws.js";
 import { fetchNativeBlockers } from "../github.js";
@@ -62,23 +62,23 @@ export class Task {
     return `https://github.com/${this.repo}`;
   }
 
-  toJSON() {
+  toJSON(): TaskRow {
     return {
-      task_id: this.taskId,
-      issue_number: this.issueNumber,
+      taskId: this.taskId,
+      issueNumber: this.issueNumber,
       repo: this.repo,
       title: this.title,
       body: this.body,
       labels: this.labels,
       status: this.status,
-      worker_id: this.workerId,
-      pr_number: this.prNumber,
+      workerId: this.workerId,
+      prNumber: this.prNumber,
       branch: this.branch,
-      created_at: this.createdAt,
-      assigned_at: this.assignedAt,
-      completed_at: this.completedAt,
-      issue_closed_at: this.issueClosedAt,
-      pr_merged_at: this.prMergedAt,
+      createdAt: this.createdAt,
+      assignedAt: this.assignedAt,
+      completedAt: this.completedAt,
+      issueClosedAt: this.issueClosedAt,
+      prMergedAt: this.prMergedAt,
     };
   }
 
