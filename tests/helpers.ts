@@ -25,11 +25,11 @@ export async function registerTestCommands(): Promise<void> {
     confirm: async () => true,
   });
   const noop = async () => {};
-  register("exit",   { description: "Exit the REPL", handler: noop });
+  register("exit",   { description: "Exit", handler: noop });
   register("clear",  { description: "Clear the conversation", handler: noop });
   register("model",  { description: "Select the Claude model to use", handler: noop });
   register("effort", { description: "Set the effort level for Claude's thinking", handler: noop });
-  register("worker:task-complete", {
+  register("worker:complete", {
     description: "Mark the current task as done",
     availability: "worker",
     handler: async () => "task-complete",

@@ -9,9 +9,9 @@ import type { CanUseTool, PermissionMode, PermissionResult } from "@anthropic-ai
 import { WebSocket } from "ws";
 import * as display from "./display.js";
 import { setVerbose, setThinkOutLoud } from "./display.js";
-import { ask, listCommands, listWorkerCommands, dispatchInput, pick, pickMultiple, pickQuestion } from "./input.js";
+import { ask, listWorkerCommands, dispatchInput, pick, pickMultiple, pickQuestion } from "./input.js";
 import type { PickQuestionResult } from "./input.js";
-import { WorkerSession, WS_TASK_ASSIGNED, WS_EVENT } from "./worker.js";
+import { WorkerSession, WS_TASK_ASSIGNED, WS_EVENT, registerWorkerCommands } from "./worker.js";
 import type { RunQuery, WsFactory, WorkerDisplay } from "./worker.js";
 import { loadConfig } from "../config.js";
 import { Workspace, confirmIfUnsafe, registerWorkspaceCommands } from "./workspace.js";
@@ -20,8 +20,8 @@ import { handleModelCommand, getCachedModels, _resetCachedModels, setCachedModel
 import type { ModelInfo, FetchModelsFn } from "./model.js";
 import { handleEffortCommand } from "./effort.js";
 import type { EffortValue } from "./effort.js";
-import { _reset, register, execute, scoped } from "./commands.js";
-export { parseSlashCommand, resolveCommandFilePath, resolveContent, dispatchInput, matchCommands, listCommandNames, listWorkerCommandNames, ask } from "./input.js";
+import { _reset, register, execute } from "./commands.js";
+export { parseSlashCommand, resolveCommandFilePath, resolveContent, dispatchInput, matchCommands, listCommandNames, listWorkerCommandNames, listWorkerCommands, ask } from "./input.js";
 export type { SlashCommandResult, DispatchResult, ListDir } from "./input.js";
 export { handleModelCommand, getCachedModels, _resetCachedModels } from "./model.js";
 export { handleEffortCommand } from "./effort.js";
@@ -242,12 +242,6 @@ function createFetchModelsFn(permConfig: { permissionMode: PermissionMode }): Fe
   };
 }
 
-// ── Worker mode config ─────────────────────────────────────────────────────────
-
-type WorkerMode = {
-  session: WorkerSession;
-};
-
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 async function main(
@@ -255,14 +249,14 @@ async function main(
   workspaceCfg?: { workspaceDir: string; repoUrl: string },
   initialModel?: string,
   initialEffort?: EffortValue,
-  workerMode?: WorkerMode,
+  session?: WorkerSession,
 ): Promise<void> {
   const fetchModelsFn = createFetchModelsFn(permConfig);
   let currentModel: string | undefined = initialModel;
   let currentEffort: EffortValue | undefined = initialEffort;
 
   process.stdout.write("\x1b[?2004h"); // enable bracketed paste mode
-  if (process.stdin.isTTY) process.stdin.setRawMode(true);
+  process.stdin.setRawMode?.(true);
   process.stdin.resume();
   process.stdin.setEncoding("utf8");
 
@@ -286,74 +280,53 @@ async function main(
       const ok = await confirmIfUnsafe(workspaceRef.current, confirm);
       if (ok) await workspaceRef.current.destroy();
     }
-    if (!workerMode) {
+    if (!session) {
       process.stdout.write("\x1b[?2004l\r\n");
       if (process.stdin.isTTY) process.stdin.setRawMode(false);
       process.stdin.pause();
     }
   };
 
-  // Register all commands. This is the single place that wires up every
-  // command with its implementation. Workspace commands are registered by
-  // workspace.ts (which owns the logic); the rest are inlined here.
-  _reset();
-  if (workerMode) {
-    // Worker mode: workspace is managed by the session; use a proxy to expose it.
-    registerWorkspaceCommands(workerMode.session.workspaceCommandDeps, true);
-  } else {
-    registerWorkspaceCommands({
-      workspace: workspaceRef,
-      config: workspaceCfg ? { ...workspaceCfg, sessionId: sessionId_ } : undefined,
-      originalCwd,
-      confirm,
-    });
+  // Sync initial model/effort to session for status bar display.
+  if (session) {
+    session.currentModel = currentModel;
+    session.currentEffort = currentEffort;
   }
+
+  // Register all commands. Commands are always present in the registry for
+  // both REPL and worker modes; worker-only commands degrade gracefully when
+  // not connected to a foreman.
+  _reset();
+  registerWorkspaceCommands(
+    session
+      ? session.workspaceCommandDeps
+      : { workspace: workspaceRef, config: workspaceCfg ? { ...workspaceCfg, sessionId: sessionId_ } : undefined, originalCwd, confirm },
+    !!session,
+  );
+  registerWorkerCommands(session);
   register("exit", {
-    description: workerMode ? "Exit the worker" : "Exit the REPL",
+    description: "Exit",
     handler: async () => {
-      if (!workerMode) await doExit();
+      if (!session) await doExit();
       return "exit";
     },
   });
-  if (workerMode) {
-    // In worker mode, /clear clears the session's conversation state.
-    register("clear", {
-      description: "Clear the conversation",
-      handler: async () => { workerMode.session.clearSession(); display.print(display.clearBreak()); },
-    });
-    // Worker-specific: mark the current task as done.
-    const workerReg = scoped("worker");
-    workerReg("task-complete", {
-      description: "Mark the current task as done",
-      availability: "worker",
-      handler: async () => workerMode.session.completeCurrentTask(),
-    });
-  } else {
-    register("clear", {
-      description: "Clear the conversation",
-      handler: async () => { sessionId = undefined; display.print(display.clearBreak()); },
-    });
-    register("worker:task-complete", {
-      description: "Mark the current task as done",
-      availability: "worker",
-      handler: async () => { display.print(display.c.boldRed("Not in worker mode.")); },
-    });
-  }
+  register("clear", {
+    description: "Clear the conversation",
+    handler: async () => {
+      sessionId = undefined;
+      session?.clearSession();
+      display.print(display.clearBreak());
+    },
+  });
   register("model", {
     description: "Select the Claude model to use",
     handler: async (args) => {
       const pickModelFn = (opts: string[], idx: number) =>
         pick(opts, { currentIdx: idx, escapable: true });
-      if (workerMode) {
-        // In worker mode, model state lives in the session (drives the status bar).
-        workerMode.session.currentModel = await handleModelCommand(
-          args, workerMode.session.currentModel, pickModelFn,
-          undefined, // models cached from first query; no fetchModelsFn in worker
-          display.print,
-        );
-      } else {
-        currentModel = await handleModelCommand(args, currentModel, pickModelFn, fetchModelsFn, display.print);
-      }
+      const newModel = await handleModelCommand(args, currentModel, pickModelFn, fetchModelsFn, display.print);
+      currentModel = newModel;
+      if (session) session.currentModel = newModel;
     },
   });
   register("effort", {
@@ -361,43 +334,33 @@ async function main(
     handler: async (args) => {
       const pickEffortFn = (opts: string[], idx: number) =>
         pick(opts, { currentIdx: idx, escapable: true });
-      if (workerMode) {
-        // In worker mode, effort state lives in the session (drives the status bar).
-        workerMode.session.currentEffort = await handleEffortCommand(
-          args, workerMode.session.currentEffort, pickEffortFn, display.print,
-        );
-      } else {
-        currentEffort = await handleEffortCommand(args, currentEffort, pickEffortFn, display.print);
-      }
+      const newEffort = await handleEffortCommand(args, currentEffort, pickEffortFn, display.print);
+      currentEffort = newEffort;
+      if (session) session.currentEffort = newEffort;
     },
   });
 
-  if (!workerMode) {
-    display.print(display.c.sageGreen(display.hr("═")));
-    display.print(display.c.skyBlue(display.s.bold("  Claude Agent SDK REPL")));
-    display.print(display.c.lavender(`  Permissions: ${permConfig.permissionMode} | Model: ${initialModel ?? "default"} | Effort: ${initialEffort ?? "auto"} | Output: ${display.verbose ? "verbose" : "quiet"} | Log: ${LOG_FILE}`));
-    display.print(display.c.lavender(`  Type /exit to quit, /clear to start a new session.`));
-    display.print(display.c.sageGreen(display.hr("═")));
-  }
+  // Unified query handler: runs a prompt through the right pathway depending
+  // on whether we're connected to a foreman or in standalone REPL mode.
+  const handleQuery = session
+    ? async (prompt: string) => { await session.runForQuery(prompt); }
+    : async (prompt: string) => { sessionId = await runQuery(permConfig, prompt, sessionId, undefined, currentModel, currentEffort); };
 
-  // In worker mode, the prompt starts hidden — the worker waits for the foreman to
-  // assign a task and is not ready for interactive input until then.
-  let showPrompt = !workerMode;
+  // In worker mode, the prompt starts hidden — the agent waits for the foreman
+  // to assign a task and is not ready for interactive input until then.
+  let showPrompt = !session;
 
   while (true) {
-    const wsAbort = workerMode ? workerMode.session.createWsInputPromise() : undefined;
+    const wsAbort = session?.createWsInputPromise();
     // Use an empty prompt string when not ready for interactive input. An
     // empty promptLine suppresses the drawFresh callback so incoming messages
     // are printed cleanly without a prompt preceding or following them.
-    const promptStr = workerMode
-      ? (showPrompt ? "\n[worker] > " : "")
-      : "\n> ";
-    const getCompletions = workerMode ? listWorkerCommands : listCommands;
-    const input = await ask(promptStr, getCompletions, wsAbort);
+    const promptStr = session ? (showPrompt ? "\n[agent] > " : "") : "\n> ";
+    const input = await ask(promptStr, listWorkerCommands, wsAbort);
 
     // ^D / ^C on empty buffer — treat as exit.
     if (input === "__eof__") {
-      if (!workerMode) await doExit();
+      if (!session) await doExit();
       break;
     }
 
@@ -405,11 +368,11 @@ async function main(
     // same tick as the ask() call; never a user action).
     if (input === "__abort__") continue;
 
-    // Worker sentinel: a WS task/event arrived. Hide the prompt, wait for the
-    // triggered query loop to finish, then show the prompt again.
-    if (workerMode && (input === WS_TASK_ASSIGNED || input === WS_EVENT)) {
+    // WS sentinel: a task or event arrived from the foreman. Hide the prompt,
+    // wait for the triggered query loop to finish, then show the prompt again.
+    if (input === WS_TASK_ASSIGNED || input === WS_EVENT) {
       showPrompt = false;
-      await workerMode.session.waitUntilIdle();
+      await session!.waitUntilIdle();
       showPrompt = true;
       continue;
     }
@@ -433,12 +396,7 @@ async function main(
     if (action.type !== "query") continue;
 
     try {
-      if (workerMode) {
-        // In worker mode, runForQuery manages session state and event draining.
-        await workerMode.session.runForQuery(action.prompt);
-      } else {
-        sessionId = await runQuery(permConfig, action.prompt, sessionId, undefined, currentModel, currentEffort);
-      }
+      await handleQuery(action.prompt);
     } catch (err) {
       console.error(display.c.boldRed(`\nERROR: ${fmtError(err)}`));
       logFull("ERROR", err instanceof Error ? { message: err.message, stack: err.stack } : err);
@@ -557,7 +515,7 @@ export async function startWorkerMode(
   });
 
   display.print(display.c.sageGreen(display.hr("═")));
-  display.print(display.c.skyBlue(display.s.bold("  Brunel Worker")));
+  display.print(display.c.skyBlue(display.s.bold("  Brunel Agent")));
   display.print(display.c.lavender(`  Worker ID: ${workerId} | Foreman: ${FOREMAN_URL}`));
   display.print(display.c.lavender(`  Permissions: ${config.permissionMode} | Model: ${config.model ?? "default"} | Output: ${config.verbose ? "verbose" : "quiet"} | Log: ${config.logFile}`));
   display.print(display.c.sageGreen(display.hr("═")));
@@ -569,7 +527,7 @@ export async function startWorkerMode(
     allowDangerouslySkipPermissions: false,
   };
 
-  await main(permConfig, undefined, config.model, config.effort, { session });
+  await main(permConfig, undefined, config.model, config.effort, session);
 
   // Post-loop cleanup: send goodbye, destroy workspace, exit.
   session.sendGoodbye();
@@ -617,6 +575,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       pingIntervalMs: config.pingIntervalMs,
     });
   } else {
+    display.print(display.c.sageGreen(display.hr("═")));
+    display.print(display.c.skyBlue(display.s.bold("  Brunel Agent")));
+    display.print(display.c.lavender(`  Permissions: ${permConfig.permissionMode} | Model: ${config.model ?? "default"} | Effort: ${config.effort ?? "auto"} | Output: ${config.verbose ? "verbose" : "quiet"} | Log: ${LOG_FILE}`));
+    display.print(display.c.lavender(`  Type /exit to quit, /clear to start a new session.`));
+    display.print(display.c.sageGreen(display.hr("═")));
     void main(permConfig, workspaceCfg, config.model, config.effort);
   }
 }

@@ -184,8 +184,8 @@ describe("dispatchInput", () => {
     expect(result).toEqual({ type: "command", name: "model", args: "opus" });
   });
 
-  it("/worker:task-complete returns canonical command", async () => {
-    const result = await dispatchInput("/worker:task-complete", () => null);
-    expect(result).toEqual({ type: "command", name: "worker:task-complete", args: "" });
+  it("/worker:complete returns canonical command", async () => {
+    const result = await dispatchInput("/worker:complete", () => null);
+    expect(result).toEqual({ type: "command", name: "worker:complete", args: "" });
   });
 });

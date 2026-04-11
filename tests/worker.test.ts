@@ -1512,9 +1512,9 @@ describe("workspace slash commands in WorkerSession", () => {
   });
 });
 
-// ── afterTask callback on /task-complete ──────────────────────────────────────
+// ── afterTask callback on /worker:complete ──────────────────────────────────────
 
-describe("afterTask callback on /task-complete", () => {
+describe("afterTask callback on /worker:complete", () => {
   it("calls afterTask before sending task_complete to foreman", async () => {
     const afterTask = vi.fn().mockResolvedValue(undefined);
     const sessionWithAfterTask = new WorkerSession(

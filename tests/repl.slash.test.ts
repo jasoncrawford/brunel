@@ -40,8 +40,8 @@ describe("parseSlashCommand", () => {
     expect(result).toEqual({ type: "unknown_command", command: "foo:bar" });
   });
 
-  it("recognizes /worker:task-complete (canonical name)", () => {
-    expect(parseSlashCommand("/worker:task-complete")).toEqual({ type: "command", name: "worker:task-complete" });
+  it("recognizes /worker:complete (canonical name)", () => {
+    expect(parseSlashCommand("/worker:complete")).toEqual({ type: "command", name: "worker:complete" });
   });
 
   it("recognizes /workspace:create (canonical name)", () => {

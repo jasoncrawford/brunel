@@ -39,7 +39,7 @@ describe("listAll", () => {
 
   it("non-worker mode excludes worker-only commands", () => {
     const names = listAll(false).map(e => e.name);
-    expect(names).not.toContain("worker:task-complete");
+    expect(names).not.toContain("worker:complete");
   });
 
   it("non-worker mode includes both-mode commands", () => {
@@ -60,7 +60,7 @@ describe("listAll", () => {
 
   it("worker mode includes worker-only commands", () => {
     const names = listAll(true).map(e => e.name);
-    expect(names).toContain("worker:task-complete");
+    expect(names).toContain("worker:complete");
   });
 
   it("worker mode includes both-mode commands", () => {
@@ -72,7 +72,7 @@ describe("listAll", () => {
 
   it("defaults to non-worker mode", () => {
     const names = listAll().map(e => e.name);
-    expect(names).not.toContain("worker:task-complete");
+    expect(names).not.toContain("worker:complete");
   });
 });
 
@@ -149,7 +149,7 @@ describe("each registered entry shape", () => {
     register("exit",   { description: "Exit", availability: "repl", handler: async () => "exit" });
     register("model",  { description: "Model", handler: async () => {} });
     register("effort", { description: "Effort", handler: async () => {} });
-    register("worker:task-complete", { description: "Task done", availability: "worker", handler: async () => "task-complete" });
+    register("worker:complete", { description: "Task done", availability: "worker", handler: async () => "task-complete" });
   });
 
   it("each entry has name, description, availability, and handler", () => {
