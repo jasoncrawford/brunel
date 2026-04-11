@@ -1,7 +1,7 @@
 import http from "http";
 import { WebSocketServer } from "ws";
 import type { WebSocket as WsSocket } from "ws";
-import type { TaskStatus } from "../types.js";
+import type { TaskStatus } from "../../shared/types.js";
 
 export interface LogEntry {
   kind: string;

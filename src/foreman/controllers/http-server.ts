@@ -5,7 +5,7 @@ import { getRequestListener } from "@hono/node-server";
 import type { TaskManager } from "../models/task-manager.js";
 import { Task } from "../models/task.js";
 import { queryActivityLog } from "../models/activity-log.js";
-import type { TaskStatus } from "../../types.js";
+import type { TaskStatus } from "../../../shared/types.js";
 import { fmtError } from "../../utils.js";
 import { summaryEvent, isMutedEvent } from "./event-router.js";
 

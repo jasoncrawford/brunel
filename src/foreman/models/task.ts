@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import type { TaskStatus } from "../../types.js";
+import type { TaskStatus } from "../../../shared/types.js";
 import type { Database } from "../../database.types.js";
 import type { TaskSnapshot, BlockerInfo } from "../admin-ws.js";
 import { fetchNativeBlockers } from "../github.js";
