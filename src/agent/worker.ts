@@ -1,15 +1,18 @@
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import { EventEmitter } from "node:events";
+import path from "node:path";
+import os from "node:os";
 import { WebSocket } from "ws";
 import * as display from "./display.js";
 import { buildInitialPrompt, buildEventPrompt } from "./templates.js";
 import type { EffortValue } from "./effort.js";
 import type { ForemanMessage, GitHubEvent, TaskIssue, WorkerMessage } from "../types.js";
-import { Workspace } from "./workspace.js";
+import { Workspace, confirmIfUnsafe } from "./workspace.js";
 import type { WorkspaceCommandDeps } from "./workspace.js";
-import { fmtError } from "../utils.js";
+import { fmtError, generateWorkerId } from "../utils.js";
 import { scoped } from "./commands.js";
+import { pick } from "./input.js";
 
 const execAsync = promisify(exec);
 
@@ -187,6 +190,20 @@ export type WorkerSessionOptions = {
   pingIntervalMs?: number;
 };
 
+/** Configuration for starting the worker process. */
+export type WorkerModeConfig = {
+  foremanUrl: string;
+  workspaceDir?: string;
+  githubToken: string;
+  githubRepo: string;
+  repoUrl?: string;
+  verbose: boolean;
+  logFile: string;
+  model?: string;
+  effort?: EffortValue;
+  pingIntervalMs: number;
+};
+
 // Sentinel: a prompt is ready for main() to execute
 export const WS_PROMPT = "__ws_prompt__";
 
@@ -231,7 +248,7 @@ export class WorkerSession {
   private statusModel: WorkerStatusModel;
 
   constructor(
-    private workerId: string,
+    public readonly workerId: string,
     private wsFactory: WsFactory,
     private display: WorkerDisplay,
     private options: WorkerSessionOptions = {},
@@ -411,6 +428,15 @@ export class WorkerSession {
         taskId: this.currentTaskId,
       }));
     }
+  }
+
+  /**
+   * Returns true if the input string is a sentinel emitted by WorkerSession
+   * to signal that a queued prompt is ready. Used by main() to detect WS
+   * notifications without needing to know the internal sentinel value.
+   */
+  static isWsSignal(input: string): boolean {
+    return input === WS_PROMPT;
   }
 
   // ── Private ───────────────────────────────────────────────────────────────
@@ -653,4 +679,110 @@ export function registerWorkerCommands(session: WorkerSession | undefined): void
       return session.completeCurrentTask();
     },
   });
+}
+
+/**
+ * Set up worker mode: create the workspace, configure the WorkerSession,
+ * install signal handlers, and start the session. Returns the session and
+ * a cleanup function — does NOT call main(). The caller (main itself) owns
+ * the query loop and calls cleanup() after the loop exits.
+ */
+export async function startWorkerMode(config: WorkerModeConfig): Promise<{
+  session: WorkerSession;
+  cleanup: () => Promise<void>;
+}> {
+  const workerId = generateWorkerId();
+  const originalCwd = process.cwd();
+  const workspaceDir = config.workspaceDir ?? path.join(os.homedir(), ".brunel", "workers");
+  const repoUrl = config.repoUrl ?? `https://${config.githubToken}@github.com/${config.githubRepo}.git`;
+
+  const workspace = await Workspace.create(workspaceDir, workerId, repoUrl);
+  process.chdir(workspace.dir);
+
+  const confirm = async (msg: string): Promise<boolean> => {
+    display.print(display.c.amber(`\n⚠ Potential data loss:\n${msg}`));
+    const idx = await pick(["Yes, proceed", "No, cancel"]);
+    return idx === 0;
+  };
+
+  const afterTask = async () => {
+    const ok = await confirmIfUnsafe(workspace, confirm);
+    if (!ok) {
+      display.print(display.c.amber("Workspace reset cancelled. Task not marked complete."));
+      throw new Error("cancelled");
+    }
+    try {
+      await workspace.reset();
+    } catch (err) {
+      display.print(display.c.boldRed(`Workspace reset failed: ${fmtError(err)}. Task not marked complete.`));
+      throw err;
+    }
+  };
+
+  let shuttingDown = false;
+
+  const wsFactory: WsFactory = (wid, taskId) => {
+    const ws = new WebSocket(`${config.foremanUrl}/worker`);
+    ws.on("open", () => {
+      ws.send(JSON.stringify({
+        type: "worker_hello",
+        workerId: wid,
+        taskId,
+        status: taskId ? "busy" : "idle",
+      }));
+    });
+    return ws;
+  };
+
+  const workerDisplay: WorkerDisplay = {
+    print: display.print,
+    printForemanMessage: display.printForemanMessage,
+    startPersistentStatus: display.startPersistentStatus,
+    stopPersistentStatus: display.stopPersistentStatus,
+    updatePersistentStatus: display.updatePersistentStatus,
+    setOnToolResultCallback: display.setOnToolResultCallback,
+  };
+
+  const session = new WorkerSession(workerId, wsFactory, workerDisplay, {
+    afterTask,
+    workspaceCtx: { workspace, originalCwd, workspaceDir, repoUrl, confirm },
+    pingIntervalMs: config.pingIntervalMs,
+  });
+  session.currentModel = config.model;
+  session.currentEffort = config.effort;
+
+  const shutdown = async () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    const ok = await confirmIfUnsafe(workspace, confirm);
+    if (ok) await workspace.destroy();
+    process.exit(0);
+  };
+
+  // SIGINT: interrupt the running query if one is active; otherwise prompt and shut down.
+  process.on("SIGINT", () => {
+    if (!session.interrupt()) {
+      void shutdown();
+    }
+  });
+
+  // SIGTERM: send goodbye then force-destroy without prompting.
+  process.on("SIGTERM", () => {
+    session.sendGoodbye();
+    void workspace.destroy().then(() => process.exit(0));
+  });
+
+  session.start();
+
+  const cleanup = async () => {
+    session.sendGoodbye();
+    shuttingDown = true;
+    const ok = await confirmIfUnsafe(workspace, confirm);
+    if (ok) await workspace.destroy();
+    process.stdout.write("\x1b[?2004l\r\n");
+    if (process.stdin.isTTY) process.stdin.setRawMode(false);
+    process.stdin.pause();
+  };
+
+  return { session, cleanup };
 }

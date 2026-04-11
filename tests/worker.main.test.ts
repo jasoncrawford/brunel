@@ -43,7 +43,8 @@ vi.mock("../src/agent/input.js", async (importOriginal) => {
   };
 });
 
-import { startWorkerMode } from "../src/agent/index.js";
+import { main } from "../src/agent/index.js";
+import type { WorkerModeConfig } from "../src/agent/worker.js";
 import { Workspace, confirmIfUnsafe } from "../src/agent/workspace.js";
 import * as inputModule from "../src/agent/input.js";
 import * as displayModule from "../src/agent/display.js";
@@ -51,18 +52,22 @@ import { stripAnsi } from "./helpers.js";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-const WORKER_CONFIG = {
+const permConfig = {
+  permissionMode: "bypassPermissions" as const,
+  allowDangerouslySkipPermissions: false,
+};
+
+const WORKER_CONFIG: WorkerModeConfig = {
   foremanUrl: "ws://localhost:3000",
   workspaceDir: "/fake/workers",
   githubToken: "test-token",
   githubRepo: "owner/repo",
-  permissionMode: "bypassPermissions" as const,
   verbose: true,
   logFile: "worker.log",
   pingIntervalMs: 25_000,
 };
 
-async function runWorkerMain(): Promise<{ exitCalled: boolean; exitCode: number | undefined }> {
+async function runWorkerMain(runQueryFn = vi.fn().mockResolvedValue(undefined)): Promise<{ exitCalled: boolean; exitCode: number | undefined }> {
   let exitCode: number | undefined;
   const exitSpy = vi.spyOn(process, "exit").mockImplementation((code?: number | string) => {
     exitCode = typeof code === "number" ? code : 0;
@@ -70,7 +75,7 @@ async function runWorkerMain(): Promise<{ exitCalled: boolean; exitCode: number 
   }) as unknown as ReturnType<typeof vi.spyOn>;
 
   try {
-    await startWorkerMode(vi.fn().mockResolvedValue(undefined), WORKER_CONFIG);
+    await main(runQueryFn, permConfig, WORKER_CONFIG);
     return { exitCalled: false, exitCode: undefined };
   } catch (err) {
     if (err instanceof Error && err.message === "__process_exit__") {
@@ -185,7 +190,7 @@ describe("workerMain exit behavior", () => {
     const chdirSpy = vi.spyOn(process, "chdir").mockImplementation(() => {});
 
     let workerDone = false;
-    const workerPromise = startWorkerMode(runQueryFn, WORKER_CONFIG).then(
+    const workerPromise = main(runQueryFn, permConfig, WORKER_CONFIG).then(
       () => { workerDone = true; },
       () => { workerDone = true; },
     );
@@ -228,7 +233,7 @@ describe("workerMain exit behavior", () => {
     }) as unknown as ReturnType<typeof vi.spyOn>;
 
     try {
-      await startWorkerMode(vi.fn().mockResolvedValue(undefined), WORKER_CONFIG);
+      await main(vi.fn().mockResolvedValue(undefined), permConfig, WORKER_CONFIG);
     } catch (err) {
       if (!(err instanceof Error && err.message === "__process_exit__")) throw err;
     } finally {
