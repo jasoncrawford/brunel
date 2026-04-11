@@ -255,21 +255,15 @@ export async function main(
   const workerCtx = workerConfig ? await startWorkerMode(workerConfig) : undefined;
   const session = workerCtx?.session;
 
-  // Print the startup banner (unified for both modes).
-  display.print(display.c.sageGreen(display.hr("═")));
-  display.print(display.c.skyBlue(display.s.bold("  Brunel Agent")));
-  if (workerConfig && workerCtx) {
-    display.print(display.c.lavender(`  Worker ID: ${workerCtx.session.workerId} | Foreman: ${workerConfig.foremanUrl}`));
-    display.print(display.c.lavender(`  Permissions: ${permConfig.permissionMode} | Model: ${workerConfig.model ?? "default"} | Output: ${workerConfig.verbose ? "verbose" : "quiet"} | Log: ${workerConfig.logFile}`));
-  } else {
-    display.print(display.c.lavender(`  Permissions: ${permConfig.permissionMode} | Model: ${initialModel ?? "default"} | Effort: ${initialEffort ?? "auto"} | Output: ${display.verbose ? "verbose" : "quiet"} | Log: ${LOG_FILE}`));
-    display.print(display.c.lavender(`  Type /exit to quit, /clear to start a new session.`));
-  }
-  display.print(display.c.sageGreen(display.hr("═")));
-
   const fetchModelsFn = createFetchModelsFn(permConfig);
   let currentModel: string | undefined = workerConfig?.model ?? initialModel;
   let currentEffort: EffortValue | undefined = workerConfig?.effort ?? initialEffort;
+
+  // Print the startup banner.
+  display.print(display.c.sageGreen(display.hr("═")));
+  display.print(display.c.skyBlue(display.s.bold("  Brunel Agent")));
+  display.print(display.c.lavender(`  Permissions: ${permConfig.permissionMode} | Model: ${currentModel ?? "default"} | Effort: ${currentEffort ?? "auto"} | Output: ${display.verbose ? "verbose" : "quiet"} | Log: ${workerConfig?.logFile ?? LOG_FILE}`));
+  display.print(display.c.sageGreen(display.hr("═")));
 
   process.stdout.write("\x1b[?2004h"); // enable bracketed paste mode
   process.stdin.setRawMode?.(true);
@@ -289,25 +283,16 @@ export async function main(
   };
 
   // doExit handles REPL workspace cleanup and stdin/stdout teardown.
-  // In worker mode, stdin/stdout cleanup is handled by startWorkerMode() after
-  // main() returns, so we skip it here.
+  // Only called in REPL mode (worker mode cleanup goes through workerCtx.cleanup()).
   const doExit = async () => {
     if (workspaceRef.current) {
       const ok = await confirmIfUnsafe(workspaceRef.current, confirm);
       if (ok) await workspaceRef.current.destroy();
     }
-    if (!session) {
-      process.stdout.write("\x1b[?2004l\r\n");
-      if (process.stdin.isTTY) process.stdin.setRawMode(false);
-      process.stdin.pause();
-    }
+    process.stdout.write("\x1b[?2004l\r\n");
+    if (process.stdin.isTTY) process.stdin.setRawMode(false);
+    process.stdin.pause();
   };
-
-  // Sync initial model/effort to session for status bar display.
-  if (session) {
-    session.currentModel = currentModel;
-    session.currentEffort = currentEffort;
-  }
 
   // Register all commands. Commands are always present in the registry for
   // both REPL and worker modes; worker-only commands degrade gracefully when

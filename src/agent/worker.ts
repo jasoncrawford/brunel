@@ -493,6 +493,10 @@ export class WorkerSession {
       this.statusModel.update({ connectionStatus: "handshaking" });
 
       // Heartbeat: detect silent connection drops (network loss, laptop sleep, etc.)
+      // Each tick sends a ping. If no pong/ping arrives before the next tick, the
+      // connection is terminated so the status bar updates and reconnect runs.
+      // Receiving any frame (pong from our ping, or ping from the foreman's heartbeat)
+      // resets the timer so the next check is a full interval away.
       isAlive = true;
 
       const startPingTimer = () => {
@@ -541,6 +545,7 @@ export class WorkerSession {
       if (ws !== this.ws) return; // stale error from a previous connection
       this.display.print(display.c.amber(`WebSocket error: ${err.message}`));
       // Ensure close fires even for errors that don't automatically close the socket
+      // (e.g. some TLS negotiation failures on older Node.js / ws versions).
       ws.terminate();
     });
   }
@@ -606,6 +611,7 @@ export class WorkerSession {
       if (event.name === "pull_request") {
         const pr = event.payload["pull_request"] as { number?: number; merged?: boolean } | undefined;
         if (action === "closed" && !pr?.merged) {
+          // PR was closed without merging — clear the PR from the status bar.
           this.statusModel.update({ prNumber: undefined });
         } else if (pr?.number != null) {
           this.statusModel.update({ prNumber: pr.number });
@@ -614,8 +620,10 @@ export class WorkerSession {
 
       if (event.name === "pull_request" && action === "closed") {
         this.prIsClosed = true;
+        // process normally (cleanup prompt still fires)
       } else if (event.name === "pull_request" && action === "reopened") {
         this.prIsClosed = false;
+        // process normally
       } else if (this.prIsClosed && event.name === "check_suite") {
         // Post-merge check suite: already logged via printForemanMessage; silently drop.
         return;
@@ -623,6 +631,7 @@ export class WorkerSession {
 
       const classification = classifyEvent(event);
       if (classification === "log_only") {
+        // Already logged via printForemanMessage above; no further action.
         return;
       }
 
@@ -691,6 +700,8 @@ export async function startWorkerMode(config: WorkerModeConfig): Promise<{
   session: WorkerSession;
   cleanup: () => Promise<void>;
 }> {
+  display.setVerbose(config.verbose);
+
   const workerId = generateWorkerId();
   const originalCwd = process.cwd();
   const workspaceDir = config.workspaceDir ?? path.join(os.homedir(), ".brunel", "workers");
