@@ -48,6 +48,35 @@ describe("loadIssuesToQueue", () => {
     setupInMemoryTasks(taskManager);
     await expect(loadIssuesToQueue(taskManager, CONFIG_OPTS)).rejects.toThrow("403");
   });
+
+  it("preserves existing task assignment when syncing content during startup", async () => {
+    // This tests the fix for issue #600: during startup, loadIssuesToQueue calls upsert
+    // for all labeled issues (including already-assigned ones). The upsert must NOT reset
+    // worker_id/assigned_at — otherwise the task gets reassigned to a different idle worker.
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => [{ number: 1, title: "Updated title", body: "Updated body", labels: [{ name: "brunel:ready" }] }],
+    } as any);
+
+    const taskManager = new TaskManager();
+    setupInMemoryTasks(taskManager);
+    vi.spyOn(Task, "fetchBlockers").mockResolvedValue([]);
+
+    // Task #1 already exists and is assigned to a worker (simulates foreman restart)
+    await Task.upsert("1", 1, "owner/repo", "Original title", "Original body", ["brunel:ready"]);
+    const t = await Task.getByIssue(1);
+    await t!.assign("worker-abc");
+    expect(t!.workerId).toBe("worker-abc");
+
+    // loadIssuesToQueue runs during startup and calls upsert for the same issue
+    await loadIssuesToQueue(taskManager, CONFIG_OPTS);
+
+    // Content should be updated, but assignment must be preserved
+    const task = await Task.getByIssue(1);
+    expect(task?.title).toBe("Updated title");
+    expect(task?.body).toBe("Updated body");
+    expect(task?.workerId).toBe("worker-abc"); // MUST NOT be reset to null
+  });
 });
 
 describe("fetchIssueStates", () => {

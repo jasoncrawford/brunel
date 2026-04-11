@@ -86,11 +86,8 @@ export function setupInMemoryTasks(emitter?: { emit: (event: string) => void }) 
   vi.spyOn(Task, "upsert").mockImplementation(async (taskId, issueNumber, repo, title, body, labels) => {
     const existing = tasks.get(taskId);
     if (existing) {
-      existing.workerId = null;
-      existing.assignedAt = null;
-      existing.completedAt = null;
-      existing.issueClosedAt = null;
-      existing.prMergedAt = null;
+      // On conflict: only update content fields — preserve all status/assignment fields.
+      // Mirrors the real Task.upsert() which omits status fields from the ON CONFLICT DO UPDATE.
       existing.title = title;
       existing.body = body;
       existing.labels = labels;

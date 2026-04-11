@@ -303,6 +303,7 @@ export function createForemanWss(
       if (msg.taskId) {
         const task = await Task.get(msg.taskId);
         if (task) {
+          log(workerId, `reverting task #${task.issueNumber} to pending (worker_goodbye)`);
           await task.revert().catch((err: unknown) =>
             flog(`ERROR Failed to revert task #${msg.taskId} to pending: ${fmtError(err)}`)
           );
