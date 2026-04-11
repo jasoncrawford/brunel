@@ -2,6 +2,8 @@
 
 How model objects, wire types, and client types are organized in this codebase.
 
+> **This is the target design.** The codebase is being incrementally refactored toward it. Existing code may not yet follow these conventions — when it doesn't, the direction of travel is here.
+
 ## Core pattern
 
 Every domain concept has at most two types:
