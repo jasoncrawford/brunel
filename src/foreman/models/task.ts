@@ -64,21 +64,21 @@ export class Task {
 
   toJSON() {
     return {
-      taskId: this.taskId,
-      issueNumber: this.issueNumber,
+      task_id: this.taskId,
+      issue_number: this.issueNumber,
       repo: this.repo,
       title: this.title,
       body: this.body,
       labels: this.labels,
       status: this.status,
-      workerId: this.workerId,
-      prNumber: this.prNumber,
+      worker_id: this.workerId,
+      pr_number: this.prNumber,
       branch: this.branch,
-      createdAt: this.createdAt,
-      assignedAt: this.assignedAt,
-      completedAt: this.completedAt,
-      issueClosedAt: this.issueClosedAt,
-      prMergedAt: this.prMergedAt,
+      created_at: this.createdAt,
+      assigned_at: this.assignedAt,
+      completed_at: this.completedAt,
+      issue_closed_at: this.issueClosedAt,
+      pr_merged_at: this.prMergedAt,
     };
   }
 

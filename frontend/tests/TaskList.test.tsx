@@ -13,17 +13,21 @@ vi.mock("../src/hooks/useAdminWs.ts", () => ({
 }));
 
 const assignedTask: TaskRow = {
-  taskId: "42",
-  issueNumber: 42,
+  task_id: "42",
+  issue_number: 42,
   repo: "owner/repo",
   title: "Fix the bug",
+  body: "",
+  labels: [],
   status: "assigned",
-  workerId: "worker-abc-123",
-  prNumber: null,
+  worker_id: "worker-abc-123",
+  pr_number: null,
   branch: null,
-  createdAt: "2026-01-01T00:00:00.000Z",
-  assignedAt: "2026-01-01T01:00:00.000Z",
-  completedAt: null,
+  created_at: "2026-01-01T00:00:00.000Z",
+  assigned_at: "2026-01-01T01:00:00.000Z",
+  completed_at: null,
+  issue_closed_at: null,
+  pr_merged_at: null,
 };
 
 function renderTaskList() {

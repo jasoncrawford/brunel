@@ -23,7 +23,7 @@ export default function TaskList() {
     if (msg.type === "snapshot") {
       const statusMap = new Map(msg.tasks.map((t) => [t.taskId, t.status]));
       setTasks((prev) => prev.map((row) => {
-        const newStatus = statusMap.get(row.taskId);
+        const newStatus = statusMap.get(row.task_id);
         return newStatus && newStatus !== row.status ? { ...row, status: newStatus } : row;
       }));
     }
@@ -75,18 +75,18 @@ export default function TaskList() {
           </thead>
           <tbody>
             {tasks.map((t) => (
-              <tr key={t.taskId}>
-                <td style={td}><Link to={`/tasks/${t.taskId}`}>#{t.issueNumber}</Link></td>
+              <tr key={t.task_id}>
+                <td style={td}><Link to={`/tasks/${t.task_id}`}>#{t.issue_number}</Link></td>
                 <td style={td}>{t.title}</td>
                 <td style={td}>{t.status}</td>
-                <td style={td}>{t.workerId
-                  ? <Link to={`/workers/${t.workerId}`}>{shortWorkerId(t.workerId)}</Link>
+                <td style={td}>{t.worker_id
+                  ? <Link to={`/workers/${t.worker_id}`}>{shortWorkerId(t.worker_id)}</Link>
                   : "—"}</td>
-                <td style={td}>{t.prNumber
-                  ? <a href={`https://github.com/${t.repo}/pull/${t.prNumber}`} target="_blank" rel="noreferrer">#{t.prNumber}</a>
+                <td style={td}>{t.pr_number
+                  ? <a href={`https://github.com/${t.repo}/pull/${t.pr_number}`} target="_blank" rel="noreferrer">#{t.pr_number}</a>
                   : "—"}</td>
-                <td style={td}>{new Date(t.createdAt).toLocaleString()}</td>
-                <td style={td}>{t.completedAt ? new Date(t.completedAt).toLocaleString() : "—"}</td>
+                <td style={td}>{new Date(t.created_at).toLocaleString()}</td>
+                <td style={td}>{t.completed_at ? new Date(t.completed_at).toLocaleString() : "—"}</td>
               </tr>
             ))}
           </tbody>
