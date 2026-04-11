@@ -108,6 +108,11 @@ describe("task_assigned", () => {
 
 describe("event_notification", () => {
   it("resolves WS input promise when actionable event_notification is received", async () => {
+    // Assign a task first so the worker has a currentTaskId to match against.
+    const issue = makeIssue();
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+
     const promise = session.createWsInputPromise();
     sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
     const result = await promise;
@@ -160,6 +165,37 @@ describe("event_notification", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("ignores event_notification for a task other than the current task", async () => {
+    vi.useFakeTimers();
+    try {
+      const issue = makeIssue(1);
+      sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+
+      // Stale event for a different task (e.g. old completed task)
+      sendMsg(fakeWs, { type: "event_notification", taskId: "99", event: makeEvent("issue_comment") });
+      await vi.runAllTimersAsync();
+
+      // runQuery should not have been called a second time
+      expect(runQuery).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("prints a warning when ignoring an event_notification for a different task", async () => {
+    const issue = makeIssue(1);
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+
+    display.print.mockClear();
+    sendMsg(fakeWs, { type: "event_notification", taskId: "99", event: makeEvent("issue_comment") });
+
+    await vi.waitFor(() => expect(display.print).toHaveBeenCalled());
+    const printCalls = display.print.mock.calls.map(args => stripAnsi(String(args[0])));
+    expect(printCalls.some(s => s.includes("ignoring"))).toBe(true);
   });
 
   it("batches multiple pending events into a single runQuery call", async () => {
