@@ -211,8 +211,12 @@ export class Task {
   }
 
   static async upsert(taskId: string, issueNumber: number, repo: string, title: string, body: string, labels: string[]): Promise<Task> {
+    // On conflict (task already exists), only update content fields (title, body, labels, repo, issue_number).
+    // Status fields (worker_id, assigned_at, completed_at, issue_closed_at, pr_merged_at) are intentionally
+    // omitted so that existing assignments and status are preserved — e.g. during startup sync.
+    // For new tasks, those columns default to null in the DB schema.
     const { data, error } = await db.from("tasks").upsert(
-      { task_id: taskId, issue_number: issueNumber, repo, title, body, labels, worker_id: null, assigned_at: null, completed_at: null, issue_closed_at: null, pr_merged_at: null },
+      { task_id: taskId, issue_number: issueNumber, repo, title, body, labels },
       { onConflict: "task_id" },
     ).select().maybeSingle();
     if (error) throw error;

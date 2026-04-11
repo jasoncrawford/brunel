@@ -393,6 +393,42 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
     expect(msg.issue.body).toBe("Real issue description");
     expect(msg.issue.labels).toEqual(["brunel:ready", "bug"]);
   });
+
+  it("GitHub sync during startup does not steal assignment from original worker (issue #600 regression)", async () => {
+    // Reproduces the bug from issue #600:
+    // 1. Task is restored from DB with worker_id set (loadActiveTasksFromDb)
+    // 2. GitHub sync calls Task.upsert() again for the same task (loadIssuesFromGithub)
+    // 3. reconcile() runs — MUST NOT assign the task to a different idle worker
+    const { wss: fwss, reconcile } = createForemanWss(taskManager, registry, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" });
+    wss = fwss;
+
+    port = await startServer();
+
+    // Step 1: restore from DB — task is assigned to "original-worker"
+    await Task.upsert("42", 42, "owner/repo", "Test task", "", []);
+    const t = await Task.get("42");
+    await t!.assign("original-worker");
+    taskManager.trackIssue(42);
+    taskManager.markBlockersLoaded(42);
+
+    // Step 2: GitHub sync calls upsert for the same task (content refresh only)
+    await Task.upsert("42", 42, "owner/repo", "Test task", "New body from GitHub", ["brunel:ready"]);
+
+    // Assignment must be preserved after the GitHub sync upsert
+    expect((await Task.get("42"))?.workerId).toBe("original-worker");
+
+    // Step 3: reconcile() — must NOT assign the task to a new worker
+    await reconcile();
+
+    expect((await Task.get("42"))?.workerId).toBe("original-worker");
+    expect((await Task.get("42"))?.status).toBe("assigned");
+
+    // Step 4: an idle worker connects — must NOT receive the already-assigned task
+    const ws = await connect({ type: "worker_hello", workerId: "new-worker", status: "idle" });
+    await waitUntil(() => registry.get("new-worker")?.status === "idle");
+
+    expect((await Task.get("42"))?.workerId).toBe("original-worker");
+  });
 });
 
 // ── Reconnect to complete task (issue closed while worker active) ─────────────

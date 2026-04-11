@@ -35,7 +35,14 @@ export async function loadIssuesToQueue(
     const labels = issue.labels.map((l) => l.name);
     const repoUrl = `https://github.com/${owner}/${repoName}`;
 
+    // Log if this task is already assigned so it's visible in startup logs that we're preserving it.
+    const existingTask = await Task.getByIssue(issue.number).catch(() => null);
+    if (existingTask?.workerId) {
+      console.log(`[startup] task #${issue.number} already assigned to worker ${existingTask.workerId} — preserving assignment`);
+    }
+
     // Track as open and upsert into DB (handles both creation and content sync).
+    // NOTE: upsert only updates content fields (title, body, labels); status fields are preserved.
     await taskModel.enqueueIssue(String(issue.number), issue.number, repo, issue.title, body, labels)
       .catch((err: unknown) => console.error(`[startup] ERROR upserting task #${issue.number}: ${fmtError(err)}`));
 

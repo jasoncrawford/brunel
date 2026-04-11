@@ -73,13 +73,13 @@ describe("Task.upsert (Supabase)", () => {
     expect(task).not.toBeNull();
   });
 
-  it("on re-label resets an existing row to pending state and refreshes content", async () => {
+  it("on conflict updates content fields only — status fields are preserved", async () => {
     await Task.upsert("dbt-42", 9042, "owner/repo", "Original title", "Original body", ["v1"]);
     const t = await Task.get("dbt-42");
     await t!.assign("worker-1");
     await t!.complete();
 
-    // Re-label: upsert should reset all status markers and update title/body/labels.
+    // Upsert again (e.g. startup sync): must update content but PRESERVE status fields.
     // Use Task.get (direct PK lookup) rather than Task.list to minimise the window
     // where pipeline.test.ts's reconcile() can delete this row (assigned_at IS NULL).
     await Task.upsert("dbt-42", 9042, "owner/repo", "New title", "New body", ["v2"]);
@@ -89,11 +89,10 @@ describe("Task.upsert (Supabase)", () => {
     expect(task!.title).toBe("New title");
     expect(task!.body).toBe("New body");
     expect(task!.labels).toEqual(["v2"]);
-    expect(task!.workerId).toBeNull();
-    expect(task!.completedAt).toBeNull();
-    expect(task!.assignedAt).toBeNull();
-    expect(task!.issueClosedAt).toBeNull();
-    expect(task!.prMergedAt).toBeNull();
+    // Status fields must be preserved — not reset to null.
+    expect(task!.workerId).toBe("worker-1");
+    expect(task!.completedAt).toBeTruthy();
+    expect(task!.assignedAt).toBeTruthy();
   });
 });
 
