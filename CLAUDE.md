@@ -75,6 +75,10 @@ supabase gen types typescript --local > src/database.types.ts
 
 Most tests run without Supabase. DB tests (`db.*.test.ts`, `pipeline.test.ts`) require `supabase start`.
 
+## Type system
+
+See **`docs/type-system.md`** for the full design. In brief: one server model class per concept, one `Wire.*` interface per concept in `src/wire.ts` (imported as `import * as Wire from "./wire.js"`), shared domain types in `shared/types.ts`. Prefer a single wire type with optional fields over multiple types for the same concept. Name things after the concept, not the form — `Wire.Task` not `Wire.TaskSnapshot`.
+
 ## Key conventions
 
 - Use `display.print()` (not `console.log`) for output in agent/worker code — it routes through the status-bar-aware renderer so messages don't corrupt the TUI.
