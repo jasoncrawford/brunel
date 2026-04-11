@@ -1,6 +1,6 @@
 /**
- * Unit tests for forwardEvent — the function that decides whether to send or
- * queue a GitHub event to a worker.
+ * Unit tests for EventRouter.forwardEvent — the method that decides whether to
+ * send or queue a GitHub event to a worker.
  *
  * Covers the bug reported in issue #601: comments on a completed task were
  * forwarded to the worker that had moved on to a new task. The fix checks the
@@ -8,8 +8,7 @@
  * guard — so any case where the worker has moved on is caught.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { forwardEvent } from "../src/foreman/controllers/event-router.js";
-import type { EventRouterDeps } from "../src/foreman/controllers/event-router.js";
+import { EventRouter } from "../src/foreman/controllers/event-router.js";
 import { Task } from "../src/foreman/models/task.js";
 import { Worker } from "../src/foreman/models/worker-registry.js";
 import { WebhookEvent } from "../src/foreman/models/webhook-event.js";
@@ -24,26 +23,31 @@ function makeEvent(name = "issue_comment"): WebhookEvent {
   return WebhookEvent.fromIncoming("evt-1", name, {});
 }
 
-function makeDeps(): EventRouterDeps & { sendMsg: ReturnType<typeof vi.fn>; flog: ReturnType<typeof vi.fn> } {
+function makeRouter(): EventRouter & { sendMsg: ReturnType<typeof vi.fn>; flog: ReturnType<typeof vi.fn> } {
   const queueEvent = vi.fn();
   const sendMsg = vi.fn();
   const flog = vi.fn();
-  return {
-    taskManager: { queueEvent } as unknown as EventRouterDeps["taskManager"],
+  const router = new EventRouter({
+    taskManager: { queueEvent } as unknown as ConstructorParameters<typeof EventRouter>[0]["taskManager"],
     repo: "owner/repo",
     token: "token",
     taskLabel: "brunel:ready",
     sendMsg,
     flog,
     assignIdleWorkers: vi.fn().mockResolvedValue(undefined),
-  } as unknown as ReturnType<typeof makeDeps>;
+  });
+  return Object.assign(router, { sendMsg, flog });
+}
+
+function callForwardEvent(router: EventRouter, task: Task, evt: WebhookEvent, ref: string): void {
+  (router as any).forwardEvent(task, evt, ref);
 }
 
 beforeEach(() => { Worker._reset(); });
 
 // ── Core bug fix: worker that has moved on ─────────────────────────────────────
 
-describe("forwardEvent — worker has moved on to a different task", () => {
+describe("EventRouter.forwardEvent — worker has moved on to a different task", () => {
   it("drops the event when the registry shows the worker is now on a different task", () => {
     // Simulates the bug: task T1 completes, worker is assigned T2,
     // but task.workerId for T1 still points to that worker.
@@ -55,12 +59,12 @@ describe("forwardEvent — worker has moved on to a different task", () => {
     });
     const w = Worker.register("worker-1", fakeWs());
     w.assign("other-task-id"); // worker has moved on to a different task
-    const deps = makeDeps();
+    const router = makeRouter();
 
-    forwardEvent(deps, task, makeEvent(), "#42");
+    callForwardEvent(router, task, makeEvent(), "#42");
 
-    expect(deps.sendMsg).not.toHaveBeenCalled();
-    expect(deps.taskManager.queueEvent).not.toHaveBeenCalled();
+    expect(router.sendMsg).not.toHaveBeenCalled();
+    expect((router as any).taskManager.queueEvent).not.toHaveBeenCalled();
   });
 
   it("drops the event when the registry shows the worker is now idle (task completed, no new task yet)", () => {
@@ -71,12 +75,12 @@ describe("forwardEvent — worker has moved on to a different task", () => {
       completed_at: new Date().toISOString(),
     });
     Worker.register("worker-1", fakeWs()); // idle with no currentTaskId
-    const deps = makeDeps();
+    const router = makeRouter();
 
-    forwardEvent(deps, task, makeEvent(), "#42");
+    callForwardEvent(router, task, makeEvent(), "#42");
 
-    expect(deps.sendMsg).not.toHaveBeenCalled();
-    expect(deps.taskManager.queueEvent).not.toHaveBeenCalled();
+    expect(router.sendMsg).not.toHaveBeenCalled();
+    expect((router as any).taskManager.queueEvent).not.toHaveBeenCalled();
   });
 
   it("logs a drop message when the worker has moved on", () => {
@@ -88,18 +92,18 @@ describe("forwardEvent — worker has moved on to a different task", () => {
     });
     const w = Worker.register("worker-1", fakeWs());
     w.assign("other-task-id");
-    const deps = makeDeps();
+    const router = makeRouter();
 
-    forwardEvent(deps, task, makeEvent("issue_comment"), "#42");
+    callForwardEvent(router, task, makeEvent("issue_comment"), "#42");
 
-    expect(deps.flog).toHaveBeenCalledWith(expect.stringContaining("dropped"));
-    expect(deps.flog).toHaveBeenCalledWith(expect.stringContaining("different task"));
+    expect(router.flog).toHaveBeenCalledWith(expect.stringContaining("dropped"));
+    expect(router.flog).toHaveBeenCalledWith(expect.stringContaining("different task"));
   });
 });
 
 // ── Active tasks still receive events (regression guard) ───────────────────────
 
-describe("forwardEvent — active tasks still receive events", () => {
+describe("EventRouter.forwardEvent — active tasks still receive events", () => {
   it("forwards the event when the registry confirms the worker is still on this task", () => {
     const task = Task.fromTest({
       task_id: "42",
@@ -108,12 +112,12 @@ describe("forwardEvent — active tasks still receive events", () => {
     });
     const w = Worker.register("worker-1", fakeWs());
     w.assign("42");
-    const deps = makeDeps();
+    const router = makeRouter();
 
-    forwardEvent(deps, task, makeEvent(), "#42");
+    callForwardEvent(router, task, makeEvent(), "#42");
 
-    expect(deps.sendMsg).toHaveBeenCalledOnce();
-    expect(deps.sendMsg).toHaveBeenCalledWith(
+    expect(router.sendMsg).toHaveBeenCalledOnce();
+    expect(router.sendMsg).toHaveBeenCalledWith(
       "worker-1",
       expect.objectContaining({ type: "event_notification" }),
     );
@@ -129,12 +133,12 @@ describe("forwardEvent — active tasks still receive events", () => {
     });
     const w = Worker.register("worker-1", fakeWs());
     w.assign("42");
-    const deps = makeDeps();
+    const router = makeRouter();
 
-    forwardEvent(deps, task, makeEvent(), "#42");
+    callForwardEvent(router, task, makeEvent(), "#42");
 
-    expect(deps.sendMsg).toHaveBeenCalledOnce();
-    expect(deps.flog).not.toHaveBeenCalledWith(expect.stringContaining("dropped"));
+    expect(router.sendMsg).toHaveBeenCalledOnce();
+    expect(router.flog).not.toHaveBeenCalledWith(expect.stringContaining("dropped"));
   });
 
   it("still forwards events when the task's issue is closed but worker is still on it", () => {
@@ -146,22 +150,22 @@ describe("forwardEvent — active tasks still receive events", () => {
     });
     const w = Worker.register("worker-1", fakeWs());
     w.assign("42");
-    const deps = makeDeps();
+    const router = makeRouter();
 
-    forwardEvent(deps, task, makeEvent(), "#42");
+    callForwardEvent(router, task, makeEvent(), "#42");
 
-    expect(deps.sendMsg).toHaveBeenCalledOnce();
-    expect(deps.flog).not.toHaveBeenCalledWith(expect.stringContaining("dropped"));
+    expect(router.sendMsg).toHaveBeenCalledOnce();
+    expect(router.flog).not.toHaveBeenCalledWith(expect.stringContaining("dropped"));
   });
 
   it("queues event for a pending task with no worker", () => {
     const task = Task.fromTest({ task_id: "42", issue_number: 42 });
     task.blockersLoaded = true; // no open blockers → status is "pending"
-    const deps = makeDeps();
+    const router = makeRouter();
 
-    forwardEvent(deps, task, makeEvent(), "#42");
+    callForwardEvent(router, task, makeEvent(), "#42");
 
-    expect(deps.taskManager.queueEvent).toHaveBeenCalledOnce();
-    expect(deps.sendMsg).not.toHaveBeenCalled();
+    expect((router as any).taskManager.queueEvent).toHaveBeenCalledOnce();
+    expect(router.sendMsg).not.toHaveBeenCalled();
   });
 });
