@@ -18,7 +18,7 @@ MVC structure. Models own state; controllers handle external inputs.
 
 A unified REPL + worker loop. `main()` in `index.ts` runs both interactive and worker modes; `startWorkerMode()` in `worker.ts` sets up the WebSocket session and returns before `main()` takes over the query loop.
 
-Key files: `worker.ts` (WS protocol + task lifecycle), `display.ts` (TUI rendering), `command-registry.ts` (`CommandRegistry` class — instantiated in `index.ts` and injected into all modules; supports scoped sub-registries via `scoped(prefix)`), `workspace.ts` (git/npm workspace management), `templates.ts` (prompt templates).
+Key files: `worker.ts` (WS protocol + task lifecycle), `display.ts` (TUI rendering), `command-registry.ts` (`CommandRegistry` class — instantiated in `index.ts` and injected into all modules; supports scoped sub-registries via `scoped(prefix)`; `registry.listCommandNames()` and `registry.listCommands()` return all available commands including file-based commands and skills), `workspace.ts` (git/npm workspace management), `templates.ts` (prompt templates).
 
 ### Shared
 
@@ -84,6 +84,6 @@ See **`docs/type-system.md`** for the full design. In brief: one server model cl
 - Use `display.print()` (not `console.log`) for output in agent/worker code — it routes through the status-bar-aware renderer so messages don't corrupt the TUI.
 - Prefer event-based designs for real-time UIs: a model holds state and emits on change; the UI subscribes once rather than scattering manual refresh calls.
 - In unit tests, use `setupInMemoryTasks()` from `tests/helpers/task.ts` instead of `initDb()` — it mocks the `Task` layer with an in-memory map.
-- In agent tests that need slash commands, create a `CommandRegistry` instance directly (`new CommandRegistry()`) and populate it via `registerTestCommands()` from `tests/helpers.ts` (which returns the registry). Pass the registry to functions like `dispatchInput`, `parseSlashCommand`, `listCommandNames`, etc. When calling `registerWorkspaceCommands` or `registerWorkerCommands` in tests, pass a pre-scoped registry (e.g. `registry.scoped("workspace")`) — scoping is always the caller's responsibility.
+- In agent tests that need slash commands, create a `CommandRegistry` instance directly (`new CommandRegistry()`) and populate it via `registerTestCommands()` from `tests/helpers.ts` (which returns the registry). Pass the registry to functions like `dispatchInput`, `parseSlashCommand`, etc.; call `registry.listCommandNames()` and `registry.listCommands()` directly on the registry (with injectable `listDir`/`readFile` args for testing). When calling `registerWorkspaceCommands` or `registerWorkerCommands` in tests, pass a pre-scoped registry (e.g. `registry.scoped("workspace")`) — scoping is always the caller's responsibility.
 - In foreman tests that call `createForemanWss`, call `Worker._reset()` in `beforeEach` to clear the module-level worker registry between tests. `createForemanWss` takes no `registry` parameter — `Worker` is imported directly by `wss.ts` and `event-router.ts`.
 - In browser tests, the server is shared across all tests — use unique issue numbers per test rather than resetting server state.

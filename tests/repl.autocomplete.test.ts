@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PassThrough } from "stream";
-import { ask, matchCommands, filterCommands, listCommandNames, listCommands, parseFrontmatter, listSkillNames, type ListDir, type CommandSuggestion } from "../src/agent/input.js";
-import { CommandRegistry } from "../src/agent/command-registry.js";
+import { ask, matchCommands, filterCommands } from "../src/agent/input.js";
+import { CommandRegistry, parseFrontmatter, listSkillNames, type ListDir, type CommandSuggestion } from "../src/agent/command-registry.js";
 import { registerTestCommands } from "./helpers.js";
 
 // ── Test harness for ask() integration tests ──────────────────────────────────
@@ -316,13 +316,13 @@ describe("listCommandNames", () => {
   beforeEach(async () => { registry = await registerTestCommands(); });
 
   it("always includes builtins clear and exit", () => {
-    const result = listCommandNames(registry, () => null);
+    const result = registry.listCommandNames(() => null);
     expect(result).toContain("clear");
     expect(result).toContain("exit");
   });
 
   it("returns only builtins when directory is missing", () => {
-    const result = listCommandNames(registry, () => null);
+    const result = registry.listCommandNames(() => null);
     expect(result).toEqual(["clear", "effort", "exit", "model", "worker:complete", "workspace:create", "workspace:prune", "workspace:remove", "workspace:reset"]);
   });
 
@@ -331,7 +331,7 @@ describe("listCommandNames", () => {
       if (dir.endsWith("commands")) return [{ name: "brainstorm.md", isDir: false }];
       return null;
     };
-    const result = listCommandNames(registry, listDir);
+    const result = registry.listCommandNames(listDir);
     expect(result).toContain("brainstorm");
   });
 
@@ -341,7 +341,7 @@ describe("listCommandNames", () => {
       if (dir.endsWith("/foo")) return [{ name: "bar.md", isDir: false }];
       return null;
     };
-    const result = listCommandNames(registry, listDir);
+    const result = registry.listCommandNames(listDir);
     expect(result).toContain("foo:bar");
   });
 
@@ -352,7 +352,7 @@ describe("listCommandNames", () => {
       if (dir.endsWith("/b")) return [{ name: "c.md", isDir: false }];
       return null;
     };
-    const result = listCommandNames(registry, listDir);
+    const result = registry.listCommandNames(listDir);
     expect(result).toContain("a:b:c");
   });
 
@@ -361,7 +361,7 @@ describe("listCommandNames", () => {
       if (dir.endsWith("commands")) return [{ name: "clear.md", isDir: false }];
       return null;
     };
-    const result = listCommandNames(registry, listDir);
+    const result = registry.listCommandNames(listDir);
     const clears = result.filter(c => c === "clear");
     expect(clears).toHaveLength(1);
   });
@@ -375,7 +375,7 @@ describe("listCommandNames", () => {
       ];
       return null;
     };
-    const result = listCommandNames(registry, listDir);
+    const result = registry.listCommandNames(listDir);
     expect(result).not.toContain("notes");
     expect(result).not.toContain("script");
     expect(result).toContain("valid");
@@ -389,7 +389,7 @@ describe("listCommandNames", () => {
       ];
       return null;
     };
-    const result = listCommandNames(registry, listDir);
+    const result = registry.listCommandNames(listDir);
     expect(result).toEqual([...result].sort());
   });
 
@@ -402,12 +402,12 @@ describe("listCommandNames", () => {
       if (path.endsWith("SKILL.md")) return "---\nname: my-skill\n---\n";
       return null;
     };
-    const result = listCommandNames(registry, listDir, readFile);
+    const result = registry.listCommandNames(listDir, readFile);
     expect(result).toContain("my-skill");
   });
 
   it("includes worker:complete", () => {
-    const result = listCommandNames(registry, () => null);
+    const result = registry.listCommandNames(() => null);
     expect(result).toContain("worker:complete");
   });
 
@@ -421,7 +421,7 @@ describe("listCommandNames", () => {
       if (path.endsWith("SKILL.md")) return "---\nname: shared\n---\n";
       return null;
     };
-    const result = listCommandNames(registry, listDir, readFile);
+    const result = registry.listCommandNames(listDir, readFile);
     const shared = result.filter(c => c === "shared");
     expect(shared).toHaveLength(1);
   });
@@ -433,7 +433,7 @@ describe("listCommands", () => {
   beforeEach(async () => { registry = await registerTestCommands(); });
 
   it("returns CommandSuggestion objects with name and description", () => {
-    const result = listCommands(registry, () => null);
+    const result = registry.listCommands(() => null);
     expect(result.length).toBeGreaterThan(0);
     for (const cmd of result) {
       expect(cmd).toHaveProperty("name");
@@ -442,7 +442,7 @@ describe("listCommands", () => {
   });
 
   it("builtins have non-empty descriptions", () => {
-    const result = listCommands(registry, () => null);
+    const result = registry.listCommands(() => null);
     const clear = result.find(c => c.name === "clear");
     expect(clear).toBeDefined();
     expect(clear!.description).toBeTruthy();
@@ -460,7 +460,7 @@ describe("listCommands", () => {
       if (path.endsWith("SKILL.md")) return "---\nname: my-skill\ndescription: Does a great thing\n---\n# Body\nSome content";
       return null;
     };
-    const result = listCommands(registry, listDir, readFile);
+    const result = registry.listCommands(listDir, readFile);
     const skill = result.find(c => c.name === "my-skill");
     expect(skill).toBeDefined();
     expect(skill!.description).toBe("Does a great thing");
@@ -475,7 +475,7 @@ describe("listCommands", () => {
       if (path.endsWith("SKILL.md")) return "---\nname: my-skill\n---\n# First line heading\nMore content";
       return null;
     };
-    const result = listCommands(registry, listDir, readFile);
+    const result = registry.listCommands(listDir, readFile);
     const skill = result.find(c => c.name === "my-skill");
     expect(skill).toBeDefined();
     expect(skill!.description).toBe("# First line heading");
@@ -491,7 +491,7 @@ describe("listCommands", () => {
       if (path === `${home}/.claude/commands/mycmd.md`) return "---\ndescription: My command description\n---\nDo something";
       return null;
     };
-    const result = listCommands(registry, listDir, readFile);
+    const result = registry.listCommands(listDir, readFile);
     const cmd = result.find(c => c.name === "mycmd");
     expect(cmd).toBeDefined();
     expect(cmd!.description).toBe("My command description");
@@ -507,14 +507,14 @@ describe("listCommands", () => {
       if (path === `${home}/.claude/commands/mycmd.md`) return "Do something useful\nMore text";
       return null;
     };
-    const result = listCommands(registry, listDir, readFile);
+    const result = registry.listCommands(listDir, readFile);
     const cmd = result.find(c => c.name === "mycmd");
     expect(cmd).toBeDefined();
     expect(cmd!.description).toBe("Do something useful");
   });
 
   it("result is sorted alphabetically by name", () => {
-    const result = listCommands(registry, () => null);
+    const result = registry.listCommands(() => null);
     const names = result.map(c => c.name);
     expect(names).toEqual([...names].sort());
   });
