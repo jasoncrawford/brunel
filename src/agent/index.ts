@@ -8,10 +8,10 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { CanUseTool, PermissionMode, PermissionResult } from "@anthropic-ai/claude-agent-sdk";
 import * as display from "./display.js";
 import { setVerbose, setThinkOutLoud } from "./display.js";
-import { ask, listCommandNames, dispatchInput, pick, pickMultiple, pickQuestion } from "./input.js";
+import { ask, listWorkerCommands, dispatchInput, pick, pickMultiple, pickQuestion } from "./input.js";
 import type { PickQuestionResult } from "./input.js";
-import { workerMain } from "./worker.js";
-import type { RunQuery } from "./worker.js";
+import { WorkerSession, registerWorkerCommands, startWorkerMode } from "./worker.js";
+import type { RunQuery, WorkerModeConfig } from "./worker.js";
 import { loadConfig } from "../config.js";
 import { Workspace, confirmIfUnsafe, registerWorkspaceCommands } from "./workspace.js";
 import { fmtError } from "../utils.js";
@@ -20,7 +20,7 @@ import type { ModelInfo, FetchModelsFn } from "./model.js";
 import { handleEffortCommand } from "./effort.js";
 import type { EffortValue } from "./effort.js";
 import { _reset, register, execute } from "./commands.js";
-export { parseSlashCommand, resolveCommandFilePath, resolveContent, dispatchInput, matchCommands, listCommandNames, listWorkerCommandNames, ask } from "./input.js";
+export { parseSlashCommand, resolveCommandFilePath, resolveContent, dispatchInput, matchCommands, listCommandNames, listWorkerCommandNames, listWorkerCommands, ask } from "./input.js";
 export type { SlashCommandResult, DispatchResult, ListDir } from "./input.js";
 export { handleModelCommand, getCachedModels, _resetCachedModels } from "./model.js";
 export { handleEffortCommand } from "./effort.js";
@@ -231,8 +231,6 @@ export async function runQuery(
   return capturedSessionId;
 }
 
-// ── Main ──────────────────────────────────────────────────────────────────────
-
 function createFetchModelsFn(permConfig: { permissionMode: PermissionMode }): FetchModelsFn {
   return async () => {
     const q = query({ prompt: "", options: { cwd: process.cwd(), systemPrompt: { type: "preset", preset: "claude_code" }, permissionMode: permConfig.permissionMode } });
@@ -243,18 +241,32 @@ function createFetchModelsFn(permConfig: { permissionMode: PermissionMode }): Fe
   };
 }
 
-async function main(
+// ── Main ──────────────────────────────────────────────────────────────────────
+
+export async function main(
+  runQueryFn: RunQuery,
   permConfig: { permissionMode: PermissionMode; allowDangerouslySkipPermissions: boolean },
+  workerConfig?: WorkerModeConfig,
   workspaceCfg?: { workspaceDir: string; repoUrl: string },
   initialModel?: string,
   initialEffort?: EffortValue,
 ): Promise<void> {
+  // Worker mode setup: create workspace, session, signal handlers.
+  const workerCtx = workerConfig ? await startWorkerMode(workerConfig) : undefined;
+  const session = workerCtx?.session;
+
   const fetchModelsFn = createFetchModelsFn(permConfig);
-  let currentModel: string | undefined = initialModel;
-  let currentEffort: EffortValue | undefined = initialEffort;
+  let currentModel: string | undefined = workerConfig?.model ?? initialModel;
+  let currentEffort: EffortValue | undefined = workerConfig?.effort ?? initialEffort;
+
+  // Print the startup banner.
+  display.print(display.c.sageGreen(display.hr("═")));
+  display.print(display.c.skyBlue(display.s.bold("  Brunel Agent")));
+  display.print(display.c.lavender(`  Permissions: ${permConfig.permissionMode} | Model: ${currentModel ?? "default"} | Effort: ${currentEffort ?? "auto"} | Output: ${display.verbose ? "verbose" : "quiet"} | Log: ${workerConfig?.logFile ?? LOG_FILE}`));
+  display.print(display.c.sageGreen(display.hr("═")));
 
   process.stdout.write("\x1b[?2004h"); // enable bracketed paste mode
-  process.stdin.setRawMode(true);
+  process.stdin.setRawMode?.(true);
   process.stdin.resume();
   process.stdin.setEncoding("utf8");
 
@@ -270,45 +282,51 @@ async function main(
     return idx === 0;
   };
 
+  // doExit handles REPL workspace cleanup and stdin/stdout teardown.
+  // Only called in REPL mode (worker mode cleanup goes through workerCtx.cleanup()).
   const doExit = async () => {
     if (workspaceRef.current) {
       const ok = await confirmIfUnsafe(workspaceRef.current, confirm);
       if (ok) await workspaceRef.current.destroy();
     }
     process.stdout.write("\x1b[?2004l\r\n");
-    process.stdin.setRawMode(false);
+    if (process.stdin.isTTY) process.stdin.setRawMode(false);
     process.stdin.pause();
   };
 
-  // Register all REPL commands. This is the single place that wires up every
-  // command with its implementation. Workspace commands are registered by
-  // workspace.ts (which owns the logic); the rest are inlined here.
+  // Register all commands. Commands are always present in the registry for
+  // both REPL and worker modes; worker-only commands degrade gracefully when
+  // not connected to a foreman.
   _reset();
-  registerWorkspaceCommands({
-    workspace: workspaceRef,
-    config: workspaceCfg ? { ...workspaceCfg, sessionId: sessionId_ } : undefined,
-    originalCwd,
-    confirm,
-  });
+  registerWorkspaceCommands(
+    session
+      ? session.workspaceCommandDeps
+      : { workspace: workspaceRef, config: workspaceCfg ? { ...workspaceCfg, sessionId: sessionId_ } : undefined, originalCwd, confirm },
+    !!session,
+  );
+  registerWorkerCommands(session);
   register("exit", {
-    description: "Exit the REPL",
-    handler: async () => { await doExit(); return "exit"; },
+    description: "Exit",
+    handler: async () => {
+      if (!session) await doExit();
+      return "exit";
+    },
   });
   register("clear", {
     description: "Clear the conversation",
-    handler: async () => { sessionId = undefined; display.print(display.clearBreak()); },
-  });
-  register("worker:task-complete", {
-    description: "Mark the current task as done",
-    availability: "worker",
-    handler: async () => { display.print(display.c.boldRed("Not in worker mode.")); },
+    handler: async () => {
+      sessionId = undefined;
+      display.print(display.clearBreak());
+    },
   });
   register("model", {
     description: "Select the Claude model to use",
     handler: async (args) => {
       const pickModelFn = (opts: string[], idx: number) =>
         pick(opts, { currentIdx: idx, escapable: true });
-      currentModel = await handleModelCommand(args, currentModel, pickModelFn, fetchModelsFn, display.print);
+      const newModel = await handleModelCommand(args, currentModel, pickModelFn, fetchModelsFn, display.print);
+      currentModel = newModel;
+      if (session) session.currentModel = newModel;
     },
   });
   register("effort", {
@@ -316,23 +334,68 @@ async function main(
     handler: async (args) => {
       const pickEffortFn = (opts: string[], idx: number) =>
         pick(opts, { currentIdx: idx, escapable: true });
-      currentEffort = await handleEffortCommand(args, currentEffort, pickEffortFn, display.print);
+      const newEffort = await handleEffortCommand(args, currentEffort, pickEffortFn, display.print);
+      currentEffort = newEffort;
+      if (session) session.currentEffort = newEffort;
     },
   });
 
-  display.print(display.c.sageGreen(display.hr("═")));
-  display.print(display.c.skyBlue(display.s.bold("  Claude Agent SDK REPL")));
-  display.print(display.c.lavender(`  Permissions: ${permConfig.permissionMode} | Model: ${initialModel ?? "default"} | Effort: ${initialEffort ?? "auto"} | Output: ${display.verbose ? "verbose" : "quiet"} | Log: ${LOG_FILE}`));
-  display.print(display.c.lavender(`  Type /exit to quit, /clear to start a new session.`));
-  display.print(display.c.sageGreen(display.hr("═")));
+  /**
+   * Run a single prompt through runQueryFn. Notifies the session before/after
+   * so it can track the AbortController for interrupt() and drain pending events
+   * when the query finishes. Returns true if the query completed normally,
+   * false if interrupted or errored (caller should stop draining pending prompts).
+   */
+  const runPrompt = async (prompt: string): Promise<boolean> => {
+    const ac = new AbortController();
+    session?.notifyQueryStart(ac);
+    try {
+      sessionId = await runQueryFn(prompt, sessionId, ac, currentModel, currentEffort) ?? sessionId;
+      return !ac.signal.aborted;
+    } catch (err) {
+      console.error(display.c.boldRed(`\nERROR: ${fmtError(err)}`));
+      logFull("ERROR", err instanceof Error ? { message: err.message, stack: err.stack } : err);
+      return false;
+    } finally {
+      session?.notifyQueryEnd(ac.signal.aborted);
+    }
+  };
+
+  // In worker mode, the prompt starts hidden — the agent waits for the foreman
+  // to assign a task and is not ready for interactive input until then.
+  let showPrompt = !session;
 
   while (true) {
-    const input = await ask("\n> ");
+    const wsAbort = session?.createWsInputPromise();
+    // Use an empty prompt string when not ready for interactive input. An
+    // empty promptLine suppresses the drawFresh callback so incoming messages
+    // are printed cleanly without a prompt preceding or following them.
+    const promptStr = session ? (showPrompt ? "\n[agent] > " : "") : "\n> ";
+    const input = await ask(promptStr, listWorkerCommands, wsAbort);
 
-    // ^D / ^C on empty buffer — treat as /exit.
+    // ^D / ^C on empty buffer — treat as exit.
     if (input === "__eof__") {
-      await doExit();
+      if (!session) await doExit();
       break;
+    }
+
+    // Ignore the internal abort sentinel (fired when wsAbort resolves at the
+    // same tick as the ask() call; never a user action).
+    if (input === "__abort__") continue;
+
+    // WS_PROMPT: a task prompt or debounced event prompt is ready. Hide the
+    // prompt, drain all queued prompts through runQueryFn, then show the prompt
+    // again. Stops draining if a prompt is interrupted or errors.
+    if (WorkerSession.isWsSignal(input)) {
+      showPrompt = false;
+      while (session?.hasPendingPrompts()) {
+        const item = session.takeNextPrompt()!;
+        if (item.fresh) sessionId = undefined; // new task → fresh conversation
+        const ok = await runPrompt(item.prompt);
+        if (!ok) break;
+      }
+      showPrompt = true;
+      continue;
     }
 
     const action = await dispatchInput(input);
@@ -347,19 +410,33 @@ async function main(
     if (action.type === "command") {
       const result = await execute(action.name, action.args);
       if (result === "exit") break;
+      if (result === "task-complete") showPrompt = false;
       continue;
     }
 
     if (action.type !== "query") continue;
 
-    try {
-      sessionId = await runQuery(permConfig, action.prompt, sessionId, undefined, currentModel, currentEffort);
-    } catch (err) {
-      console.error(display.c.boldRed(`\nERROR: ${fmtError(err)}`));
-      logFull("ERROR", err instanceof Error ? { message: err.message, stack: err.stack } : err);
+    await runPrompt(action.prompt);
+
+    // Drain any foreman prompts that arrived during the user's query.
+    if (session) {
+      while (session.hasPendingPrompts()) {
+        const item = session.takeNextPrompt()!;
+        if (item.fresh) sessionId = undefined;
+        const ok = await runPrompt(item.prompt);
+        if (!ok) break;
+      }
     }
   }
+
+  // Worker mode post-loop: send goodbye, destroy workspace, tear down I/O, exit.
+  if (workerCtx) {
+    await workerCtx.cleanup();
+    process.exit(0);
+  }
 }
+
+// ── Startup ───────────────────────────────────────────────────────────────────
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const config = await loadConfig(process.argv);
@@ -380,21 +457,20 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       }
     : undefined;
 
-  if (process.argv.includes("--worker-mode")) {
-    void workerMain(boundRunQuery, {
-      foremanUrl: config.foremanUrl,
-      workspaceDir: config.workspaceDir,
-      githubToken: config.githubToken,
-      githubRepo: config.githubRepo,
-      repoUrl: config.repoUrl,
-      permissionMode: config.permissionMode,
-      verbose: config.verbose,
-      logFile: LOG_FILE,
-      model: config.model,
-      effort: config.effort,
-      pingIntervalMs: config.pingIntervalMs,
-    });
-  } else {
-    void main(permConfig, workspaceCfg, config.model, config.effort);
-  }
+  const workerConfig: WorkerModeConfig | undefined = process.argv.includes("--worker-mode")
+    ? {
+        foremanUrl: config.foremanUrl,
+        workspaceDir: config.workspaceDir,
+        githubToken: config.githubToken,
+        githubRepo: config.githubRepo,
+        repoUrl: config.repoUrl,
+        verbose: config.verbose,
+        logFile: LOG_FILE,
+        model: config.model,
+        effort: config.effort,
+        pingIntervalMs: config.pingIntervalMs,
+      }
+    : undefined;
+
+  await main(boundRunQuery, permConfig, workerConfig, workspaceCfg, config.model, config.effort);
 }

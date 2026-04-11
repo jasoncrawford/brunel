@@ -37,7 +37,6 @@ function sendMsg(ws: FakeWs, msg: ForemanMessage) {
 
 let fakeWs: FakeWs;
 let wsFactory: ReturnType<typeof vi.fn>;
-let runQuery: ReturnType<typeof vi.fn>;
 let display: {
   print: ReturnType<typeof vi.fn>;
   printForemanMessage: ReturnType<typeof vi.fn>;
@@ -51,7 +50,6 @@ let session: WorkerSession;
 beforeEach(() => {
   fakeWs = new FakeWs();
   wsFactory = vi.fn().mockReturnValue(fakeWs);
-  runQuery = vi.fn().mockResolvedValue("session-1");
   display = {
     print: vi.fn(),
     printForemanMessage: vi.fn(),
@@ -60,261 +58,263 @@ beforeEach(() => {
     updatePersistentStatus: vi.fn(),
     setOnToolResultCallback: vi.fn(),
   };
-  session = new WorkerSession(WORKER_ID, wsFactory, runQuery, display);
+  session = new WorkerSession(WORKER_ID, wsFactory, display);
   session.start();
 });
+
+// Always restore real timers after each test so fake-timer leaks don't cascade.
+afterEach(() => { vi.useRealTimers(); });
 
 // ── Idle → task assignment ────────────────────────────────────────────────────
 
 describe("task_assigned", () => {
-  it("calls runQuery with the initial prompt when task_assigned is received", async () => {
+  it("enqueues a fresh prompt with the initial task description when task_assigned is received", () => {
     const issue = makeIssue();
     sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
-    const [prompt] = runQuery.mock.calls[0];
-    expect(prompt).toContain(issue.title);
+    expect(session.hasPendingPrompts()).toBe(true);
+    const item = session.takeNextPrompt()!;
+    expect(item.prompt).toContain(issue.title);
+    expect(item.fresh).toBe(true);
   });
 
   it("updates currentTaskId and currentIssue when task_assigned is received", async () => {
     const issue = makeIssue();
     sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-    await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
-    // The state is observable via /task-complete behavior: if task is set,
-    // task_complete message is sent to WS
-    const action = session.handleUserInput("/worker:task-complete");
-    await action;
+    session.takeNextPrompt(); // consume prompt
+
+    // State is observable via completeCurrentTask: if task is set, task_complete is sent
+    await session.completeCurrentTask();
     const sent = JSON.parse(fakeWs.send.mock.calls[0][0]);
     expect(sent.taskId).toBe("42");
   });
 
-  it("calls display.printForemanMessage for task_assigned", async () => {
+  it("calls display.printForemanMessage for task_assigned", () => {
     const issue = makeIssue();
     sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-    await vi.waitFor(() => expect(display.printForemanMessage).toHaveBeenCalledWith(
+    expect(display.printForemanMessage).toHaveBeenCalledWith(
       expect.objectContaining({ type: "task_assigned" })
-    ));
+    );
   });
 
-  it("prints the initial prompt in amber when task_assigned is received", async () => {
+  it("prints the initial prompt when task_assigned is received", () => {
     const issue = makeIssue();
     sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
     const printCalls = display.print.mock.calls.map(args => stripAnsi(String(args[0])));
     expect(printCalls.some(s => s.includes(issue.title))).toBe(true);
   });
 });
 
-// ── Event handling during query ───────────────────────────────────────────────
+// ── Event handling during a running query ─────────────────────────────────────
 
 describe("event_notification", () => {
-  it("resolves WS input promise when actionable event_notification is received", async () => {
-    // Assign a task first so the worker has a currentTaskId to match against.
-    const issue = makeIssue();
-    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+  it("resolves WS input promise when actionable event_notification fires after debounce", async () => {
+    vi.useFakeTimers();
+    // Must assign a task first so the debounce fires (requires currentTaskId to be set).
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
+    session.takeNextPrompt(); // consume initial prompt
 
     const promise = session.createWsInputPromise();
     sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
+    await vi.runAllTimersAsync();
     const result = await promise;
-    expect(result).toBeTruthy(); // promise resolved (sentinel value is internal impl detail)
+    expect(result).toBeTruthy();
   });
 
-  it("queues event when event_notification arrives during runQuery", async () => {
+  it("queues event when event_notification arrives during a running query; drains after query ends", () => {
     const issue = makeIssue();
-    // First runQuery blocks until we resolve it
-    let resolveFirst!: (v: string | undefined) => void;
-    runQuery.mockReturnValueOnce(new Promise<string | undefined>((r) => { resolveFirst = r; }));
-    runQuery.mockResolvedValue("session-2");
-
-    // Assign task → starts runQuery (blocking)
     sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+    session.takeNextPrompt(); // consume initial
 
-    // Deliver event while query is running
+    const ac = new AbortController();
+    session.notifyQueryStart(ac);
+
+    // Event arrives while query is running → goes to pendingEvents, not prompts
     sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
-    // First runQuery not yet finished — only called once so far
-    expect(runQuery).toHaveBeenCalledOnce();
+    expect(session.hasPendingPrompts()).toBe(false);
 
-    // Finish first runQuery → should trigger event runQuery
-    resolveFirst("session-1");
-    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledTimes(2));
-
-    const [eventPrompt] = runQuery.mock.calls[1];
-    // Second call is with a different prompt (not the initial task prompt)
-    const [initialPrompt] = runQuery.mock.calls[0];
-    expect(eventPrompt).not.toBe(initialPrompt);
-    expect(eventPrompt).toContain("A comment was added"); // issue_comment template content
+    // Query ends → event drained into prompt queue
+    session.notifyQueryEnd(false);
+    expect(session.hasPendingPrompts()).toBe(true);
+    const item = session.takeNextPrompt()!;
+    expect(item.prompt).toContain("A comment was added");
+    expect(item.fresh).toBe(false);
   });
 
-  it("prints event prompt when event runs a query (no 'Building prompt' diagnostic)", async () => {
-    vi.useFakeTimers();
-    try {
-      const issue = makeIssue();
-      sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+  it("prints event prompt when event is drained (no 'Building prompt' diagnostic)", () => {
+    const issue = makeIssue();
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+    session.takeNextPrompt();
 
-      display.print.mockClear();
-      sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
-      // Advance past the debounce timer
-      await vi.runAllTimersAsync();
-      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledTimes(2));
+    const ac = new AbortController();
+    session.notifyQueryStart(ac);
+    sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
 
-      const printCalls = display.print.mock.calls.map(args => stripAnsi(String(args[0])));
-      expect(printCalls.some(s => s.startsWith("Building prompt from events:"))).toBe(false);
-      expect(printCalls.some(s => s.includes("A comment was added"))).toBe(true);
-    } finally {
-      vi.useRealTimers();
-    }
+    display.print.mockClear();
+    session.notifyQueryEnd(false);
+
+    const printCalls = display.print.mock.calls.map(args => stripAnsi(String(args[0])));
+    expect(printCalls.some(s => s.startsWith("Building prompt from events:"))).toBe(false);
+    expect(printCalls.some(s => s.includes("A comment was added"))).toBe(true);
   });
 
   it("ignores event_notification for a task other than the current task", async () => {
     vi.useFakeTimers();
     try {
-      const issue = makeIssue(1);
-      sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+      sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue(1) });
+      session.takeNextPrompt(); // consume initial prompt
 
       // Stale event for a different task (e.g. old completed task)
       sendMsg(fakeWs, { type: "event_notification", taskId: "99", event: makeEvent("issue_comment") });
       await vi.runAllTimersAsync();
 
-      // runQuery should not have been called a second time
-      expect(runQuery).toHaveBeenCalledOnce();
+      // No prompt should have been queued
+      expect(session.hasPendingPrompts()).toBe(false);
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it("prints a warning when ignoring an event_notification for a different task", async () => {
-    const issue = makeIssue(1);
-    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+  it("prints a warning when ignoring an event_notification for a different task", () => {
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue(1) });
+    session.takeNextPrompt(); // consume initial prompt
 
     display.print.mockClear();
     sendMsg(fakeWs, { type: "event_notification", taskId: "99", event: makeEvent("issue_comment") });
 
-    await vi.waitFor(() => expect(display.print).toHaveBeenCalled());
     const printCalls = display.print.mock.calls.map(args => stripAnsi(String(args[0])));
     expect(printCalls.some(s => s.includes("ignoring"))).toBe(true);
   });
 
-  it("batches multiple pending events into a single runQuery call", async () => {
+  it("batches multiple pending events into a single prompt when query ends", () => {
     const issue = makeIssue();
-    let resolveFirst!: (v: string | undefined) => void;
-    runQuery.mockReturnValueOnce(new Promise<string | undefined>((r) => { resolveFirst = r; }));
-    runQuery.mockResolvedValue("session-2");
-
     sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+    session.takeNextPrompt();
 
-    // Two actionable events during query (both get queued in pendingEvents)
+    const ac = new AbortController();
+    session.notifyQueryStart(ac);
+
     sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
     sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("pull_request_review") });
 
-    resolveFirst("session-1");
-    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledTimes(2));
-
-    // Only 2 total runQuery calls: initial + 1 batched event call
-    // buildEventPrompt with multiple events returns a "Multiple events" message
-    const [batchedPrompt] = runQuery.mock.calls[1];
-    expect(batchedPrompt).toContain("Multiple events");
+    session.notifyQueryEnd(false);
+    expect(session.hasPendingPrompts()).toBe(true);
+    expect(session.pendingPrompts.length ?? session.hasPendingPrompts()).toBeTruthy();
+    const item = session.takeNextPrompt()!;
+    expect(item.prompt).toContain("Multiple events");
+    // Only one batched prompt
+    expect(session.hasPendingPrompts()).toBe(false);
   });
 });
 
-// ── User commands ─────────────────────────────────────────────────────────────
+// ── completeCurrentTask ───────────────────────────────────────────────────────
 
-describe("handleUserInput", () => {
-  it("/task-complete sends task_complete to WS and clears task state", async () => {
+describe("completeCurrentTask", () => {
+  it("sends task_complete to WS and clears task state", async () => {
     const issue = makeIssue();
     sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-    await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
+    session.takeNextPrompt();
 
-    await session.handleUserInput("/worker:task-complete");
+    await session.completeCurrentTask();
 
     const sent = JSON.parse(fakeWs.send.mock.calls[0][0]);
     expect(sent).toEqual({ type: "task_complete", workerId: WORKER_ID, taskId: "42" });
   });
 
-  it("/task-complete returns 'task-complete' so workerMain can hide the prompt", async () => {
+  it("returns 'task-complete' so the main loop can hide the prompt", async () => {
     const issue = makeIssue();
     sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-    await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
+    session.takeNextPrompt();
 
-    const result = await session.handleUserInput("/worker:task-complete");
-
+    const result = await session.completeCurrentTask();
     expect(result).toBe("task-complete");
   });
 
-  it("/task-complete with no active task returns undefined (no prompt change needed)", async () => {
-    const result = await session.handleUserInput("/worker:task-complete");
+  it("with no active task returns undefined (no prompt change needed)", async () => {
+    const result = await session.completeCurrentTask();
     expect(result).toBeUndefined();
   });
 
-  it("/task-complete with no active task does not send to WS", async () => {
-    await session.handleUserInput("/worker:task-complete");
+  it("with no active task does not send to WS", async () => {
+    await session.completeCurrentTask();
     expect(fakeWs.send).not.toHaveBeenCalled();
-  });
-
-  it("/clear clears sessionId but not task state", async () => {
-    const issue = makeIssue();
-    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-    await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
-
-    await session.handleUserInput("/clear");
-
-    // After /clear, task is still set — /task-complete should still send
-    await session.handleUserInput("/worker:task-complete");
-    expect(fakeWs.send).toHaveBeenCalled();
-    const sent = JSON.parse(fakeWs.send.mock.calls[0][0]);
-    expect(sent.taskId).toBe("42");
-  });
-
-  it("regular query text runs runQuery with prompt and sessionId", async () => {
-    await session.handleUserInput("hello claude");
-    expect(runQuery).toHaveBeenCalledWith("hello claude", undefined, expect.anything(), undefined, undefined);
-  });
-
-  it("passes currentModel to runQuery when set", async () => {
-    session.currentModel = "opus";
-    await session.handleUserInput("hello claude");
-    expect(runQuery).toHaveBeenCalledWith("hello claude", undefined, expect.anything(), "opus", undefined);
-  });
-
-  it("passes currentEffort to runQuery when set", async () => {
-    session.currentEffort = "low";
-    await session.handleUserInput("hello claude");
-    expect(runQuery).toHaveBeenCalledWith("hello claude", undefined, expect.anything(), undefined, "low");
-  });
-
-  it("WS_TASK_ASSIGNED sentinel triggers initial runQuery", async () => {
-    const issue = makeIssue();
-    // Simulate what the ws message handler does before resolving the promise
-    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
-    const [prompt] = runQuery.mock.calls[0];
-    expect(prompt).toContain(issue.title);
-  });
-
-  it("__eof__ returns 'exit' so workerMain() loop breaks and cleanup runs", async () => {
-    const result = await session.handleUserInput("__eof__");
-    expect(result).toBe("exit");
   });
 });
 
 // ── State isolation ───────────────────────────────────────────────────────────
 
 describe("state after task_complete", () => {
-  it("currentTaskId / currentIssue / currentSessionId are cleared after /task-complete", async () => {
+  it("task state is cleared after completeCurrentTask()", async () => {
     const issue = makeIssue();
     sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-    await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
+    session.takeNextPrompt();
 
-    await session.handleUserInput("/worker:task-complete");
+    await session.completeCurrentTask();
 
-    // State should be cleared — another /task-complete sends nothing
+    // State should be cleared — another completeCurrentTask sends nothing
     fakeWs.send.mockClear();
-    await session.handleUserInput("/worker:task-complete");
+    await session.completeCurrentTask();
     expect(fakeWs.send).not.toHaveBeenCalled();
+  });
+});
+
+// ── Prompt queuing API ────────────────────────────────────────────────────────
+
+describe("hasPendingPrompts / takeNextPrompt / createWsInputPromise", () => {
+  it("hasPendingPrompts is false initially", () => {
+    expect(session.hasPendingPrompts()).toBe(false);
+  });
+
+  it("takeNextPrompt returns undefined when no prompts queued", () => {
+    expect(session.takeNextPrompt()).toBeUndefined();
+  });
+
+  it("createWsInputPromise resolves immediately if prompts already queued", async () => {
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "1", issue: makeIssue() });
+    // Prompt is now queued; new promise should resolve immediately
+    const p = session.createWsInputPromise();
+    const result = await Promise.race([p, new Promise<"pending">((r) => setTimeout(() => r("pending"), 10))]);
+    expect(result).not.toBe("pending");
+  });
+
+  it("createWsInputPromise resolves when task_assigned arrives", async () => {
+    const promise = session.createWsInputPromise();
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "1", issue: makeIssue() });
+    expect(await promise).toBeTruthy();
+  });
+
+  it("each new createWsInputPromise abandons the previous one", async () => {
+    const first = session.createWsInputPromise();
+    const second = session.createWsInputPromise();
+
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "1", issue: makeIssue() });
+
+    // second gets resolved
+    expect(await second).toBeTruthy();
+    // first was abandoned and never resolves
+    const firstResult = await Promise.race([first, new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 20))]);
+    expect(firstResult).toBe("timeout");
+  });
+
+  it("task_assigned prompt has fresh=true (signals main() to reset sessionId)", () => {
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "1", issue: makeIssue() });
+    const item = session.takeNextPrompt()!;
+    expect(item.fresh).toBe(true);
+  });
+
+  it("event prompt has fresh=false (continues same conversation)", async () => {
+    vi.useFakeTimers();
+    try {
+      sendMsg(fakeWs, { type: "task_assigned", taskId: "1", issue: makeIssue() });
+      session.takeNextPrompt();
+
+      sendMsg(fakeWs, { type: "event_notification", taskId: "1", event: makeEvent("issue_comment") });
+      await vi.runAllTimersAsync();
+
+      const item = session.takeNextPrompt()!;
+      expect(item.fresh).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -340,6 +340,7 @@ describe("reconnect", () => {
     await Promise.resolve();
 
     fakeWs.emit("close");
+
     vi.advanceTimersByTime(5001);
 
     const secondCall = wsFactory.mock.calls[1];
@@ -526,18 +527,16 @@ describe("status bar content", () => {
     expect(text).toContain("no current task");
   });
 
-  it("shows task number after task_assigned", async () => {
+  it("shows task number after task_assigned", () => {
     const issue = makeIssue(42);
     sendMsg(fakeWs, { type: "task_assigned", taskId: "t42", issue });
-    await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
     const text = stripAnsi(session.getStatusText());
     expect(text).toContain("task #42");
   });
 
-  it("shows PR number after pull_request event", async () => {
+  it("shows PR number after pull_request event", () => {
     const issue = makeIssue(1);
     sendMsg(fakeWs, { type: "task_assigned", taskId: "t1", issue });
-    await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
 
     const prEvent: GitHubEvent = {
       id: "pr-evt",
@@ -552,7 +551,6 @@ describe("status bar content", () => {
   it("resets PR number when new task is assigned", async () => {
     const issue1 = makeIssue(1);
     sendMsg(fakeWs, { type: "task_assigned", taskId: "t1", issue: issue1 });
-    await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
 
     // Set PR number
     const prEvent: GitHubEvent = {
@@ -564,18 +562,17 @@ describe("status bar content", () => {
     expect(stripAnsi(session.getStatusText())).toContain("PR #55");
 
     // Complete task and assign new task
-    await session.handleUserInput("/worker:task-complete");
+    session.takeNextPrompt();
+    await session.completeCurrentTask();
     const issue2 = makeIssue(2);
     sendMsg(fakeWs, { type: "task_assigned", taskId: "t2", issue: issue2 });
-    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledTimes(2));
 
     expect(stripAnsi(session.getStatusText())).not.toContain("PR #");
   });
 
-  it("clears PR number from status bar when pull_request/closed without merging is received", async () => {
+  it("clears PR number from status bar when pull_request/closed without merging is received", () => {
     const issue = makeIssue(1);
     sendMsg(fakeWs, { type: "task_assigned", taskId: "t1", issue });
-    await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
 
     // First set the PR number via opened event
     const prOpenedEvent: GitHubEvent = {
@@ -596,10 +593,9 @@ describe("status bar content", () => {
     expect(stripAnsi(session.getStatusText())).not.toContain("PR #");
   });
 
-  it("keeps PR number in status bar when pull_request/closed with merge is received", async () => {
+  it("keeps PR number in status bar when pull_request/closed with merge is received", () => {
     const issue = makeIssue(1);
     sendMsg(fakeWs, { type: "task_assigned", taskId: "t1", issue });
-    await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
 
     const prOpenedEvent: GitHubEvent = {
       id: "pr-opened",
@@ -620,112 +616,6 @@ describe("status bar content", () => {
   });
 });
 
-// ── createWsInputPromise ──────────────────────────────────────────────────────
-
-describe("createWsInputPromise", () => {
-  it("resolves when task_assigned arrives", async () => {
-    const promise = session.createWsInputPromise();
-    sendMsg(fakeWs, { type: "task_assigned", taskId: "1", issue: makeIssue() });
-    expect(await promise).toBeTruthy(); // sentinel value is internal impl detail
-  });
-
-  it("each new promise abandons the previous one (previous never resolves)", async () => {
-    const first = session.createWsInputPromise();
-    const second = session.createWsInputPromise();
-
-    sendMsg(fakeWs, { type: "task_assigned", taskId: "1", issue: makeIssue() });
-
-    // second gets resolved since it holds the current resolveWsInput
-    expect(await second).toBeTruthy(); // sentinel value is internal impl detail
-    // first was abandoned and never resolves
-    const firstResult = await Promise.race([first, new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 20))]);
-    expect(firstResult).toBe("timeout");
-  });
-});
-
-// ── waitUntilIdle ─────────────────────────────────────────────────────────────
-
-describe("waitUntilIdle", () => {
-  it("resolves immediately when no query is running", async () => {
-    // No task assigned — not running a query
-    const result = await Promise.race([
-      session.waitUntilIdle().then(() => "idle"),
-      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
-    ]);
-    expect(result).toBe("idle");
-  });
-
-  it("waits until runQuery completes when a query is running", async () => {
-    let resolveQuery!: (v: string | undefined) => void;
-    runQuery.mockReturnValueOnce(new Promise<string | undefined>((r) => { resolveQuery = r; }));
-
-    sendMsg(fakeWs, { type: "task_assigned", taskId: "1", issue: makeIssue() });
-    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
-
-    // waitUntilIdle should not resolve while query is running
-    const idlePromise = session.waitUntilIdle();
-    const raceResult1 = await Promise.race([
-      idlePromise.then(() => "idle"),
-      new Promise<"pending">((r) => setTimeout(() => r("pending"), 20)),
-    ]);
-    expect(raceResult1).toBe("pending");
-
-    // Resolve the query
-    resolveQuery("session-done");
-
-    // Now waitUntilIdle should resolve
-    const raceResult2 = await Promise.race([
-      idlePromise.then(() => "idle"),
-      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 100)),
-    ]);
-    expect(raceResult2).toBe("idle");
-  });
-
-  it("multiple waitUntilIdle callers all resolve when query completes", async () => {
-    let resolveQuery!: (v: string | undefined) => void;
-    runQuery.mockReturnValueOnce(new Promise<string | undefined>((r) => { resolveQuery = r; }));
-
-    sendMsg(fakeWs, { type: "task_assigned", taskId: "1", issue: makeIssue() });
-    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
-
-    const p1 = session.waitUntilIdle();
-    const p2 = session.waitUntilIdle();
-
-    resolveQuery("session-done");
-
-    await expect(p1).resolves.toBeUndefined();
-    await expect(p2).resolves.toBeUndefined();
-  });
-
-  it("resolves after runQuery is aborted (^C interrupt)", async () => {
-    let resolveQuery!: (v: string | undefined) => void;
-    let capturedAc!: AbortController;
-    runQuery.mockImplementationOnce(
-      (_prompt: string, _sessionId: string | undefined, ac: AbortController) => {
-        capturedAc = ac;
-        return new Promise<string | undefined>((r) => { resolveQuery = r; });
-      }
-    );
-
-    sendMsg(fakeWs, { type: "task_assigned", taskId: "1", issue: makeIssue() });
-    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
-
-    const idlePromise = session.waitUntilIdle();
-
-    // Simulate ^C: abort the controller and let the mock resolve
-    capturedAc.abort();
-    resolveQuery(undefined);
-
-    // waitUntilIdle should resolve even though the query was aborted
-    const result = await Promise.race([
-      idlePromise.then(() => "idle"),
-      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 100)),
-    ]);
-    expect(result).toBe("idle");
-  });
-});
-
-
 // ── hello_ack handshake — buffering ──────────────────────────────────────────
 
 describe("hello_ack handshake — buffering", () => {
@@ -744,6 +634,7 @@ describe("hello_ack handshake — buffering", () => {
       // Assign a task so the worker has something to complete
       const issue = makeIssue();
       sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+      session.takeNextPrompt();
 
       // Reconnect: new WS is created
       const newWs = reconnectWithNewWs();
@@ -752,7 +643,7 @@ describe("hello_ack handshake — buffering", () => {
       newWs.emit("open");
 
       // Try to send task_complete — should be buffered (hello_ack not yet received)
-      await session.handleUserInput("/worker:task-complete");
+      await session.completeCurrentTask();
       expect(newWs.send).not.toHaveBeenCalled();
 
       // Send hello_ack → buffer should be flushed
@@ -771,20 +662,21 @@ describe("hello_ack handshake — buffering", () => {
     try {
       const issue = makeIssue();
       sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+      session.takeNextPrompt();
 
       const newWs = reconnectWithNewWs();
       newWs.emit("open");
 
       // Buffer a task_complete
-      await session.handleUserInput("/worker:task-complete");
+      await session.completeCurrentTask();
       expect(newWs.send).not.toHaveBeenCalled();
 
       // Send hello_ack cancelled → buffer discarded, task state cleared
       sendMsg(newWs, { type: "hello_ack", workerId: WORKER_ID, status: "cancelled" });
       expect(newWs.send).not.toHaveBeenCalled();
 
-      // Verify task state cleared: subsequent /task-complete sends nothing
-      await session.handleUserInput("/worker:task-complete");
+      // Verify task state cleared: subsequent completeCurrentTask sends nothing
+      await session.completeCurrentTask();
       expect(newWs.send).not.toHaveBeenCalled();
     } finally {
       vi.restoreAllMocks();
@@ -797,6 +689,7 @@ describe("hello_ack handshake — buffering", () => {
     try {
       const issue = makeIssue();
       sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+      session.takeNextPrompt();
 
       const newWs = reconnectWithNewWs();
       newWs.emit("open");
@@ -828,13 +721,14 @@ describe("hello_ack handshake — buffering", () => {
       let callCount = 0;
       const wsFactoryWs = vi.fn().mockImplementation(() => callCount++ === 0 ? wsA : wsB);
 
-      const sessionWithWs = new WorkerSession(WORKER_ID, wsFactoryWs, runQuery, display, {
+      const sessionWithWs = new WorkerSession(WORKER_ID, wsFactoryWs, display, {
         workspaceCtx: { workspace, originalCwd: "/original", workspaceDir: "/tmp/workers", repoUrl: "https://github.com/owner/repo", confirm: vi.fn() },
       });
       sessionWithWs.start(); // uses wsA
 
       const issue = makeIssue();
       sendMsg(wsA, { type: "task_assigned", taskId: "42", issue });
+      sessionWithWs.takeNextPrompt();
 
       // Simulate reconnect: wsA closes, wsB is created
       vi.spyOn(Math, "random").mockReturnValue(0);
@@ -852,26 +746,14 @@ describe("hello_ack handshake — buffering", () => {
     }
   });
 
-  it("aborts running query when hello_ack cancelled is received", async () => {
+  it("aborts running query when hello_ack cancelled is received", () => {
     vi.useFakeTimers();
     try {
-      let capturedAc: AbortController | undefined;
-      let resolveQuery!: (v: string) => void;
-      const pendingQuery = new Promise<string>((resolve) => { resolveQuery = resolve; });
+      sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
+      session.takeNextPrompt();
 
-      runQuery.mockImplementationOnce(async (
-        _prompt: string,
-        _sessionId: string | undefined,
-        ac: AbortController,
-      ) => {
-        capturedAc = ac;
-        return pendingQuery;
-      });
-
-      // Assign task — starts runQuery (which is now pending)
-      const issue = makeIssue();
-      sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-      await vi.waitFor(() => expect(capturedAc).toBeDefined());
+      const ac = new AbortController();
+      session.notifyQueryStart(ac);
 
       // Simulate reconnect and receive cancelled ack while query is still running
       const newWs = reconnectWithNewWs();
@@ -879,10 +761,10 @@ describe("hello_ack handshake — buffering", () => {
       sendMsg(newWs, { type: "hello_ack", workerId: WORKER_ID, status: "cancelled" });
 
       // The running query's AbortController must be aborted
-      expect(capturedAc?.signal.aborted).toBe(true);
+      expect(ac.signal.aborted).toBe(true);
 
-      // Clean up: resolve the pending promise so the async loop can exit
-      resolveQuery("session-1");
+      // Clean up
+      session.notifyQueryEnd(true);
     } finally {
       vi.restoreAllMocks();
       vi.useRealTimers();
@@ -894,15 +776,15 @@ describe("hello_ack handshake — buffering", () => {
     try {
       const issue = makeIssue();
       sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+      session.takeNextPrompt();
 
       const newWs = reconnectWithNewWs();
       newWs.emit("open");
 
-      await session.handleUserInput("/worker:task-complete");
+      await session.completeCurrentTask();
       expect(newWs.send).not.toHaveBeenCalled();
 
       // hello_ack idle — task was reverted on foreman side; but worker flushes anyway
-      // (foreman's ownership check will reject the stale task_complete if needed)
       sendMsg(newWs, { type: "hello_ack", workerId: WORKER_ID, status: "idle" });
       expect(newWs.send).toHaveBeenCalledOnce();
       const sent = JSON.parse(newWs.send.mock.calls[0][0]);
@@ -1006,20 +888,18 @@ describe("classifyEvent", () => {
 // ── log_only filtering ────────────────────────────────────────────────────────
 
 describe("log_only event filtering", () => {
-  it("log_only event is not pushed to pendingEvents and does not trigger query", async () => {
+  it("log_only event is not pushed to pendingEvents and does not trigger a prompt", async () => {
     vi.useFakeTimers();
     try {
       const issue = makeIssue();
       sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+      session.takeNextPrompt();
 
-      runQuery.mockClear();
       // check_run is log_only
       sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: { id: "e1", name: "check_run", payload: { action: "completed" } } });
       await vi.runAllTimersAsync();
 
-      // No additional runQuery call
-      expect(runQuery).not.toHaveBeenCalled();
+      expect(session.hasPendingPrompts()).toBe(false);
     } finally {
       vi.useRealTimers();
     }
@@ -1044,126 +924,140 @@ describe("debounce", () => {
     try {
       const issue = makeIssue();
       sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+      session.takeNextPrompt();
 
-      runQuery.mockClear();
       sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
 
-      // runQuery not yet called (debounce timer pending)
-      expect(runQuery).not.toHaveBeenCalled();
+      // No prompt yet (debounce timer pending)
+      expect(session.hasPendingPrompts()).toBe(false);
 
       // Advance past the debounce delay
       await vi.runAllTimersAsync();
 
-      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+      expect(session.hasPendingPrompts()).toBe(true);
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it("multiple actionable events arriving within debounce window are batched into one query", async () => {
+  it("multiple actionable events arriving within debounce window are batched into one prompt", async () => {
     vi.useFakeTimers();
     try {
       const issue = makeIssue();
       sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+      session.takeNextPrompt();
 
-      runQuery.mockClear();
       sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
       sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("pull_request_review") });
 
-      // Advance past the debounce delay
       await vi.runAllTimersAsync();
 
-      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
-      const [prompt] = runQuery.mock.calls[0];
-      expect(prompt).toContain("Multiple events");
+      expect(session.hasPendingPrompts()).toBe(true);
+      const item = session.takeNextPrompt()!;
+      expect(item.prompt).toContain("Multiple events");
+      expect(session.hasPendingPrompts()).toBe(false); // only one batched prompt
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it("debounce timer is cancelled when runQueryLoop starts (e.g., via user input)", async () => {
+  it("notifyQueryStart cancels the debounce; events drain into prompts via notifyQueryEnd", async () => {
     vi.useFakeTimers();
     try {
       const issue = makeIssue();
       sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+      session.takeNextPrompt();
 
-      runQuery.mockClear();
       // Actionable event sets the debounce timer
       sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
-      expect(runQuery).not.toHaveBeenCalled();
+      expect(session.hasPendingPrompts()).toBe(false);
 
-      // User input fires a query before the timer fires.
-      // runQueryLoop cancels the debounce, runs the user's query, then drains
-      // the pending issue_comment event — total 2 runQuery calls.
-      const userQueryPromise = session.handleUserInput("what's the status?");
-      await userQueryPromise;
+      // Query starts → cancels debounce
+      const ac = new AbortController();
+      session.notifyQueryStart(ac);
 
-      // Advance past the original debounce delay — the cancelled timer must
-      // NOT fire a third runQuery call.
-      await vi.runAllTimersAsync();
+      // Advance past the original debounce delay — timer was cancelled
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(session.hasPendingPrompts()).toBe(false);
 
-      expect(runQuery).toHaveBeenCalledTimes(2);
+      // Query ends → events drain
+      session.notifyQueryEnd(false);
+      expect(session.hasPendingPrompts()).toBe(true);
+      const item = session.takeNextPrompt()!;
+      expect(item.prompt).toContain("A comment was added");
     } finally {
       vi.useRealTimers();
     }
   });
 });
 
-// ── Interrupt (AbortController) ───────────────────────────────────────────────
+// ── notifyQueryStart / notifyQueryEnd ─────────────────────────────────────────
 
-describe("interrupt", () => {
-  it("runQueryLoop passes an AbortController to runQuery", async () => {
-    const issue = makeIssue();
-    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
-    const ac = runQuery.mock.calls[0][2];
-    expect(ac).toBeInstanceOf(AbortController);
+describe("notifyQueryStart / notifyQueryEnd", () => {
+  it("notifyQueryStart stores the AbortController for interrupt()", () => {
+    const ac = new AbortController();
+    session.notifyQueryStart(ac);
+    expect(session.interrupt()).toBe(true);
+    expect(ac.signal.aborted).toBe(true);
+    session.notifyQueryEnd(true);
   });
 
-  it("when runQuery's AbortController is aborted, event drain is skipped", async () => {
-    const issue = makeIssue();
-    // Mock runQuery: abort the controller on first call, then resolve
-    runQuery.mockImplementationOnce(async (_prompt: string, _sessionId: string | undefined, ac: AbortController) => {
-      ac.abort(); // simulate user pressing ^C
-      return "session-1";
-    });
+  it("notifyQueryEnd with aborted=true does not drain pending events into prompts", () => {
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
+    session.takeNextPrompt();
 
-    // Deliver event before query finishes (it will be in pendingEvents)
-    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
-
-    // Queue an event that would normally trigger a second runQuery
+    const ac = new AbortController();
+    session.notifyQueryStart(ac);
     sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
 
-    // Wait for the loop to settle
-    await vi.waitFor(() => !session["isRunningQuery"]);
-
-    // The event drain should have been skipped — only one runQuery call
-    expect(runQuery).toHaveBeenCalledOnce();
+    session.notifyQueryEnd(true); // aborted
+    expect(session.hasPendingPrompts()).toBe(false);
   });
 
-  it("when runQuery's AbortController is aborted, notifyQueryDone is not called (waitUntilIdle still resolves via isRunningQuery flag)", async () => {
-    const issue = makeIssue();
-    let abortedAc: AbortController | undefined;
-    runQuery.mockImplementationOnce(async (_prompt: string, _sessionId: string | undefined, ac: AbortController) => {
-      abortedAc = ac;
-      ac.abort();
-      return "session-1";
-    });
+  it("notifyQueryEnd with aborted=false drains pending events into prompts", () => {
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
+    session.takeNextPrompt();
 
-    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+    const ac = new AbortController();
+    session.notifyQueryStart(ac);
+    sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
 
-    // waitUntilIdle should still resolve after the runQuery loop exits
-    const result = await Promise.race([
-      session.waitUntilIdle().then(() => "idle"),
-      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 100)),
-    ]);
-    expect(result).toBe("idle");
-    expect(abortedAc?.signal.aborted).toBe(true);
+    session.notifyQueryEnd(false); // not aborted
+    expect(session.hasPendingPrompts()).toBe(true);
+  });
+
+  it("notifyQueryEnd clears interrupt() (returns false after query ends)", () => {
+    const ac = new AbortController();
+    session.notifyQueryStart(ac);
+    session.notifyQueryEnd(false);
+    expect(session.interrupt()).toBe(false);
+  });
+});
+
+// ── interrupt() ───────────────────────────────────────────────────────────────
+
+describe("interrupt()", () => {
+  it("returns false when no query is running", () => {
+    expect(session.interrupt()).toBe(false);
+  });
+
+  it("returns true and aborts the AbortController when a query is running", () => {
+    const ac = new AbortController();
+    session.notifyQueryStart(ac);
+
+    const result = session.interrupt();
+    expect(result).toBe(true);
+    expect(ac.signal.aborted).toBe(true);
+
+    session.notifyQueryEnd(true); // clean up
+  });
+
+  it("returns false after the query finishes", () => {
+    const ac = new AbortController();
+    session.notifyQueryStart(ac);
+    session.notifyQueryEnd(false);
+
+    expect(session.interrupt()).toBe(false);
   });
 });
 
@@ -1229,19 +1123,18 @@ describe("event-type-specific debounce timers", () => {
     try {
       const issue = makeIssue();
       sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
-      runQuery.mockClear();
+      session.takeNextPrompt();
 
       const csEvt: GitHubEvent = { id: "e1", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success" } } };
       sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: csEvt });
 
       // Should NOT fire after 3s (old default)
       await vi.advanceTimersByTimeAsync(3001);
-      expect(runQuery).not.toHaveBeenCalled();
+      expect(session.hasPendingPrompts()).toBe(false);
 
       // Should fire after 30s
       await vi.advanceTimersByTimeAsync(27001);
-      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+      expect(session.hasPendingPrompts()).toBe(true);
     } finally {
       vi.useRealTimers();
     }
@@ -1252,14 +1145,13 @@ describe("event-type-specific debounce timers", () => {
     try {
       const issue = makeIssue();
       sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
-      runQuery.mockClear();
+      session.takeNextPrompt();
 
       const csEvt: GitHubEvent = { id: "e1", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "failure" } } };
       sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: csEvt });
 
       await vi.advanceTimersByTimeAsync(3001);
-      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+      expect(session.hasPendingPrompts()).toBe(true);
     } finally {
       vi.useRealTimers();
     }
@@ -1270,15 +1162,14 @@ describe("event-type-specific debounce timers", () => {
     try {
       const issue = makeIssue();
       sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
-      runQuery.mockClear();
+      session.takeNextPrompt();
 
       const prEvt: GitHubEvent = { id: "e1", name: "pull_request", payload: { action: "closed", pull_request: { number: 1 } } };
       sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: prEvt });
 
       // Advance by just 1ms — fires immediately (0ms debounce)
       await vi.advanceTimersByTimeAsync(1);
-      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+      expect(session.hasPendingPrompts()).toBe(true);
     } finally {
       vi.useRealTimers();
     }
@@ -1289,8 +1180,7 @@ describe("event-type-specific debounce timers", () => {
     try {
       const issue = makeIssue();
       sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
-      runQuery.mockClear();
+      session.takeNextPrompt();
 
       // Success sets 30s timer
       const successEvt: GitHubEvent = { id: "e1", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success" } } };
@@ -1298,7 +1188,7 @@ describe("event-type-specific debounce timers", () => {
 
       // Advance 3s — still waiting (30s timer)
       await vi.advanceTimersByTimeAsync(3001);
-      expect(runQuery).not.toHaveBeenCalled();
+      expect(session.hasPendingPrompts()).toBe(false);
 
       // Failure arrives — resets timer to 3s
       const failEvt: GitHubEvent = { id: "e2", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "failure" } } };
@@ -1306,7 +1196,7 @@ describe("event-type-specific debounce timers", () => {
 
       // Advance 3s more — should fire now
       await vi.advanceTimersByTimeAsync(3001);
-      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+      expect(session.hasPendingPrompts()).toBe(true);
     } finally {
       vi.useRealTimers();
     }
@@ -1321,20 +1211,20 @@ describe("prIsClosed guard", () => {
     try {
       const issue = makeIssue();
       sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+      session.takeNextPrompt();
 
-      // Close the PR — should trigger cleanup query
+      // Close the PR — should trigger prompt after debounce
       const closedEvt: GitHubEvent = { id: "e1", name: "pull_request", payload: { action: "closed", pull_request: { number: 1 } } };
       sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: closedEvt });
       await vi.runAllTimersAsync();
-      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledTimes(2));
-      runQuery.mockClear();
+      expect(session.hasPendingPrompts()).toBe(true);
+      session.takeNextPrompt(); // consume PR closed prompt
 
-      // check_suite event should be silently dropped
+      // check_suite event should be silently dropped (prIsClosed = true)
       const csEvt: GitHubEvent = { id: "e2", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success" } } };
       sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: csEvt });
       await vi.runAllTimersAsync();
-      expect(runQuery).not.toHaveBeenCalled();
+      expect(session.hasPendingPrompts()).toBe(false);
     } finally {
       vi.useRealTimers();
     }
@@ -1345,24 +1235,23 @@ describe("prIsClosed guard", () => {
     try {
       const issue = makeIssue();
       sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+      session.takeNextPrompt();
 
       // Close the PR
       const closedEvt: GitHubEvent = { id: "e1", name: "pull_request", payload: { action: "closed", pull_request: { number: 1 } } };
       sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: closedEvt });
       await vi.runAllTimersAsync();
-      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledTimes(2));
+      session.takeNextPrompt(); // consume
 
       // New task assigned — resets prIsClosed
       sendMsg(fakeWs, { type: "task_assigned", taskId: "99", issue: makeIssue(2) });
-      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledTimes(3));
-      runQuery.mockClear();
+      session.takeNextPrompt(); // consume new task prompt
 
       // check_suite event should now work normally (not dropped)
       const csEvt: GitHubEvent = { id: "e2", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success" } } };
       sendMsg(fakeWs, { type: "event_notification", taskId: "99", event: csEvt });
       await vi.runAllTimersAsync();
-      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+      expect(session.hasPendingPrompts()).toBe(true);
     } finally {
       vi.useRealTimers();
     }
@@ -1373,20 +1262,19 @@ describe("prIsClosed guard", () => {
     try {
       const issue = makeIssue();
       sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+      session.takeNextPrompt();
 
-      // Close the PR — should trigger cleanup query
+      // Close the PR
       const closedEvt: GitHubEvent = { id: "e1", name: "pull_request", payload: { action: "closed", pull_request: { number: 1 } } };
       sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: closedEvt });
       await vi.runAllTimersAsync();
-      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledTimes(2));
-      runQuery.mockClear();
+      session.takeNextPrompt(); // consume
 
       // issue_comment/created should NOT be dropped — still actionable after PR closed
       const commentEvt: GitHubEvent = { id: "e2", name: "issue_comment", payload: { action: "created" } };
       sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: commentEvt });
       await vi.runAllTimersAsync();
-      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+      expect(session.hasPendingPrompts()).toBe(true);
     } finally {
       vi.useRealTimers();
     }
@@ -1397,32 +1285,32 @@ describe("prIsClosed guard", () => {
     try {
       const issue = makeIssue();
       sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+      session.takeNextPrompt();
 
       // Close the PR
       sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: { id: "e1", name: "pull_request", payload: { action: "closed", pull_request: { number: 1 } } } });
       await vi.runAllTimersAsync();
-      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledTimes(2));
+      session.takeNextPrompt(); // consume
 
-      // Reopen the PR
+      // Reopen the PR (log_only — no prompt, but clears prIsClosed flag)
       sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: { id: "e2", name: "pull_request", payload: { action: "reopened", pull_request: { number: 1 } } } });
       await vi.runAllTimersAsync();
-      runQuery.mockClear();
 
       // check_suite event should now work normally (not dropped)
       const csEvt: GitHubEvent = { id: "e3", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success" } } };
       sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: csEvt });
       await vi.runAllTimersAsync();
-      await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
+      expect(session.hasPendingPrompts()).toBe(true);
     } finally {
       vi.useRealTimers();
     }
   });
 });
 
-import { Workspace } from "../src/agent/workspace.js";
+import { Workspace, registerWorkspaceCommands } from "../src/agent/workspace.js";
+import { _reset, execute } from "../src/agent/commands.js";
 
-// ── workspace slash commands in WorkerSession ─────────────────────────────────
+// ── workspace slash commands via workspaceCommandDeps ─────────────────────────
 
 describe("workspace slash commands in WorkerSession", () => {
   function makeWorkspace(): Workspace {
@@ -1436,10 +1324,10 @@ describe("workspace slash commands in WorkerSession", () => {
     } as unknown as Workspace;
   }
 
-  it("/reset-workspace calls workspace.reset() when clean", async () => {
+  it("/workspace:reset calls workspace.reset() when clean", async () => {
     const workspace = makeWorkspace();
     const confirm = vi.fn().mockResolvedValue(true);
-    const sessionWs = new WorkerSession(WORKER_ID, wsFactory, runQuery, display, {
+    const sessionWs = new WorkerSession(WORKER_ID, wsFactory, display, {
       workspaceCtx: {
         workspace,
         originalCwd: "/original",
@@ -1449,17 +1337,19 @@ describe("workspace slash commands in WorkerSession", () => {
       },
     });
     sessionWs.start();
-    await sessionWs.handleUserInput("/workspace:reset");
+    _reset();
+    registerWorkspaceCommands(sessionWs.workspaceCommandDeps, true);
+    await execute("workspace:reset", "");
     expect(workspace.reset).toHaveBeenCalledOnce();
   });
 
-  it("/reset-workspace does not reset if user declines", async () => {
+  it("/workspace:reset does not reset if user declines", async () => {
     const workspace = makeWorkspace();
     (workspace.checkSafety as ReturnType<typeof vi.fn>).mockResolvedValue({
       uncommittedFiles: ["M foo.ts"], unpushedCommits: [], noUpstream: false,
     });
     const confirm = vi.fn().mockResolvedValue(false);
-    const sessionWs = new WorkerSession(WORKER_ID, wsFactory, runQuery, display, {
+    const sessionWs = new WorkerSession(WORKER_ID, wsFactory, display, {
       workspaceCtx: {
         workspace,
         originalCwd: "/original",
@@ -1469,15 +1359,17 @@ describe("workspace slash commands in WorkerSession", () => {
       },
     });
     sessionWs.start();
-    await sessionWs.handleUserInput("/workspace:reset");
+    _reset();
+    registerWorkspaceCommands(sessionWs.workspaceCommandDeps, true);
+    await execute("workspace:reset", "");
     expect(workspace.reset).not.toHaveBeenCalled();
   });
 
-  it("/remove-workspace calls destroy() when approved", async () => {
+  it("/workspace:remove calls destroy() when approved", async () => {
     const workspace = makeWorkspace();
     const confirm = vi.fn().mockResolvedValue(true);
     const originalCwd = process.cwd();
-    const sessionWs = new WorkerSession(WORKER_ID, wsFactory, runQuery, display, {
+    const sessionWs = new WorkerSession(WORKER_ID, wsFactory, display, {
       workspaceCtx: {
         workspace,
         originalCwd,
@@ -1487,16 +1379,20 @@ describe("workspace slash commands in WorkerSession", () => {
       },
     });
     sessionWs.start();
-    await sessionWs.handleUserInput("/workspace:remove");
+    _reset();
+    registerWorkspaceCommands(sessionWs.workspaceCommandDeps, true);
+    await execute("workspace:remove", "");
     expect(workspace.destroy).toHaveBeenCalledOnce();
   });
 
-  it("/create-workspace prints 'managed automatically' in worker mode", async () => {
+  it("/workspace:create prints 'managed automatically' in worker mode", async () => {
     const printSpy = vi.spyOn(displayModule, "print").mockImplementation(() => {});
     try {
-      const sessionWs = new WorkerSession(WORKER_ID, wsFactory, runQuery, display, {});
+      const sessionWs = new WorkerSession(WORKER_ID, wsFactory, display, {});
       sessionWs.start();
-      await sessionWs.handleUserInput("/workspace:create");
+      _reset();
+      registerWorkspaceCommands(sessionWs.workspaceCommandDeps, true);
+      await execute("workspace:create", "");
       const printed = printSpy.mock.calls.map(([s]) => stripAnsi(s as string)).join("\n");
       expect(printed).toContain("managed automatically");
     } finally {
@@ -1505,21 +1401,21 @@ describe("workspace slash commands in WorkerSession", () => {
   });
 });
 
-// ── afterTask callback on /task-complete ──────────────────────────────────────
+// ── afterTask callback on /worker:complete ──────────────────────────────────────
 
-describe("afterTask callback on /task-complete", () => {
+describe("afterTask callback on /worker:complete", () => {
   it("calls afterTask before sending task_complete to foreman", async () => {
     const afterTask = vi.fn().mockResolvedValue(undefined);
     const sessionWithAfterTask = new WorkerSession(
-      WORKER_ID, wsFactory, runQuery, display, { afterTask }
+      WORKER_ID, wsFactory, display, { afterTask }
     );
     sessionWithAfterTask.start();
 
     const issue = makeIssue();
     sendMsg(fakeWs, { type: "task_assigned", taskId: "t1", issue });
-    await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
+    sessionWithAfterTask.takeNextPrompt();
 
-    await sessionWithAfterTask.handleUserInput("/worker:task-complete");
+    await sessionWithAfterTask.completeCurrentTask();
     expect(afterTask).toHaveBeenCalledOnce();
     const sentMsg = JSON.parse(fakeWs.send.mock.calls.at(-1)![0]);
     expect(sentMsg.type).toBe("task_complete");
@@ -1528,16 +1424,16 @@ describe("afterTask callback on /task-complete", () => {
   it("does not send task_complete if afterTask throws", async () => {
     const afterTask = vi.fn().mockRejectedValue(new Error("reset failed"));
     const sessionWithAfterTask = new WorkerSession(
-      WORKER_ID, wsFactory, runQuery, display, { afterTask }
+      WORKER_ID, wsFactory, display, { afterTask }
     );
     sessionWithAfterTask.start();
 
     const issue = makeIssue();
     sendMsg(fakeWs, { type: "task_assigned", taskId: "t1", issue });
-    await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
+    sessionWithAfterTask.takeNextPrompt();
 
     const sendCountBefore = fakeWs.send.mock.calls.length;
-    await sessionWithAfterTask.handleUserInput("/worker:task-complete");
+    await sessionWithAfterTask.completeCurrentTask();
     const taskCompleteSent = fakeWs.send.mock.calls
       .slice(sendCountBefore)
       .some(([data]: [string]) => JSON.parse(data).type === "task_complete");
@@ -1547,88 +1443,20 @@ describe("afterTask callback on /task-complete", () => {
   it("sends task_complete normally with no afterTask", async () => {
     const issue = makeIssue();
     sendMsg(fakeWs, { type: "task_assigned", taskId: "t1", issue });
-    await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
-    await session.handleUserInput("/worker:task-complete");
+    session.takeNextPrompt();
+    await session.completeCurrentTask();
     const lastMsg = JSON.parse(fakeWs.send.mock.calls.at(-1)![0]);
     expect(lastMsg.type).toBe("task_complete");
   });
 });
 
-// ── API error handling ────────────────────────────────────────────────────────
-
-describe("runQuery error handling", () => {
-  it("prints error and remains functional when runQuery throws during task_assigned", async () => {
-    const issue = makeIssue();
-    runQuery.mockRejectedValueOnce(new Error("You're out of extra usage · resets 9am (Etc/Unknown)"));
-
-    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
-
-    // waitUntilIdle should resolve (not hang) after the error
-    const result = await Promise.race([
-      session.waitUntilIdle().then(() => "idle"),
-      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 200)),
-    ]);
-    expect(result).toBe("idle");
-
-    // Error message should be printed
-    const printCalls = display.print.mock.calls.map(args => stripAnsi(String(args[0])));
-    expect(printCalls.some(s => s.includes("out of extra usage"))).toBe(true);
-  });
-
-  it("prints error and remains functional when runQuery throws during event processing", async () => {
-    const issue = makeIssue();
-    let resolveFirst!: (v: string | undefined) => void;
-    runQuery.mockReturnValueOnce(new Promise<string | undefined>((r) => { resolveFirst = r; }));
-    runQuery.mockRejectedValueOnce(new Error("Claude Code returned an error result: out of tokens"));
-
-    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
-
-    // Queue an event while query is running
-    sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
-
-    // Finish the first query → event processing starts and throws
-    resolveFirst("session-1");
-    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledTimes(2));
-
-    // waitUntilIdle should resolve (not hang) after the error
-    const result = await Promise.race([
-      session.waitUntilIdle().then(() => "idle"),
-      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 200)),
-    ]);
-    expect(result).toBe("idle");
-
-    // Error message should be printed
-    const printCalls = display.print.mock.calls.map(args => stripAnsi(String(args[0])));
-    expect(printCalls.some(s => s.includes("out of tokens"))).toBe(true);
-  });
-
-  it("does not print error for abort (^C interrupt) — that is a clean interrupt", async () => {
-    const issue = makeIssue();
-    let rejectQuery!: (e: Error) => void;
-    runQuery.mockReturnValueOnce(new Promise<string | undefined>((_r, reject) => { rejectQuery = reject; }));
-
-    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledOnce());
-
-    display.print.mockClear();
-    // runQuery (in repl.ts) swallows AbortError and resolves undefined — but
-    // here we simulate a raw abort thrown by the mock (edge case)
-    rejectQuery(new Error("Operation aborted by user"));
-
-    await vi.waitFor(() => session.waitUntilIdle());
-
-    const printCalls = display.print.mock.calls.map(args => stripAnsi(String(args[0])));
-    expect(printCalls.some(s => s.toLowerCase().includes("error"))).toBe(false);
-  });
-});
+// ── sendGoodbye ───────────────────────────────────────────────────────────────
 
 describe("sendGoodbye", () => {
   it("sends worker_goodbye with workerId and taskId when ws is open and task is active", async () => {
     const issue = makeIssue();
     sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
-    await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
+    session.takeNextPrompt();
 
     fakeWs.send.mockClear();
     session.sendGoodbye();
@@ -1657,51 +1485,6 @@ describe("sendGoodbye", () => {
   });
 });
 
-// ── interrupt() ───────────────────────────────────────────────────────────────
-
-describe("interrupt()", () => {
-  it("returns false when no query is running", () => {
-    expect(session.interrupt()).toBe(false);
-  });
-
-  it("returns true and aborts the AbortController when a query is running", async () => {
-    let capturedAc: AbortController | undefined;
-    let resolveQuery!: (value: string | undefined) => void;
-    runQuery.mockImplementation(
-      (_prompt: string, _sid: string | undefined, ac: AbortController) => {
-        capturedAc = ac;
-        return new Promise<string | undefined>((resolve) => { resolveQuery = resolve; });
-      },
-    );
-
-    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
-    await vi.waitFor(() => expect(capturedAc).toBeDefined());
-
-    const result = session.interrupt();
-    expect(result).toBe(true);
-    expect(capturedAc?.signal.aborted).toBe(true);
-
-    // Clean up: resolve the query so runQueryLoop can exit
-    resolveQuery(undefined);
-    await session.waitUntilIdle();
-  });
-
-  it("returns false after the query finishes", async () => {
-    let resolveQuery!: (value: string | undefined) => void;
-    runQuery.mockImplementation(
-      () => new Promise<string | undefined>((resolve) => { resolveQuery = resolve; }),
-    );
-
-    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
-    await vi.waitFor(() => expect(runQuery).toHaveBeenCalled());
-
-    resolveQuery(undefined);
-    await session.waitUntilIdle();
-
-    expect(session.interrupt()).toBe(false);
-  });
-});
-
 // ── Heartbeat / ping-pong ──────────────────────────────────────────────────────
 
 describe("heartbeat", () => {
@@ -1710,7 +1493,7 @@ describe("heartbeat", () => {
   function makeHeartbeatSession(pingIntervalMs = 100) {
     const ws = new FakeWs();
     const factory = vi.fn().mockReturnValue(ws);
-    const s = new WorkerSession(WORKER_ID, factory, vi.fn().mockResolvedValue("s"), display, { pingIntervalMs });
+    const s = new WorkerSession(WORKER_ID, factory, display, { pingIntervalMs });
     s.start();
     return { ws, factory, s };
   }

@@ -405,10 +405,10 @@ describe("listCommandNames", () => {
     expect(result).toContain("my-skill");
   });
 
-  it("does not include worker:task-complete (worker-only command)", () => {
+  it("does not include worker:complete (worker-only command)", () => {
     const result = listCommandNames(() => null);
-    expect(result).not.toContain("worker:task-complete");
-    expect(result).not.toContain("task-complete");
+    expect(result).not.toContain("worker:complete");
+    expect(result).not.toContain("complete");
   });
 
   it("deduplicates when skill name matches a command name", () => {
@@ -525,9 +525,9 @@ describe("listCommands", () => {
 describe("listWorkerCommandNames", () => {
   beforeEach(async () => registerTestCommands());
 
-  it("includes worker:task-complete", () => {
+  it("includes worker:complete", () => {
     const result = listWorkerCommandNames(() => null);
-    expect(result).toContain("worker:task-complete");
+    expect(result).toContain("worker:complete");
   });
 
   it("also includes clear and exit", () => {
