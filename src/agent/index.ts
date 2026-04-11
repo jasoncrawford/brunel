@@ -20,8 +20,8 @@ import type { ModelInfo, FetchModelsFn } from "./model.js";
 import { handleEffortCommand } from "./effort.js";
 import type { EffortValue } from "./effort.js";
 import { CommandRegistry } from "./command-registry.js";
-export { parseSlashCommand, resolveCommandFilePath, resolveContent, dispatchInput, matchCommands, ask } from "./input.js";
-export type { SlashCommandResult, DispatchResult, ListDir } from "./input.js";
+export { parseSlashCommand, dispatchInput, matchCommands, ask } from "./input.js";
+export type { SlashCommandResult, DispatchResult } from "./input.js";
 export { handleModelCommand, getCachedModels, _resetCachedModels } from "./model.js";
 export { handleEffortCommand } from "./effort.js";
 

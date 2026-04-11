@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { dispatchInput, applyArguments, resolveContent } from "../src/agent/input.js";
+import { dispatchInput, applyArguments } from "../src/agent/input.js";
+import { resolveContent } from "../src/agent/command-registry.js";
 import { registerTestCommands } from "./helpers.js";
 import type { CommandRegistry } from "../src/agent/command-registry.js";
 

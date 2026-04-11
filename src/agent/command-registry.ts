@@ -35,7 +35,7 @@ export function parseFrontmatter(content: string): Record<string, string> {
   return result;
 }
 
-export function defaultReadFile(path: string): string | null {
+function defaultReadFile(path: string): string | null {
   try {
     return fs.readFileSync(path, "utf8");
   } catch {

@@ -1,8 +1,15 @@
+import fs from "fs";
 import * as display from "./display.js";
-import { defaultReadFile, resolveContent } from "./command-registry.js";
+import { resolveContent } from "./command-registry.js";
 import type { CommandRegistry, CommandSuggestion } from "./command-registry.js";
-export { parseFrontmatter, resolveCommandFilePath, resolveContent, listSkillNames, defaultReadFile } from "./command-registry.js";
-export type { ListDir, CommandSuggestion } from "./command-registry.js";
+
+function defaultReadFile(path: string): string | null {
+  try {
+    return fs.readFileSync(path, "utf8");
+  } catch {
+    return null;
+  }
+}
 
 // ── Stash ─────────────────────────────────────────────────────────────────────
 
