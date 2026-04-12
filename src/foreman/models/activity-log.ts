@@ -1,4 +1,4 @@
-import type { LogEntry } from "../admin-ws.js";
+import type { LogEntry } from "../../../shared/wire.js";
 import { WebhookEvent } from "./webhook-event.js";
 import { ForemanMessage } from "./foreman-message.js";
 

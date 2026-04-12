@@ -1,7 +1,6 @@
 import { EventEmitter } from "events";
-import * as Wire from "../../wire.js";
+import * as Wire from "../../../shared/wire.js";
 import type { WebSocket as WsSocket } from "ws";
-import type { WorkerSnapshot } from "../admin-ws.js";
 
 const registry = new Map<string, Worker>();
 
@@ -87,7 +86,7 @@ export class Worker {
     return false;
   }
 
-  toSnapshot(): WorkerSnapshot {
+  toSnapshot(): Wire.Worker {
     return {
       workerId: this.workerId,
       status: this.status,

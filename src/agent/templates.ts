@@ -1,4 +1,4 @@
-import * as Wire from "../wire.js";
+import * as Wire from "../../shared/wire.js";
 
 export function formatCommentLocation(
   path: unknown,

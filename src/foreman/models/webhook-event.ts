@@ -2,7 +2,7 @@ import type { Json } from "../../database.types.js";
 import { db } from "../db-client.js";
 import type { DbRow } from "../db-client.js";
 import { fmtEvent } from "../event-fmt.js";
-import * as Wire from "../../wire.js";
+import * as Wire from "../../../shared/wire.js";
 
 type Row = DbRow<"webhook_events">;
 

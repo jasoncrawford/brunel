@@ -7,7 +7,7 @@ import { WebSocket } from "ws";
 import * as display from "./display.js";
 import { buildInitialPrompt, buildEventPrompt } from "./templates.js";
 import type { EffortValue } from "./effort.js";
-import * as Wire from "../wire.js";
+import * as Wire from "../../shared/wire.js";
 import { Workspace, confirmIfUnsafe } from "./workspace.js";
 import type { WorkspaceCommandDeps } from "./workspace.js";
 import { fmtError } from "../utils.js";

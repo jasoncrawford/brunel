@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import type { TaskStatus } from "../../../shared/types.js";
 import type { Database } from "../../database.types.js";
-import type { TaskSnapshot, BlockerInfo } from "../admin-ws.js";
+import * as Wire from "../../../shared/wire.js";
 import { fetchNativeBlockers } from "../github.js";
 import { db } from "../db-client.js";
 
@@ -27,7 +27,7 @@ export class Task {
 
   // ── In-memory blocker state (not persisted to DB) ─────────────────────────
   /** Merged set of blockers with their current open/closed state — set by TaskManager.hydrateBlockers(). */
-  blockers: BlockerInfo[] = [];
+  blockers: Wire.BlockerInfo[] = [];
   /** Whether native blockers have been fetched from the GitHub API. */
   blockersLoaded: boolean = false;
 
@@ -82,7 +82,7 @@ export class Task {
     };
   }
 
-  toSnapshot(): TaskSnapshot {
+  toSnapshot(): Wire.Task {
     return {
       taskId: this.taskId,
       issueNumber: this.issueNumber,

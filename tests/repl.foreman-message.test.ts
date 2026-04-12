@@ -5,7 +5,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from "vitest";
 import { stripAnsi } from "./helpers.js";
 import { printForemanMessage, stopStatus, setVerbose } from "../src/agent/display.js";
-import * as Wire from "../src/wire.js";
+import * as Wire from "../shared/wire.js";
 
 function captureOutput(fn: () => void): string {
   let output = "";

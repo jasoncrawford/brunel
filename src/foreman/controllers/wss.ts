@@ -1,6 +1,6 @@
 import http from "http";
 import { WebSocketServer, WebSocket } from "ws";
-import * as Wire from "../../wire.js";
+import * as Wire from "../../../shared/wire.js";
 import { ForemanMessage } from "../models/foreman-message.js";
 import { WebhookEvent } from "../models/webhook-event.js";
 import type { AdminWss } from "../admin-ws.js";

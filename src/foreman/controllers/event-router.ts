@@ -1,4 +1,4 @@
-import * as Wire from "../../wire.js";
+import * as Wire from "../../../shared/wire.js";
 import type { WebhookEvent } from "../models/webhook-event.js";
 import { fetchIssueStates } from "../github.js";
 import type { TaskManager } from "../models/task-manager.js";

@@ -1,13 +1,13 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useAdminWs } from "../hooks/useAdminWs.ts";
-import type { LogEntry, AdminMessage, TaskSnapshot } from "../types.ts";
+import type { LogEntry, AdminMessage, Task } from "../types.ts";
 import { shortWorkerId } from "../../../shared/utils.ts";
 
 export default function TaskDetail() {
   const { id } = useParams<{ id: string }>();
   const [events, setEvents] = useState<LogEntry[]>([]);
-  const [task, setTask] = useState<TaskSnapshot | null>(null);
+  const [task, setTask] = useState<Task | null>(null);
 
   useEffect(() => {
     fetch(`/api/tasks/${id}/events`)
