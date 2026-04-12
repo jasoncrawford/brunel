@@ -10,7 +10,7 @@ import { shortWorkerId } from "../../../shared/utils.js";
 import type { BrunelConfig } from "../../config.js";
 import type { TaskManager } from "../models/task-manager.js";
 import { Task } from "../models/task.js";
-import { Worker } from "../models/worker-registry.js";
+import { Worker } from "../models/worker.js";
 import { EventRouter } from "./event-router.js";
 
 type R = Record<string, unknown>;

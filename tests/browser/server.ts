@@ -36,7 +36,7 @@ const _realFetch = globalThis.fetch;
 import http from "http";
 import type { AddressInfo } from "net";
 import { WebSocket } from "ws";
-import { Worker } from "../../src/foreman/models/worker-registry.js";
+import { Worker } from "../../src/foreman/models/worker.js";
 import { createForemanWss } from "../../src/foreman/controllers/wss.js";
 import { createHttpServer } from "../../src/foreman/controllers/http-server.js";
 import { TaskManager } from "../../src/foreman/models/task-manager.js";
