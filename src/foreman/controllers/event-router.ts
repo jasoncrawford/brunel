@@ -7,19 +7,6 @@ import { Worker } from "../models/worker-registry.js";
 import { shortWorkerId } from "../../../shared/utils.js";
 import { fmtError } from "../../utils.js";
 
-// ── Dependencies interface ──────────────────────────────────────────────────
-
-export interface EventRouterDeps {
-  taskManager: TaskManager;
-  repo: string;
-  token: string;
-  githubApiUrl?: string;
-  taskLabel: string;
-  sendMsg(workerId: string, msg: Wire.ForemanMessage, logTaskId?: string): void;
-  flog(msg: string): void;
-  assignIdleWorkers(): Promise<void>;
-}
-
 // ── Pure helper functions ───────────────────────────────────────────────────
 
 function strProp(obj: unknown, key: string): string | null {
@@ -91,243 +78,278 @@ export function isMutedEvent(name: string): boolean {
   return name === "workflow_job" || name === "workflow_run";
 }
 
-// ── Event forwarding ─────────────────────────────────────────────────────────
-
-export function forwardEvent(deps: EventRouterDeps, task: Task, evt: WebhookEvent, ref: string): void {
-  if (task.workerId) {
-    const worker = Worker.get(task.workerId);
-    if (worker && worker.currentTaskId !== task.taskId) {
-      deps.flog(`[task ${ref}] ${evt.eventName} dropped — worker ${shortWorkerId(task.workerId)} is now on a different task`);
-      return;
-    }
-    if (worker?.status === "disconnected") {
-      deps.taskManager.queueEvent(task.taskId, evt);
-      deps.flog(`[task ${ref}] ${evt.eventName} queued (worker ${shortWorkerId(task.workerId)} disconnected)`);
-    } else if (worker) {
-      const evtMsg: Wire.ForemanMessage = { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload() };
-      deps.sendMsg(task.workerId, evtMsg);
-      deps.flog(`[worker ${shortWorkerId(task.workerId)}] → event_notification ${ref} ${evt.eventName}`);
-    } else {
-      deps.flog(`[task ${ref}] ${evt.eventName} DROPPED — worker ${shortWorkerId(task.workerId)} not in registry (disconnected?)`);
-    }
-  } else if (task.status === "pending" || task.status === "blocked") {
-    deps.taskManager.queueEvent(task.taskId, evt);
-    deps.flog(`[task ${ref}] ${evt.eventName} queued (no worker assigned)`);
-  }
-}
-
-// ── Dependency loading ─────────────────────────────────────────────────────
-
-export function startDepsLoad(deps: EventRouterDeps, issueNumber: number, body: string): void {
-  Task.fetchBlockers(issueNumber, body, { repo: deps.repo, token: deps.token, apiUrl: deps.githubApiUrl })
-    .then(async (blockers) => {
-      deps.taskManager.setBlockers(issueNumber, blockers);
-      if (blockers.length > 0) {
-        const states = await fetchIssueStates(blockers, { repo: deps.repo, token: deps.token });
-        for (const [num, state] of states) {
-          deps.taskManager.setIssueOpenState(num, state === "open");
-        }
-      }
-      deps.taskManager.markBlockersLoaded(issueNumber);
-      await deps.assignIdleWorkers();
-    })
-    .catch((err) => deps.flog(`ERROR fetching deps for #${issueNumber}: ${fmtError(err)}`));
-}
-
-// ── Core event routing ──────────────────────────────────────────────────────
+// ── Route result ──────────────────────────────────────────────────────────────
 
 export interface RouteResult { taskId: string | null; workerId: string | null; }
 
-export async function doRouteEvent(deps: EventRouterDeps, name: string, p: Record<string, unknown>, evt: WebhookEvent): Promise<RouteResult> {
-  function result(task: { taskId: string; workerId: string | null } | null | undefined): RouteResult {
-    return { taskId: task?.taskId ?? null, workerId: task?.workerId ?? null };
+// ── EventRouter class ─────────────────────────────────────────────────────────
+
+export class EventRouter {
+  private taskManager: TaskManager;
+  private repo: string;
+  private token: string;
+  private githubApiUrl: string | undefined;
+  private taskLabel: string;
+  private sendMsg: (workerId: string, msg: Wire.ForemanMessage, logTaskId?: string) => void;
+  private flog: (msg: string) => void;
+  private assignIdleWorkers: () => Promise<void>;
+
+  constructor(deps: {
+    taskManager: TaskManager;
+    repo: string;
+    token: string;
+    githubApiUrl?: string;
+    taskLabel: string;
+    sendMsg(workerId: string, msg: Wire.ForemanMessage, logTaskId?: string): void;
+    flog(msg: string): void;
+    assignIdleWorkers(): Promise<void>;
+  }) {
+    this.taskManager = deps.taskManager;
+    this.repo = deps.repo;
+    this.token = deps.token;
+    this.githubApiUrl = deps.githubApiUrl;
+    this.taskLabel = deps.taskLabel;
+    this.sendMsg = deps.sendMsg;
+    this.flog = deps.flog;
+    this.assignIdleWorkers = deps.assignIdleWorkers;
   }
 
-  const { taskManager, flog, repo } = deps;
+  // ── Event forwarding ──────────────────────────────────────────────────────
 
-  // ── PR events: route by PR number ────────────────────────────────────────
+  private forwardEvent(task: Task, evt: WebhookEvent, ref: string): void {
+    if (task.workerId) {
+      const worker = Worker.get(task.workerId);
+      if (worker && worker.currentTaskId !== task.taskId) {
+        this.flog(`[task ${ref}] ${evt.eventName} dropped — worker ${shortWorkerId(task.workerId)} is now on a different task`);
+        return;
+      }
+      if (worker?.status === "disconnected") {
+        this.taskManager.queueEvent(task.taskId, evt);
+        this.flog(`[task ${ref}] ${evt.eventName} queued (worker ${shortWorkerId(task.workerId)} disconnected)`);
+      } else if (worker) {
+        const evtMsg: Wire.ForemanMessage = { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload() };
+        this.sendMsg(task.workerId, evtMsg);
+        this.flog(`[worker ${shortWorkerId(task.workerId)}] → event_notification ${ref} ${evt.eventName}`);
+      } else {
+        this.flog(`[task ${ref}] ${evt.eventName} DROPPED — worker ${shortWorkerId(task.workerId)} not in registry (disconnected?)`);
+      }
+    } else if (task.status === "pending" || task.status === "blocked") {
+      this.taskManager.queueEvent(task.taskId, evt);
+      this.flog(`[task ${ref}] ${evt.eventName} queued (no worker assigned)`);
+    }
+  }
 
-  if (name === "pull_request") {
-    const pr = p.pull_request as Record<string, unknown> | undefined;
-    const prNumber = numProp(pr, "number");
-    if (prNumber === null) return result(null);
+  // ── Dependency loading ────────────────────────────────────────────────────
 
-    // Drop synchronize events — the worker pushed these commits itself.
-    if (p.action === "synchronize") return result(await Task.getByPr(prNumber));
+  private startDepsLoad(issueNumber: number, body: string): void {
+    Task.fetchBlockers(issueNumber, body, { repo: this.repo, token: this.token, apiUrl: this.githubApiUrl })
+      .then(async (blockers) => {
+        this.taskManager.setBlockers(issueNumber, blockers);
+        if (blockers.length > 0) {
+          const states = await fetchIssueStates(blockers, { repo: this.repo, token: this.token });
+          for (const [num, state] of states) {
+            this.taskManager.setIssueOpenState(num, state === "open");
+          }
+        }
+        this.taskManager.markBlockersLoaded(issueNumber);
+        await this.assignIdleWorkers();
+      })
+      .catch((err) => this.flog(`ERROR fetching deps for #${issueNumber}: ${fmtError(err)}`));
+  }
 
-    // When a PR is opened, register it against a task if the body links an issue.
-    if (p.action === "opened" && pr) {
-      const linkedIssue = extractLinkedIssueNumber(String(pr.body ?? ""));
-      if (linkedIssue !== null) {
-        const linkedTask = await Task.getByIssue(linkedIssue);
-        if (linkedTask) {
-          const branch = strProp(pr.head, "ref");
-          if (branch) taskManager.registerBranch(branch, linkedTask.taskId);
-          await linkedTask.registerPr(prNumber, branch ?? null).catch((err: unknown) =>
-            flog(`ERROR Failed to register PR for task #${linkedTask.taskId}: ${fmtError(err)}`)
-          );
-          flog(`[task #${linkedIssue}] PR #${prNumber} registered`);
+  // ── Core event routing ────────────────────────────────────────────────────
+
+  async routeEvent(name: string, p: Record<string, unknown>, evt: WebhookEvent): Promise<RouteResult> {
+    function result(task: { taskId: string; workerId: string | null } | null | undefined): RouteResult {
+      return { taskId: task?.taskId ?? null, workerId: task?.workerId ?? null };
+    }
+
+    const { taskManager, flog, repo } = this;
+
+    // ── PR events: route by PR number ──────────────────────────────────────
+
+    if (name === "pull_request") {
+      const pr = p.pull_request as Record<string, unknown> | undefined;
+      const prNumber = numProp(pr, "number");
+      if (prNumber === null) return result(null);
+
+      // Drop synchronize events — the worker pushed these commits itself.
+      if (p.action === "synchronize") return result(await Task.getByPr(prNumber));
+
+      // When a PR is opened, register it against a task if the body links an issue.
+      if (p.action === "opened" && pr) {
+        const linkedIssue = extractLinkedIssueNumber(String(pr.body ?? ""));
+        if (linkedIssue !== null) {
+          const linkedTask = await Task.getByIssue(linkedIssue);
+          if (linkedTask) {
+            const branch = strProp(pr.head, "ref");
+            if (branch) taskManager.registerBranch(branch, linkedTask.taskId);
+            await linkedTask.registerPr(prNumber, branch ?? null).catch((err: unknown) =>
+              flog(`ERROR Failed to register PR for task #${linkedTask.taskId}: ${fmtError(err)}`)
+            );
+            flog(`[task #${linkedIssue}] PR #${prNumber} registered`);
+          }
         }
       }
-    }
 
-    // When a PR is closed without merging, clear it from the task.
-    if (p.action === "closed" && pr && !pr.merged) {
-      const task = await Task.getByPr(prNumber);
-      if (task) {
-        flog(`[task #${task.issueNumber}] PR #${prNumber} unregistered (closed without merging)`);
-        await task.unregisterPr().catch((err: unknown) =>
-          flog(`ERROR Failed to unregister PR #${prNumber}: ${fmtError(err)}`)
-        );
-        forwardEvent(deps, task, evt, `PR #${prNumber}`);
-        return result(task);
-      }
-      return result(null);
-    }
-
-    // When a PR is closed with merging, record that it was merged.
-    if (p.action === "closed" && pr && pr.merged) {
-      const task = await Task.getByPr(prNumber);
-      if (task) {
-        flog(`[task #${task.issueNumber}] PR #${prNumber} merged`);
-        await task.mergePr().catch((err: unknown) =>
-          flog(`ERROR Failed to record PR #${prNumber} merge: ${fmtError(err)}`)
-        );
-        forwardEvent(deps, task, evt, `PR #${prNumber}`);
-        return result(task);
-      }
-      return result(null);
-    }
-
-    const task = await Task.getByPr(prNumber);
-    if (task) forwardEvent(deps, task, evt, `PR #${prNumber}`);
-    return result(task);
-  }
-
-  if (name === "pull_request_review" || name === "pull_request_review_comment") {
-    const pr = p.pull_request as Record<string, unknown> | undefined;
-    const prNumber = numProp(pr, "number");
-    if (prNumber === null) return result(null);
-    const task = await Task.getByPr(prNumber);
-    if (task) forwardEvent(deps, task, evt, `PR #${prNumber}`);
-    return result(task);
-  }
-
-  if (name === "check_run" || name === "check_suite") {
-    const inner = (name === "check_run" ? p.check_run : p.check_suite) as Record<string, unknown> | undefined;
-    const prs = inner?.pull_requests as Array<{ number: number }> | undefined;
-
-    if (prs && prs.length > 0) {
-      const task = await Task.getByPr(prs[0].number);
-      if (task) { forwardEvent(deps, task, evt, `PR #${prs[0].number}`); return result(task); }
-    }
-
-    const headBranch = name === "check_run"
-      ? strProp(inner?.check_suite, "head_branch") ?? ""
-      : strProp(inner, "head_branch") ?? "";
-    if (headBranch) {
-      const task = await taskManager.getTaskForBranch(headBranch);
-      if (task) { forwardEvent(deps, task, evt, `branch ${headBranch}`); return result(task); }
-    }
-    return result(null);
-  }
-
-  // ── Issue events: route by issue number ──────────────────────────────────
-
-  const issue = p.issue as Record<string, unknown> | undefined;
-  const issueNumber = numProp(issue, "number");
-  if (issueNumber === null) return result(null);
-
-  let task = await Task.getByIssue(issueNumber);
-
-  // GitHub issue_comment events on PRs have the PR number in issue.number.
-  if (!task) task = await Task.getByPr(issueNumber);
-
-  // If the issue isn't queued yet, check if this webhook should enqueue it.
-  if (!task && name === "issues" && issue) {
-    const action = p.action as string | undefined;
-    const labeledNow =
-      action === "labeled" &&
-      (p.label as Record<string, unknown> | undefined)?.name === deps.taskLabel;
-    const openedWithLabel =
-      action === "opened" &&
-      (issue.labels as Array<{ name: string }> | undefined)?.some((l) => l.name === deps.taskLabel);
-
-    if (labeledNow || openedWithLabel) {
-      const issueState = String(issue.state ?? "open");
-      if (issueState === "closed") {
-        flog(`[task #${issueNumber}] issues/${action}: ignoring — issue is closed (title: ${JSON.stringify(String(issue.title ?? ""))})`);
+      // When a PR is closed without merging, clear it from the task.
+      if (p.action === "closed" && pr && !pr.merged) {
+        const task = await Task.getByPr(prNumber);
+        if (task) {
+          flog(`[task #${task.issueNumber}] PR #${prNumber} unregistered (closed without merging)`);
+          await task.unregisterPr().catch((err: unknown) =>
+            flog(`ERROR Failed to unregister PR #${prNumber}: ${fmtError(err)}`)
+          );
+          this.forwardEvent(task, evt, `PR #${prNumber}`);
+          return result(task);
+        }
         return result(null);
       }
 
-      const repoUrl = strProp(p.repository, "html_url") ?? "";
-      const labels =
-        (issue.labels as Array<{ name: string }> | undefined)?.map((l) => l.name) ?? [];
-      const issueData: Wire.TaskIssue = {
-        number: issueNumber,
-        title: String(issue.title ?? ""),
-        body: String(issue.body ?? ""),
-        labels,
-        repoUrl,
-      };
+      // When a PR is closed with merging, record that it was merged.
+      if (p.action === "closed" && pr && pr.merged) {
+        const task = await Task.getByPr(prNumber);
+        if (task) {
+          flog(`[task #${task.issueNumber}] PR #${prNumber} merged`);
+          await task.mergePr().catch((err: unknown) =>
+            flog(`ERROR Failed to record PR #${prNumber} merge: ${fmtError(err)}`)
+          );
+          this.forwardEvent(task, evt, `PR #${prNumber}`);
+          return result(task);
+        }
+        return result(null);
+      }
 
-      // Track as open and persist to DB.
-      await taskManager.enqueueIssue(String(issueNumber), issueNumber, repo, issueData.title, issueData.body, issueData.labels)
-        .catch((err: unknown) => flog(`ERROR Failed to persist task #${issueNumber}: ${fmtError(err)}`));
-
-      startDepsLoad(deps, issueNumber, issueData.body);
-      await deps.assignIdleWorkers();
-      flog(`[task #${issueNumber}] enqueued via ${name}/${action}`);
-      return { taskId: String(issueNumber), workerId: null };
-    }
-  }
-
-  // ── Dependency graph updates ───────────────────────────────────────────────
-
-  if (name === "issues" && issue) {
-    const action = p.action as string | undefined;
-
-    if (
-      action === "unlabeled" &&
-      (p.label as Record<string, unknown> | undefined)?.name === deps.taskLabel
-    ) {
-      await taskManager.dequeueIssue(issueNumber)
-        .catch((err: unknown) => flog(`ERROR Failed to dequeue task #${issueNumber}: ${fmtError(err)}`));
-      flog(`[task #${issueNumber}] dequeued (label removed)`);
-      await deps.assignIdleWorkers();
+      const task = await Task.getByPr(prNumber);
+      if (task) this.forwardEvent(task, evt, `PR #${prNumber}`);
       return result(task);
     }
 
-    if (action === "closed") {
-      await taskManager.closeIssue(issueNumber).catch((err: unknown) =>
-        flog(`ERROR Failed to close issue #${issueNumber}: ${fmtError(err)}`)
-      );
-      await deps.assignIdleWorkers();
+    if (name === "pull_request_review" || name === "pull_request_review_comment") {
+      const pr = p.pull_request as Record<string, unknown> | undefined;
+      const prNumber = numProp(pr, "number");
+      if (prNumber === null) return result(null);
+      const task = await Task.getByPr(prNumber);
+      if (task) this.forwardEvent(task, evt, `PR #${prNumber}`);
       return result(task);
     }
 
-    if (action === "reopened") {
-      await taskManager.reopenIssue(issueNumber).catch((err: unknown) =>
-        flog(`ERROR Failed to reopen issue #${issueNumber}: ${fmtError(err)}`)
-      );
-      await deps.assignIdleWorkers();
-      return result(task);
+    if (name === "check_run" || name === "check_suite") {
+      const inner = (name === "check_run" ? p.check_run : p.check_suite) as Record<string, unknown> | undefined;
+      const prs = inner?.pull_requests as Array<{ number: number }> | undefined;
+
+      if (prs && prs.length > 0) {
+        const task = await Task.getByPr(prs[0].number);
+        if (task) { this.forwardEvent(task, evt, `PR #${prs[0].number}`); return result(task); }
+      }
+
+      const headBranch = name === "check_run"
+        ? strProp(inner?.check_suite, "head_branch") ?? ""
+        : strProp(inner, "head_branch") ?? "";
+      if (headBranch) {
+        const task = await taskManager.getTaskForBranch(headBranch);
+        if (task) { this.forwardEvent(task, evt, `branch ${headBranch}`); return result(task); }
+      }
+      return result(null);
     }
 
-    if (action === "edited") {
-      const changes = p.changes as Record<string, unknown> | undefined;
-      if (changes?.body) {
-        const trackedTask = await Task.getByIssue(issueNumber);
-        if (trackedTask) {
-          const newBody = String(issue.body ?? "");
-          taskManager.resetBlockers(issueNumber);
-          startDepsLoad(deps, issueNumber, newBody);
+    // ── Issue events: route by issue number ────────────────────────────────
+
+    const issue = p.issue as Record<string, unknown> | undefined;
+    const issueNumber = numProp(issue, "number");
+    if (issueNumber === null) return result(null);
+
+    let task = await Task.getByIssue(issueNumber);
+
+    // GitHub issue_comment events on PRs have the PR number in issue.number.
+    if (!task) task = await Task.getByPr(issueNumber);
+
+    // If the issue isn't queued yet, check if this webhook should enqueue it.
+    if (!task && name === "issues" && issue) {
+      const action = p.action as string | undefined;
+      const labeledNow =
+        action === "labeled" &&
+        (p.label as Record<string, unknown> | undefined)?.name === this.taskLabel;
+      const openedWithLabel =
+        action === "opened" &&
+        (issue.labels as Array<{ name: string }> | undefined)?.some((l) => l.name === this.taskLabel);
+
+      if (labeledNow || openedWithLabel) {
+        const issueState = String(issue.state ?? "open");
+        if (issueState === "closed") {
+          flog(`[task #${issueNumber}] issues/${action}: ignoring — issue is closed (title: ${JSON.stringify(String(issue.title ?? ""))})`);
+          return result(null);
+        }
+
+        const repoUrl = strProp(p.repository, "html_url") ?? "";
+        const labels =
+          (issue.labels as Array<{ name: string }> | undefined)?.map((l) => l.name) ?? [];
+        const issueData: Wire.TaskIssue = {
+          number: issueNumber,
+          title: String(issue.title ?? ""),
+          body: String(issue.body ?? ""),
+          labels,
+          repoUrl,
+        };
+
+        // Track as open and persist to DB.
+        await taskManager.enqueueIssue(String(issueNumber), issueNumber, repo, issueData.title, issueData.body, issueData.labels)
+          .catch((err: unknown) => flog(`ERROR Failed to persist task #${issueNumber}: ${fmtError(err)}`));
+
+        this.startDepsLoad(issueNumber, issueData.body);
+        await this.assignIdleWorkers();
+        flog(`[task #${issueNumber}] enqueued via ${name}/${action}`);
+        return { taskId: String(issueNumber), workerId: null };
+      }
+    }
+
+    // ── Dependency graph updates ───────────────────────────────────────────
+
+    if (name === "issues" && issue) {
+      const action = p.action as string | undefined;
+
+      if (
+        action === "unlabeled" &&
+        (p.label as Record<string, unknown> | undefined)?.name === this.taskLabel
+      ) {
+        await taskManager.dequeueIssue(issueNumber)
+          .catch((err: unknown) => flog(`ERROR Failed to dequeue task #${issueNumber}: ${fmtError(err)}`));
+        flog(`[task #${issueNumber}] dequeued (label removed)`);
+        await this.assignIdleWorkers();
+        return result(task);
+      }
+
+      if (action === "closed") {
+        await taskManager.closeIssue(issueNumber).catch((err: unknown) =>
+          flog(`ERROR Failed to close issue #${issueNumber}: ${fmtError(err)}`)
+        );
+        await this.assignIdleWorkers();
+        return result(task);
+      }
+
+      if (action === "reopened") {
+        await taskManager.reopenIssue(issueNumber).catch((err: unknown) =>
+          flog(`ERROR Failed to reopen issue #${issueNumber}: ${fmtError(err)}`)
+        );
+        await this.assignIdleWorkers();
+        return result(task);
+      }
+
+      if (action === "edited") {
+        const changes = p.changes as Record<string, unknown> | undefined;
+        if (changes?.body) {
+          const trackedTask = await Task.getByIssue(issueNumber);
+          if (trackedTask) {
+            const newBody = String(issue.body ?? "");
+            taskManager.resetBlockers(issueNumber);
+            this.startDepsLoad(issueNumber, newBody);
+          }
         }
       }
     }
-  }
 
-  if (!task) return result(null);
-  forwardEvent(deps, task, evt, `#${issueNumber}`);
-  return result(task);
+    if (!task) return result(null);
+    this.forwardEvent(task, evt, `#${issueNumber}`);
+    return result(task);
+  }
 }

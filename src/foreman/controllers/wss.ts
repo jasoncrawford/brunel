@@ -11,8 +11,7 @@ import type { BrunelConfig } from "../../config.js";
 import type { TaskManager } from "../models/task-manager.js";
 import { Task } from "../models/task.js";
 import { Worker } from "../models/worker-registry.js";
-import { doRouteEvent, isMutedEvent, summaryEvent, forwardEvent } from "./event-router.js";
-import type { EventRouterDeps } from "./event-router.js";
+import { EventRouter } from "./event-router.js";
 
 type R = Record<string, unknown>;
 
@@ -148,8 +147,7 @@ export function createForemanWss(
     }
   }
 
-  // Build the event router deps object
-  const routerDeps: EventRouterDeps = {
+  const eventRouter = new EventRouter({
     taskManager,
     repo,
     token,
@@ -158,13 +156,13 @@ export function createForemanWss(
     sendMsg,
     flog,
     assignIdleWorkers,
-  };
+  });
 
   async function routeEvent(id: string, name: string, payload: unknown) {
     const p = payload as Record<string, unknown>;
     const evt = WebhookEvent.fromIncoming(id, name, p);
 
-    const { taskId, workerId } = await doRouteEvent(routerDeps, name, p, evt);
+    const { taskId, workerId } = await eventRouter.routeEvent(name, p, evt);
 
     const action = typeof p.action === "string" ? p.action : null;
     const webhookIssueNumber = typeof (p.issue as R | undefined)?.number === "number" ? (p.issue as R).number as number : null;
