@@ -3,6 +3,7 @@ export default defineConfig({
   test: {
     environment: "node",
     globalSetup: "./tests/globalSetup.ts",
+    setupFiles: ["./tests/setup.ts"],
     testTimeout: 15000,
     exclude: ["node_modules", "frontend/**", ".worktrees/**", ".claude/**", "tests/browser/**"],
     coverage: {
