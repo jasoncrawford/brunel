@@ -259,17 +259,14 @@ describe("queryActivityLog", () => {
   });
 
   it("filters by workerId and excludes other workers", async () => {
-    WebhookEvent.log({
-      deliveryId: null, eventName: "push", action: null,
-      repo: null, sender: null, issueNumber: null,
-      prNumber: null, branch: null, taskId: null, workerId: "w1", payload: {},
-    });
-    WebhookEvent.log({
-      deliveryId: null, eventName: "push", action: null,
-      repo: null, sender: null, issueNumber: null,
-      prNumber: null, branch: null, taskId: null, workerId: "w2", payload: {},
-    });
-    await new Promise((r) => setTimeout(r, 50));
+    await Promise.all([
+      supabase.from("webhook_events").insert({
+        event_name: "push", action: null, task_id: null, worker_id: "w1", payload: {},
+      }),
+      supabase.from("webhook_events").insert({
+        event_name: "push", action: null, task_id: null, worker_id: "w2", payload: {},
+      }),
+    ]);
 
     const entries = await queryActivityLog({ workerId: "w1" });
     expect(entries).toHaveLength(1);
