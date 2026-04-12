@@ -64,10 +64,10 @@ const mockWorkers = new Map<string, WebSocket>();
 let foremanWss: ReturnType<typeof createForemanWss>;
 
 // Build the foreman HTTP server (handles /webhook, /health, /api/*, static dist/)
-const server = createHttpServer(
-  null,
-  (id, name, payload) => foremanWss.routeEvent(id, name, payload),
-);
+const server = createHttpServer({
+  webhooks: null,
+  routeEvent: (id, name, payload) => foremanWss.routeEvent(id, name, payload),
+});
 
 // Intercept the request event so we can add /test/* routes without touching
 // the production createHttpServer factory.

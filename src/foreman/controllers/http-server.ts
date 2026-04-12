@@ -18,11 +18,13 @@ function printEvent(id: string, name: string, payload: unknown) {
   flog(summaryEvent(id, name, payload));
 }
 
-export function createHttpServer(
-  webhooks: InstanceType<typeof Webhooks> | null,
-  routeEvent: (id: string, name: string, payload: unknown) => void | Promise<void>,
-  taskManager?: TaskManager,
-): http.Server {
+export interface HttpServerOptions {
+  webhooks: InstanceType<typeof Webhooks> | null;
+  routeEvent: (id: string, name: string, payload: unknown) => void | Promise<void>;
+  taskManager?: TaskManager;
+}
+
+export function createHttpServer({ webhooks, routeEvent, taskManager }: HttpServerOptions): http.Server {
   const app = new Hono();
 
   // ── Webhook ────────────────────────────────────────────────────────────────
