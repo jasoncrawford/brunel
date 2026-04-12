@@ -118,7 +118,7 @@ export async function runQuery(
   // completed messages and track the current one separately.
   const stats = new QueryStats();
   const workingVerb = display.pickWorkingVerb();
-  const getStatusText = () => stats.getStatusText(workingVerb);
+  const getStatusText = () => display.c.darkGray(stats.getStatusText(workingVerb));
   display.startStatus(getStatusText);
 
   const canUseTool: CanUseTool = async (toolName, input) => {

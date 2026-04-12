@@ -55,12 +55,10 @@ export class QueryStats extends EventEmitter {
     this.emit("change");
   }
 
-  /** Formatted status bar text for use with display.startStatus(). */
+  /** Formatted status bar text for use with display.startStatus(). Styling is the caller's responsibility. */
   getStatusText(workingVerb: string): string {
     const secs = this.elapsedSecs;
     const outTokens = this.outputTokens;
-    return display.c.darkGray(
-      `${workingVerb}… ${display.fmtStats(secs, this._turns || undefined, outTokens || undefined, this._inputTokens || undefined)}`,
-    );
+    return `${workingVerb}… ${display.fmtStats(secs, this._turns || undefined, outTokens || undefined, this._inputTokens || undefined)}`;
   }
 }
