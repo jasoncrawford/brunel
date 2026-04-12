@@ -289,7 +289,6 @@ export async function main(
       ? session.workspaceCommandDeps
       : { workspace: workspaceRef, config: workspaceCfg ? { ...workspaceCfg, sessionId: agentId } : undefined, originalCwd, confirm },
     registry.scoped("workspace"),
-    !!session,
   );
   registerWorkerCommands(session, registry.scoped("worker"));
   registry.register("exit", {

@@ -192,17 +192,11 @@ export interface WorkspaceCommandDeps {
 /**
  * Register workspace commands into the given registry (which should already be
  * scoped, e.g. registry.scoped("workspace")). Call this once at startup.
- * If workerMode is true, the create command prints "managed automatically"
- * instead of creating a workspace (workers have their workspace managed by the foreman).
  */
-export function registerWorkspaceCommands(deps: WorkspaceCommandDeps, registry: CommandRegistry, workerMode = false): void {
+export function registerWorkspaceCommands(deps: WorkspaceCommandDeps, registry: CommandRegistry): void {
   registry.register("create", {
     description: "Create an isolated git checkout for this session",
     handler: async () => {
-      if (workerMode) {
-        display.print(display.c.amber("Workspace is managed automatically in worker mode."));
-        return;
-      }
       if (!deps.config) {
         display.print(display.c.boldRed("Cannot create workspace: no GitHub repo configured."));
         return;

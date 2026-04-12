@@ -1338,7 +1338,7 @@ describe("workspace slash commands in WorkerSession", () => {
     });
     sessionWs.start();
     const wsReg1 = new CommandRegistry();
-    registerWorkspaceCommands(sessionWs.workspaceCommandDeps, wsReg1.scoped("workspace"), true);
+    registerWorkspaceCommands(sessionWs.workspaceCommandDeps, wsReg1.scoped("workspace"));
     await wsReg1.execute("workspace:reset", "");
     expect(workspace.reset).toHaveBeenCalledOnce();
   });
@@ -1385,16 +1385,25 @@ describe("workspace slash commands in WorkerSession", () => {
     expect(workspace.destroy).toHaveBeenCalledOnce();
   });
 
-  it("/workspace:create prints 'managed automatically' in worker mode", async () => {
+  it("/workspace:create prints 'already exists' when workspace is pre-created", async () => {
     const printSpy = vi.spyOn(displayModule, "print").mockImplementation(() => {});
     try {
-      const sessionWs = new WorkerSession(new AgentStatus(AGENT_ID), wsFactory, display, {});
+      const workspace = makeWorkspace();
+      const sessionWs = new WorkerSession(new AgentStatus(AGENT_ID), wsFactory, display, {
+        workspaceCtx: {
+          workspace,
+          originalCwd: "/original",
+          workspaceDir: "/tmp/workers",
+          repoUrl: "https://token@github.com/owner/repo.git",
+          confirm: vi.fn(),
+        },
+      });
       sessionWs.start();
       const wsReg4 = new CommandRegistry();
-      registerWorkspaceCommands(sessionWs.workspaceCommandDeps, wsReg4.scoped("workspace"), true);
+      registerWorkspaceCommands(sessionWs.workspaceCommandDeps, wsReg4.scoped("workspace"));
       await wsReg4.execute("workspace:create", "");
       const printed = printSpy.mock.calls.map(([s]) => stripAnsi(s as string)).join("\n");
-      expect(printed).toContain("managed automatically");
+      expect(printed).toContain("Workspace already exists");
     } finally {
       printSpy.mockRestore();
     }
