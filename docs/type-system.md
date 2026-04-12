@@ -58,9 +58,10 @@ export interface Task {
   prNumber?: number;
   prUrl?: string;
   blockers?: BlockerInfo[];
-  // detail fields only present in REST responses:
-  body?: string;
+  // Extended fields — present in REST responses, optional in WebSocket snapshots
+  repo?: string;
   branch?: string;
+  createdAt?: string;
   assignedAt?: string;
   completedAt?: string;
 }
