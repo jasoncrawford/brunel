@@ -1,48 +1,9 @@
 import http from "http";
 import { WebSocketServer } from "ws";
 import type { WebSocket as WsSocket } from "ws";
-import type { TaskStatus } from "../../shared/types.js";
+import type { Task, Worker, LogEntry, AdminSnapshot, AdminMessage } from "../../shared/wire.js";
 
-export interface LogEntry {
-  kind: string;
-  id: number | undefined;
-  timestamp: string;
-  taskId: string | null;
-  workerId: string | null;
-  summary: string;
-}
-
-export interface BlockerInfo {
-  issueNumber: number;
-  isOpen: boolean;
-}
-
-export interface TaskSnapshot {
-  taskId: string;
-  issueNumber: number;
-  title: string;
-  status: TaskStatus;
-  assignedWorkerId?: string;
-  prNumber?: number;
-  prUrl?: string;
-  blockers?: BlockerInfo[];
-}
-
-export interface WorkerSnapshot {
-  workerId: string;
-  status: "idle" | "busy" | "disconnected";
-  currentTaskId?: string;
-}
-
-export interface AdminSnapshot {
-  tasks: TaskSnapshot[];
-  workers: WorkerSnapshot[];
-}
-
-export type AdminMessage =
-  | { type: "snapshot"; tasks: TaskSnapshot[]; workers: WorkerSnapshot[] }
-  | { type: "initial_log"; entries: LogEntry[] }
-  | { type: "log_event"; entry: LogEntry };
+export type { Task, Worker, LogEntry, AdminSnapshot, AdminMessage };
 
 export interface AdminWss {
   broadcastSnapshot(snapshot: AdminSnapshot): void;

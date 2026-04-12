@@ -15,10 +15,10 @@ Shared domain types (enums, value objects used on both sides) live in `shared/ty
 
 ## The Wire namespace
 
-All wire types live in `src/wire.ts` and are imported with a namespace alias:
+All wire types live in `shared/wire.ts` and are imported with a namespace alias:
 
 ```ts
-import * as Wire from "./wire.js";
+import * as Wire from "../../shared/wire.js";
 ```
 
 This gives you `Wire.Task`, `Wire.WebhookEvent`, `Wire.ForemanMessage`, etc. — clearly distinct from the server model classes of the same name, with zero runtime cost (interfaces are erased by TypeScript).

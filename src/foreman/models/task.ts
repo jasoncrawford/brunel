@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import type { TaskStatus } from "../../../shared/types.js";
 import type { Database } from "../../database.types.js";
-import type { TaskSnapshot, BlockerInfo } from "../admin-ws.js";
+import type { Task as WireTask, BlockerInfo } from "../../../shared/wire.js";
 import { fetchNativeBlockers } from "../github.js";
 import { db } from "../db-client.js";
 
@@ -82,7 +82,7 @@ export class Task {
     };
   }
 
-  toSnapshot(): TaskSnapshot {
+  toSnapshot(): WireTask {
     return {
       taskId: this.taskId,
       issueNumber: this.issueNumber,

@@ -1,6 +1,6 @@
 import { EventEmitter } from "events";
 import type { WebhookEvent } from "./webhook-event.js";
-import type { TaskSnapshot } from "../admin-ws.js";
+import type { Task as WireTask } from "../../../shared/wire.js";
 import { loadIssuesToQueue } from "../github.js";
 import { EventQueue } from "../event-queue.js";
 import { Task } from "./task.js";
@@ -156,7 +156,7 @@ export class TaskManager extends EventEmitter {
 
   /** Task snapshots with open-issue state baked in — for admin broadcasts.
    *  Complete tasks are excluded: the dashboard only shows active tasks. */
-  async getTaskSnapshots(): Promise<TaskSnapshot[]> {
+  async getTaskSnapshots(): Promise<WireTask[]> {
     const tasks = await Task.list();
     return tasks.filter((t) => !t.completedAt).map((t) => {
       this.hydrateBlockers(t);

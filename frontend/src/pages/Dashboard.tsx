@@ -1,12 +1,12 @@
 import { useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useAdminWs } from "../hooks/useAdminWs.ts";
-import type { TaskSnapshot, WorkerSnapshot, LogEntry, AdminMessage } from "../types.ts";
+import type { Task, Worker, LogEntry, AdminMessage } from "../types.ts";
 import { shortWorkerId } from "../../../shared/utils.ts";
 
 export default function Dashboard() {
-  const [tasks, setTasks] = useState<TaskSnapshot[]>([]);
-  const [workers, setWorkers] = useState<WorkerSnapshot[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [workers, setWorkers] = useState<Worker[]>([]);
   const [recentLog, setRecentLog] = useState<LogEntry[]>([]);
 
   const handleMessage = useCallback((msg: AdminMessage) => {

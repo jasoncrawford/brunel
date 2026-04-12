@@ -4,7 +4,7 @@ import net from "net";
 import { WebSocket } from "ws";
 import type { AddressInfo } from "net";
 import { createAdminWss } from "../src/foreman/admin-ws.js";
-import type { AdminMessage, LogEntry } from "../src/foreman/admin-ws.js";
+import type { AdminMessage, LogEntry } from "../shared/wire.js";
 
 function startServer(): Promise<{ server: http.Server; port: number; adminWss: ReturnType<typeof createAdminWss> }> {
   return new Promise((resolve) => {
@@ -16,7 +16,7 @@ function startServer(): Promise<{ server: http.Server; port: number; adminWss: R
   });
 }
 
-function startServerWithSnapshot(getSnapshot: () => import("../src/foreman/admin-ws.js").AdminSnapshot): Promise<{ server: http.Server; port: number; adminWss: ReturnType<typeof createAdminWss> }> {
+function startServerWithSnapshot(getSnapshot: () => import("../shared/wire.js").AdminSnapshot): Promise<{ server: http.Server; port: number; adminWss: ReturnType<typeof createAdminWss> }> {
   return new Promise((resolve) => {
     const server = http.createServer();
     const adminWss = createAdminWss(server, getSnapshot);
