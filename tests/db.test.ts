@@ -159,6 +159,13 @@ describe("ForemanMessage.buildSummary richer summaries", () => {
   });
 });
 
+describe("WebhookEvent.fromIncoming", () => {
+  it("produces an in-memory instance with id undefined", () => {
+    const evt = WebhookEvent.fromIncoming("d1", "issues", { action: "labeled" });
+    expect(evt.id).toBeUndefined();
+  });
+});
+
 describe("WebhookEvent.format (richer summaries)", () => {
   function fmt(eventName: string, payload: Record<string, unknown>): string {
     return WebhookEvent.fromIncoming("test", eventName, payload).format();

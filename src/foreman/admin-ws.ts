@@ -5,7 +5,7 @@ import type { TaskStatus } from "../../shared/types.js";
 
 export interface LogEntry {
   kind: string;
-  id: number;
+  id: number | undefined;
   timestamp: string;
   taskId: string | null;
   workerId: string | null;

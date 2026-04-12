@@ -8,7 +8,7 @@ type DbRow = Database["public"]["Tables"]["webhook_events"]["Row"];
 // ── Model ──────────────────────────────────────────────────────────────────────
 
 export class WebhookEvent {
-  readonly id: number;
+  readonly id: number | undefined;
   readonly deliveryId: string | null;
   readonly eventName: string;
   readonly action: string | null;
@@ -22,7 +22,7 @@ export class WebhookEvent {
   readonly payload: Record<string, unknown>;
   readonly receivedAt: string;
 
-  private constructor(row: DbRow) {
+  private constructor(row: Omit<DbRow, "id"> & { id?: number }) {
     this.id = row.id;
     this.deliveryId = row.delivery_id;
     this.eventName = row.event_name;
@@ -53,7 +53,6 @@ export class WebhookEvent {
     const sender = typeof (payload.sender as R | undefined)?.login === "string"
       ? (payload.sender as R).login as string : null;
     return new WebhookEvent({
-      id: 0,
       delivery_id: deliveryId,
       event_name: eventName,
       action,

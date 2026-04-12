@@ -25,7 +25,7 @@ export interface WorkerSnapshot {
 
 export interface LogEntry {
   kind: "webhook" | "message";
-  id: number;
+  id: number | undefined;
   timestamp: string;
   taskId: string | null;
   workerId: string | null;
