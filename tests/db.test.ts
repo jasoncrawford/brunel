@@ -229,28 +229,28 @@ describe("queryActivityLog", () => {
   });
 
   it("filters by taskId", async () => {
-    WebhookEvent.log({
+    await WebhookEvent.log({
       deliveryId: null, eventName: "issues", action: "labeled",
       repo: null, sender: null, issueNumber: 42,
       prNumber: null, branch: null, taskId: "42", workerId: "worker-1", payload: {},
     });
-    await new Promise((r) => setTimeout(r, 50));
 
     const entries = await queryActivityLog({ taskId: "42" });
     expect(entries[0].workerId).toBe("worker-1");
   });
 
   it("filters by workerId and includes both kinds", async () => {
-    WebhookEvent.log({
-      deliveryId: null, eventName: "issues", action: "labeled",
-      repo: null, sender: null, issueNumber: 42,
-      prNumber: null, branch: null, taskId: "42", workerId: "w1", payload: {},
-    });
-    ForemanMessage.log({
-      direction: "sent", workerId: "w1", taskId: "42",
-      msgType: "task_assigned", payload: {},
-    });
-    await new Promise((r) => setTimeout(r, 50));
+    await Promise.all([
+      WebhookEvent.log({
+        deliveryId: null, eventName: "issues", action: "labeled",
+        repo: null, sender: null, issueNumber: 42,
+        prNumber: null, branch: null, taskId: "42", workerId: "w1", payload: {},
+      }),
+      ForemanMessage.log({
+        direction: "sent", workerId: "w1", taskId: "42",
+        msgType: "task_assigned", payload: {},
+      }),
+    ]);
 
     const entries = await queryActivityLog({ workerId: "w1" });
     const kinds = entries.map((e) => e.kind);
@@ -259,17 +259,18 @@ describe("queryActivityLog", () => {
   });
 
   it("filters by workerId and excludes other workers", async () => {
-    WebhookEvent.log({
-      deliveryId: null, eventName: "push", action: null,
-      repo: null, sender: null, issueNumber: null,
-      prNumber: null, branch: null, taskId: null, workerId: "w1", payload: {},
-    });
-    WebhookEvent.log({
-      deliveryId: null, eventName: "push", action: null,
-      repo: null, sender: null, issueNumber: null,
-      prNumber: null, branch: null, taskId: null, workerId: "w2", payload: {},
-    });
-    await new Promise((r) => setTimeout(r, 50));
+    await Promise.all([
+      WebhookEvent.log({
+        deliveryId: null, eventName: "push", action: null,
+        repo: null, sender: null, issueNumber: null,
+        prNumber: null, branch: null, taskId: null, workerId: "w1", payload: {},
+      }),
+      WebhookEvent.log({
+        deliveryId: null, eventName: "push", action: null,
+        repo: null, sender: null, issueNumber: null,
+        prNumber: null, branch: null, taskId: null, workerId: "w2", payload: {},
+      }),
+    ]);
 
     const entries = await queryActivityLog({ workerId: "w1" });
     expect(entries).toHaveLength(1);
@@ -278,12 +279,11 @@ describe("queryActivityLog", () => {
   });
 
   it("returns entries with workerId from webhook rows in queryLog", async () => {
-    WebhookEvent.log({
+    await WebhookEvent.log({
       deliveryId: null, eventName: "push", action: null,
       repo: null, sender: null, issueNumber: null,
       prNumber: null, branch: null, taskId: null, workerId: "worker-2", payload: {},
     });
-    await new Promise((r) => setTimeout(r, 50));
 
     const entries = await queryActivityLog();
     expect(entries).toEqual(expect.arrayContaining([

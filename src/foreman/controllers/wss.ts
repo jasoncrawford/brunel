@@ -72,7 +72,7 @@ export function createForemanWss(
     const taskId = logTaskId ?? (("taskId" in msg ? msg.taskId : null) ?? null);
     Worker.get(workerId)?.send(msg);
     const msgPayload = msg as unknown as Record<string, unknown>;
-    ForemanMessage.log({ direction: "sent", workerId, taskId, msgType: msg.type, payload: msgPayload });
+    void ForemanMessage.log({ direction: "sent", workerId, taskId, msgType: msg.type, payload: msgPayload });
     broadcastMessageEvent({ direction: "sent", workerId, taskId, msgType: msg.type, payload: msgPayload });
   }
 
@@ -167,7 +167,7 @@ export function createForemanWss(
     const action = typeof p.action === "string" ? p.action : null;
     const webhookIssueNumber = typeof (p.issue as R | undefined)?.number === "number" ? (p.issue as R).number as number : null;
     const webhookPrNumber = typeof (p.pull_request as R | undefined)?.number === "number" ? (p.pull_request as R).number as number : null;
-    WebhookEvent.log({
+    void WebhookEvent.log({
       deliveryId: id,
       eventName: name,
       action,
@@ -317,7 +317,7 @@ export function createForemanWss(
         const rcvWorkerId = workerId || ((msg as { workerId?: string }).workerId ?? null);
         const rcvTaskId = (msg as { taskId?: string }).taskId ?? null;
         const rcvPayload = msg as unknown as Record<string, unknown>;
-        ForemanMessage.log({
+        void ForemanMessage.log({
           direction: "received",
           workerId: rcvWorkerId,
           taskId: rcvTaskId,
@@ -343,7 +343,7 @@ export function createForemanWss(
         log(workerId, `disconnected (code ${code}${reasonStr})`);
         const taskId = currentWorker?.currentTaskId ?? null;
         const disconnPayload = { code, reason: reason?.toString() ?? null };
-        ForemanMessage.log({
+        void ForemanMessage.log({
           direction: "received",
           workerId,
           taskId,
