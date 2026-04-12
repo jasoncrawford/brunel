@@ -11,13 +11,13 @@ export type QueryStreamEvent = {
 
 /**
  * Accumulates per-query token/turn statistics from stream events.
- * Emits "change" whenever a stat-bearing event is processed, so subscribers
- * can react without polling.
+ * Picks its own working verb at construction and emits "change" whenever a
+ * stat-bearing event is processed, so subscribers can react without polling.
  *
  * Usage:
  *   const stats = new QueryStats();
  *   stats.update(ev); // call for each message_start/message_delta/message_stop
- *   stats.getStatusText("Working"); // formatted status bar text
+ *   stats.getStatusText(); // formatted status bar text
  */
 export class QueryStats extends EventEmitter {
   private _turns = 0;
@@ -25,10 +25,12 @@ export class QueryStats extends EventEmitter {
   private _completedOutputTokens = 0;
   private _currentOutputTokens = 0;
   private readonly _startTime: number;
+  private readonly _workingVerb: string;
 
   constructor(startTime = Date.now()) {
     super();
     this._startTime = startTime;
+    this._workingVerb = display.pickWorkingVerb();
   }
 
   get turns(): number { return this._turns; }
@@ -56,9 +58,9 @@ export class QueryStats extends EventEmitter {
   }
 
   /** Formatted status bar text for use with display.startStatus(). Styling is the caller's responsibility. */
-  getStatusText(workingVerb: string): string {
+  getStatusText(): string {
     const secs = this.elapsedSecs;
     const outTokens = this.outputTokens;
-    return `${workingVerb}… ${display.fmtStats(secs, this._turns || undefined, outTokens || undefined, this._inputTokens || undefined)}`;
+    return `${this._workingVerb}… ${display.fmtStats(secs, this._turns || undefined, outTokens || undefined, this._inputTokens || undefined)}`;
   }
 }

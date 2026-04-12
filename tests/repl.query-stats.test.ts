@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { QueryStats } from "../src/agent/query-stats.js";
+import * as display from "../src/agent/display.js";
 import { stripAnsi } from "./helpers.js";
 
 afterEach(() => {
@@ -184,10 +185,11 @@ describe("QueryStats - elapsedSecs", () => {
 });
 
 describe("QueryStats - getStatusText", () => {
-  it("returns a string containing the working verb", () => {
+  it("uses a verb from pickWorkingVerb", () => {
+    const verb = "Welding";
+    vi.spyOn(display, "pickWorkingVerb").mockReturnValueOnce(verb);
     const stats = new QueryStats();
-    const text = stripAnsi(stats.getStatusText("Thinking"));
-    expect(text).toContain("Thinking");
+    expect(stripAnsi(stats.getStatusText())).toContain(verb);
   });
 
   it("includes elapsed time", () => {
@@ -195,27 +197,23 @@ describe("QueryStats - getStatusText", () => {
     const start = Date.now();
     const stats = new QueryStats(start);
     vi.advanceTimersByTime(5000);
-    const text = stripAnsi(stats.getStatusText("Working"));
-    expect(text).toContain("5s");
+    expect(stripAnsi(stats.getStatusText())).toContain("5s");
   });
 
   it("includes turn count after message_start", () => {
     const stats = new QueryStats();
     stats.update({ type: "message_start", message: { usage: { input_tokens: 10 } } });
-    const text = stripAnsi(stats.getStatusText("Working"));
-    expect(text).toContain("1 turn");
+    expect(stripAnsi(stats.getStatusText())).toContain("1 turn");
   });
 
   it("includes output token count after message_delta", () => {
     const stats = new QueryStats();
     stats.update({ type: "message_delta", usage: { output_tokens: 500 } });
-    const text = stripAnsi(stats.getStatusText("Working"));
-    expect(text).toContain("500");
+    expect(stripAnsi(stats.getStatusText())).toContain("500");
   });
 
   it("omits turn count before first message_start (turns=0)", () => {
     const stats = new QueryStats();
-    const text = stripAnsi(stats.getStatusText("Working"));
-    expect(text).not.toContain("turn");
+    expect(stripAnsi(stats.getStatusText())).not.toContain("turn");
   });
 });

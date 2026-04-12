@@ -117,8 +117,7 @@ export async function runQuery(
   // message_delta.usage.output_tokens is cumulative per message, so we sum
   // completed messages and track the current one separately.
   const stats = new QueryStats();
-  const workingVerb = display.pickWorkingVerb();
-  const getStatusText = () => display.c.darkGray(stats.getStatusText(workingVerb));
+  const getStatusText = () => display.c.darkGray(stats.getStatusText());
   display.startStatus(getStatusText);
 
   const canUseTool: CanUseTool = async (toolName, input) => {
