@@ -19,6 +19,7 @@ import type { ModelInfo, FetchModelsFn } from "./model.js";
 import { handleEffortCommand } from "./effort.js";
 import type { EffortValue } from "./effort.js";
 import { CommandRegistry } from "./command-registry.js";
+import { QueryStats } from "./query-stats.js";
 export { parseSlashCommand, dispatchInput, matchCommands, ask } from "./input.js";
 export type { SlashCommandResult, DispatchResult } from "./input.js";
 export { handleModelCommand, getCachedModels, _resetCachedModels } from "./model.js";
@@ -112,17 +113,8 @@ export async function runQuery(
     process.stdout.write("\r\n\x1b[J");
   }
 
-  const startTime = Date.now();
-  // Accumulate stats from stream_event messages to show in the status line.
-  // message_delta.usage.output_tokens is cumulative per message, so we sum
-  // completed messages and track the current one separately.
-  const stats = { turns: 0, inputTokens: 0, completedOutputTokens: 0, currentOutputTokens: 0 };
-  const workingVerb = display.pickWorkingVerb();
-  const getStatusText = () => {
-    const secs = Math.floor((Date.now() - startTime) / 1000);
-    const outTokens = stats.completedOutputTokens + stats.currentOutputTokens;
-    return display.c.darkGray(`${workingVerb}… ${display.fmtStats(secs, stats.turns || undefined, outTokens || undefined, stats.inputTokens || undefined)}`);
-  };
+  const stats = new QueryStats();
+  const getStatusText = () => display.c.darkGray(stats.getStatusText());
   display.startStatus(getStatusText);
 
   const canUseTool: CanUseTool = async (toolName, input) => {
@@ -188,12 +180,7 @@ export async function runQuery(
       // Extract turn count and token totals from streaming events.
       if (message.type === "stream_event") {
         if (message.parent_tool_use_id == null) {
-          // BetaRawMessageStreamEvent is a discriminated union; use a structural type for field access
-          type StreamEvent = { type: string; message?: { usage?: { input_tokens?: number } }; usage?: { output_tokens?: number } };
-          const ev = message.event as StreamEvent;
-          if (ev.type === "message_start")       { stats.turns++; stats.inputTokens += ev.message?.usage?.input_tokens ?? 0; }
-          if (ev.type === "message_delta")       stats.currentOutputTokens = ev.usage?.output_tokens ?? stats.currentOutputTokens;
-          if (ev.type === "message_stop")        { stats.completedOutputTokens += stats.currentOutputTokens; stats.currentOutputTokens = 0; }
+          stats.update(message.event as Parameters<typeof stats.update>[0]);
         }
         continue; // stream events are display-only; don't pass to printMessage
       }
