@@ -6,8 +6,8 @@
  * server.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { handleBusyHello, handleIdleHello } from "../src/foreman/controllers/hello-handlers.js";
-import type { BusyHelloDeps, IdleHelloDeps } from "../src/foreman/controllers/hello-handlers.js";
+import { handleBusyHello, handleIdleHello } from "../src/foreman/controllers/wss.js";
+import type { BusyHelloDeps, IdleHelloDeps } from "../src/foreman/controllers/wss.js";
 import { Worker } from "../src/foreman/models/worker-registry.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { setupInMemoryTasks } from "./helpers/task.js";
