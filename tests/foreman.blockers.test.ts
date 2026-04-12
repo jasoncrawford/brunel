@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Worker } from "../src/foreman/models/worker.js";
-import { createForemanWss } from "../src/foreman/controllers/wss.js";
+import { ForemanWss } from "../src/foreman/controllers/wss.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
 import { setupInMemoryTasks } from "./helpers/task.js";
@@ -33,7 +33,7 @@ describe("foreman — blocker transitions via routeEvent", () => {
     taskManager.markBlockersLoaded(10);
     taskManager.setIssueOpenState(5, true); // blocker is open
 
-    const { wss } = createForemanWss(taskManager, server, { ...defaultCfg, taskLabel: "brunel:ready", workerReclaimTimeoutMs: 300_000 });
+    const { wss } = new ForemanWss({ taskManager, server, config: { ...defaultCfg, taskLabel: "brunel:ready", workerReclaimTimeoutMs: 300_000 } });
     wss.close();
 
     const snapshots = await taskManager.getTaskSnapshots();
@@ -49,7 +49,7 @@ describe("foreman — blocker transitions via routeEvent", () => {
     taskManager.markBlockersLoaded(10);
     taskManager.setIssueOpenState(5, true);
 
-    const { wss, routeEvent } = createForemanWss(taskManager, server, { ...defaultCfg, taskLabel: "brunel:ready" });
+    const { wss, routeEvent } = new ForemanWss({ taskManager, server, config: { ...defaultCfg, taskLabel: "brunel:ready" } });
     wss.close();
 
     // Initially blocked
@@ -78,7 +78,7 @@ describe("foreman — blocker transitions via routeEvent", () => {
     taskManager.setIssueOpenState(5, true);
     taskManager.setIssueOpenState(6, true);
 
-    const { wss, routeEvent } = createForemanWss(taskManager, server, { ...defaultCfg, taskLabel: "brunel:ready" });
+    const { wss, routeEvent } = new ForemanWss({ taskManager, server, config: { ...defaultCfg, taskLabel: "brunel:ready" } });
     wss.close();
 
     // Initially blocked

@@ -19,7 +19,7 @@ import { WebSocket, WebSocketServer } from "ws";
 import type { AddressInfo } from "net";
 import * as Wire from "../src/wire.js";
 import { Worker } from "../src/foreman/models/worker.js";
-import { createForemanWss } from "../src/foreman/controllers/wss.js";
+import { ForemanWss } from "../src/foreman/controllers/wss.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
 import { initDb } from "../src/foreman/db-client.js";
@@ -216,11 +216,11 @@ function buildForeman(): {
   const httpServer = http.createServer();
   const openClients: WebSocket[] = [];
 
-  const { wss, routeEvent } = createForemanWss(taskModel, httpServer, {
+  const { wss, routeEvent } = new ForemanWss({ taskManager: taskModel, server: httpServer, config: {
     ...defaultCfg,
     githubRepo: "owner/repo",
     githubToken: "token",
-  });
+  } });
 
   // port is assigned synchronously when listen() resolves; we'll resolve it
   // asynchronously below, but return the object immediately so the caller can

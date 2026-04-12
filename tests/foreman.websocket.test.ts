@@ -4,7 +4,7 @@ import http from "http";
 import { WebSocket, WebSocketServer } from "ws";
 import type { AddressInfo } from "net";
 import { Worker } from "../src/foreman/models/worker.js";
-import { createForemanWss } from "../src/foreman/controllers/wss.js";
+import { ForemanWss } from "../src/foreman/controllers/wss.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
 import { setupInMemoryTasks } from "./helpers/task.js";
@@ -91,7 +91,7 @@ beforeEach(() => {
   taskManager = new TaskManager();
   setupInMemoryTasks(taskManager);
   httpServer = http.createServer();
-  ({ wss, routeEvent, reconcile, shutdown } = createForemanWss(taskManager, httpServer, defaultCfg));
+  ({ wss, routeEvent, reconcile, shutdown } = new ForemanWss({ taskManager, server: httpServer, config: defaultCfg }));
 
   return new Promise<void>((resolve) => {
     httpServer.listen(0, () => {
@@ -611,10 +611,7 @@ describe("worker secret enforcement", () => {
     const server = http.createServer();
     const tm = new TaskManager();
     setupInMemoryTasks(tm);
-    const { wss: secretWss } = createForemanWss(
-      tm, server,
-      { ...defaultCfg, workerSecret: secret },
-    );
+    const { wss: secretWss } = new ForemanWss({ taskManager: tm, server, config: { ...defaultCfg, workerSecret: secret } });
     const p = await new Promise<number>((r) => server.listen(0, () => r((server.address() as AddressInfo).port)));
     return { server, secretWss, port: p };
   }
@@ -656,7 +653,7 @@ describe("worker WebSocket connection", () => {
     const server = http.createServer();
     const tm = new TaskManager();
     setupInMemoryTasks(tm);
-    const { wss } = createForemanWss(tm, server, defaultCfg);
+    const { wss } = new ForemanWss({ taskManager: tm, server, config: defaultCfg });
     const testPort = await new Promise<number>((resolve) => {
       server.listen(0, () => resolve((server.address() as AddressInfo).port));
     });
@@ -682,7 +679,7 @@ describe("worker WebSocket connection", () => {
     const server = http.createServer();
     const tm = new TaskManager();
     setupInMemoryTasks(tm);
-    const { wss } = createForemanWss(tm, server, defaultCfg);
+    const { wss } = new ForemanWss({ taskManager: tm, server, config: defaultCfg });
     const testPort = await new Promise<number>((resolve) => {
       server.listen(0, () => resolve((server.address() as AddressInfo).port));
     });
@@ -706,7 +703,7 @@ describe("worker disconnect DB logging", () => {
     const server = http.createServer();
     const localTm = new TaskManager();
     setupInMemoryTasks(localTm);
-    const { wss: testWss } = createForemanWss(localTm, server, defaultCfg);
+    const { wss: testWss } = new ForemanWss({ taskManager: localTm, server, config: defaultCfg });
     const testPort = await new Promise<number>((r) => server.listen(0, () => r((server.address() as AddressInfo).port)));
 
     const ws = new WebSocket(`ws://localhost:${testPort}/worker`);
@@ -744,7 +741,7 @@ describe("worker disconnect DB logging", () => {
     localTm.markBlockersLoaded(42);
 
     const server = http.createServer();
-    const { wss: testWss } = createForemanWss(localTm, server, defaultCfg);
+    const { wss: testWss } = new ForemanWss({ taskManager: localTm, server, config: defaultCfg });
     const testPort = await new Promise<number>((r) => server.listen(0, () => r((server.address() as AddressInfo).port)));
 
     const ws = new WebSocket(`ws://localhost:${testPort}/worker`);
@@ -1017,7 +1014,7 @@ describe("keepalive ping", () => {
     const tm = new TaskManager();
     setupInMemoryTasks(tm);
     const srv = http.createServer();
-    const { wss: testWss } = createForemanWss(tm, srv, { ...defaultCfg, pingIntervalMs: 50 });
+    const { wss: testWss } = new ForemanWss({ taskManager: tm, server: srv, config: { ...defaultCfg, pingIntervalMs: 50 } });
     await new Promise<void>((resolve) => srv.listen(0, resolve));
     const testPort = (srv.address() as AddressInfo).port;
 
@@ -1090,7 +1087,7 @@ describe("graceful shutdown", () => {
     const srv = http.createServer();
     const localTm = new TaskManager();
     setupInMemoryTasks(localTm);
-    const { wss: testWss, shutdown: localShutdown } = createForemanWss(localTm, srv, defaultCfg);
+    const { wss: testWss, shutdown: localShutdown } = new ForemanWss({ taskManager: localTm, server: srv, config: defaultCfg });
     const testPort = await new Promise<number>((r) => srv.listen(0, () => r((srv.address() as AddressInfo).port)));
 
     const ws = new WebSocket(`ws://localhost:${testPort}/worker`);

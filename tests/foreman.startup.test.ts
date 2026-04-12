@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Worker } from "../src/foreman/models/worker.js";
-import { createForemanWss } from "../src/foreman/controllers/wss.js";
+import { ForemanWss } from "../src/foreman/controllers/wss.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
 import { setupInMemoryTasks } from "./helpers/task.js";
@@ -121,7 +121,7 @@ describe("tryAssignWork — assign persistence", () => {
   it("task.assign is called and task status becomes assigned before task_assigned is sent", async () => {
     await registerReady(taskManager, "42", 42, "owner/repo", "Test task", "body", []);
 
-    ({ wss } = createForemanWss(taskManager, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
+    ({ wss } = new ForemanWss({ taskManager, server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } }));
 
     port = await startServer();
     const ws = await connect({ type: "worker_hello", workerId: "w1", status: "idle" });
@@ -142,7 +142,7 @@ describe("tryAssignWork — assign persistence", () => {
     const task = await Task.get("42");
     vi.spyOn(task!, "assign").mockRejectedValue(new Error("db down"));
 
-    ({ wss } = createForemanWss(taskManager, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
+    ({ wss } = new ForemanWss({ taskManager, server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } }));
 
     port = await startServer();
     const ws = await connect({ type: "worker_hello", workerId: "w1", status: "idle" });
@@ -153,7 +153,7 @@ describe("tryAssignWork — assign persistence", () => {
 
   it("works transparently with in-memory task store", async () => {
     await registerReady(taskManager, "42", 42, "owner/repo", "Test task", "body", []);
-    ({ wss } = createForemanWss(taskManager, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
+    ({ wss } = new ForemanWss({ taskManager, server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } }));
 
     port = await startServer();
     const ws = await connect({ type: "worker_hello", workerId: "w1", status: "idle" });
@@ -174,7 +174,7 @@ describe("startup reconnect behaviour", () => {
     const t = await Task.get("42");
     await t!.assign("w1"); // simulate what main block does after startup restore
 
-    ({ wss } = createForemanWss(taskManager, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
+    ({ wss } = new ForemanWss({ taskManager, server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } }));
 
     port = await startServer();
     const ws = await connect({ type: "worker_hello", workerId: "w1", status: "idle" });
@@ -191,7 +191,7 @@ describe("startup reconnect behaviour", () => {
     const t = await Task.get("42");
     await t!.assign("original-worker"); // simulate startup loading
 
-    ({ wss } = createForemanWss(taskManager, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
+    ({ wss } = new ForemanWss({ taskManager, server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } }));
 
     port = await startServer();
     const ws = await connect({ type: "worker_hello", workerId: "new-worker", status: "idle" });
@@ -207,7 +207,7 @@ describe("startup reconnect behaviour", () => {
     const t = await Task.get("42");
     await t!.assign("w1");
 
-    ({ wss } = createForemanWss(taskManager, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
+    ({ wss } = new ForemanWss({ taskManager, server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } }));
 
     port = await startServer();
     await connect({ type: "worker_hello", workerId: "w1", status: "busy", taskId: "42" });
@@ -227,7 +227,7 @@ describe("PR tracking persistence", () => {
     await t!.assign("w1");
     const spyRegisterPr = vi.spyOn(t!, "registerPr");
 
-    const result = createForemanWss(taskManager, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" });
+    const result = new ForemanWss({ taskManager, server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } });
     ({ wss } = result);
 
     await result.routeEvent("evt-1", "pull_request", {
@@ -248,7 +248,7 @@ describe("PR tracking persistence", () => {
     await t!.assign("w1");
     const spyRegisterPr = vi.spyOn(t!, "registerPr");
 
-    const result = createForemanWss(taskManager, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" });
+    const result = new ForemanWss({ taskManager, server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } });
     ({ wss } = result);
 
     await result.routeEvent("evt-1", "pull_request", {
@@ -294,7 +294,7 @@ async function restoreTasksFromDb(rows: Array<{
 
 describe("startup — restore tasks from tasks table (DB is source of truth)", () => {
   it("assigned task from store is visible in the snapshot", async () => {
-    ({ wss } = createForemanWss(taskManager, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
+    ({ wss } = new ForemanWss({ taskManager, server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } }));
 
     port = await startServer();
 
@@ -312,7 +312,7 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
   });
 
   it("pending task from store can be assigned by nextPending", async () => {
-    ({ wss } = createForemanWss(taskManager, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
+    ({ wss } = new ForemanWss({ taskManager, server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } }));
 
     port = await startServer();
 
@@ -329,7 +329,7 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
   });
 
   it("PR number and branch are restored from store", async () => {
-    ({ wss } = createForemanWss(taskManager, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
+    ({ wss } = new ForemanWss({ taskManager, server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } }));
 
     port = await startServer();
 
@@ -345,7 +345,7 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
   });
 
   it("complete tasks from store are skipped", async () => {
-    ({ wss } = createForemanWss(taskManager, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
+    ({ wss } = new ForemanWss({ taskManager, server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } }));
 
     port = await startServer();
 
@@ -365,7 +365,7 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
     // 2. GitHub data is loaded into labeledIssues (via loadIssuesToQueue)
     // 3. reconcile() is called to sync labeledIssues → taskQueue
     // 4. Worker connects and must receive the real body/labels in task_assigned
-    const { wss: fwss, reconcile } = createForemanWss(taskManager, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" });
+    const { wss: fwss, reconcile } = new ForemanWss({ taskManager, server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } });
     wss = fwss;
 
     port = await startServer();
@@ -399,7 +399,7 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
     // 1. Task is restored from DB with worker_id set (loadActiveTasksFromDb)
     // 2. GitHub sync calls Task.upsert() again for the same task (loadIssuesFromGithub)
     // 3. reconcile() runs — MUST NOT assign the task to a different idle worker
-    const { wss: fwss, reconcile } = createForemanWss(taskManager, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" });
+    const { wss: fwss, reconcile } = new ForemanWss({ taskManager, server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } });
     wss = fwss;
 
     port = await startServer();
@@ -477,7 +477,7 @@ describe("startup reconnect — worker reconnects to complete task", () => {
     await t!.assign("w1");
     await t!.complete(); // issue closed while worker was active
 
-    ({ wss } = createForemanWss(taskManager, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
+    ({ wss } = new ForemanWss({ taskManager, server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } }));
 
     port = await startServer();
     await connect({ type: "worker_hello", workerId: "w1", status: "busy", taskId: "42" });
@@ -495,7 +495,7 @@ describe("startup reconnect — worker reconnects to complete task", () => {
     await t!.assign("w1");
     await t!.complete();
 
-    ({ wss } = createForemanWss(taskManager, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
+    ({ wss } = new ForemanWss({ taskManager, server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } }));
 
     port = await startServer();
     const ws = await connect({ type: "worker_hello", workerId: "w1", status: "busy", taskId: "42" });
@@ -521,7 +521,7 @@ describe("task_complete marks task complete", () => {
     const t = await Task.get("42");
     await t!.assign("w1");
 
-    ({ wss } = createForemanWss(taskManager, httpServer, { ...defaultCfg, taskLabel: "brunel:ready" }));
+    ({ wss } = new ForemanWss({ taskManager, server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } }));
 
     port = await startServer();
     const ws = await connect({ type: "worker_hello", workerId: "w1", status: "busy", taskId: "42" });
