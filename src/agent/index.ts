@@ -113,9 +113,6 @@ export async function runQuery(
     process.stdout.write("\r\n\x1b[J");
   }
 
-  // Accumulate stats from stream_event messages to show in the status line.
-  // message_delta.usage.output_tokens is cumulative per message, so we sum
-  // completed messages and track the current one separately.
   const stats = new QueryStats();
   const getStatusText = () => display.c.darkGray(stats.getStatusText());
   display.startStatus(getStatusText);
