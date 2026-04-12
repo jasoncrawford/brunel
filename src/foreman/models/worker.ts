@@ -86,7 +86,7 @@ export class Worker {
     return false;
   }
 
-  toSnapshot(): Wire.Worker {
+  toWire(): Wire.Worker {
     return {
       workerId: this.workerId,
       status: this.status,

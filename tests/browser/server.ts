@@ -141,8 +141,8 @@ async function handleTestRoute(
 // ── Admin WebSocket ───────────────────────────────────────────────────────────
 
 const adminWss = createAdminWss(server, async () => ({
-  tasks: await taskModel.getTaskSnapshots(),
-  workers: Worker.all().map((w) => w.toSnapshot()),
+  tasks: await taskModel.getTasksForBroadcast(),
+  workers: Worker.all().map((w) => w.toWire()),
 }));
 
 // ── Foreman WebSocket ─────────────────────────────────────────────────────────

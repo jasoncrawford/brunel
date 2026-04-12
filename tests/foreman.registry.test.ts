@@ -74,10 +74,10 @@ describe("Worker", () => {
     expect(result).toBe(true);
   });
 
-  it("toSnapshot returns WorkerSnapshot", () => {
+  it("toWire returns WorkerSnapshot", () => {
     const w = Worker.register("w1", fakeWs());
     w.assign("42");
-    expect(w.toSnapshot()).toEqual({ workerId: "w1", status: "busy", currentTaskId: "42" });
+    expect(w.toWire()).toEqual({ workerId: "w1", status: "busy", currentTaskId: "42" });
   });
 
   describe("markDisconnected", () => {
@@ -117,7 +117,7 @@ describe("Worker", () => {
       const w = Worker.register("w1", fakeWs());
       w.assign("42");
       w.markDisconnected();
-      const snapshots = Worker.all().map(x => x.toSnapshot());
+      const snapshots = Worker.all().map(x => x.toWire());
       expect(snapshots).toHaveLength(1);
       expect(snapshots[0].status).toBe("disconnected");
       expect(snapshots[0].currentTaskId).toBe("42");

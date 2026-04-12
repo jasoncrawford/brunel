@@ -106,41 +106,41 @@ describe("TaskManager — queue operations", () => {
     expect(await m.getTaskForBranch("unknown-branch")).toBeNull();
   });
 
-  it("getTaskSnapshots includes prUrl when PR is registered", async () => {
+  it("getTasksForBroadcast includes prUrl when PR is registered", async () => {
     await Task.upsert("42", 42, repoSlug, "Fix the bug", "It is broken", ["brunel:ready"]);
     const t = await Task.get("42");
     await t!.registerPr(10, null);
-    const snapshots = await m.getTaskSnapshots();
+    const snapshots = await m.getTasksForBroadcast();
     expect(snapshots[0].prUrl).toBe("https://github.com/test/repo/pull/10");
   });
 
-  it("getTaskSnapshots omits prUrl when no PR registered", async () => {
+  it("getTasksForBroadcast omits prUrl when no PR registered", async () => {
     await registerBase();
-    const snapshots = await m.getTaskSnapshots();
+    const snapshots = await m.getTasksForBroadcast();
     expect(snapshots[0].prUrl).toBeUndefined();
   });
 
-  it("getTaskSnapshots includes empty blockers array when no blockers set", async () => {
+  it("getTasksForBroadcast includes empty blockers array when no blockers set", async () => {
     await registerBase();
-    const snapshots = await m.getTaskSnapshots();
+    const snapshots = await m.getTasksForBroadcast();
     expect(snapshots[0].blockers).toEqual([]);
   });
 
-  it("getTaskSnapshots includes blockers with isOpen status", async () => {
+  it("getTasksForBroadcast includes blockers with isOpen status", async () => {
     await registerBase(); // issueNumber: 42
     m.setBlockers(42, [10, 11]);
     m.setIssueOpenState(10, true);  // 10 is open
     m.setIssueOpenState(11, false); // 11 is closed
-    const snapshots = await m.getTaskSnapshots();
+    const snapshots = await m.getTasksForBroadcast();
     expect(snapshots[0].blockers).toEqual([
       { issueNumber: 10, isOpen: true },
       { issueNumber: 11, isOpen: false },
     ]);
   });
 
-  it("getTaskSnapshots shows empty blockers array when no deps set", async () => {
+  it("getTasksForBroadcast shows empty blockers array when no deps set", async () => {
     await registerBase(); // issueNumber: 42, no blockers set
-    const snapshots = await m.getTaskSnapshots();
+    const snapshots = await m.getTasksForBroadcast();
     expect(snapshots[0].blockers).toEqual([]);
   });
 });
@@ -176,21 +176,21 @@ describe("TaskManager — derived blocked status", () => {
     expect(result.map((t) => t.taskId)).not.toContain("3");
   });
 
-  it("getTaskSnapshots derives blocked status when blocker is open", async () => {
+  it("getTasksForBroadcast derives blocked status when blocker is open", async () => {
     await registerBase(); // issueNumber: 42
     m.trackIssue(42);
     m.setBlockers(42, [100]);
     m.markBlockersLoaded(42);
     m.setIssueOpenState(100, true); // blocker is open (not closed)
 
-    const snapshots = await m.getTaskSnapshots();
+    const snapshots = await m.getTasksForBroadcast();
     expect(snapshots[0].status).toBe("blocked");
   });
 
-  it("getTaskSnapshots derives pending status when no blockers", async () => {
+  it("getTasksForBroadcast derives pending status when no blockers", async () => {
     await registerBase(); // issueNumber: 42, no blockers
 
-    const snapshots = await m.getTaskSnapshots();
+    const snapshots = await m.getTasksForBroadcast();
     expect(snapshots[0].status).toBe("pending");
   });
 });
