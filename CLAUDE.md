@@ -12,7 +12,7 @@ MVC structure. Models own state; controllers handle external inputs.
 
 - **Models** (`models/`) — `Task` is the active-record for tasks. `WebhookEvent` is the active-record for incoming GitHub webhook events (`webhook_events` table); `WebhookEvent.fromIncoming()` builds an in-memory instance and `toWorkerPayload()` maps `eventName` → `name` for the wire protocol. `ForemanMessage` is the active-record for foreman↔worker messages (`foreman_messages` table); `ForemanMessage.buildSummary()` is the single source of truth for log entry summaries. `queryActivityLog()` (in `activity-log.ts`) merges both tables by timestamp. `TaskManager` owns ephemeral in-memory state only (event queues, branch mappings, blocker state). `Worker` is the active-record for connected workers (module-level registry, static finders, `Worker._reset()` for test isolation).
 - **Controllers** (`controllers/`) — `http-server.ts` handles webhooks + REST + SPA. `wss.ts` handles the WebSocket lifecycle with workers. `event-router.ts` routes GitHub events to the right worker or queue.
-- **Infrastructure** — `db-client.ts` wires the shared Supabase client. `admin-ws.ts` broadcasts to the admin dashboard. `github.ts` wraps GitHub API calls.
+- **Infrastructure** — `db-client.ts` wires the shared Supabase client and exports `DbRow<T>`, a helper type that makes `id` optional for in-memory (unsaved) model instances. `admin-ws.ts` broadcasts to the admin dashboard. `github.ts` wraps GitHub API calls.
 
 ### Agent/Worker (`src/agent/`)
 
