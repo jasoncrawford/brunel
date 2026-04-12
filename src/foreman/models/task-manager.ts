@@ -160,7 +160,7 @@ export class TaskManager extends EventEmitter {
     const tasks = await Task.list();
     return tasks.filter((t) => !t.completedAt).map((t) => {
       this.hydrateBlockers(t);
-      return t.toSnapshot();
+      return t.toWire();
     });
   }
 

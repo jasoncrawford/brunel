@@ -2,7 +2,7 @@ import { render, screen, waitFor, act } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import TaskList from "../src/pages/TaskList.tsx";
-import type { AdminMessage, TaskRow } from "../src/types.ts";
+import type { AdminMessage, Task } from "../src/types.ts";
 
 let capturedHandler: ((msg: AdminMessage) => void) | null = null;
 
@@ -12,18 +12,17 @@ vi.mock("../src/hooks/useAdminWs.ts", () => ({
   },
 }));
 
-const assignedTask: TaskRow = {
+const assignedTask: Task = {
   taskId: "42",
   issueNumber: 42,
-  repo: "owner/repo",
   title: "Fix the bug",
   status: "assigned",
-  workerId: "worker-abc-123",
-  prNumber: null,
-  branch: null,
+  assignedWorkerId: "worker-abc-123",
+  repo: "owner/repo",
+  branch: undefined,
   createdAt: "2026-01-01T00:00:00.000Z",
   assignedAt: "2026-01-01T01:00:00.000Z",
-  completedAt: null,
+  completedAt: undefined,
 };
 
 function renderTaskList() {
