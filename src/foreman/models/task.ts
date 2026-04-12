@@ -184,7 +184,6 @@ export class Task {
   }
 
   static async list(opts?: { cancelable?: boolean; limit?: number }): Promise<Task[]> {
-    if (!db) return [];
     const limit = opts?.limit ?? 200;
     let q = Task.select();
     if (opts?.cancelable) {

@@ -71,7 +71,7 @@ export class WebhookEvent {
 
   // ── Persistence ─────────────────────────────────────────────────────────────
 
-  /** Insert into webhook_events. Returns a promise (usually ignored). No-op if DB is not initialized. */
+  /** Insert into webhook_events. Returns a promise (usually ignored). */
   static log(data: {
     deliveryId: string | null;
     eventName: string;
@@ -85,26 +85,21 @@ export class WebhookEvent {
     workerId: string | null;
     payload: Record<string, unknown>;
   }): Promise<void> {
-    try {
-      if (!db) return Promise.resolve();
-      return Promise.resolve(db.from("webhook_events").insert({
-        delivery_id: data.deliveryId,
-        event_name: data.eventName,
-        action: data.action,
-        repo: data.repo,
-        sender: data.sender,
-        issue_number: data.issueNumber,
-        pr_number: data.prNumber,
-        branch: data.branch,
-        task_id: data.taskId,
-        worker_id: data.workerId,
-        payload: data.payload as Json,
-      })).then(({ error }) => {
-        if (error) console.error("[db] webhook_events insert error:", error);
-      }).catch((err: unknown) => console.error("[db] unexpected error:", err));
-    } catch {
-      return Promise.resolve();
-    }
+    return Promise.resolve(db.from("webhook_events").insert({
+      delivery_id: data.deliveryId,
+      event_name: data.eventName,
+      action: data.action,
+      repo: data.repo,
+      sender: data.sender,
+      issue_number: data.issueNumber,
+      pr_number: data.prNumber,
+      branch: data.branch,
+      task_id: data.taskId,
+      worker_id: data.workerId,
+      payload: data.payload as Json,
+    })).then(({ error }) => {
+      if (error) console.error("[db] webhook_events insert error:", error);
+    }).catch((err: unknown) => console.error("[db] unexpected error:", err));
   }
 
   // ── Queries ──────────────────────────────────────────────────────────────────

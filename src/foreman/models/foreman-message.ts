@@ -26,7 +26,7 @@ export class ForemanMessage {
 
   // ── Persistence ─────────────────────────────────────────────────────────────
 
-  /** Insert into foreman_messages. Returns a promise (usually ignored). No-op if DB is not initialized. */
+  /** Insert into foreman_messages. Returns a promise (usually ignored). */
   static log(data: {
     direction: "sent" | "received";
     workerId: string | null;
@@ -34,20 +34,15 @@ export class ForemanMessage {
     msgType: string;
     payload: Record<string, unknown>;
   }): Promise<void> {
-    try {
-      if (!db) return Promise.resolve();
-      return Promise.resolve(db.from("foreman_messages").insert({
-        direction: data.direction,
-        worker_id: data.workerId,
-        task_id: data.taskId,
-        msg_type: data.msgType,
-        payload: data.payload as Json,
-      })).then(({ error }) => {
-        if (error) console.error("[db] foreman_messages insert error:", error);
-      }).catch((err: unknown) => console.error("[db] unexpected error:", err));
-    } catch {
-      return Promise.resolve();
-    }
+    return Promise.resolve(db.from("foreman_messages").insert({
+      direction: data.direction,
+      worker_id: data.workerId,
+      task_id: data.taskId,
+      msg_type: data.msgType,
+      payload: data.payload as Json,
+    })).then(({ error }) => {
+      if (error) console.error("[db] foreman_messages insert error:", error);
+    }).catch((err: unknown) => console.error("[db] unexpected error:", err));
   }
 
   // ── Queries ──────────────────────────────────────────────────────────────────
