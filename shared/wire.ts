@@ -20,6 +20,12 @@ export interface Task {
   prNumber?: number;
   prUrl?: string;
   blockers?: BlockerInfo[];
+  // Extended fields — present in REST responses, optional in WebSocket snapshots
+  repo?: string;
+  branch?: string;
+  createdAt?: string;
+  assignedAt?: string;
+  completedAt?: string;
 }
 
 /** Wire representation of a connected worker — sent over the admin WebSocket. */

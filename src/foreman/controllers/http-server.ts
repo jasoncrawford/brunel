@@ -103,10 +103,10 @@ export function createHttpServer({ webhooks, routeEvent, taskManager }: HttpServ
     try {
       const statusFilter = c.req.query("status") as TaskStatus | undefined;
       const tasks = taskManager ? await Task.list() : [];
-      if (statusFilter) {
-        return c.json(tasks.filter((t) => t.status === statusFilter));
-      }
-      return c.json(tasks.filter((t) => t.status !== "complete"));
+      const filtered = statusFilter
+        ? tasks.filter((t) => t.status === statusFilter)
+        : tasks.filter((t) => t.status !== "complete");
+      return c.json(filtered.map((t) => t.toWire()));
     } catch (err) {
       flog(`ERROR API query failed: ${fmtError(err)}`);
       return c.json({ error: "internal error" }, 500);

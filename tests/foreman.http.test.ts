@@ -206,9 +206,9 @@ describe("GET /api/tasks", () => {
         taskId: "1",
         repo: "test/repo",
         status: "pending",
-        workerId: null,
-        completedAt: null,
       });
+      expect(body[0].assignedWorkerId).toBeUndefined();
+      expect(body[0].completedAt).toBeUndefined();
     } finally {
       vi.restoreAllMocks();
       await stopServer(s);

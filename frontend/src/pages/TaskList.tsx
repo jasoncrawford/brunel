@@ -1,20 +1,20 @@
 import { useState, useEffect, useCallback } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useAdminWs } from "../hooks/useAdminWs.ts";
-import type { AdminMessage, TaskRow, TaskStatus } from "../types.ts";
+import type { AdminMessage, Task, TaskStatus } from "../types.ts";
 import { shortWorkerId } from "../../../shared/utils.ts";
 
 export default function TaskList() {
   const [searchParams, setSearchParams] = useSearchParams();
   const statusFilter = (searchParams.get("status") ?? "all") as "all" | TaskStatus;
-  const [tasks, setTasks] = useState<TaskRow[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const url = statusFilter === "all" ? "/api/tasks" : `/api/tasks?status=${statusFilter}`;
     setLoading(true);
     fetch(url)
-      .then((r) => r.json() as Promise<TaskRow[]>)
+      .then((r) => r.json() as Promise<Task[]>)
       .then((data) => { setTasks(data); setLoading(false); })
       .catch((err) => { console.error(err); setLoading(false); });
   }, [statusFilter]);
@@ -79,13 +79,13 @@ export default function TaskList() {
                 <td style={td}><Link to={`/tasks/${t.taskId}`}>#{t.issueNumber}</Link></td>
                 <td style={td}>{t.title}</td>
                 <td style={td}>{t.status}</td>
-                <td style={td}>{t.workerId
-                  ? <Link to={`/workers/${t.workerId}`}>{shortWorkerId(t.workerId)}</Link>
+                <td style={td}>{t.assignedWorkerId
+                  ? <Link to={`/workers/${t.assignedWorkerId}`}>{shortWorkerId(t.assignedWorkerId)}</Link>
                   : "—"}</td>
-                <td style={td}>{t.prNumber
-                  ? <a href={`https://github.com/${t.repo}/pull/${t.prNumber}`} target="_blank" rel="noreferrer">#{t.prNumber}</a>
+                <td style={td}>{t.prUrl
+                  ? <a href={t.prUrl} target="_blank" rel="noreferrer">#{t.prNumber}</a>
                   : "—"}</td>
-                <td style={td}>{new Date(t.createdAt).toLocaleString()}</td>
+                <td style={td}>{t.createdAt ? new Date(t.createdAt).toLocaleString() : "—"}</td>
                 <td style={td}>{t.completedAt ? new Date(t.completedAt).toLocaleString() : "—"}</td>
               </tr>
             ))}

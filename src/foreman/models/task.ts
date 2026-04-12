@@ -62,27 +62,7 @@ export class Task {
     return `https://github.com/${this.repo}`;
   }
 
-  toJSON() {
-    return {
-      taskId: this.taskId,
-      issueNumber: this.issueNumber,
-      repo: this.repo,
-      title: this.title,
-      body: this.body,
-      labels: this.labels,
-      status: this.status,
-      workerId: this.workerId,
-      prNumber: this.prNumber,
-      branch: this.branch,
-      createdAt: this.createdAt,
-      assignedAt: this.assignedAt,
-      completedAt: this.completedAt,
-      issueClosedAt: this.issueClosedAt,
-      prMergedAt: this.prMergedAt,
-    };
-  }
-
-  toSnapshot(): Wire.Task {
+  toWire(): Wire.Task {
     return {
       taskId: this.taskId,
       issueNumber: this.issueNumber,
@@ -92,6 +72,11 @@ export class Task {
       prNumber: this.prNumber ?? undefined,
       prUrl: this.prNumber != null ? `https://github.com/${this.repo}/pull/${this.prNumber}` : undefined,
       blockers: this.blockers,
+      repo: this.repo,
+      branch: this.branch ?? undefined,
+      createdAt: this.createdAt,
+      assignedAt: this.assignedAt ?? undefined,
+      completedAt: this.completedAt ?? undefined,
     };
   }
 
