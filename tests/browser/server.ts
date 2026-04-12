@@ -37,7 +37,7 @@ import http from "http";
 import type { AddressInfo } from "net";
 import { WebSocket } from "ws";
 import { Worker } from "../../src/foreman/models/worker.js";
-import { createForemanWss } from "../../src/foreman/controllers/wss.js";
+import { ForemanWss } from "../../src/foreman/controllers/wss.js";
 import { createHttpServer } from "../../src/foreman/controllers/http-server.js";
 import { TaskManager } from "../../src/foreman/models/task-manager.js";
 import { Task } from "../../src/foreman/models/task.js";
@@ -61,7 +61,7 @@ const mockWorkers = new Map<string, WebSocket>();
 
 // ── HTTP server ───────────────────────────────────────────────────────────────
 
-let foremanWss: ReturnType<typeof createForemanWss>;
+let foremanWss: ForemanWss;
 
 // Build the foreman HTTP server (handles /webhook, /health, /api/*, static dist/)
 const server = createHttpServer({
@@ -147,7 +147,7 @@ const adminWss = createAdminWss(server, async () => ({
 
 // ── Foreman WebSocket ─────────────────────────────────────────────────────────
 
-foremanWss = createForemanWss(taskModel, server, cfg, { adminWss });
+foremanWss = new ForemanWss({ taskManager: taskModel, server, config: cfg, adminWss });
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 

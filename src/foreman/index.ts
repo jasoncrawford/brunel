@@ -9,8 +9,7 @@ import { TaskManager } from "./models/task-manager.js";
 import { initDb } from "./db-client.js";
 import { Worker } from "./models/worker.js";
 import { createHttpServer } from "./controllers/http-server.js";
-import { createForemanWss } from "./controllers/wss.js";
-import type { ForemanWss } from "./controllers/wss.js";
+import { ForemanWss } from "./controllers/wss.js";
 import { createAdminWss } from "./admin-ws.js";
 import { isMutedEvent, summaryEvent } from "./controllers/event-router.js";
 import { fmtError } from "../utils.js";
@@ -52,9 +51,7 @@ if (isMain) {
     workers: Worker.all().map((w) => w.toSnapshot()),
   }));
 
-  foremanWss = createForemanWss(taskManager, server, config, {
-    adminWss,
-  });
+  foremanWss = new ForemanWss({ config, taskManager, server, adminWss });
 
   if (webhooks) {
     webhooks.onAny(async ({ id, name, payload }) => {

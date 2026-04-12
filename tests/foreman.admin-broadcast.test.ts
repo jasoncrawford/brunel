@@ -17,7 +17,7 @@ import http from "http";
 import { WebSocket, WebSocketServer } from "ws";
 import type { AddressInfo } from "net";
 import { Worker } from "../src/foreman/models/worker.js";
-import { createForemanWss } from "../src/foreman/controllers/wss.js";
+import { ForemanWss } from "../src/foreman/controllers/wss.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
 import { setupInMemoryTasks } from "./helpers/task.js";
@@ -90,7 +90,7 @@ beforeEach(() => {
 
   adminWss = makeMockAdminWss();
   httpServer = http.createServer();
-  ({ wss, routeEvent } = createForemanWss(taskManager, httpServer, defaultCfg, { adminWss }));
+  ({ wss, routeEvent } = new ForemanWss({ taskManager, server: httpServer, config: defaultCfg, adminWss }));
 
   return new Promise<void>((resolve) => {
     httpServer.listen(0, () => {

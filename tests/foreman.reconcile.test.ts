@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import http from "http";
 import { Worker } from "../src/foreman/models/worker.js";
-import { createForemanWss } from "../src/foreman/controllers/wss.js";
+import { ForemanWss } from "../src/foreman/controllers/wss.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
 import { setupInMemoryTasks } from "./helpers/task.js";
@@ -24,7 +24,7 @@ beforeEach(() => {
   taskManager = new TaskManager();
   setupInMemoryTasks(taskManager);
   const server = http.createServer();
-  ({ reconcile, routeEvent } = createForemanWss(taskManager, server, { ...defaultCfg, taskLabel: TASK_LABEL }));
+  ({ reconcile, routeEvent } = new ForemanWss({ taskManager, server, config: { ...defaultCfg, taskLabel: TASK_LABEL } }));
 });
 
 afterEach(() => {
@@ -32,7 +32,7 @@ afterEach(() => {
 });
 
 describe("reconcile()", () => {
-  it("is exposed in the return value of createForemanWss", () => {
+  it("is exposed on the ForemanWss instance", () => {
     expect(typeof reconcile).toBe("function");
   });
 
