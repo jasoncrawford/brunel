@@ -71,7 +71,7 @@ export class WebhookEvent {
 
   // ── Persistence ─────────────────────────────────────────────────────────────
 
-  /** Fire-and-forget insert into webhook_events. No-op if DB is not initialized. */
+  /** Insert into webhook_events. Returns a promise (usually ignored). No-op if DB is not initialized. */
   static log(data: {
     deliveryId: string | null;
     eventName: string;
@@ -84,10 +84,10 @@ export class WebhookEvent {
     taskId: string | null;
     workerId: string | null;
     payload: Record<string, unknown>;
-  }): void {
+  }): Promise<void> {
     try {
-      if (!db) return;
-      void Promise.resolve(db.from("webhook_events").insert({
+      if (!db) return Promise.resolve();
+      return Promise.resolve(db.from("webhook_events").insert({
         delivery_id: data.deliveryId,
         event_name: data.eventName,
         action: data.action,
@@ -103,7 +103,7 @@ export class WebhookEvent {
         if (error) console.error("[db] webhook_events insert error:", error);
       }).catch((err: unknown) => console.error("[db] unexpected error:", err));
     } catch {
-      // Silently ignore if DB is not available
+      return Promise.resolve();
     }
   }
 

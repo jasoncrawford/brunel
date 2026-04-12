@@ -26,17 +26,17 @@ export class ForemanMessage {
 
   // ── Persistence ─────────────────────────────────────────────────────────────
 
-  /** Fire-and-forget insert into foreman_messages. No-op if DB is not initialized. */
+  /** Insert into foreman_messages. Returns a promise (usually ignored). No-op if DB is not initialized. */
   static log(data: {
     direction: "sent" | "received";
     workerId: string | null;
     taskId: string | null;
     msgType: string;
     payload: Record<string, unknown>;
-  }): void {
+  }): Promise<void> {
     try {
-      if (!db) return;
-      void Promise.resolve(db.from("foreman_messages").insert({
+      if (!db) return Promise.resolve();
+      return Promise.resolve(db.from("foreman_messages").insert({
         direction: data.direction,
         worker_id: data.workerId,
         task_id: data.taskId,
@@ -46,7 +46,7 @@ export class ForemanMessage {
         if (error) console.error("[db] foreman_messages insert error:", error);
       }).catch((err: unknown) => console.error("[db] unexpected error:", err));
     } catch {
-      // Silently ignore if DB is not available
+      return Promise.resolve();
     }
   }
 
