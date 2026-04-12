@@ -44,7 +44,7 @@ if (isMain) {
   initDb(supabase);
 
   let foremanWss: ForemanWss;
-  const server = createHttpServer(webhooks, (id, name, payload) => foremanWss.routeEvent(id, name, payload), taskManager);
+  const server = createHttpServer({ webhooks, routeEvent: (id, name, payload) => foremanWss.routeEvent(id, name, payload), taskManager });
 
   // Admin WebSocket broadcaster
   const adminWss = createAdminWss(server, async () => ({

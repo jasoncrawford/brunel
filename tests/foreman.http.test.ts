@@ -75,7 +75,7 @@ let routeEvent: ReturnType<typeof vi.fn>;
 beforeEach(async () => {
   routeEvent = vi.fn();
   vi.mocked(queryActivityLog).mockResolvedValue([]);
-  server = createHttpServer(null, routeEvent);
+  server = createHttpServer({ webhooks: null, routeEvent });
   port = await startServer(server);
 });
 
@@ -194,7 +194,7 @@ describe("GET /api/tasks", () => {
     const t2 = await Task.upsert("2", 2, "test/repo", "Done bug", "Description", []);
     await t2.complete();
 
-    const s = createHttpServer(null, vi.fn(), tm);
+    const s = createHttpServer({ webhooks: null, routeEvent: vi.fn(), taskManager: tm });
     const p = await startServer(s);
     try {
       const res = await request(p, "GET", "/api/tasks");
@@ -222,7 +222,7 @@ describe("GET /api/tasks", () => {
     const t = await Task.upsert("42", 42, "test/repo", "Fix bug", "Description", []);
     await t.complete();
 
-    const s = createHttpServer(null, vi.fn(), tm);
+    const s = createHttpServer({ webhooks: null, routeEvent: vi.fn(), taskManager: tm });
     const p = await startServer(s);
     try {
       const res = await request(p, "GET", "/api/tasks?status=complete");
@@ -244,7 +244,7 @@ describe("GET /api/tasks", () => {
     await t1.complete();
     await Task.upsert("2", 2, "test/repo", "T2", "b", []);
 
-    const s = createHttpServer(null, vi.fn(), tm);
+    const s = createHttpServer({ webhooks: null, routeEvent: vi.fn(), taskManager: tm });
     const p = await startServer(s);
     try {
       const res = await request(p, "GET", "/api/tasks?status=complete");
