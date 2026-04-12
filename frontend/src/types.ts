@@ -1,4 +1,5 @@
-export type { TaskStatus } from "../../shared/types.ts";
+import type { TaskStatus } from "../../shared/types.ts";
+export type { TaskStatus };
 export type { Task, Worker, LogEntry, AdminMessage, BlockerInfo } from "../../shared/wire.ts";
 
 export interface TaskRow {
@@ -6,7 +7,7 @@ export interface TaskRow {
   issueNumber: number;
   repo: string;
   title: string;
-  status: import("../../shared/types.ts").TaskStatus;
+  status: TaskStatus;
   workerId: string | null;
   prNumber: number | null;
   branch: string | null;

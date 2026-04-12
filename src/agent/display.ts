@@ -1,4 +1,4 @@
-import * as Wire from "../wire.js";
+import * as Wire from "../../shared/wire.js";
 import { shortWorkerId } from "../../shared/utils.js";
 
 // ── Display width ─────────────────────────────────────────────────────────────

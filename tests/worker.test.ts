@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "events";
 import { AgentStatus, WorkerSession, classifyEvent, debounceMs } from "../src/agent/worker.js";
-import * as Wire from "../src/wire.js";
+import * as Wire from "../shared/wire.js";
 import { stripAnsi } from "./helpers.js";
 import * as displayModule from "../src/agent/display.js";
 

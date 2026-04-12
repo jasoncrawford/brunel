@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { buildInitialPrompt, buildEventPrompt, fmtEventList, resolveEventTemplate, coalesceEvents, EVENT_FMT, formatCommentLocation, type EventTemplateFmtTable } from "../src/agent/templates.js";
-import * as Wire from "../src/wire.js";
+import * as Wire from "../shared/wire.js";
 
 describe("buildInitialPrompt", () => {
   it("includes issue number, title, body, labels, and repoUrl", () => {

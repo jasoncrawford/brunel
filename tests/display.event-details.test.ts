@@ -4,7 +4,7 @@
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { fmtTime, fmtEventDetails } from "../src/agent/display.js";
-import * as Wire from "../src/wire.js";
+import * as Wire from "../shared/wire.js";
 
 afterEach(() => {
   vi.useRealTimers();
