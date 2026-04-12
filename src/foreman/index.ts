@@ -47,8 +47,8 @@ if (isMain) {
 
   // Admin WebSocket broadcaster
   const adminWss = createAdminWss(server, async () => ({
-    tasks: await taskManager.getTaskSnapshots(),
-    workers: Worker.all().map((w) => w.toSnapshot()),
+    tasks: await taskManager.getTasksForBroadcast(),
+    workers: Worker.all().map((w) => w.toWire()),
   }));
 
   foremanWss = new ForemanWss({ config, taskManager, server, adminWss });

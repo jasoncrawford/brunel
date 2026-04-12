@@ -446,7 +446,7 @@ describe("startup — derived blocked status", () => {
     taskManager.setBlockers(42, [5]);
     taskManager.setIssueOpenState(5, false); // issue 5 is closed
 
-    const snapshots = await taskManager.getTaskSnapshots();
+    const snapshots = await taskManager.getTasksForBroadcast();
     expect(snapshots[0].status).toBe("pending");
   });
 
@@ -462,7 +462,7 @@ describe("startup — derived blocked status", () => {
     taskManager.setBlockers(42, [5]);
     taskManager.setIssueOpenState(5, true); // issue 5 is open
 
-    const snapshots = await taskManager.getTaskSnapshots();
+    const snapshots = await taskManager.getTasksForBroadcast();
     expect(snapshots[0].status).toBe("blocked");
   });
 });

@@ -208,8 +208,8 @@ export class ForemanWss {
     async function broadcastSnapshot() {
       if (!adminWss) return;
       adminWss.broadcastSnapshot({
-        tasks: await taskManager.getTaskSnapshots(),
-        workers: Worker.all().map((w) => w.toSnapshot()),
+        tasks: await taskManager.getTasksForBroadcast(),
+        workers: Worker.all().map((w) => w.toWire()),
       });
     }
 

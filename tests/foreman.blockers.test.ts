@@ -36,7 +36,7 @@ describe("foreman — blocker transitions via routeEvent", () => {
     const { wss } = new ForemanWss({ taskManager, server, config: { ...defaultCfg, taskLabel: "brunel:ready", workerReclaimTimeoutMs: 300_000 } });
     wss.close();
 
-    const snapshots = await taskManager.getTaskSnapshots();
+    const snapshots = await taskManager.getTasksForBroadcast();
     expect(snapshots[0].status).toBe("blocked");
   });
 
@@ -53,7 +53,7 @@ describe("foreman — blocker transitions via routeEvent", () => {
     wss.close();
 
     // Initially blocked
-    const snapshots1 = await taskManager.getTaskSnapshots();
+    const snapshots1 = await taskManager.getTasksForBroadcast();
     expect(snapshots1[0].status).toBe("blocked");
 
     // Close the blocker
@@ -63,7 +63,7 @@ describe("foreman — blocker transitions via routeEvent", () => {
     });
 
     // Now pending
-    const snapshots2 = await taskManager.getTaskSnapshots();
+    const snapshots2 = await taskManager.getTasksForBroadcast();
     expect(snapshots2[0].status).toBe("pending");
   });
 
@@ -82,7 +82,7 @@ describe("foreman — blocker transitions via routeEvent", () => {
     wss.close();
 
     // Initially blocked
-    const snapshots1 = await taskManager.getTaskSnapshots();
+    const snapshots1 = await taskManager.getTasksForBroadcast();
     expect(snapshots1[0].status).toBe("blocked");
 
     // Close issue 5 — but 6 is still open
@@ -92,7 +92,7 @@ describe("foreman — blocker transitions via routeEvent", () => {
     });
 
     // Task remains blocked (6 is still open)
-    const snapshots2 = await taskManager.getTaskSnapshots();
+    const snapshots2 = await taskManager.getTasksForBroadcast();
     expect(snapshots2[0].status).toBe("blocked");
   });
 });
