@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { Worker } from "../src/foreman/models/worker-registry.js";
+import { Worker } from "../src/foreman/models/worker.js";
 import * as Wire from "../src/wire.js";
 
 function fakeWs() {

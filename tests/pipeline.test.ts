@@ -18,7 +18,7 @@ import http from "http";
 import { WebSocket, WebSocketServer } from "ws";
 import type { AddressInfo } from "net";
 import * as Wire from "../src/wire.js";
-import { Worker } from "../src/foreman/models/worker-registry.js";
+import { Worker } from "../src/foreman/models/worker.js";
 import { createForemanWss } from "../src/foreman/controllers/wss.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";

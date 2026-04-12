@@ -3,7 +3,7 @@ import type { WebhookEvent } from "../models/webhook-event.js";
 import { fetchIssueStates } from "../github.js";
 import type { TaskManager } from "../models/task-manager.js";
 import { Task } from "../models/task.js";
-import { Worker } from "../models/worker-registry.js";
+import { Worker } from "../models/worker.js";
 import { shortWorkerId } from "../../../shared/utils.js";
 import { fmtError } from "../../utils.js";
 

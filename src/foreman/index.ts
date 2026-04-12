@@ -7,7 +7,7 @@ import { Webhooks } from "@octokit/webhooks";
 import { loadConfig } from "../config.js";
 import { TaskManager } from "./models/task-manager.js";
 import { initDb } from "./db-client.js";
-import { Worker } from "./models/worker-registry.js";
+import { Worker } from "./models/worker.js";
 import { createHttpServer } from "./controllers/http-server.js";
 import { createForemanWss } from "./controllers/wss.js";
 import type { ForemanWss } from "./controllers/wss.js";

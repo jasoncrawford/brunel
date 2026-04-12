@@ -8,7 +8,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventRouter } from "../src/foreman/controllers/event-router.js";
 import { Task } from "../src/foreman/models/task.js";
-import { Worker } from "../src/foreman/models/worker-registry.js";
+import { Worker } from "../src/foreman/models/worker.js";
 import { WebhookEvent } from "../src/foreman/models/webhook-event.js";
 import { setupInMemoryTasks } from "./helpers/task.js";
 
