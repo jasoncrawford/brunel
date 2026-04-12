@@ -12,6 +12,7 @@ import type { TaskManager } from "../models/task-manager.js";
 import { Task } from "../models/task.js";
 import { Worker } from "../models/worker-registry.js";
 import { EventRouter } from "./event-router.js";
+import { handleBusyHello, handleIdleHello } from "./hello-handlers.js";
 
 type R = Record<string, unknown>;
 
@@ -209,74 +210,12 @@ export function createForemanWss(
       }
 
       workerId = msg.workerId;
-
-      function flushQueuedEvents(taskId: string, issueRef: string | number) {
-        for (const evt of taskManager.drainEvents(taskId)) {
-          sendMsg(workerId, { type: "event_notification", taskId, event: evt.toWorkerPayload() });
-          log(workerId, `→ event_notification #${issueRef} ${evt.eventName} (queued)`);
-        }
-      }
-
-      function cancelWorker(taskId?: string) {
-        Worker.register(workerId, ws);
-        sendMsg(workerId, { type: "hello_ack", workerId, status: "cancelled" }, taskId);
-      }
-
-      async function reclaimWorker(task: Task) {
-        const w = Worker.register(workerId, ws);
-        w.assign(task.taskId);
-        // Only call assign if task is not already complete (to preserve task status)
-        if (task.status !== "complete") {
-          await task.assign(workerId);
-        }
-        // For complete tasks, the task stays complete while worker finishes cleanup/finalization work
-        sendMsg(workerId, { type: "hello_ack", workerId, status: "busy" }, task.taskId);
-        flushQueuedEvents(task.taskId, task.issueNumber);
-      }
+      const helloDeps = { ws, taskManager, sendMsg, log, flog };
 
       if (msg.status === "busy" && msg.taskId) {
-        const existing = await Task.get(msg.taskId);
-
-        if (!existing) {
-          log(workerId, `hello busy task=#${msg.taskId} — unknown task, respecting busy status`);
-          // Create a placeholder so the worker can complete normally
-          const issueNumber = parseInt(msg.taskId, 10);
-          let placeholderTask: Task | null = null;
-          if (!isNaN(issueNumber)) {
-            placeholderTask = await Task.upsert(msg.taskId, issueNumber, "", "", "", []);
-          }
-          if (placeholderTask) {
-            await reclaimWorker(placeholderTask);
-          } else {
-            cancelWorker(msg.taskId);
-          }
-        } else if (existing.status === "complete") {
-          if (existing.workerId && existing.workerId !== workerId) {
-            log(workerId, `hello busy task=#${msg.taskId} — task complete but owned by another worker, cancelling`);
-            cancelWorker(msg.taskId);
-          } else {
-            log(workerId, `hello busy task=#${msg.taskId} — task already complete, reclaiming for finalization`);
-            await reclaimWorker(existing);
-          }
-        } else if (existing.workerId && existing.workerId !== workerId) {
-          log(workerId, `hello busy task=#${msg.taskId} — task taken by another worker`);
-          cancelWorker(msg.taskId);
-        } else {
-          log(workerId, `hello busy task=#${msg.taskId} — reclaimed`);
-          await reclaimWorker(existing);
-        }
+        await handleBusyHello(workerId, msg.taskId, helloDeps);
       } else {
-        const priorTask = await Task.getByWorker(workerId);
-        if (priorTask) {
-          await priorTask.revert().catch((err: unknown) =>
-            flog(`ERROR Failed to revert task #${priorTask.taskId} to pending: ${fmtError(err)}`)
-          );
-          log(workerId, `hello idle (had task #${priorTask.taskId}) — reverting task to pending`);
-        } else {
-          log(workerId, "hello idle");
-        }
-        Worker.register(workerId, ws);
-        sendMsg(workerId, { type: "hello_ack", workerId, status: "idle" });
+        await handleIdleHello(workerId, helloDeps);
       }
     }
 
