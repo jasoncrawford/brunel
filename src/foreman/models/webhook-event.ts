@@ -1,14 +1,15 @@
-import type { Database, Json } from "../../database.types.js";
+import type { Json } from "../../database.types.js";
 import { db } from "../db-client.js";
+import type { DbRow } from "../db-client.js";
 import { fmtEvent } from "../event-fmt.js";
 import * as Wire from "../../wire.js";
 
-type DbRow = Database["public"]["Tables"]["webhook_events"]["Row"];
+type Row = DbRow<"webhook_events">;
 
 // ── Model ──────────────────────────────────────────────────────────────────────
 
 export class WebhookEvent {
-  readonly id: number;
+  readonly id: number | undefined;
   readonly deliveryId: string | null;
   readonly eventName: string;
   readonly action: string | null;
@@ -22,7 +23,7 @@ export class WebhookEvent {
   readonly payload: Record<string, unknown>;
   readonly receivedAt: string;
 
-  private constructor(row: DbRow) {
+  private constructor(row: Row) {
     this.id = row.id;
     this.deliveryId = row.delivery_id;
     this.eventName = row.event_name;
@@ -53,7 +54,6 @@ export class WebhookEvent {
     const sender = typeof (payload.sender as R | undefined)?.login === "string"
       ? (payload.sender as R).login as string : null;
     return new WebhookEvent({
-      id: 0,
       delivery_id: deliveryId,
       event_name: eventName,
       action,
