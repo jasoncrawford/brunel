@@ -189,7 +189,7 @@ export class Task extends ActiveRecord {
     }
     const { data, error } = await q.order("created_at", { ascending: false }).limit(limit);
     if (error) throw error;
-    return ((data ?? []) as unknown[]).map((row) => new Task(row as any));
+    return ((data ?? []) as DbRow[]).map((row) => new Task(row));
   }
 
   static async upsert(taskId: string, issueNumber: number, repo: string, title: string, body: string, labels: string[]): Promise<Task> {
