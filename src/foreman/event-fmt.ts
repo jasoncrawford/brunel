@@ -80,4 +80,3 @@ export function fmtEvent(event: { name: string; payload: Record<string, unknown>
   const details = fmtEventDetails(event);
   return `${nameAction}${details ? ` — ${details}` : ""}`;
 }
-

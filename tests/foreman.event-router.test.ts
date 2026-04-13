@@ -8,7 +8,7 @@
  * guard — so any case where the worker has moved on is caught.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { forwardEvent, type RoutingDeps } from "../src/foreman/controllers/wss.js";
+import { createRouter, type RoutingDeps } from "../src/foreman/controllers/wss.js";
 import { Task } from "../src/foreman/models/task.js";
 import { Worker } from "../src/foreman/models/worker.js";
 import { WebhookEvent } from "../src/foreman/models/webhook-event.js";
@@ -55,8 +55,9 @@ describe("forwardEvent — worker has moved on to a different task", () => {
     const w = Worker.register("worker-1", fakeWs());
     w.assign("other-task-id"); // worker has moved on to a different task
     const { deps, taskManager, sendMsg, flog } = makeDeps();
+    const { forwardEvent } = createRouter(deps, sendMsg, flog);
 
-    forwardEvent(task, makeEvent(), "#42", deps.taskManager, sendMsg, flog);
+    forwardEvent(task, makeEvent(), "#42");
 
     expect(sendMsg).not.toHaveBeenCalled();
     expect(taskManager.queueEvent).not.toHaveBeenCalled();
@@ -71,8 +72,9 @@ describe("forwardEvent — worker has moved on to a different task", () => {
     });
     Worker.register("worker-1", fakeWs()); // idle with no currentTaskId
     const { deps, taskManager, sendMsg, flog } = makeDeps();
+    const { forwardEvent } = createRouter(deps, sendMsg, flog);
 
-    forwardEvent(task, makeEvent(), "#42", deps.taskManager, sendMsg, flog);
+    forwardEvent(task, makeEvent(), "#42");
 
     expect(sendMsg).not.toHaveBeenCalled();
     expect(taskManager.queueEvent).not.toHaveBeenCalled();
@@ -88,8 +90,9 @@ describe("forwardEvent — worker has moved on to a different task", () => {
     const w = Worker.register("worker-1", fakeWs());
     w.assign("other-task-id");
     const { deps, sendMsg, flog } = makeDeps();
+    const { forwardEvent } = createRouter(deps, sendMsg, flog);
 
-    forwardEvent(task, makeEvent("issue_comment"), "#42", deps.taskManager, sendMsg, flog);
+    forwardEvent(task, makeEvent("issue_comment"), "#42");
 
     expect(flog).toHaveBeenCalledWith(expect.stringContaining("dropped"));
     expect(flog).toHaveBeenCalledWith(expect.stringContaining("different task"));
@@ -108,8 +111,9 @@ describe("forwardEvent — active tasks still receive events", () => {
     const w = Worker.register("worker-1", fakeWs());
     w.assign("42");
     const { deps, sendMsg, flog } = makeDeps();
+    const { forwardEvent } = createRouter(deps, sendMsg, flog);
 
-    forwardEvent(task, makeEvent(), "#42", deps.taskManager, sendMsg, flog);
+    forwardEvent(task, makeEvent(), "#42");
 
     expect(sendMsg).toHaveBeenCalledOnce();
     expect(sendMsg).toHaveBeenCalledWith(
@@ -129,8 +133,9 @@ describe("forwardEvent — active tasks still receive events", () => {
     const w = Worker.register("worker-1", fakeWs());
     w.assign("42");
     const { deps, sendMsg, flog } = makeDeps();
+    const { forwardEvent } = createRouter(deps, sendMsg, flog);
 
-    forwardEvent(task, makeEvent(), "#42", deps.taskManager, sendMsg, flog);
+    forwardEvent(task, makeEvent(), "#42");
 
     expect(sendMsg).toHaveBeenCalledOnce();
     expect(flog).not.toHaveBeenCalledWith(expect.stringContaining("dropped"));
@@ -146,8 +151,9 @@ describe("forwardEvent — active tasks still receive events", () => {
     const w = Worker.register("worker-1", fakeWs());
     w.assign("42");
     const { deps, sendMsg, flog } = makeDeps();
+    const { forwardEvent } = createRouter(deps, sendMsg, flog);
 
-    forwardEvent(task, makeEvent(), "#42", deps.taskManager, sendMsg, flog);
+    forwardEvent(task, makeEvent(), "#42");
 
     expect(sendMsg).toHaveBeenCalledOnce();
     expect(flog).not.toHaveBeenCalledWith(expect.stringContaining("dropped"));
@@ -157,8 +163,9 @@ describe("forwardEvent — active tasks still receive events", () => {
     const task = Task.fromTest({ task_id: "42", issue_number: 42 });
     task.blockersLoaded = true; // no open blockers → status is "pending"
     const { deps, taskManager, sendMsg, flog } = makeDeps();
+    const { forwardEvent } = createRouter(deps, sendMsg, flog);
 
-    forwardEvent(task, makeEvent(), "#42", deps.taskManager, sendMsg, flog);
+    forwardEvent(task, makeEvent(), "#42");
 
     expect(taskManager.queueEvent).toHaveBeenCalledOnce();
     expect(sendMsg).not.toHaveBeenCalled();

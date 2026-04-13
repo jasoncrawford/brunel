@@ -1,7 +1,7 @@
 import { EventEmitter } from "events";
 import type { WebhookEvent } from "./webhook-event.js";
 import * as Wire from "../../../shared/wire.js";
-import { loadIssuesToQueue } from "../github.js";
+import { loadIssuesToQueue, fetchIssueStates } from "../github.js";
 import { EventQueue } from "../event-queue.js";
 import { Task } from "./task.js";
 import { Worker } from "./worker.js";
@@ -209,6 +209,24 @@ export class TaskManager extends EventEmitter {
       if (task.branch) this.branchToTaskId.set(task.branch, task.taskId);
       flog(`[startup] restored task #${task.taskId} (${task.status})`);
     }
+  }
+
+  /** Fetch and store blocker state for an issue. Called when a task is first
+   *  enqueued or when its body is edited. Fire-and-forget from the caller. */
+  async fetchAndLoadDeps(
+    issueNumber: number,
+    body: string,
+    config: { repo: string; token: string; apiUrl?: string },
+  ): Promise<void> {
+    const blockers = await Task.fetchBlockers(issueNumber, body, config);
+    this.setBlockers(issueNumber, blockers);
+    if (blockers.length > 0) {
+      const states = await fetchIssueStates(blockers, { repo: config.repo, token: config.token });
+      for (const [num, state] of states) {
+        this.setIssueOpenState(num, state === "open");
+      }
+    }
+    this.markBlockersLoaded(issueNumber);
   }
 
   /** Fetch brunel:ready issues from GitHub and load deps.

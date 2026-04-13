@@ -3,7 +3,7 @@
  * routePrEvent, routePrReviewEvent, routeCheckEvent, routeIssueEvent.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { type RoutingDeps, routePrEvent, routePrReviewEvent, routeCheckEvent, routeIssueEvent } from "../src/foreman/controllers/wss.js";
+import { createRouter, type RoutingDeps, type Router } from "../src/foreman/controllers/wss.js";
 import { Task } from "../src/foreman/models/task.js";
 import { Worker } from "../src/foreman/models/worker.js";
 import { WebhookEvent } from "../src/foreman/models/webhook-event.js";
@@ -21,6 +21,7 @@ function makeEvent(name = "pull_request"): WebhookEvent {
 
 interface TestDeps {
   deps: RoutingDeps;
+  router: Router;
   sendMsg: ReturnType<typeof vi.fn>;
   flog: ReturnType<typeof vi.fn>;
   taskManager: {
@@ -33,6 +34,7 @@ interface TestDeps {
     reopenIssue: ReturnType<typeof vi.fn>;
     resetBlockers: ReturnType<typeof vi.fn>;
     assignIdleWorkers: ReturnType<typeof vi.fn>;
+    fetchAndLoadDeps: ReturnType<typeof vi.fn>;
   };
 }
 
@@ -46,6 +48,7 @@ function makeDeps(): TestDeps {
   const reopenIssue = vi.fn().mockResolvedValue(undefined);
   const resetBlockers = vi.fn();
   const assignIdleWorkers = vi.fn().mockResolvedValue([]);
+  const fetchAndLoadDeps = vi.fn().mockResolvedValue(undefined);
   const sendMsg = vi.fn();
   const flog = vi.fn();
   const taskManager = {
@@ -58,6 +61,7 @@ function makeDeps(): TestDeps {
     reopenIssue,
     resetBlockers,
     assignIdleWorkers,
+    fetchAndLoadDeps,
   };
   const deps: RoutingDeps = {
     taskManager: taskManager as any,
@@ -65,7 +69,8 @@ function makeDeps(): TestDeps {
     token: "token",
     taskLabel: "brunel:ready",
   };
-  return { deps, sendMsg, flog, taskManager };
+  const router = createRouter(deps, sendMsg, flog);
+  return { deps, router, sendMsg, flog, taskManager };
 }
 
 let taskStore: ReturnType<typeof setupInMemoryTasks>;
@@ -83,8 +88,8 @@ afterEach(() => {
 
 describe("routePrEvent — missing PR number", () => {
   it("returns null task when pull_request has no number", async () => {
-    const { deps, sendMsg, flog } = makeDeps();
-    const result = await routePrEvent({ pull_request: {} }, makeEvent(), deps, sendMsg, flog);
+    const { router } = makeDeps();
+    const result = await router.routePrEvent({ pull_request: {} }, makeEvent());
     expect(result).toEqual({ taskId: null, workerId: null });
   });
 });
@@ -92,13 +97,10 @@ describe("routePrEvent — missing PR number", () => {
 describe("routePrEvent — synchronize", () => {
   it("returns the task without forwarding when action is synchronize", async () => {
     const task = taskStore.addTask({ task_id: "42", issue_number: 42, pr_number: 99 });
-    const { deps, sendMsg, flog } = makeDeps();
-    const result = await routePrEvent(
+    const { router, sendMsg } = makeDeps();
+    const result = await router.routePrEvent(
       { action: "synchronize", pull_request: { number: 99 } },
       makeEvent(),
-      deps,
-      sendMsg,
-      flog,
     );
     expect(result.taskId).toBe("42");
     expect(sendMsg).not.toHaveBeenCalled();
@@ -108,8 +110,8 @@ describe("routePrEvent — synchronize", () => {
 describe("routePrEvent — opened", () => {
   it("registers PR on a linked task when PR body closes the issue", async () => {
     const task = taskStore.addTask({ task_id: "42", issue_number: 42 });
-    const { deps, sendMsg, flog, taskManager } = makeDeps();
-    const result = await routePrEvent(
+    const { router, sendMsg, flog, taskManager } = makeDeps();
+    const result = await router.routePrEvent(
       {
         action: "opened",
         pull_request: {
@@ -119,9 +121,6 @@ describe("routePrEvent — opened", () => {
         },
       },
       makeEvent(),
-      deps,
-      sendMsg,
-      flog,
     );
     expect(task.prNumber).toBe(99);
     expect(task.branch).toBe("feature-branch");
@@ -131,13 +130,10 @@ describe("routePrEvent — opened", () => {
   });
 
   it("does nothing when PR body does not link an issue", async () => {
-    const { deps, sendMsg, flog, taskManager } = makeDeps();
-    const result = await routePrEvent(
+    const { router, sendMsg, taskManager } = makeDeps();
+    const result = await router.routePrEvent(
       { action: "opened", pull_request: { number: 99, body: "no link here", head: { ref: "branch" } } },
       makeEvent(),
-      deps,
-      sendMsg,
-      flog,
     );
     expect(result).toEqual({ taskId: null, workerId: null });
     expect(taskManager.registerBranch).not.toHaveBeenCalled();
@@ -150,13 +146,10 @@ describe("routePrEvent — closed without merge", () => {
     const w = Worker.register("worker-1", fakeWs());
     task.workerId = "worker-1";
     w.assign("42");
-    const { deps, sendMsg, flog } = makeDeps();
-    const result = await routePrEvent(
+    const { router, sendMsg, flog } = makeDeps();
+    const result = await router.routePrEvent(
       { action: "closed", pull_request: { number: 99, merged: false } },
       makeEvent(),
-      deps,
-      sendMsg,
-      flog,
     );
     expect(task.prNumber).toBeNull();
     expect(flog).toHaveBeenCalledWith(expect.stringContaining("unregistered"));
@@ -165,13 +158,10 @@ describe("routePrEvent — closed without merge", () => {
   });
 
   it("returns null when no task owns the PR", async () => {
-    const { deps, sendMsg, flog } = makeDeps();
-    const result = await routePrEvent(
+    const { router, sendMsg, flog } = makeDeps();
+    const result = await router.routePrEvent(
       { action: "closed", pull_request: { number: 99, merged: false } },
       makeEvent(),
-      deps,
-      sendMsg,
-      flog,
     );
     expect(result).toEqual({ taskId: null, workerId: null });
   });
@@ -183,13 +173,10 @@ describe("routePrEvent — closed with merge", () => {
     const w = Worker.register("worker-1", fakeWs());
     task.workerId = "worker-1";
     w.assign("42");
-    const { deps, sendMsg, flog } = makeDeps();
-    const result = await routePrEvent(
+    const { router, sendMsg, flog } = makeDeps();
+    const result = await router.routePrEvent(
       { action: "closed", pull_request: { number: 99, merged: true } },
       makeEvent(),
-      deps,
-      sendMsg,
-      flog,
     );
     expect(task.prMergedAt).toBeTruthy();
     expect(flog).toHaveBeenCalledWith(expect.stringContaining("merged"));
@@ -198,13 +185,10 @@ describe("routePrEvent — closed with merge", () => {
   });
 
   it("returns null when no task owns the PR", async () => {
-    const { deps, sendMsg, flog } = makeDeps();
-    const result = await routePrEvent(
+    const { router } = makeDeps();
+    const result = await router.routePrEvent(
       { action: "closed", pull_request: { number: 99, merged: true } },
       makeEvent(),
-      deps,
-      sendMsg,
-      flog,
     );
     expect(result).toEqual({ taskId: null, workerId: null });
   });
@@ -216,26 +200,20 @@ describe("routePrEvent — passthrough", () => {
     const w = Worker.register("worker-1", fakeWs());
     task.workerId = "worker-1";
     w.assign("42");
-    const { deps, sendMsg, flog } = makeDeps();
-    const result = await routePrEvent(
+    const { router, sendMsg } = makeDeps();
+    const result = await router.routePrEvent(
       { action: "labeled", pull_request: { number: 99 } },
       makeEvent(),
-      deps,
-      sendMsg,
-      flog,
     );
     expect(sendMsg).toHaveBeenCalledOnce();
     expect(result.taskId).toBe("42");
   });
 
   it("returns null task when no task owns the PR", async () => {
-    const { deps, sendMsg, flog } = makeDeps();
-    const result = await routePrEvent(
+    const { router } = makeDeps();
+    const result = await router.routePrEvent(
       { action: "labeled", pull_request: { number: 99 } },
       makeEvent(),
-      deps,
-      sendMsg,
-      flog,
     );
     expect(result).toEqual({ taskId: null, workerId: null });
   });
@@ -245,8 +223,8 @@ describe("routePrEvent — passthrough", () => {
 
 describe("routePrReviewEvent", () => {
   it("returns null when PR number is missing", async () => {
-    const { deps, sendMsg, flog } = makeDeps();
-    const result = await routePrReviewEvent({ pull_request: {} }, makeEvent("pull_request_review"), deps, sendMsg, flog);
+    const { router } = makeDeps();
+    const result = await router.routePrReviewEvent({ pull_request: {} }, makeEvent("pull_request_review"));
     expect(result).toEqual({ taskId: null, workerId: null });
   });
 
@@ -255,26 +233,20 @@ describe("routePrReviewEvent", () => {
     const w = Worker.register("worker-1", fakeWs());
     task.workerId = "worker-1";
     w.assign("42");
-    const { deps, sendMsg, flog } = makeDeps();
-    const result = await routePrReviewEvent(
+    const { router, sendMsg } = makeDeps();
+    const result = await router.routePrReviewEvent(
       { pull_request: { number: 99 } },
       makeEvent("pull_request_review"),
-      deps,
-      sendMsg,
-      flog,
     );
     expect(sendMsg).toHaveBeenCalledOnce();
     expect(result.taskId).toBe("42");
   });
 
   it("returns null when no task owns the reviewed PR", async () => {
-    const { deps, sendMsg, flog } = makeDeps();
-    const result = await routePrReviewEvent(
+    const { router } = makeDeps();
+    const result = await router.routePrReviewEvent(
       { pull_request: { number: 99 } },
       makeEvent("pull_request_review"),
-      deps,
-      sendMsg,
-      flog,
     );
     expect(result).toEqual({ taskId: null, workerId: null });
   });
@@ -288,14 +260,11 @@ describe("routeCheckEvent — via PR number", () => {
     const w = Worker.register("worker-1", fakeWs());
     task.workerId = "worker-1";
     w.assign("42");
-    const { deps, sendMsg, flog } = makeDeps();
-    const result = await routeCheckEvent(
+    const { router, sendMsg } = makeDeps();
+    const result = await router.routeCheckEvent(
       { check_run: { pull_requests: [{ number: 99 }] } },
       makeEvent("check_run"),
       "check_run",
-      deps,
-      sendMsg,
-      flog,
     );
     expect(sendMsg).toHaveBeenCalledOnce();
     expect(result.taskId).toBe("42");
@@ -306,14 +275,11 @@ describe("routeCheckEvent — via PR number", () => {
     const w = Worker.register("worker-1", fakeWs());
     task.workerId = "worker-1";
     w.assign("42");
-    const { deps, sendMsg, flog } = makeDeps();
-    const result = await routeCheckEvent(
+    const { router, sendMsg } = makeDeps();
+    const result = await router.routeCheckEvent(
       { check_suite: { pull_requests: [{ number: 99 }] } },
       makeEvent("check_suite"),
       "check_suite",
-      deps,
-      sendMsg,
-      flog,
     );
     expect(sendMsg).toHaveBeenCalledOnce();
     expect(result.taskId).toBe("42");
@@ -326,15 +292,12 @@ describe("routeCheckEvent — via branch name", () => {
     const w = Worker.register("worker-1", fakeWs());
     task.workerId = "worker-1";
     w.assign("42");
-    const { deps, sendMsg, flog, taskManager } = makeDeps();
+    const { router, sendMsg, taskManager } = makeDeps();
     taskManager.getTaskForBranch = vi.fn().mockResolvedValue(task);
-    const result = await routeCheckEvent(
+    const result = await router.routeCheckEvent(
       { check_run: { pull_requests: [], check_suite: { head_branch: "feature-branch" } } },
       makeEvent("check_run"),
       "check_run",
-      deps,
-      sendMsg,
-      flog,
     );
     expect(taskManager.getTaskForBranch).toHaveBeenCalledWith("feature-branch");
     expect(sendMsg).toHaveBeenCalledOnce();
@@ -346,15 +309,12 @@ describe("routeCheckEvent — via branch name", () => {
     const w = Worker.register("worker-1", fakeWs());
     task.workerId = "worker-1";
     w.assign("42");
-    const { deps, sendMsg, flog, taskManager } = makeDeps();
+    const { router, sendMsg, taskManager } = makeDeps();
     taskManager.getTaskForBranch = vi.fn().mockResolvedValue(task);
-    const result = await routeCheckEvent(
+    const result = await router.routeCheckEvent(
       { check_suite: { pull_requests: [], head_branch: "feature-branch" } },
       makeEvent("check_suite"),
       "check_suite",
-      deps,
-      sendMsg,
-      flog,
     );
     expect(taskManager.getTaskForBranch).toHaveBeenCalledWith("feature-branch");
     expect(sendMsg).toHaveBeenCalledOnce();
@@ -362,14 +322,11 @@ describe("routeCheckEvent — via branch name", () => {
   });
 
   it("returns null when neither PR nor branch matches a task", async () => {
-    const { deps, sendMsg, flog } = makeDeps();
-    const result = await routeCheckEvent(
+    const { router } = makeDeps();
+    const result = await router.routeCheckEvent(
       { check_run: { pull_requests: [], check_suite: { head_branch: "unknown-branch" } } },
       makeEvent("check_run"),
       "check_run",
-      deps,
-      sendMsg,
-      flog,
     );
     expect(result).toEqual({ taskId: null, workerId: null });
   });
@@ -379,33 +336,26 @@ describe("routeCheckEvent — via branch name", () => {
 
 describe("routeIssueEvent — enqueue on labeled", () => {
   it("enqueues the issue and starts dep loading when labeled with task label", async () => {
-    vi.spyOn(Task, "fetchBlockers").mockResolvedValue([]);
-    const { deps, sendMsg, flog, taskManager } = makeDeps();
+    const { router, taskManager } = makeDeps();
     const issue = { number: 42, title: "Do something", body: "details", state: "open", labels: [{ name: "brunel:ready" }] };
-    const result = await routeIssueEvent(
+    const result = await router.routeIssueEvent(
       { action: "labeled", label: { name: "brunel:ready" }, repository: { html_url: "https://github.com/owner/repo" } },
       makeEvent("issues"),
       issue,
       42,
-      deps,
-      sendMsg,
-      flog,
     );
     expect(taskManager.enqueueIssue).toHaveBeenCalledWith("42", 42, "owner/repo", "Do something", "details", ["brunel:ready"]);
     expect(result).toEqual({ taskId: "42", workerId: null });
   });
 
   it("ignores a labeled event when the issue is already closed", async () => {
-    const { deps, sendMsg, flog, taskManager } = makeDeps();
+    const { router, flog, taskManager } = makeDeps();
     const issue = { number: 42, title: "Do something", body: "", state: "closed", labels: [{ name: "brunel:ready" }] };
-    const result = await routeIssueEvent(
+    const result = await router.routeIssueEvent(
       { action: "labeled", label: { name: "brunel:ready" } },
       makeEvent("issues"),
       issue,
       42,
-      deps,
-      sendMsg,
-      flog,
     );
     expect(taskManager.enqueueIssue).not.toHaveBeenCalled();
     expect(result).toEqual({ taskId: null, workerId: null });
@@ -413,16 +363,13 @@ describe("routeIssueEvent — enqueue on labeled", () => {
   });
 
   it("ignores a labeled event for a different label", async () => {
-    const { deps, sendMsg, flog, taskManager } = makeDeps();
+    const { router, taskManager } = makeDeps();
     const issue = { number: 42, title: "Do something", body: "", state: "open", labels: [] };
-    const result = await routeIssueEvent(
+    const result = await router.routeIssueEvent(
       { action: "labeled", label: { name: "other-label" } },
       makeEvent("issues"),
       issue,
       42,
-      deps,
-      sendMsg,
-      flog,
     );
     expect(taskManager.enqueueIssue).not.toHaveBeenCalled();
     expect(result).toEqual({ taskId: null, workerId: null });
@@ -431,33 +378,26 @@ describe("routeIssueEvent — enqueue on labeled", () => {
 
 describe("routeIssueEvent — enqueue on opened", () => {
   it("enqueues the issue when opened with the task label already attached", async () => {
-    vi.spyOn(Task, "fetchBlockers").mockResolvedValue([]);
-    const { deps, sendMsg, flog, taskManager } = makeDeps();
+    const { router, taskManager } = makeDeps();
     const issue = { number: 42, title: "Do something", body: "details", state: "open", labels: [{ name: "brunel:ready" }] };
-    const result = await routeIssueEvent(
+    const result = await router.routeIssueEvent(
       { action: "opened", repository: { html_url: "https://github.com/owner/repo" } },
       makeEvent("issues"),
       issue,
       42,
-      deps,
-      sendMsg,
-      flog,
     );
     expect(taskManager.enqueueIssue).toHaveBeenCalled();
     expect(result).toEqual({ taskId: "42", workerId: null });
   });
 
   it("does not enqueue when opened without the task label", async () => {
-    const { deps, sendMsg, flog, taskManager } = makeDeps();
+    const { router, taskManager } = makeDeps();
     const issue = { number: 42, title: "Do something", body: "", state: "open", labels: [] };
-    const result = await routeIssueEvent(
+    const result = await router.routeIssueEvent(
       { action: "opened" },
       makeEvent("issues"),
       issue,
       42,
-      deps,
-      sendMsg,
-      flog,
     );
     expect(taskManager.enqueueIssue).not.toHaveBeenCalled();
     expect(result).toEqual({ taskId: null, workerId: null });
@@ -467,16 +407,13 @@ describe("routeIssueEvent — enqueue on opened", () => {
 describe("routeIssueEvent — unlabeled (dequeue)", () => {
   it("dequeues the task when the task label is removed", async () => {
     taskStore.addTask({ task_id: "42", issue_number: 42 });
-    const { deps, sendMsg, flog, taskManager } = makeDeps();
+    const { router, flog, taskManager } = makeDeps();
     const issue = { number: 42 };
-    await routeIssueEvent(
+    await router.routeIssueEvent(
       { action: "unlabeled", label: { name: "brunel:ready" } },
       makeEvent("issues"),
       issue,
       42,
-      deps,
-      sendMsg,
-      flog,
     );
     expect(taskManager.dequeueIssue).toHaveBeenCalledWith(42);
     expect(flog).toHaveBeenCalledWith(expect.stringContaining("dequeued"));
@@ -484,16 +421,13 @@ describe("routeIssueEvent — unlabeled (dequeue)", () => {
 
   it("does not dequeue when a different label is removed", async () => {
     taskStore.addTask({ task_id: "42", issue_number: 42 });
-    const { deps, sendMsg, flog, taskManager } = makeDeps();
+    const { router, taskManager } = makeDeps();
     const issue = { number: 42 };
-    await routeIssueEvent(
+    await router.routeIssueEvent(
       { action: "unlabeled", label: { name: "other-label" } },
       makeEvent("issues"),
       issue,
       42,
-      deps,
-      sendMsg,
-      flog,
     );
     expect(taskManager.dequeueIssue).not.toHaveBeenCalled();
   });
@@ -501,16 +435,13 @@ describe("routeIssueEvent — unlabeled (dequeue)", () => {
 
 describe("routeIssueEvent — closed", () => {
   it("calls closeIssue when an issue is closed", async () => {
-    const { deps, sendMsg, flog, taskManager } = makeDeps();
+    const { router, taskManager } = makeDeps();
     const issue = { number: 42 };
-    await routeIssueEvent(
+    await router.routeIssueEvent(
       { action: "closed" },
       makeEvent("issues"),
       issue,
       42,
-      deps,
-      sendMsg,
-      flog,
     );
     expect(taskManager.closeIssue).toHaveBeenCalledWith(42);
   });
@@ -518,16 +449,13 @@ describe("routeIssueEvent — closed", () => {
 
 describe("routeIssueEvent — reopened", () => {
   it("calls reopenIssue when an issue is reopened", async () => {
-    const { deps, sendMsg, flog, taskManager } = makeDeps();
+    const { router, taskManager } = makeDeps();
     const issue = { number: 42 };
-    await routeIssueEvent(
+    await router.routeIssueEvent(
       { action: "reopened" },
       makeEvent("issues"),
       issue,
       42,
-      deps,
-      sendMsg,
-      flog,
     );
     expect(taskManager.reopenIssue).toHaveBeenCalledWith(42);
   });
@@ -536,35 +464,28 @@ describe("routeIssueEvent — reopened", () => {
 describe("routeIssueEvent — edited", () => {
   it("resets and reloads blockers when the issue body is edited for a tracked task", async () => {
     taskStore.addTask({ task_id: "42", issue_number: 42 });
-    vi.spyOn(Task, "fetchBlockers").mockResolvedValue([]);
-    const { deps, sendMsg, flog, taskManager } = makeDeps();
+    const { router, taskManager } = makeDeps();
     const issue = { number: 42, body: "updated body" };
-    await routeIssueEvent(
+    await router.routeIssueEvent(
       { action: "edited", changes: { body: { from: "old body" } } },
       makeEvent("issues"),
       issue,
       42,
-      deps,
-      sendMsg,
-      flog,
     );
     expect(taskManager.resetBlockers).toHaveBeenCalledWith(42);
-    // startDepsLoad fires Task.fetchBlockers with the new body
-    expect(Task.fetchBlockers).toHaveBeenCalledWith(42, "updated body", expect.any(Object));
+    // startDepsLoad calls fetchAndLoadDeps with the new body
+    expect(taskManager.fetchAndLoadDeps).toHaveBeenCalledWith(42, "updated body", expect.any(Object));
   });
 
   it("does not reset blockers when the body was not changed", async () => {
     taskStore.addTask({ task_id: "42", issue_number: 42 });
-    const { deps, sendMsg, flog, taskManager } = makeDeps();
+    const { router, taskManager } = makeDeps();
     const issue = { number: 42, title: "updated title" };
-    await routeIssueEvent(
+    await router.routeIssueEvent(
       { action: "edited", changes: { title: { from: "old title" } } },
       makeEvent("issues"),
       issue,
       42,
-      deps,
-      sendMsg,
-      flog,
     );
     expect(taskManager.resetBlockers).not.toHaveBeenCalled();
   });
@@ -576,16 +497,13 @@ describe("routeIssueEvent — passthrough forwarding", () => {
     const w = Worker.register("worker-1", fakeWs());
     task.workerId = "worker-1";
     w.assign("42");
-    const { deps, sendMsg, flog } = makeDeps();
+    const { router, sendMsg } = makeDeps();
     const issue = { number: 42 };
-    const result = await routeIssueEvent(
+    const result = await router.routeIssueEvent(
       { action: "assigned" },
       makeEvent("issues"),
       issue,
       42,
-      deps,
-      sendMsg,
-      flog,
     );
     expect(sendMsg).toHaveBeenCalledOnce();
     expect(result.taskId).toBe("42");
@@ -596,16 +514,13 @@ describe("routeIssueEvent — passthrough forwarding", () => {
     const w = Worker.register("worker-1", fakeWs());
     task.workerId = "worker-1";
     w.assign("42");
-    const { deps, sendMsg, flog } = makeDeps();
+    const { router, sendMsg } = makeDeps();
     const issue = { number: 99 }; // PR number in issue.number
-    const result = await routeIssueEvent(
+    const result = await router.routeIssueEvent(
       { action: "created" },
       makeEvent("issue_comment"),
       issue,
       99,
-      deps,
-      sendMsg,
-      flog,
     );
     expect(sendMsg).toHaveBeenCalledOnce();
     expect(result.taskId).toBe("42");

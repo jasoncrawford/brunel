@@ -7,16 +7,9 @@ import { Task } from "../models/task.js";
 import { queryActivityLog } from "../models/activity-log.js";
 import type { TaskStatus } from "../../../shared/types.js";
 import { fmtError } from "../../utils.js";
-import { WebhookEvent } from "../models/webhook-event.js";
 
 function flog(msg: string) {
   console.log(`${new Date().toISOString()} ${msg}`);
-}
-
-function printEvent(id: string, name: string, payload: unknown) {
-  const evt = WebhookEvent.fromIncoming(id, name, payload as Record<string, unknown>);
-  if (evt.isMuted()) return;
-  flog(evt.summary());
 }
 
 export interface HttpServerOptions {
@@ -52,7 +45,6 @@ export function createHttpServer({ webhooks, routeEvent, taskManager }: HttpServ
         });
       } else {
         const parsed = JSON.parse(rawBody) as unknown;
-        printEvent(id, name, parsed);
         await routeEvent(id, name, parsed);
       }
       return c.text("OK", 200);
