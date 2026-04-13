@@ -2,8 +2,9 @@
  * Unit tests for the per-event-type routing functions:
  * routePrEvent, routePrReviewEvent, routeCheckEvent, routeIssueEvent.
  */
+import http from "http";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createRouter, type RoutingDeps, type Router } from "../src/foreman/controllers/wss.js";
+import { ForemanWss } from "../src/foreman/controllers/wss.js";
 import { Task } from "../src/foreman/models/task.js";
 import { Worker } from "../src/foreman/models/worker.js";
 import { WebhookEvent } from "../src/foreman/models/webhook-event.js";
@@ -20,8 +21,7 @@ function makeEvent(name = "pull_request"): WebhookEvent {
 }
 
 interface TestDeps {
-  deps: RoutingDeps;
-  router: Router;
+  wss: ForemanWss;
   sendMsg: ReturnType<typeof vi.fn>;
   flog: ReturnType<typeof vi.fn>;
   taskManager: {
@@ -35,42 +35,34 @@ interface TestDeps {
     resetBlockers: ReturnType<typeof vi.fn>;
     assignIdleWorkers: ReturnType<typeof vi.fn>;
     fetchAndLoadDeps: ReturnType<typeof vi.fn>;
+    on: ReturnType<typeof vi.fn>;
   };
 }
 
 function makeDeps(): TestDeps {
-  const queueEvent = vi.fn();
-  const registerBranch = vi.fn();
-  const getTaskForBranch = vi.fn().mockResolvedValue(null);
-  const enqueueIssue = vi.fn().mockResolvedValue(undefined);
-  const dequeueIssue = vi.fn().mockResolvedValue(undefined);
-  const closeIssue = vi.fn().mockResolvedValue(undefined);
-  const reopenIssue = vi.fn().mockResolvedValue(undefined);
-  const resetBlockers = vi.fn();
-  const assignIdleWorkers = vi.fn().mockResolvedValue([]);
-  const fetchAndLoadDeps = vi.fn().mockResolvedValue(undefined);
+  const taskManager = {
+    queueEvent: vi.fn(),
+    registerBranch: vi.fn(),
+    getTaskForBranch: vi.fn().mockResolvedValue(null),
+    enqueueIssue: vi.fn().mockResolvedValue(undefined),
+    dequeueIssue: vi.fn().mockResolvedValue(undefined),
+    closeIssue: vi.fn().mockResolvedValue(undefined),
+    reopenIssue: vi.fn().mockResolvedValue(undefined),
+    resetBlockers: vi.fn(),
+    assignIdleWorkers: vi.fn().mockResolvedValue([]),
+    fetchAndLoadDeps: vi.fn().mockResolvedValue(undefined),
+    on: vi.fn(),
+  };
+  const wss = new ForemanWss({
+    config: { taskLabel: "brunel:ready", githubRepo: "owner/repo", githubToken: "token", workerSecret: undefined, pingIntervalMs: 1e9 },
+    taskManager: taskManager as any,
+    server: http.createServer(),
+  });
   const sendMsg = vi.fn();
   const flog = vi.fn();
-  const taskManager = {
-    queueEvent,
-    registerBranch,
-    getTaskForBranch,
-    enqueueIssue,
-    dequeueIssue,
-    closeIssue,
-    reopenIssue,
-    resetBlockers,
-    assignIdleWorkers,
-    fetchAndLoadDeps,
-  };
-  const deps: RoutingDeps = {
-    taskManager: taskManager as any,
-    repo: "owner/repo",
-    token: "token",
-    taskLabel: "brunel:ready",
-  };
-  const router = createRouter(deps, sendMsg, flog);
-  return { deps, router, sendMsg, flog, taskManager };
+  wss.sendMsg = sendMsg;
+  wss.flog = flog;
+  return { wss, sendMsg, flog, taskManager };
 }
 
 let taskStore: ReturnType<typeof setupInMemoryTasks>;
@@ -88,8 +80,8 @@ afterEach(() => {
 
 describe("routePrEvent — missing PR number", () => {
   it("returns null task when pull_request has no number", async () => {
-    const { router } = makeDeps();
-    const result = await router.routePrEvent({ pull_request: {} }, makeEvent());
+    const { wss } = makeDeps();
+    const result = await wss.routePrEvent({ pull_request: {} }, makeEvent());
     expect(result).toEqual({ taskId: null, workerId: null });
   });
 });
@@ -97,8 +89,8 @@ describe("routePrEvent — missing PR number", () => {
 describe("routePrEvent — synchronize", () => {
   it("returns the task without forwarding when action is synchronize", async () => {
     const task = taskStore.addTask({ task_id: "42", issue_number: 42, pr_number: 99 });
-    const { router, sendMsg } = makeDeps();
-    const result = await router.routePrEvent(
+    const { wss, sendMsg } = makeDeps();
+    const result = await wss.routePrEvent(
       { action: "synchronize", pull_request: { number: 99 } },
       makeEvent(),
     );
@@ -110,8 +102,8 @@ describe("routePrEvent — synchronize", () => {
 describe("routePrEvent — opened", () => {
   it("registers PR on a linked task when PR body closes the issue", async () => {
     const task = taskStore.addTask({ task_id: "42", issue_number: 42 });
-    const { router, sendMsg, flog, taskManager } = makeDeps();
-    const result = await router.routePrEvent(
+    const { wss, sendMsg, flog, taskManager } = makeDeps();
+    const result = await wss.routePrEvent(
       {
         action: "opened",
         pull_request: {
@@ -130,8 +122,8 @@ describe("routePrEvent — opened", () => {
   });
 
   it("does nothing when PR body does not link an issue", async () => {
-    const { router, sendMsg, taskManager } = makeDeps();
-    const result = await router.routePrEvent(
+    const { wss, sendMsg, taskManager } = makeDeps();
+    const result = await wss.routePrEvent(
       { action: "opened", pull_request: { number: 99, body: "no link here", head: { ref: "branch" } } },
       makeEvent(),
     );
@@ -146,8 +138,8 @@ describe("routePrEvent — closed without merge", () => {
     const w = Worker.register("worker-1", fakeWs());
     task.workerId = "worker-1";
     w.assign("42");
-    const { router, sendMsg, flog } = makeDeps();
-    const result = await router.routePrEvent(
+    const { wss, sendMsg, flog } = makeDeps();
+    const result = await wss.routePrEvent(
       { action: "closed", pull_request: { number: 99, merged: false } },
       makeEvent(),
     );
@@ -158,8 +150,8 @@ describe("routePrEvent — closed without merge", () => {
   });
 
   it("returns null when no task owns the PR", async () => {
-    const { router, sendMsg, flog } = makeDeps();
-    const result = await router.routePrEvent(
+    const { wss, sendMsg, flog } = makeDeps();
+    const result = await wss.routePrEvent(
       { action: "closed", pull_request: { number: 99, merged: false } },
       makeEvent(),
     );
@@ -173,8 +165,8 @@ describe("routePrEvent — closed with merge", () => {
     const w = Worker.register("worker-1", fakeWs());
     task.workerId = "worker-1";
     w.assign("42");
-    const { router, sendMsg, flog } = makeDeps();
-    const result = await router.routePrEvent(
+    const { wss, sendMsg, flog } = makeDeps();
+    const result = await wss.routePrEvent(
       { action: "closed", pull_request: { number: 99, merged: true } },
       makeEvent(),
     );
@@ -185,8 +177,8 @@ describe("routePrEvent — closed with merge", () => {
   });
 
   it("returns null when no task owns the PR", async () => {
-    const { router } = makeDeps();
-    const result = await router.routePrEvent(
+    const { wss } = makeDeps();
+    const result = await wss.routePrEvent(
       { action: "closed", pull_request: { number: 99, merged: true } },
       makeEvent(),
     );
@@ -200,8 +192,8 @@ describe("routePrEvent — passthrough", () => {
     const w = Worker.register("worker-1", fakeWs());
     task.workerId = "worker-1";
     w.assign("42");
-    const { router, sendMsg } = makeDeps();
-    const result = await router.routePrEvent(
+    const { wss, sendMsg } = makeDeps();
+    const result = await wss.routePrEvent(
       { action: "labeled", pull_request: { number: 99 } },
       makeEvent(),
     );
@@ -210,8 +202,8 @@ describe("routePrEvent — passthrough", () => {
   });
 
   it("returns null task when no task owns the PR", async () => {
-    const { router } = makeDeps();
-    const result = await router.routePrEvent(
+    const { wss } = makeDeps();
+    const result = await wss.routePrEvent(
       { action: "labeled", pull_request: { number: 99 } },
       makeEvent(),
     );
@@ -223,8 +215,8 @@ describe("routePrEvent — passthrough", () => {
 
 describe("routePrReviewEvent", () => {
   it("returns null when PR number is missing", async () => {
-    const { router } = makeDeps();
-    const result = await router.routePrReviewEvent({ pull_request: {} }, makeEvent("pull_request_review"));
+    const { wss } = makeDeps();
+    const result = await wss.routePrReviewEvent({ pull_request: {} }, makeEvent("pull_request_review"));
     expect(result).toEqual({ taskId: null, workerId: null });
   });
 
@@ -233,8 +225,8 @@ describe("routePrReviewEvent", () => {
     const w = Worker.register("worker-1", fakeWs());
     task.workerId = "worker-1";
     w.assign("42");
-    const { router, sendMsg } = makeDeps();
-    const result = await router.routePrReviewEvent(
+    const { wss, sendMsg } = makeDeps();
+    const result = await wss.routePrReviewEvent(
       { pull_request: { number: 99 } },
       makeEvent("pull_request_review"),
     );
@@ -243,8 +235,8 @@ describe("routePrReviewEvent", () => {
   });
 
   it("returns null when no task owns the reviewed PR", async () => {
-    const { router } = makeDeps();
-    const result = await router.routePrReviewEvent(
+    const { wss } = makeDeps();
+    const result = await wss.routePrReviewEvent(
       { pull_request: { number: 99 } },
       makeEvent("pull_request_review"),
     );
@@ -260,8 +252,8 @@ describe("routeCheckEvent — via PR number", () => {
     const w = Worker.register("worker-1", fakeWs());
     task.workerId = "worker-1";
     w.assign("42");
-    const { router, sendMsg } = makeDeps();
-    const result = await router.routeCheckEvent(
+    const { wss, sendMsg } = makeDeps();
+    const result = await wss.routeCheckEvent(
       { check_run: { pull_requests: [{ number: 99 }] } },
       makeEvent("check_run"),
       "check_run",
@@ -275,8 +267,8 @@ describe("routeCheckEvent — via PR number", () => {
     const w = Worker.register("worker-1", fakeWs());
     task.workerId = "worker-1";
     w.assign("42");
-    const { router, sendMsg } = makeDeps();
-    const result = await router.routeCheckEvent(
+    const { wss, sendMsg } = makeDeps();
+    const result = await wss.routeCheckEvent(
       { check_suite: { pull_requests: [{ number: 99 }] } },
       makeEvent("check_suite"),
       "check_suite",
@@ -292,9 +284,9 @@ describe("routeCheckEvent — via branch name", () => {
     const w = Worker.register("worker-1", fakeWs());
     task.workerId = "worker-1";
     w.assign("42");
-    const { router, sendMsg, taskManager } = makeDeps();
+    const { wss, sendMsg, taskManager } = makeDeps();
     taskManager.getTaskForBranch = vi.fn().mockResolvedValue(task);
-    const result = await router.routeCheckEvent(
+    const result = await wss.routeCheckEvent(
       { check_run: { pull_requests: [], check_suite: { head_branch: "feature-branch" } } },
       makeEvent("check_run"),
       "check_run",
@@ -309,9 +301,9 @@ describe("routeCheckEvent — via branch name", () => {
     const w = Worker.register("worker-1", fakeWs());
     task.workerId = "worker-1";
     w.assign("42");
-    const { router, sendMsg, taskManager } = makeDeps();
+    const { wss, sendMsg, taskManager } = makeDeps();
     taskManager.getTaskForBranch = vi.fn().mockResolvedValue(task);
-    const result = await router.routeCheckEvent(
+    const result = await wss.routeCheckEvent(
       { check_suite: { pull_requests: [], head_branch: "feature-branch" } },
       makeEvent("check_suite"),
       "check_suite",
@@ -322,8 +314,8 @@ describe("routeCheckEvent — via branch name", () => {
   });
 
   it("returns null when neither PR nor branch matches a task", async () => {
-    const { router } = makeDeps();
-    const result = await router.routeCheckEvent(
+    const { wss } = makeDeps();
+    const result = await wss.routeCheckEvent(
       { check_run: { pull_requests: [], check_suite: { head_branch: "unknown-branch" } } },
       makeEvent("check_run"),
       "check_run",
@@ -336,9 +328,9 @@ describe("routeCheckEvent — via branch name", () => {
 
 describe("routeIssueEvent — enqueue on labeled", () => {
   it("enqueues the issue and starts dep loading when labeled with task label", async () => {
-    const { router, taskManager } = makeDeps();
+    const { wss, taskManager } = makeDeps();
     const issue = { number: 42, title: "Do something", body: "details", state: "open", labels: [{ name: "brunel:ready" }] };
-    const result = await router.routeIssueEvent(
+    const result = await wss.routeIssueEvent(
       { action: "labeled", label: { name: "brunel:ready" }, repository: { html_url: "https://github.com/owner/repo" } },
       makeEvent("issues"),
       issue,
@@ -349,9 +341,9 @@ describe("routeIssueEvent — enqueue on labeled", () => {
   });
 
   it("ignores a labeled event when the issue is already closed", async () => {
-    const { router, flog, taskManager } = makeDeps();
+    const { wss, flog, taskManager } = makeDeps();
     const issue = { number: 42, title: "Do something", body: "", state: "closed", labels: [{ name: "brunel:ready" }] };
-    const result = await router.routeIssueEvent(
+    const result = await wss.routeIssueEvent(
       { action: "labeled", label: { name: "brunel:ready" } },
       makeEvent("issues"),
       issue,
@@ -363,9 +355,9 @@ describe("routeIssueEvent — enqueue on labeled", () => {
   });
 
   it("ignores a labeled event for a different label", async () => {
-    const { router, taskManager } = makeDeps();
+    const { wss, taskManager } = makeDeps();
     const issue = { number: 42, title: "Do something", body: "", state: "open", labels: [] };
-    const result = await router.routeIssueEvent(
+    const result = await wss.routeIssueEvent(
       { action: "labeled", label: { name: "other-label" } },
       makeEvent("issues"),
       issue,
@@ -378,9 +370,9 @@ describe("routeIssueEvent — enqueue on labeled", () => {
 
 describe("routeIssueEvent — enqueue on opened", () => {
   it("enqueues the issue when opened with the task label already attached", async () => {
-    const { router, taskManager } = makeDeps();
+    const { wss, taskManager } = makeDeps();
     const issue = { number: 42, title: "Do something", body: "details", state: "open", labels: [{ name: "brunel:ready" }] };
-    const result = await router.routeIssueEvent(
+    const result = await wss.routeIssueEvent(
       { action: "opened", repository: { html_url: "https://github.com/owner/repo" } },
       makeEvent("issues"),
       issue,
@@ -391,9 +383,9 @@ describe("routeIssueEvent — enqueue on opened", () => {
   });
 
   it("does not enqueue when opened without the task label", async () => {
-    const { router, taskManager } = makeDeps();
+    const { wss, taskManager } = makeDeps();
     const issue = { number: 42, title: "Do something", body: "", state: "open", labels: [] };
-    const result = await router.routeIssueEvent(
+    const result = await wss.routeIssueEvent(
       { action: "opened" },
       makeEvent("issues"),
       issue,
@@ -407,9 +399,9 @@ describe("routeIssueEvent — enqueue on opened", () => {
 describe("routeIssueEvent — unlabeled (dequeue)", () => {
   it("dequeues the task when the task label is removed", async () => {
     taskStore.addTask({ task_id: "42", issue_number: 42 });
-    const { router, flog, taskManager } = makeDeps();
+    const { wss, flog, taskManager } = makeDeps();
     const issue = { number: 42 };
-    await router.routeIssueEvent(
+    await wss.routeIssueEvent(
       { action: "unlabeled", label: { name: "brunel:ready" } },
       makeEvent("issues"),
       issue,
@@ -421,9 +413,9 @@ describe("routeIssueEvent — unlabeled (dequeue)", () => {
 
   it("does not dequeue when a different label is removed", async () => {
     taskStore.addTask({ task_id: "42", issue_number: 42 });
-    const { router, taskManager } = makeDeps();
+    const { wss, taskManager } = makeDeps();
     const issue = { number: 42 };
-    await router.routeIssueEvent(
+    await wss.routeIssueEvent(
       { action: "unlabeled", label: { name: "other-label" } },
       makeEvent("issues"),
       issue,
@@ -435,9 +427,9 @@ describe("routeIssueEvent — unlabeled (dequeue)", () => {
 
 describe("routeIssueEvent — closed", () => {
   it("calls closeIssue when an issue is closed", async () => {
-    const { router, taskManager } = makeDeps();
+    const { wss, taskManager } = makeDeps();
     const issue = { number: 42 };
-    await router.routeIssueEvent(
+    await wss.routeIssueEvent(
       { action: "closed" },
       makeEvent("issues"),
       issue,
@@ -449,9 +441,9 @@ describe("routeIssueEvent — closed", () => {
 
 describe("routeIssueEvent — reopened", () => {
   it("calls reopenIssue when an issue is reopened", async () => {
-    const { router, taskManager } = makeDeps();
+    const { wss, taskManager } = makeDeps();
     const issue = { number: 42 };
-    await router.routeIssueEvent(
+    await wss.routeIssueEvent(
       { action: "reopened" },
       makeEvent("issues"),
       issue,
@@ -464,9 +456,9 @@ describe("routeIssueEvent — reopened", () => {
 describe("routeIssueEvent — edited", () => {
   it("resets and reloads blockers when the issue body is edited for a tracked task", async () => {
     taskStore.addTask({ task_id: "42", issue_number: 42 });
-    const { router, taskManager } = makeDeps();
+    const { wss, taskManager } = makeDeps();
     const issue = { number: 42, body: "updated body" };
-    await router.routeIssueEvent(
+    await wss.routeIssueEvent(
       { action: "edited", changes: { body: { from: "old body" } } },
       makeEvent("issues"),
       issue,
@@ -479,9 +471,9 @@ describe("routeIssueEvent — edited", () => {
 
   it("does not reset blockers when the body was not changed", async () => {
     taskStore.addTask({ task_id: "42", issue_number: 42 });
-    const { router, taskManager } = makeDeps();
+    const { wss, taskManager } = makeDeps();
     const issue = { number: 42, title: "updated title" };
-    await router.routeIssueEvent(
+    await wss.routeIssueEvent(
       { action: "edited", changes: { title: { from: "old title" } } },
       makeEvent("issues"),
       issue,
@@ -497,9 +489,9 @@ describe("routeIssueEvent — passthrough forwarding", () => {
     const w = Worker.register("worker-1", fakeWs());
     task.workerId = "worker-1";
     w.assign("42");
-    const { router, sendMsg } = makeDeps();
+    const { wss, sendMsg } = makeDeps();
     const issue = { number: 42 };
-    const result = await router.routeIssueEvent(
+    const result = await wss.routeIssueEvent(
       { action: "assigned" },
       makeEvent("issues"),
       issue,
@@ -514,9 +506,9 @@ describe("routeIssueEvent — passthrough forwarding", () => {
     const w = Worker.register("worker-1", fakeWs());
     task.workerId = "worker-1";
     w.assign("42");
-    const { router, sendMsg } = makeDeps();
+    const { wss, sendMsg } = makeDeps();
     const issue = { number: 99 }; // PR number in issue.number
-    const result = await router.routeIssueEvent(
+    const result = await wss.routeIssueEvent(
       { action: "created" },
       makeEvent("issue_comment"),
       issue,
