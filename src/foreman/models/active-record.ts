@@ -1,4 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+// `any` is intentional throughout this file: db.from(tableName) uses a runtime
+// string so Supabase cannot infer per-table types, and `new (this as any)(row)`
+// is the standard pattern for polymorphic static factory methods in TypeScript.
 import { EventEmitter } from "node:events";
 import { db } from "../db-client.js";
 
