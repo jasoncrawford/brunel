@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
+import { Worker } from "../src/foreman/models/worker.js";
 import { setupInMemoryTasks } from "./helpers/task.js";
 
 const REPO = "test/repo";
@@ -274,5 +275,85 @@ describe("Task.status (derived)", () => {
   it("returns 'complete' when completedAt is set", () => {
     const t = Task.fromTest({ task_id: "t1", issue_number: 1, completed_at: new Date().toISOString() });
     expect(t.status).toBe("complete");
+  });
+});
+
+// ── TaskManager.reserveTaskForWorker ──────────────────────────────────────────
+
+describe("TaskManager.reserveTaskForWorker", () => {
+  let manager: TaskManager;
+
+  beforeEach(() => {
+    Worker._reset();
+    manager = new TaskManager();
+    setupInMemoryTasks(manager);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("returns null when there are no pending tasks", async () => {
+    const result = await manager.reserveTaskForWorker("worker-1");
+    expect(result).toBeNull();
+  });
+
+  it("returns the task and empty queued events when a pending task exists", async () => {
+    await Task.upsert("42", 42, REPO, "Fix the bug", "Body", ["brunel:ready"]);
+    manager.markBlockersLoaded(42);
+
+    const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
+    Worker.register("worker-1", fakeWs);
+
+    const result = await manager.reserveTaskForWorker("worker-1");
+    expect(result).not.toBeNull();
+    expect(result!.task.taskId).toBe("42");
+    expect(result!.task.workerId).toBe("worker-1");
+    expect(result!.queued).toEqual([]);
+  });
+
+  it("marks the worker's in-memory currentTaskId on success", async () => {
+    await Task.upsert("42", 42, REPO, "Fix the bug", "Body", ["brunel:ready"]);
+    manager.markBlockersLoaded(42);
+
+    const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
+    const worker = Worker.register("worker-1", fakeWs);
+
+    await manager.reserveTaskForWorker("worker-1");
+    expect(worker.currentTaskId).toBe("42");
+  });
+
+  it("serialises concurrent calls — second call gets null when only one task exists", async () => {
+    await Task.upsert("42", 42, REPO, "Fix the bug", "Body", ["brunel:ready"]);
+    manager.markBlockersLoaded(42);
+
+    const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
+    Worker.register("worker-1", fakeWs);
+    Worker.register("worker-2", fakeWs);
+
+    // Fire both concurrently — only one should win the task.
+    const [r1, r2] = await Promise.all([
+      manager.reserveTaskForWorker("worker-1"),
+      manager.reserveTaskForWorker("worker-2"),
+    ]);
+    const results = [r1, r2];
+    expect(results.filter(r => r !== null)).toHaveLength(1);
+    expect(results.filter(r => r === null)).toHaveLength(1);
+  });
+
+  it("propagates errors and leaves the lock usable for subsequent calls", async () => {
+    await Task.upsert("42", 42, REPO, "Fix the bug", "Body", ["brunel:ready"]);
+    manager.markBlockersLoaded(42);
+
+    const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
+    Worker.register("worker-1", fakeWs);
+
+    // Fail the first call on DB write.
+    const t = await Task.get("42");
+    vi.spyOn(t!, "assign").mockRejectedValue(new Error("DB down"));
+    await expect(manager.reserveTaskForWorker("worker-1")).rejects.toThrow("DB down");
+
+    // The lock should still be usable — a second call goes through (also fails, but doesn't hang).
+    await expect(manager.reserveTaskForWorker("worker-1")).rejects.toThrow("DB down");
   });
 });

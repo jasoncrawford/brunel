@@ -4,6 +4,7 @@ import * as Wire from "../../../shared/wire.js";
 import { loadIssuesToQueue } from "../github.js";
 import { EventQueue } from "../event-queue.js";
 import { Task } from "./task.js";
+import { Worker } from "./worker.js";
 
 
 // ── TaskManager ────────────────────────────────────────────────────────────────
@@ -18,6 +19,7 @@ export class TaskManager extends EventEmitter {
   // ── Ephemeral in-memory state (no DB backing) ────────────────────────────
   private eventQueue = new EventQueue();
   private branchToTaskId = new Map<string, string>();
+  private assignLock = Promise.resolve();
 
   // ── GitHub issue state ────────────────────────────────────────────────────
   /** Open issues that are blockers (non-task issues whose open/closed state
@@ -54,6 +56,25 @@ export class TaskManager extends EventEmitter {
       if (isReady === undefined || isReady(task)) return task;
     }
     return null;
+  }
+
+  /** Atomically find a pending task and assign it to the given worker.
+   *  Uses a mutex (assignLock) to prevent two concurrent calls from both
+   *  seeing the same pending task before either writes an assignment. */
+  async reserveTaskForWorker(workerId: string): Promise<{ task: Task; queued: WebhookEvent[] } | null> {
+    return new Promise((resolve, reject) => {
+      this.assignLock = this.assignLock.then(async () => {
+        try {
+          const task = await this.nextPending(t => t.blockersLoaded && t.status === "pending");
+          if (!task) { resolve(null); return; }
+          Worker.get(workerId)?.assign(task.taskId);
+          await task.assign(workerId);
+          resolve({ task, queued: this.drainEvents(task.taskId) });
+        } catch (err) {
+          reject(err);
+        }
+      });
+    });
   }
 
   /** All active (non-complete) tasks — used by the dashboard task list API and dependency resolution. */

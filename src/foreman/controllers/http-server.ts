@@ -7,7 +7,7 @@ import { Task } from "../models/task.js";
 import { queryActivityLog } from "../models/activity-log.js";
 import type { TaskStatus } from "../../../shared/types.js";
 import { fmtError } from "../../utils.js";
-import { summaryEvent, isMutedEvent } from "./event-router.js";
+import { summaryEvent, isMutedEvent } from "../event-fmt.js";
 
 function flog(msg: string) {
   console.log(`${new Date().toISOString()} ${msg}`);

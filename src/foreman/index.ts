@@ -11,7 +11,7 @@ import { Worker } from "./models/worker.js";
 import { createHttpServer } from "./controllers/http-server.js";
 import { ForemanWss } from "./controllers/wss.js";
 import { createAdminWss } from "./admin-ws.js";
-import { isMutedEvent, summaryEvent } from "./controllers/event-router.js";
+import { isMutedEvent, summaryEvent } from "./event-fmt.js";
 import { fmtError } from "../utils.js";
 
 function flog(msg: string) {

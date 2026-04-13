@@ -11,7 +11,7 @@ import type { BrunelConfig } from "../../config.js";
 import type { TaskManager } from "../models/task-manager.js";
 import { Task } from "../models/task.js";
 import { Worker } from "../models/worker.js";
-import { EventRouter } from "./event-router.js";
+import { routeEvent } from "./event-routing.js";
 
 type R = Record<string, unknown>;
 
@@ -217,77 +217,54 @@ export class ForemanWss {
     taskManager.on("changed", debouncedBroadcast);
     Worker.events.on("changed", debouncedBroadcast);
 
-    // Mutex that ensures at most one assignIdleWorkers() runs at a time.
-    // Without this, two concurrent webhook events can each call assignIdleWorkers()
-    // and both see the same pending task before either writes an assignment. (Issue #577)
-    let assignLock = Promise.resolve();
-
+    // Sequential (not concurrent) to prevent double-assignment: TaskManager.reserveTaskForWorker
+    // uses an internal mutex so each DB write completes before the next call queries nextPending().
+    // (Issue #563, #577)
     const assignIdleWorkers = async (): Promise<void> => {
-      assignLock = assignLock.then(async () => {
-        // Sequential (not concurrent) to prevent double-assignment: each tryAssignWork
-        // must complete its DB write before the next one calls nextPending(), otherwise
-        // two workers can both see the same pending task. (Issue #563)
-        for (const w of Worker.getIdle()) {
-          await tryAssignWork(w.workerId).catch(err => flog(`ERROR tryAssignWork: ${fmtError(err)}`));
-        }
-      });
-      await assignLock;
-    };
-
-    const tryAssignWork = async (workerId: string): Promise<void> => {
-      const task = await taskManager.nextPending(
-        (t) => t.blockersLoaded && t.status === "pending",
-      );
-      if (task) {
-        const worker = Worker.get(workerId);
-        worker?.assign(task.taskId);
-        try {
-          await task.assign(workerId);
-        } catch (err) {
-          flog(`ERROR Failed to persist assignment for task #${task.taskId}: ${fmtError(err)}`);
-          worker?.release();
-          log(workerId, "→ idle (DB write failed)");
-          return;
-        }
-
-        const queued = taskManager.drainEvents(task.taskId);
-        const assignMsg: Wire.ForemanMessage = {
-          type: "task_assigned",
-          taskId: task.taskId,
-          issue: {
-            number: task.issueNumber,
-            title: task.title,
-            body: task.body,
-            labels: task.labels,
-            repoUrl: task.repoUrl,
-          },
-        };
-        sendMsg(workerId, assignMsg);
-        log(workerId, `→ task_assigned #${task.issueNumber} "${task.title}"`);
-        for (const evt of queued) {
-          const evtMsg: Wire.ForemanMessage = { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload() };
-          sendMsg(workerId, evtMsg);
-          log(workerId, `→ event_notification #${task.issueNumber} ${evt.eventName} (queued)`);
-        }
+      for (const w of Worker.getIdle()) {
+        await tryAssignWork(w.workerId).catch(err => flog(`ERROR tryAssignWork: ${fmtError(err)}`));
       }
     };
 
-    const eventRouter = new EventRouter({
-      taskManager,
-      repo,
-      token,
-      githubApiUrl,
-      taskLabel,
-      sendMsg,
-      flog,
-      assignIdleWorkers,
-    });
+    const tryAssignWork = async (workerId: string): Promise<void> => {
+      let result: { task: Task; queued: WebhookEvent[] } | null;
+      try {
+        result = await taskManager.reserveTaskForWorker(workerId);
+      } catch (err) {
+        flog(`ERROR Failed to persist assignment: ${fmtError(err)}`);
+        Worker.get(workerId)?.release();
+        log(workerId, "→ idle (DB write failed)");
+        return;
+      }
+      if (!result) return;
+      const { task, queued } = result;
+      const assignMsg: Wire.ForemanMessage = {
+        type: "task_assigned",
+        taskId: task.taskId,
+        issue: {
+          number: task.issueNumber,
+          title: task.title,
+          body: task.body,
+          labels: task.labels,
+          repoUrl: task.repoUrl,
+        },
+      };
+      sendMsg(workerId, assignMsg);
+      log(workerId, `→ task_assigned #${task.issueNumber} "${task.title}"`);
+      for (const evt of queued) {
+        const evtMsg: Wire.ForemanMessage = { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload() };
+        sendMsg(workerId, evtMsg);
+        log(workerId, `→ event_notification #${task.issueNumber} ${evt.eventName} (queued)`);
+      }
+    };
+
+    const routingDeps = { taskManager, repo, token, githubApiUrl, taskLabel, sendMsg, flog, assignIdleWorkers };
 
     this.routeEvent = async (id: string, name: string, payload: unknown) => {
       const p = payload as Record<string, unknown>;
       const evt = WebhookEvent.fromIncoming(id, name, p);
 
-      const { taskId, workerId } = await eventRouter.routeEvent(name, p, evt);
+      const { taskId, workerId } = await routeEvent(name, p, evt, routingDeps);
 
       const action = typeof p.action === "string" ? p.action : null;
       const webhookIssueNumber = typeof (p.issue as R | undefined)?.number === "number" ? (p.issue as R).number as number : null;
