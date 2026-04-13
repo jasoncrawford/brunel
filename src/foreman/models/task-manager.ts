@@ -15,6 +15,10 @@ import { Worker } from "./worker.js";
 // Emits "changed" after every Task mutation (by subscribing to Task.events)
 // and after every worker registry change so the admin dashboard can refresh.
 
+export type AssignOutcome =
+  | { ok: true; task: Task; queued: WebhookEvent[]; workerId: string }
+  | { ok: false; workerId: string; err: unknown };
+
 export class TaskManager extends EventEmitter {
   // ── Ephemeral in-memory state (no DB backing) ────────────────────────────
   private eventQueue = new EventQueue();
@@ -60,28 +64,31 @@ export class TaskManager extends EventEmitter {
 
   /** Assign pending tasks to all idle workers.
    *  Uses a mutex (assignLock) to prevent concurrent calls from double-assigning.
-   *  Emits "assigned" on success, "assign_failed" on DB write failure. */
-  async assignIdleWorkers(): Promise<void> {
+   *  Returns the list of assignment outcomes for the caller to act on. */
+  async assignIdleWorkers(): Promise<AssignOutcome[]> {
     return new Promise((resolve) => {
       this.assignLock = this.assignLock.then(async () => {
+        const outcomes: AssignOutcome[] = [];
         for (const w of Worker.getIdle()) {
-          await this.tryAssignWork(w.workerId).catch((err: unknown) => {
-            Worker.get(w.workerId)?.release();
-            this.emit("assign_failed", { workerId: w.workerId, err });
-          });
+          const outcome = await this.tryAssignWork(w.workerId);
+          if (outcome) outcomes.push(outcome);
         }
-        resolve();
+        resolve(outcomes);
       });
     });
   }
 
-  private async tryAssignWork(workerId: string): Promise<void> {
+  private async tryAssignWork(workerId: string): Promise<AssignOutcome | null> {
     const task = await this.nextPending(t => t.blockersLoaded && t.status === "pending");
-    if (!task) return;
+    if (!task) return null;
     Worker.get(workerId)?.assign(task.taskId);
-    await task.assign(workerId);
-    const queued = this.drainEvents(task.taskId);
-    this.emit("assigned", { task, queued, workerId });
+    try {
+      await task.assign(workerId);
+      return { ok: true, task, queued: this.drainEvents(task.taskId), workerId };
+    } catch (err) {
+      Worker.get(workerId)?.release();
+      return { ok: false, workerId, err };
+    }
   }
 
   /** All active (non-complete) tasks — used by the dashboard task list API and dependency resolution. */

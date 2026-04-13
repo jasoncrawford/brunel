@@ -23,20 +23,19 @@ function makeEvent(name = "issue_comment"): WebhookEvent {
   return WebhookEvent.fromIncoming("evt-1", name, {});
 }
 
-function makeDeps(): RoutingDeps & { sendMsg: ReturnType<typeof vi.fn>; flog: ReturnType<typeof vi.fn> } {
+function makeDeps(): { deps: RoutingDeps; taskManager: { queueEvent: ReturnType<typeof vi.fn>; assignIdleWorkers: ReturnType<typeof vi.fn> }; sendMsg: ReturnType<typeof vi.fn>; flog: ReturnType<typeof vi.fn> } {
   const queueEvent = vi.fn();
-  const assignIdleWorkers = vi.fn().mockResolvedValue(undefined);
+  const assignIdleWorkers = vi.fn().mockResolvedValue([]);
   const sendMsg = vi.fn();
   const flog = vi.fn();
+  const taskManager = { queueEvent, assignIdleWorkers };
   const deps: RoutingDeps = {
-    taskManager: { queueEvent, assignIdleWorkers } as unknown as RoutingDeps["taskManager"],
+    taskManager: taskManager as unknown as RoutingDeps["taskManager"],
     repo: "owner/repo",
     token: "token",
     taskLabel: "brunel:ready",
-    sendMsg,
-    flog,
   };
-  return Object.assign(deps, { sendMsg, flog });
+  return { deps, taskManager, sendMsg, flog };
 }
 
 beforeEach(() => { Worker._reset(); });
@@ -55,12 +54,12 @@ describe("forwardEvent — worker has moved on to a different task", () => {
     });
     const w = Worker.register("worker-1", fakeWs());
     w.assign("other-task-id"); // worker has moved on to a different task
-    const deps = makeDeps();
+    const { deps, taskManager, sendMsg, flog } = makeDeps();
 
-    forwardEvent(task, makeEvent(), "#42", deps);
+    forwardEvent(task, makeEvent(), "#42", deps.taskManager, sendMsg, flog);
 
-    expect(deps.sendMsg).not.toHaveBeenCalled();
-    expect(deps.taskManager.queueEvent).not.toHaveBeenCalled();
+    expect(sendMsg).not.toHaveBeenCalled();
+    expect(taskManager.queueEvent).not.toHaveBeenCalled();
   });
 
   it("drops the event when the registry shows the worker is now idle (task completed, no new task yet)", () => {
@@ -71,12 +70,12 @@ describe("forwardEvent — worker has moved on to a different task", () => {
       completed_at: new Date().toISOString(),
     });
     Worker.register("worker-1", fakeWs()); // idle with no currentTaskId
-    const deps = makeDeps();
+    const { deps, taskManager, sendMsg, flog } = makeDeps();
 
-    forwardEvent(task, makeEvent(), "#42", deps);
+    forwardEvent(task, makeEvent(), "#42", deps.taskManager, sendMsg, flog);
 
-    expect(deps.sendMsg).not.toHaveBeenCalled();
-    expect(deps.taskManager.queueEvent).not.toHaveBeenCalled();
+    expect(sendMsg).not.toHaveBeenCalled();
+    expect(taskManager.queueEvent).not.toHaveBeenCalled();
   });
 
   it("logs a drop message when the worker has moved on", () => {
@@ -88,12 +87,12 @@ describe("forwardEvent — worker has moved on to a different task", () => {
     });
     const w = Worker.register("worker-1", fakeWs());
     w.assign("other-task-id");
-    const deps = makeDeps();
+    const { deps, sendMsg, flog } = makeDeps();
 
-    forwardEvent(task, makeEvent("issue_comment"), "#42", deps);
+    forwardEvent(task, makeEvent("issue_comment"), "#42", deps.taskManager, sendMsg, flog);
 
-    expect(deps.flog).toHaveBeenCalledWith(expect.stringContaining("dropped"));
-    expect(deps.flog).toHaveBeenCalledWith(expect.stringContaining("different task"));
+    expect(flog).toHaveBeenCalledWith(expect.stringContaining("dropped"));
+    expect(flog).toHaveBeenCalledWith(expect.stringContaining("different task"));
   });
 });
 
@@ -108,12 +107,12 @@ describe("forwardEvent — active tasks still receive events", () => {
     });
     const w = Worker.register("worker-1", fakeWs());
     w.assign("42");
-    const deps = makeDeps();
+    const { deps, sendMsg, flog } = makeDeps();
 
-    forwardEvent(task, makeEvent(), "#42", deps);
+    forwardEvent(task, makeEvent(), "#42", deps.taskManager, sendMsg, flog);
 
-    expect(deps.sendMsg).toHaveBeenCalledOnce();
-    expect(deps.sendMsg).toHaveBeenCalledWith(
+    expect(sendMsg).toHaveBeenCalledOnce();
+    expect(sendMsg).toHaveBeenCalledWith(
       "worker-1",
       expect.objectContaining({ type: "event_notification" }),
     );
@@ -129,12 +128,12 @@ describe("forwardEvent — active tasks still receive events", () => {
     });
     const w = Worker.register("worker-1", fakeWs());
     w.assign("42");
-    const deps = makeDeps();
+    const { deps, sendMsg, flog } = makeDeps();
 
-    forwardEvent(task, makeEvent(), "#42", deps);
+    forwardEvent(task, makeEvent(), "#42", deps.taskManager, sendMsg, flog);
 
-    expect(deps.sendMsg).toHaveBeenCalledOnce();
-    expect(deps.flog).not.toHaveBeenCalledWith(expect.stringContaining("dropped"));
+    expect(sendMsg).toHaveBeenCalledOnce();
+    expect(flog).not.toHaveBeenCalledWith(expect.stringContaining("dropped"));
   });
 
   it("still forwards events when the task's issue is closed but worker is still on it", () => {
@@ -146,22 +145,22 @@ describe("forwardEvent — active tasks still receive events", () => {
     });
     const w = Worker.register("worker-1", fakeWs());
     w.assign("42");
-    const deps = makeDeps();
+    const { deps, sendMsg, flog } = makeDeps();
 
-    forwardEvent(task, makeEvent(), "#42", deps);
+    forwardEvent(task, makeEvent(), "#42", deps.taskManager, sendMsg, flog);
 
-    expect(deps.sendMsg).toHaveBeenCalledOnce();
-    expect(deps.flog).not.toHaveBeenCalledWith(expect.stringContaining("dropped"));
+    expect(sendMsg).toHaveBeenCalledOnce();
+    expect(flog).not.toHaveBeenCalledWith(expect.stringContaining("dropped"));
   });
 
   it("queues event for a pending task with no worker", () => {
     const task = Task.fromTest({ task_id: "42", issue_number: 42 });
     task.blockersLoaded = true; // no open blockers → status is "pending"
-    const deps = makeDeps();
+    const { deps, taskManager, sendMsg, flog } = makeDeps();
 
-    forwardEvent(task, makeEvent(), "#42", deps);
+    forwardEvent(task, makeEvent(), "#42", deps.taskManager, sendMsg, flog);
 
-    expect(deps.taskManager.queueEvent).toHaveBeenCalledOnce();
-    expect(deps.sendMsg).not.toHaveBeenCalled();
+    expect(taskManager.queueEvent).toHaveBeenCalledOnce();
+    expect(sendMsg).not.toHaveBeenCalled();
   });
 });

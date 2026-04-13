@@ -11,16 +11,17 @@ import { Worker } from "./models/worker.js";
 import { createHttpServer } from "./controllers/http-server.js";
 import { ForemanWss } from "./controllers/wss.js";
 import { createAdminWss } from "./admin-ws.js";
-import { isMutedEvent, summaryEvent } from "./event-fmt.js";
 import { fmtError } from "../utils.js";
+import { WebhookEvent } from "./models/webhook-event.js";
 
 function flog(msg: string) {
   console.log(`${new Date().toISOString()} ${msg}`);
 }
 
 function printEvent(id: string, name: string, payload: unknown) {
-  if (isMutedEvent(name)) return;
-  flog(summaryEvent(id, name, payload));
+  const evt = WebhookEvent.fromIncoming(id, name, payload as Record<string, unknown>);
+  if (evt.isMuted()) return;
+  flog(evt.summary());
 }
 
 // Only start listening when run directly (not when imported by tests)

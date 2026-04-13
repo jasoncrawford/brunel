@@ -7,15 +7,16 @@ import { Task } from "../models/task.js";
 import { queryActivityLog } from "../models/activity-log.js";
 import type { TaskStatus } from "../../../shared/types.js";
 import { fmtError } from "../../utils.js";
-import { summaryEvent, isMutedEvent } from "../event-fmt.js";
+import { WebhookEvent } from "../models/webhook-event.js";
 
 function flog(msg: string) {
   console.log(`${new Date().toISOString()} ${msg}`);
 }
 
 function printEvent(id: string, name: string, payload: unknown) {
-  if (isMutedEvent(name)) return;
-  flog(summaryEvent(id, name, payload));
+  const evt = WebhookEvent.fromIncoming(id, name, payload as Record<string, unknown>);
+  if (evt.isMuted()) return;
+  flog(evt.summary());
 }
 
 export interface HttpServerOptions {
