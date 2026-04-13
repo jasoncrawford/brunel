@@ -3,7 +3,7 @@
  * routePrEvent, routePrReviewEvent, routeCheckEvent, routeIssueEvent.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { type RoutingDeps, routePrEvent, routePrReviewEvent, routeCheckEvent, routeIssueEvent } from "../src/foreman/controllers/event-routing.js";
+import { type RoutingDeps, routePrEvent, routePrReviewEvent, routeCheckEvent, routeIssueEvent } from "../src/foreman/controllers/wss.js";
 import { Task } from "../src/foreman/models/task.js";
 import { Worker } from "../src/foreman/models/worker.js";
 import { WebhookEvent } from "../src/foreman/models/webhook-event.js";
@@ -31,6 +31,7 @@ function makeDeps(): RoutingDeps & {
     closeIssue: ReturnType<typeof vi.fn>;
     reopenIssue: ReturnType<typeof vi.fn>;
     resetBlockers: ReturnType<typeof vi.fn>;
+    assignIdleWorkers: ReturnType<typeof vi.fn>;
   };
 } {
   const queueEvent = vi.fn();
@@ -41,6 +42,7 @@ function makeDeps(): RoutingDeps & {
   const closeIssue = vi.fn().mockResolvedValue(undefined);
   const reopenIssue = vi.fn().mockResolvedValue(undefined);
   const resetBlockers = vi.fn();
+  const assignIdleWorkers = vi.fn().mockResolvedValue(undefined);
   const sendMsg = vi.fn();
   const flog = vi.fn();
   const taskManager = {
@@ -52,6 +54,7 @@ function makeDeps(): RoutingDeps & {
     closeIssue,
     reopenIssue,
     resetBlockers,
+    assignIdleWorkers,
   };
   const deps: RoutingDeps = {
     taskManager: taskManager as any,
@@ -60,7 +63,6 @@ function makeDeps(): RoutingDeps & {
     taskLabel: "brunel:ready",
     sendMsg,
     flog,
-    assignIdleWorkers: vi.fn().mockResolvedValue(undefined),
   };
   return Object.assign(deps, { sendMsg, flog, taskManager }) as any;
 }

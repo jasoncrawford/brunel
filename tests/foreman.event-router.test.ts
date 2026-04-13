@@ -8,7 +8,7 @@
  * guard — so any case where the worker has moved on is caught.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { forwardEvent, type RoutingDeps } from "../src/foreman/controllers/event-routing.js";
+import { forwardEvent, type RoutingDeps } from "../src/foreman/controllers/wss.js";
 import { Task } from "../src/foreman/models/task.js";
 import { Worker } from "../src/foreman/models/worker.js";
 import { WebhookEvent } from "../src/foreman/models/webhook-event.js";
@@ -25,16 +25,16 @@ function makeEvent(name = "issue_comment"): WebhookEvent {
 
 function makeDeps(): RoutingDeps & { sendMsg: ReturnType<typeof vi.fn>; flog: ReturnType<typeof vi.fn> } {
   const queueEvent = vi.fn();
+  const assignIdleWorkers = vi.fn().mockResolvedValue(undefined);
   const sendMsg = vi.fn();
   const flog = vi.fn();
   const deps: RoutingDeps = {
-    taskManager: { queueEvent } as unknown as RoutingDeps["taskManager"],
+    taskManager: { queueEvent, assignIdleWorkers } as unknown as RoutingDeps["taskManager"],
     repo: "owner/repo",
     token: "token",
     taskLabel: "brunel:ready",
     sendMsg,
     flog,
-    assignIdleWorkers: vi.fn().mockResolvedValue(undefined),
   };
   return Object.assign(deps, { sendMsg, flog });
 }

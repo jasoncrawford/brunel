@@ -58,23 +58,30 @@ export class TaskManager extends EventEmitter {
     return null;
   }
 
-  /** Atomically find a pending task and assign it to the given worker.
-   *  Uses a mutex (assignLock) to prevent two concurrent calls from both
-   *  seeing the same pending task before either writes an assignment. */
-  async reserveTaskForWorker(workerId: string): Promise<{ task: Task; queued: WebhookEvent[] } | null> {
-    return new Promise((resolve, reject) => {
+  /** Assign pending tasks to all idle workers.
+   *  Uses a mutex (assignLock) to prevent concurrent calls from double-assigning.
+   *  Emits "assigned" on success, "assign_failed" on DB write failure. */
+  async assignIdleWorkers(): Promise<void> {
+    return new Promise((resolve) => {
       this.assignLock = this.assignLock.then(async () => {
-        try {
-          const task = await this.nextPending(t => t.blockersLoaded && t.status === "pending");
-          if (!task) { resolve(null); return; }
-          Worker.get(workerId)?.assign(task.taskId);
-          await task.assign(workerId);
-          resolve({ task, queued: this.drainEvents(task.taskId) });
-        } catch (err) {
-          reject(err);
+        for (const w of Worker.getIdle()) {
+          await this.tryAssignWork(w.workerId).catch((err: unknown) => {
+            Worker.get(w.workerId)?.release();
+            this.emit("assign_failed", { workerId: w.workerId, err });
+          });
         }
+        resolve();
       });
     });
+  }
+
+  private async tryAssignWork(workerId: string): Promise<void> {
+    const task = await this.nextPending(t => t.blockersLoaded && t.status === "pending");
+    if (!task) return;
+    Worker.get(workerId)?.assign(task.taskId);
+    await task.assign(workerId);
+    const queued = this.drainEvents(task.taskId);
+    this.emit("assigned", { task, queued, workerId });
   }
 
   /** All active (non-complete) tasks — used by the dashboard task list API and dependency resolution. */

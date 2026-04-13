@@ -278,9 +278,9 @@ describe("Task.status (derived)", () => {
   });
 });
 
-// ── TaskManager.reserveTaskForWorker ──────────────────────────────────────────
+// ── TaskManager.assignIdleWorkers ─────────────────────────────────────────────
 
-describe("TaskManager.reserveTaskForWorker", () => {
+describe("TaskManager.assignIdleWorkers", () => {
   let manager: TaskManager;
 
   beforeEach(() => {
@@ -293,67 +293,98 @@ describe("TaskManager.reserveTaskForWorker", () => {
     vi.restoreAllMocks();
   });
 
-  it("returns null when there are no pending tasks", async () => {
-    const result = await manager.reserveTaskForWorker("worker-1");
-    expect(result).toBeNull();
-  });
-
-  it("returns the task and empty queued events when a pending task exists", async () => {
+  it("does nothing when there are no idle workers", async () => {
     await Task.upsert("42", 42, REPO, "Fix the bug", "Body", ["brunel:ready"]);
     manager.markBlockersLoaded(42);
+    const assigned = vi.fn();
+    manager.on("assigned", assigned);
+    await manager.assignIdleWorkers();
+    expect(assigned).not.toHaveBeenCalled();
+  });
 
+  it("does nothing when there are no pending tasks", async () => {
+    const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
+    Worker.register("worker-1", fakeWs);
+    const assigned = vi.fn();
+    manager.on("assigned", assigned);
+    await manager.assignIdleWorkers();
+    expect(assigned).not.toHaveBeenCalled();
+  });
+
+  it("emits 'assigned' with task, queued events, and workerId", async () => {
+    await Task.upsert("42", 42, REPO, "Fix the bug", "Body", ["brunel:ready"]);
+    manager.markBlockersLoaded(42);
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
     Worker.register("worker-1", fakeWs);
 
-    const result = await manager.reserveTaskForWorker("worker-1");
-    expect(result).not.toBeNull();
-    expect(result!.task.taskId).toBe("42");
-    expect(result!.task.workerId).toBe("worker-1");
-    expect(result!.queued).toEqual([]);
+    const assigned = vi.fn();
+    manager.on("assigned", assigned);
+    await manager.assignIdleWorkers();
+
+    expect(assigned).toHaveBeenCalledOnce();
+    expect(assigned).toHaveBeenCalledWith(expect.objectContaining({
+      task: expect.objectContaining({ taskId: "42", workerId: "worker-1" }),
+      queued: [],
+      workerId: "worker-1",
+    }));
   });
 
   it("marks the worker's in-memory currentTaskId on success", async () => {
     await Task.upsert("42", 42, REPO, "Fix the bug", "Body", ["brunel:ready"]);
     manager.markBlockersLoaded(42);
-
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
     const worker = Worker.register("worker-1", fakeWs);
 
-    await manager.reserveTaskForWorker("worker-1");
+    await manager.assignIdleWorkers();
     expect(worker.currentTaskId).toBe("42");
   });
 
-  it("serialises concurrent calls — second call gets null when only one task exists", async () => {
+  it("serialises concurrent calls — only one worker gets the task", async () => {
     await Task.upsert("42", 42, REPO, "Fix the bug", "Body", ["brunel:ready"]);
     manager.markBlockersLoaded(42);
-
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
     Worker.register("worker-1", fakeWs);
     Worker.register("worker-2", fakeWs);
 
-    // Fire both concurrently — only one should win the task.
-    const [r1, r2] = await Promise.all([
-      manager.reserveTaskForWorker("worker-1"),
-      manager.reserveTaskForWorker("worker-2"),
-    ]);
-    const results = [r1, r2];
-    expect(results.filter(r => r !== null)).toHaveLength(1);
-    expect(results.filter(r => r === null)).toHaveLength(1);
+    const assigned = vi.fn();
+    manager.on("assigned", assigned);
+
+    // Fire both concurrently — only one worker should win the task.
+    await Promise.all([manager.assignIdleWorkers(), manager.assignIdleWorkers()]);
+    expect(assigned).toHaveBeenCalledOnce();
   });
 
-  it("propagates errors and leaves the lock usable for subsequent calls", async () => {
+  it("emits 'assign_failed' and releases the worker when DB write fails", async () => {
     await Task.upsert("42", 42, REPO, "Fix the bug", "Body", ["brunel:ready"]);
     manager.markBlockersLoaded(42);
-
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
     Worker.register("worker-1", fakeWs);
 
-    // Fail the first call on DB write.
     const t = await Task.get("42");
     vi.spyOn(t!, "assign").mockRejectedValue(new Error("DB down"));
-    await expect(manager.reserveTaskForWorker("worker-1")).rejects.toThrow("DB down");
 
-    // The lock should still be usable — a second call goes through (also fails, but doesn't hang).
-    await expect(manager.reserveTaskForWorker("worker-1")).rejects.toThrow("DB down");
+    const assignFailed = vi.fn();
+    manager.on("assign_failed", assignFailed);
+    await manager.assignIdleWorkers();
+
+    expect(assignFailed).toHaveBeenCalledOnce();
+    expect(assignFailed).toHaveBeenCalledWith(expect.objectContaining({
+      workerId: "worker-1",
+      err: expect.any(Error),
+    }));
+  });
+
+  it("leaves the mutex usable after a failure", async () => {
+    await Task.upsert("42", 42, REPO, "Fix the bug", "Body", ["brunel:ready"]);
+    manager.markBlockersLoaded(42);
+    const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
+    Worker.register("worker-1", fakeWs);
+
+    const t = await Task.get("42");
+    vi.spyOn(t!, "assign").mockRejectedValue(new Error("DB down"));
+
+    // Both calls should resolve (not hang), even though assignment fails.
+    await manager.assignIdleWorkers();
+    await manager.assignIdleWorkers();
   });
 });
