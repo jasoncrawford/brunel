@@ -4,11 +4,15 @@ import type { Database } from "../../database.types.js";
 import * as Wire from "../../../shared/wire.js";
 import { fetchNativeBlockers } from "../github.js";
 import { db } from "../db-client.js";
+import { ActiveRecord } from "./active-record.js";
 
 type DbRow = Database["public"]["Tables"]["tasks"]["Row"];
 
-export class Task {
+export class Task extends ActiveRecord {
   static readonly events = new EventEmitter();
+
+  protected static readonly tableName = "tasks";
+  protected static readonly primaryKey = "task_id";
 
   readonly taskId: string;
   issueNumber: number;
@@ -31,7 +35,12 @@ export class Task {
   /** Whether native blockers have been fetched from the GitHub API. */
   blockersLoaded: boolean = false;
 
+  protected getPrimaryKeyValue(): string | number {
+    return this.taskId;
+  }
+
   private constructor(row: DbRow) {
+    super();
     this.taskId = row.task_id;
     this.issueNumber = row.issue_number;
     this.repo = row.repo;
@@ -137,19 +146,10 @@ export class Task {
 
   // ── Private helpers ─────────────────────────────────────────────────────────
 
-  private static select() {
-    return db.from("tasks").select("*");
-  }
-
-  private static async findOne(col: string, val: string | number): Promise<Task | null> {
-    const { data, error } = await Task.select().eq(col, val).maybeSingle();
-    if (error) throw error;
-    return data ? new Task(data) : null;
-  }
-
   private async save(changes: Partial<DbRow>): Promise<void> {
-    const { error } = await db.from("tasks").update(changes).eq("task_id", this.taskId);
-    if (error) throw error;
+    await this.update(changes as Record<string, unknown>);
+    // Field sync (remains per-model until codegen issue is done).
+    // Note: "changed" event is already emitted by the base update() above.
     if ("worker_id" in changes) this.workerId = changes.worker_id ?? null;
     if ("assigned_at" in changes) this.assignedAt = changes.assigned_at ?? null;
     if ("completed_at" in changes) this.completedAt = changes.completed_at ?? null;
@@ -160,21 +160,20 @@ export class Task {
     if ("title" in changes) this.title = changes.title!;
     if ("body" in changes) this.body = changes.body!;
     if ("labels" in changes) this.labels = changes.labels!;
-    Task.events.emit("changed");
   }
 
   // ── Static finders ──────────────────────────────────────────────────────────
 
   static async get(taskId: string): Promise<Task | null> {
-    return Task.findOne("task_id", taskId);
+    return Task.getBy("task_id", taskId);
   }
 
   static async getByIssue(issueNumber: number): Promise<Task | null> {
-    return Task.findOne("issue_number", issueNumber);
+    return Task.getBy("issue_number", issueNumber);
   }
 
   static async getByPr(prNumber: number): Promise<Task | null> {
-    return Task.findOne("pr_number", prNumber);
+    return Task.getBy("pr_number", prNumber);
   }
 
   static async getByWorker(workerId: string): Promise<Task | null> {
@@ -191,7 +190,7 @@ export class Task {
     }
     const { data, error } = await q.order("created_at", { ascending: false }).limit(limit);
     if (error) throw error;
-    return (data ?? []).map((row) => new Task(row));
+    return (data ?? []).map((row: DbRow) => new Task(row));
   }
 
   static async upsert(taskId: string, issueNumber: number, repo: string, title: string, body: string, labels: string[]): Promise<Task> {

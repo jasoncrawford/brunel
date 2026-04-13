@@ -3,12 +3,16 @@ import { db } from "../db-client.js";
 import type { DbRow } from "../db-client.js";
 import { fmtEvent } from "../event-fmt.js";
 import * as Wire from "../../../shared/wire.js";
+import { ActiveRecord } from "./active-record.js";
 
 type Row = DbRow<"webhook_events">;
 
 // ── Model ──────────────────────────────────────────────────────────────────────
 
-export class WebhookEvent {
+export class WebhookEvent extends ActiveRecord {
+  protected static readonly tableName = "webhook_events";
+  protected static readonly primaryKey = "id";
+
   readonly id: number | undefined;
   readonly deliveryId: string | null;
   readonly eventName: string;
@@ -24,6 +28,7 @@ export class WebhookEvent {
   readonly receivedAt: string;
 
   private constructor(row: Row) {
+    super();
     this.id = row.id;
     this.deliveryId = row.delivery_id;
     this.eventName = row.event_name;
@@ -71,7 +76,7 @@ export class WebhookEvent {
 
   // ── Persistence ─────────────────────────────────────────────────────────────
 
-  /** Insert into webhook_events. Returns a promise (usually ignored). */
+  /** Insert into webhook_events. Returns a promise (usually ignored with `void`). */
   static log(data: {
     deliveryId: string | null;
     eventName: string;
@@ -105,29 +110,26 @@ export class WebhookEvent {
   // ── Queries ──────────────────────────────────────────────────────────────────
 
   static async queryForTask(taskId: string): Promise<WebhookEvent[]> {
-    const { data } = await db.from("webhook_events")
-      .select("*")
+    const { data } = await WebhookEvent.select()
       .eq("task_id", taskId)
       .order("received_at", { ascending: false })
       .limit(500);
-    return (data ?? []).map((r) => new WebhookEvent(r));
+    return (data ?? []).map((r: Row) => new WebhookEvent(r));
   }
 
   static async queryForWorker(workerId: string): Promise<WebhookEvent[]> {
-    const { data } = await db.from("webhook_events")
-      .select("*")
+    const { data } = await WebhookEvent.select()
       .eq("worker_id", workerId)
       .order("received_at", { ascending: false })
       .limit(500);
-    return (data ?? []).map((r) => new WebhookEvent(r));
+    return (data ?? []).map((r: Row) => new WebhookEvent(r));
   }
 
-  static async query(opts: { limit?: number } = {}): Promise<WebhookEvent[]> {
-    const { data } = await db.from("webhook_events")
-      .select("*")
+  static async list(opts: { limit?: number } = {}): Promise<WebhookEvent[]> {
+    const { data } = await WebhookEvent.select()
       .order("received_at", { ascending: false })
       .limit(opts.limit ?? 100);
-    return (data ?? []).map((r) => new WebhookEvent(r));
+    return (data ?? []).map((r: Row) => new WebhookEvent(r));
   }
 
   // ── Wire / display helpers ───────────────────────────────────────────────────
