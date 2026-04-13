@@ -125,11 +125,34 @@ export function createMemoryTaskDb(): SupabaseClient<Database> {
           return sb;
         },
         update(changes: Partial<DbRow>) {
-          return buildMutateQuery((filters) => {
-            for (const row of applyFilters([...store.values()], filters)) {
-              store.set(row.task_id, { ...row, ...changes });
-            }
-          });
+          // Build a fluent chain that supports both the old pattern
+          // (.update(changes).eq(...)) and the new base-class pattern
+          // (.update(changes).eq(...).select().single()) used by ActiveRecord.update().
+          const filters: Filters = [];
+          const builder = {
+            eq(col: string, val: unknown) {
+              filters.push({ col: col as keyof DbRow, op: "eq", val });
+              return builder;
+            },
+            is(col: string, val: unknown) {
+              filters.push({ col: col as keyof DbRow, op: "is", val });
+              return builder;
+            },
+            select(_cols?: string) { return builder; },
+            single() { return builder; },
+            then(
+              resolve: (v: { data: DbRow | null; error: null }) => void,
+              _reject?: (e: unknown) => void,
+            ) {
+              const matching = applyFilters([...store.values()], filters);
+              for (const row of matching) {
+                store.set(row.task_id, { ...row, ...changes });
+              }
+              const updated = applyFilters([...store.values()], filters);
+              resolve({ data: updated[0] ?? null, error: null });
+            },
+          };
+          return builder;
         },
         delete() {
           return buildMutateQuery((filters) => {
