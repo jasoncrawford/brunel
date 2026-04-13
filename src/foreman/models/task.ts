@@ -164,10 +164,7 @@ export class Task extends ActiveRecord {
   }
 
   // ── Static finders ──────────────────────────────────────────────────────────
-
-  static async get(taskId: string): Promise<Task | null> {
-    return Task.getBy("task_id", taskId);
-  }
+  // Task.get(id) is inherited from ActiveRecord — finds by task_id (primaryKey).
 
   static async getByIssue(issueNumber: number): Promise<Task | null> {
     return Task.getBy("issue_number", issueNumber);
@@ -183,6 +180,7 @@ export class Task extends ActiveRecord {
     return data ? new Task(data) : null;
   }
 
+  // Overrides base list() to add created_at ordering and the cancelable filter.
   static async list(opts?: { cancelable?: boolean; limit?: number }): Promise<Task[]> {
     const limit = opts?.limit ?? 200;
     let q = Task.select();
@@ -191,7 +189,7 @@ export class Task extends ActiveRecord {
     }
     const { data, error } = await q.order("created_at", { ascending: false }).limit(limit);
     if (error) throw error;
-    return (data ?? []).map((row: DbRow) => new Task(row));
+    return ((data ?? []) as unknown[]).map((row) => new Task(row as any));
   }
 
   static async upsert(taskId: string, issueNumber: number, repo: string, title: string, body: string, labels: string[]): Promise<Task> {
@@ -246,7 +244,8 @@ export class Task extends ActiveRecord {
     await this.save({ title, body, labels });
   }
 
-  async delete(): Promise<void> {
+  /** Delete this task only if it has never been assigned. No-op if assigned_at is set. */
+  async deleteIfUnassigned(): Promise<void> {
     const { error } = await db.from("tasks").delete().eq("task_id", this.taskId).is("assigned_at", null);
     if (error) throw error;
     Task.events.emit("changed");

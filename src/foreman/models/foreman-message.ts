@@ -1,5 +1,4 @@
 import type { Database, Json } from "../../database.types.js";
-import { db } from "../db-client.js";
 import { ActiveRecord } from "./active-record.js";
 
 type DbRow = Database["public"]["Tables"]["foreman_messages"]["Row"];
@@ -39,15 +38,13 @@ export class ForemanMessage extends ActiveRecord {
     msgType: string;
     payload: Record<string, unknown>;
   }): Promise<void> {
-    return Promise.resolve(db.from("foreman_messages").insert({
+    return ForemanMessage.insert({
       direction: data.direction,
       worker_id: data.workerId,
       task_id: data.taskId,
       msg_type: data.msgType,
       payload: data.payload as Json,
-    })).then(({ error }) => {
-      if (error) console.error("[db] foreman_messages insert error:", error);
-    }).catch((err: unknown) => console.error("[db] unexpected error:", err));
+    }).then(() => undefined).catch((err: unknown) => console.error("[db] foreman_messages insert error:", err));
   }
 
   // ── Queries ──────────────────────────────────────────────────────────────────

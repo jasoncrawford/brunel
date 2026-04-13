@@ -1,5 +1,4 @@
 import type { Json } from "../../database.types.js";
-import { db } from "../db-client.js";
 import type { DbRow } from "../db-client.js";
 import { fmtEvent } from "../event-fmt.js";
 import * as Wire from "../../../shared/wire.js";
@@ -90,7 +89,7 @@ export class WebhookEvent extends ActiveRecord {
     workerId: string | null;
     payload: Record<string, unknown>;
   }): Promise<void> {
-    return Promise.resolve(db.from("webhook_events").insert({
+    return WebhookEvent.insert({
       delivery_id: data.deliveryId,
       event_name: data.eventName,
       action: data.action,
@@ -102,9 +101,7 @@ export class WebhookEvent extends ActiveRecord {
       task_id: data.taskId,
       worker_id: data.workerId,
       payload: data.payload as Json,
-    })).then(({ error }) => {
-      if (error) console.error("[db] webhook_events insert error:", error);
-    }).catch((err: unknown) => console.error("[db] unexpected error:", err));
+    }).then(() => undefined).catch((err: unknown) => console.error("[db] webhook_events insert error:", err));
   }
 
   // ── Queries ──────────────────────────────────────────────────────────────────

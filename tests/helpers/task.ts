@@ -57,6 +57,10 @@ export function setupInMemoryTasks(emitter?: { emit: (event: string) => void }) 
       notifyChange();
     });
     vi.spyOn(task, "delete").mockImplementation(async () => {
+      tasks.delete(task.taskId);
+      notifyChange();
+    });
+    vi.spyOn(task, "deleteIfUnassigned").mockImplementation(async () => {
       if (task.assignedAt === null) {
         tasks.delete(task.taskId);
       }

@@ -79,14 +79,21 @@ export function createMemoryTaskDb(): SupabaseClient<Database> {
   // Stub for tables other than "tasks" — always returns empty results so that
   // WebhookEvent.query() / ForemanMessage.query() calls don't return task rows
   // by accident (the real tables don't exist in the in-memory store).
-  const emptyBuilder = {
+  // insert().select().single() returns an error so ActiveRecord.insert() throws,
+  // which is swallowed by the fire-and-forget log() callers.
+  const emptyInsertStub = {
+    select() { return emptyInsertStub; },
+    single() { return Promise.resolve({ data: null, error: new Error("stub: table not tracked in memory-db") }); },
+  };
+  const emptyBuilder: Record<string, (...args: unknown[]) => unknown> = {
     select(_cols?: string) { return emptyBuilder; },
     eq(_col: string, _val: unknown) { return emptyBuilder; },
     is(_col: string, _val: unknown) { return emptyBuilder; },
     order(_col: string, _opts?: unknown) { return emptyBuilder; },
     limit(_n: number) { return ok([] as DbRow[]); },
     maybeSingle() { return ok(null as DbRow | null); },
-    insert(_data: unknown) { return ok(null); },
+    single() { return ok(null as DbRow | null); },
+    insert(_data: unknown) { return emptyInsertStub; },
   };
 
   return {
