@@ -147,9 +147,8 @@ export class Task extends ActiveRecord {
   // ── Private helpers ─────────────────────────────────────────────────────────
 
   private async save(changes: Partial<DbRow>): Promise<void> {
-    await this.update(changes as Record<string, unknown>);
-    // Field sync (remains per-model until codegen issue is done).
-    // Note: "changed" event is already emitted by the base update() above.
+    // Field sync happens before the DB call so that in-memory state is current
+    // when the base update() emits "changed" and listeners re-render.
     if ("worker_id" in changes) this.workerId = changes.worker_id ?? null;
     if ("assigned_at" in changes) this.assignedAt = changes.assigned_at ?? null;
     if ("completed_at" in changes) this.completedAt = changes.completed_at ?? null;
@@ -160,6 +159,8 @@ export class Task extends ActiveRecord {
     if ("title" in changes) this.title = changes.title!;
     if ("body" in changes) this.body = changes.body!;
     if ("labels" in changes) this.labels = changes.labels!;
+    await this.update(changes as Record<string, unknown>);
+    // "changed" event is emitted by the base update() above.
   }
 
   // ── Static finders ──────────────────────────────────────────────────────────
