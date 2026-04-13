@@ -22,7 +22,7 @@ function own(tasks: Task[]) {
 
 /**
  * Insert a task row that is protected from pipeline.test.ts's reconcile().
- * Reconcile calls task.delete() which only deletes rows where assigned_at IS NULL.
+ * Reconcile calls task.deleteIfUnassigned() which only deletes rows where assigned_at IS NULL.
  * Setting assigned_at to a non-null value makes the row immune to deletion.
  * Use this for tests that need a stable row but aren't testing upsert itself.
  */
@@ -236,13 +236,13 @@ describe("Task.list (Supabase)", () => {
   });
 });
 
-// ── Tests: Task.delete (Supabase) ─────────────────────────────────────────────
+// ── Tests: Task.deleteIfUnassigned (Supabase) ─────────────────────────────────
 
-describe("Task.delete (Supabase)", () => {
+describe("Task.deleteIfUnassigned (Supabase)", () => {
   it("deletes a never-assigned pending row", async () => {
     await Task.upsert("dbt-42", 9042, "owner/repo", "Fix", "", []);
     const t = await Task.get("dbt-42");
-    await t!.delete();
+    await t!.deleteIfUnassigned();
 
     expect(own(await Task.list())).toHaveLength(0);
   });
@@ -253,7 +253,7 @@ describe("Task.delete (Supabase)", () => {
     await t!.assign("worker-1");
     await t!.revert(); // revert (e.g. worker_goodbye) — assigned_at stays set
 
-    await t!.delete();
+    await t!.deleteIfUnassigned();
 
     // Row must still exist because it has history
     const tasks = own(await Task.list());
@@ -263,7 +263,7 @@ describe("Task.delete (Supabase)", () => {
 
   it("is a no-op when the row does not exist", async () => {
     const ghost = Task.fromTest({ task_id: "dbt-42", issue_number: 9042 });
-    await expect(ghost.delete()).resolves.toBeUndefined();
+    await expect(ghost.deleteIfUnassigned()).resolves.toBeUndefined();
   });
 });
 
