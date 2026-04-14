@@ -288,7 +288,7 @@ async function restoreTasksFromDb(rows: Array<{
       const t = await Task.get(row.taskId);
       if (t) await t.registerPr(row.prNumber, row.branch ?? null);
     }
-    if (row.branch) tm.registerBranch(row.branch, row.taskId);
+    if (row.branch) { const t = await Task.get(row.taskId); if (t) tm.registerBranch(row.branch, t); }
   }
 }
 

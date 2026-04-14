@@ -155,7 +155,7 @@ describe("handleBusyHello", () => {
 
   describe("queued events", () => {
     it("flushes queued events after reclaim", async () => {
-      addTask({
+      const task = addTask({
         task_id: "10",
         issue_number: 10,
         worker_id: "w1",
@@ -163,7 +163,7 @@ describe("handleBusyHello", () => {
       });
 
       // Queue an event manually via the task manager
-      taskManager.queueEvent("10", { toWorkerPayload: () => ({ name: "issue_comment", payload: {} }), eventName: "issue_comment" } as any);
+      taskManager.queueEvent(task, { toWorkerPayload: () => ({ name: "issue_comment", payload: {} }), eventName: "issue_comment" } as any);
 
       const { wss, sendMsg } = makeWss(taskManager);
       await wss.handleBusyHello("w1", "10", fakeWs());

@@ -115,7 +115,7 @@ describe("routePrEvent — opened", () => {
     );
     expect(task.prNumber).toBe(99);
     expect(task.branch).toBe("feature-branch");
-    expect(taskManager.registerBranch).toHaveBeenCalledWith("feature-branch", "42");
+    expect(taskManager.registerBranch).toHaveBeenCalledWith("feature-branch", expect.objectContaining({ taskId: "42" }));
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("PR #99 registered"));
     expect(result.taskId).toBe("42");
   });
@@ -136,7 +136,7 @@ describe("routePrEvent — closed without merge", () => {
     const task = taskStore.addTask({ task_id: "42", issue_number: 42, pr_number: 99 });
     const w = Worker.register("worker-1", fakeWs());
     task.workerId = "worker-1";
-    w.assign("42");
+    w.assign(task);
     const { wss, sendMsg } = makeDeps();
     const result = await wss.routePrEvent(
       { action: "closed", pull_request: { number: 99, merged: false } },
@@ -163,7 +163,7 @@ describe("routePrEvent — closed with merge", () => {
     const task = taskStore.addTask({ task_id: "42", issue_number: 42, pr_number: 99 });
     const w = Worker.register("worker-1", fakeWs());
     task.workerId = "worker-1";
-    w.assign("42");
+    w.assign(task);
     const { wss, sendMsg } = makeDeps();
     const result = await wss.routePrEvent(
       { action: "closed", pull_request: { number: 99, merged: true } },
@@ -190,7 +190,7 @@ describe("routePrEvent — passthrough", () => {
     const task = taskStore.addTask({ task_id: "42", issue_number: 42, pr_number: 99 });
     const w = Worker.register("worker-1", fakeWs());
     task.workerId = "worker-1";
-    w.assign("42");
+    w.assign(task);
     const { wss, sendMsg } = makeDeps();
     const result = await wss.routePrEvent(
       { action: "labeled", pull_request: { number: 99 } },
@@ -223,7 +223,7 @@ describe("routePrReviewEvent", () => {
     const task = taskStore.addTask({ task_id: "42", issue_number: 42, pr_number: 99 });
     const w = Worker.register("worker-1", fakeWs());
     task.workerId = "worker-1";
-    w.assign("42");
+    w.assign(task);
     const { wss, sendMsg } = makeDeps();
     const result = await wss.routePrReviewEvent(
       { pull_request: { number: 99 } },
@@ -250,7 +250,7 @@ describe("routeCheckEvent — via PR number", () => {
     const task = taskStore.addTask({ task_id: "42", issue_number: 42, pr_number: 99 });
     const w = Worker.register("worker-1", fakeWs());
     task.workerId = "worker-1";
-    w.assign("42");
+    w.assign(task);
     const { wss, sendMsg } = makeDeps();
     const result = await wss.routeCheckEvent(
       { check_run: { pull_requests: [{ number: 99 }] } },
@@ -265,7 +265,7 @@ describe("routeCheckEvent — via PR number", () => {
     const task = taskStore.addTask({ task_id: "42", issue_number: 42, pr_number: 99 });
     const w = Worker.register("worker-1", fakeWs());
     task.workerId = "worker-1";
-    w.assign("42");
+    w.assign(task);
     const { wss, sendMsg } = makeDeps();
     const result = await wss.routeCheckEvent(
       { check_suite: { pull_requests: [{ number: 99 }] } },
@@ -282,7 +282,7 @@ describe("routeCheckEvent — via branch name", () => {
     const task = taskStore.addTask({ task_id: "42", issue_number: 42 });
     const w = Worker.register("worker-1", fakeWs());
     task.workerId = "worker-1";
-    w.assign("42");
+    w.assign(task);
     const { wss, sendMsg, taskManager } = makeDeps();
     taskManager.getTaskForBranch = vi.fn().mockResolvedValue(task);
     const result = await wss.routeCheckEvent(
@@ -299,7 +299,7 @@ describe("routeCheckEvent — via branch name", () => {
     const task = taskStore.addTask({ task_id: "42", issue_number: 42 });
     const w = Worker.register("worker-1", fakeWs());
     task.workerId = "worker-1";
-    w.assign("42");
+    w.assign(task);
     const { wss, sendMsg, taskManager } = makeDeps();
     taskManager.getTaskForBranch = vi.fn().mockResolvedValue(task);
     const result = await wss.routeCheckEvent(
@@ -487,7 +487,7 @@ describe("routeIssueEvent — passthrough forwarding", () => {
     const task = taskStore.addTask({ task_id: "42", issue_number: 42 });
     const w = Worker.register("worker-1", fakeWs());
     task.workerId = "worker-1";
-    w.assign("42");
+    w.assign(task);
     const { wss, sendMsg } = makeDeps();
     const issue = { number: 42 };
     const result = await wss.routeIssueEvent(
@@ -504,7 +504,7 @@ describe("routeIssueEvent — passthrough forwarding", () => {
     const task = taskStore.addTask({ task_id: "42", issue_number: 42, pr_number: 99 });
     const w = Worker.register("worker-1", fakeWs());
     task.workerId = "worker-1";
-    w.assign("42");
+    w.assign(task);
     const { wss, sendMsg } = makeDeps();
     const issue = { number: 99 }; // PR number in issue.number
     const result = await wss.routeIssueEvent(

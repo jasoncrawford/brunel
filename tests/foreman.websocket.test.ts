@@ -288,7 +288,8 @@ describe("foreman WebSocket protocol", () => {
   it("routeEvent queues event when no worker is assigned", async () => {
     await makeTask(taskManager, 1);
     await foremanWss.routeEvent("evt-1", "issue_comment", { issue: { number: 1 } });
-    const events = taskManager.drainEvents("1");
+    const t = await Task.get("1");
+    const events = taskManager.drainEvents(t!);
     expect(events).toHaveLength(1);
     expect(events[0].eventName).toBe("issue_comment");
   });
@@ -489,7 +490,7 @@ describe("hello_ack handshake", () => {
     await makeTask(taskManager, 1);
     const t = await Task.get("1");
     await t!.assign("w1");
-    { const w = Worker.register("w1", {} as ReturnType<typeof connect> extends Promise<infer T> ? T : never); w.assign("1"); w.markDisconnected(); }
+    { const w = Worker.register("w1", {} as ReturnType<typeof connect> extends Promise<infer T> ? T : never); w.assign(t!); w.markDisconnected(); }
     await foremanWss.routeEvent("evt-1", "issue_comment", { issue: { number: 1 } });
 
     const ws = await connect();
@@ -806,7 +807,8 @@ describe("disconnected worker state", () => {
 
     await foremanWss.routeEvent("evt-1", "issue_comment", { issue: { number: 1 }, comment: { body: "hi" } });
 
-    const queued = taskManager.drainEvents("1");
+    const t = await Task.get("1");
+    const queued = taskManager.drainEvents(t!);
     expect(queued).toHaveLength(1);
     expect(queued[0].eventName).toBe("issue_comment");
   });

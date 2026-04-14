@@ -58,19 +58,21 @@ describe("TaskManager — queue operations", () => {
 
   it("queueEvent appends to task event queue", async () => {
     await registerBase();
+    const t = await Task.get("42");
     const evt = WebhookEvent.fromIncoming("e1", "check_run", {});
-    m.queueEvent("42", evt);
-    const drained = m.drainEvents("42");
+    m.queueEvent(t!, evt);
+    const drained = m.drainEvents(t!);
     expect(drained).toHaveLength(1);
   });
 
   it("drainEvents returns all events and clears the queue", async () => {
     await registerBase();
+    const t = await Task.get("42");
     const evt = WebhookEvent.fromIncoming("e1", "check_run", {});
-    m.queueEvent("42", evt);
-    const drained = m.drainEvents("42");
+    m.queueEvent(t!, evt);
+    const drained = m.drainEvents(t!);
     expect(drained).toHaveLength(1);
-    expect(m.drainEvents("42")).toHaveLength(0);
+    expect(m.drainEvents(t!)).toHaveLength(0);
   });
 
   it("Task.getByIssue looks up by issueNumber", async () => {
@@ -98,7 +100,8 @@ describe("TaskManager — queue operations", () => {
 
   it("registerBranch + getTaskForBranch looks up task by branch name", async () => {
     await registerBase();
-    m.registerBranch("fix-issue-42", "42");
+    const t = await Task.get("42");
+    m.registerBranch("fix-issue-42", t!);
     expect((await m.getTaskForBranch("fix-issue-42"))?.taskId).toBe("42");
   });
 

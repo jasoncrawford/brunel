@@ -82,10 +82,10 @@ export class TaskManager extends EventEmitter {
   private async tryAssignWork(workerId: string): Promise<AssignOutcome | null> {
     const task = await this.nextPending(t => t.blockersLoaded && t.status === "pending");
     if (!task) return null;
-    Worker.get(workerId)?.assign(task.taskId);
+    Worker.get(workerId)?.assign(task);
     try {
       await task.assign(workerId);
-      return { ok: true, task, queued: this.drainEvents(task.taskId), workerId };
+      return { ok: true, task, queued: this.drainEvents(task), workerId };
     } catch (err) {
       Worker.get(workerId)?.release();
       return { ok: false, workerId, err };
@@ -100,16 +100,16 @@ export class TaskManager extends EventEmitter {
 
   // ── Memory-only write operations (ephemeral data) ─────────────────────────
 
-  queueEvent(taskId: string, event: WebhookEvent): void {
-    this.eventQueue.enqueue(taskId, event);
+  queueEvent(task: Task, event: WebhookEvent): void {
+    this.eventQueue.enqueue(task, event);
   }
 
-  drainEvents(taskId: string): WebhookEvent[] {
-    return this.eventQueue.drain(taskId);
+  drainEvents(task: Task): WebhookEvent[] {
+    return this.eventQueue.drain(task);
   }
 
-  registerBranch(branch: string, taskId: string): void {
-    this.branchToTaskId.set(branch, taskId);
+  registerBranch(branch: string, task: Task): void {
+    this.branchToTaskId.set(branch, task.taskId);
   }
 
   // ── Issue-lifecycle methods ───────────────────────────────────────────────
@@ -207,7 +207,7 @@ export class TaskManager extends EventEmitter {
     const tasks = await Task.list();
     for (const task of tasks) {
       if (task.completedAt) continue;
-      if (task.branch) this.branchToTaskId.set(task.branch, task.taskId);
+      if (task.branch) this.registerBranch(task.branch, task);
       log(`[startup] restored task #${task.taskId} (${task.status})`);
     }
   }

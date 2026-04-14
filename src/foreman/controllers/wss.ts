@@ -290,10 +290,10 @@ export class ForemanWss {
 
   // ── Hello handlers ───────────────────────────────────────────────────────────
 
-  private flushQueuedEvents(workerId: string, taskId: string, issueRef: string | number): void {
-    for (const evt of this.taskManager.drainEvents(taskId)) {
-      this.sendMsg(workerId, { type: "event_notification", taskId, event: evt.toWorkerPayload() });
-      this.workerLog(workerId, `→ event_notification #${issueRef} ${evt.eventName} (queued)`);
+  private flushQueuedEvents(workerId: string, task: Task): void {
+    for (const evt of this.taskManager.drainEvents(task)) {
+      this.sendMsg(workerId, { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload() });
+      this.workerLog(workerId, `→ event_notification #${task.issueNumber} ${evt.eventName} (queued)`);
     }
   }
 
@@ -304,14 +304,14 @@ export class ForemanWss {
 
   private async reclaimWorker(workerId: string, task: Task, ws: WebSocket): Promise<void> {
     const w = Worker.register(workerId, ws);
-    w.assign(task.taskId);
+    w.assign(task);
     // Only call assign if task is not already complete (to preserve task status)
     if (task.status !== "complete") {
       await task.assign(workerId);
     }
     // For complete tasks, the task stays complete while worker finishes cleanup/finalization work
     this.sendMsg(workerId, { type: "hello_ack", workerId, status: "busy" }, task.taskId);
-    this.flushQueuedEvents(workerId, task.taskId, task.issueNumber);
+    this.flushQueuedEvents(workerId, task);
   }
 
   /**
@@ -381,12 +381,12 @@ export class ForemanWss {
   forwardEvent(task: Task, evt: WebhookEvent, ref: string): void {
     if (task.workerId) {
       const worker = Worker.get(task.workerId);
-      if (worker && worker.currentTaskId !== task.taskId) {
+      if (worker && worker.currentTask?.taskId !== task.taskId) {
         log(`[task ${ref}] ${evt.eventName} dropped — worker ${shortWorkerId(task.workerId)} is now on a different task`);
         return;
       }
       if (worker?.status === "disconnected") {
-        this.taskManager.queueEvent(task.taskId, evt);
+        this.taskManager.queueEvent(task, evt);
         log(`[task ${ref}] ${evt.eventName} queued (worker ${shortWorkerId(task.workerId)} disconnected)`);
       } else if (worker) {
         this.sendMsg(task.workerId, { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload() });
@@ -395,7 +395,7 @@ export class ForemanWss {
         log(`[task ${ref}] ${evt.eventName} DROPPED — worker ${shortWorkerId(task.workerId)} not in registry (disconnected?)`);
       }
     } else if (task.status === "pending" || task.status === "blocked") {
-      this.taskManager.queueEvent(task.taskId, evt);
+      this.taskManager.queueEvent(task, evt);
       log(`[task ${ref}] ${evt.eventName} queued (no worker assigned)`);
     }
   }
@@ -450,7 +450,7 @@ export class ForemanWss {
         const linkedTask = await Task.getByIssue(linkedIssue);
         if (linkedTask) {
           const branch = strProp(pr.head, "ref");
-          if (branch) this.taskManager.registerBranch(branch, linkedTask.taskId);
+          if (branch) this.taskManager.registerBranch(branch, linkedTask);
           await linkedTask.registerPr(prNumber, branch ?? null).catch((err: unknown) =>
             log(`ERROR Failed to register PR for task #${linkedTask.taskId}: ${fmtError(err)}`)
           );
