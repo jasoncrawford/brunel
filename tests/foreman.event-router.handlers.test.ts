@@ -58,10 +58,8 @@ function makeDeps(): TestDeps {
     taskManager: taskManager as any,
     server: http.createServer(),
   });
-  const sendMsg = vi.fn();
-  const flog = vi.fn();
-  wss.sendMsg = sendMsg;
-  wss.flog = flog;
+  const sendMsg = vi.spyOn(wss, "sendMsg").mockImplementation(() => {});
+  const flog = vi.spyOn(wss, "flog").mockImplementation(() => {});
   return { wss, sendMsg, flog, taskManager };
 }
 

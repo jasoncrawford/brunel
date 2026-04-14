@@ -189,10 +189,6 @@ export class ForemanWss {
   private readonly adminWss?: AdminWss;
   private nextBroadcastId = 1;
 
-  // Public so tests can override with vi.fn() to capture and assert on calls.
-  flog: (msg: string) => void;
-  sendMsg: (workerId: string, msg: Wire.ForemanMessage, logTaskId?: string) => void;
-
   constructor({ config, server, taskManager, adminWss }: ForemanWssOptions) {
     this.taskManager = taskManager;
     this.repo = config.githubRepo;
@@ -200,18 +196,6 @@ export class ForemanWss {
     this.githubApiUrl = config.githubApiUrl;
     this.taskLabel = config.taskLabel;
     this.adminWss = adminWss;
-
-    this.flog = (msg) => {
-      console.log(`${new Date().toISOString()} ${msg}`);
-    };
-
-    this.sendMsg = (workerId, msg, logTaskId) => {
-      const taskId = logTaskId ?? (("taskId" in msg ? msg.taskId : null) ?? null);
-      Worker.get(workerId)?.send(msg);
-      const msgPayload = msg as unknown as Record<string, unknown>;
-      void ForemanMessage.log({ direction: "sent", workerId, taskId, msgType: msg.type, payload: msgPayload });
-      this.broadcastMessageEvent({ direction: "sent", workerId, taskId, msgType: msg.type, payload: msgPayload });
-    };
 
     const debouncedBroadcast = debounce(() => this.broadcastSnapshot(), 10);
     taskManager.on("changed", debouncedBroadcast);
@@ -404,6 +388,18 @@ export class ForemanWss {
         client.close(1001, "Server shutting down");
       }
     });
+  }
+
+  flog(msg: string): void {
+    console.log(`${new Date().toISOString()} ${msg}`);
+  }
+
+  sendMsg(workerId: string, msg: Wire.ForemanMessage, logTaskId?: string): void {
+    const taskId = logTaskId ?? (("taskId" in msg ? msg.taskId : null) ?? null);
+    Worker.get(workerId)?.send(msg);
+    const msgPayload = msg as unknown as Record<string, unknown>;
+    void ForemanMessage.log({ direction: "sent", workerId, taskId, msgType: msg.type, payload: msgPayload });
+    this.broadcastMessageEvent({ direction: "sent", workerId, taskId, msgType: msg.type, payload: msgPayload });
   }
 
   private broadcastMessageEvent(data: { direction: string; workerId: string | null; taskId: string | null; msgType: string; payload?: Record<string, unknown> }): void {
