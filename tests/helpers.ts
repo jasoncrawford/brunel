@@ -21,12 +21,7 @@ export async function registerTestCommands(): Promise<CommandRegistry> {
   const { CommandRegistry } = await import("../src/agent/command-registry.js");
   const { registerWorkspaceCommands } = await import("../src/agent/workspace.js");
   const registry = new CommandRegistry();
-  registerWorkspaceCommands({
-    workspace: { current: undefined },
-    config: undefined,
-    originalCwd: process.cwd(),
-    confirm: async () => true,
-  }, registry.scoped("workspace"));
+  registerWorkspaceCommands(undefined, registry.scoped("workspace"));
   const noop = async () => {};
   registry.register("exit",   { description: "Exit", handler: noop });
   registry.register("clear",  { description: "Clear the conversation", handler: noop });

@@ -14,22 +14,50 @@ vi.mock("ws", async () => {
   };
 });
 
+// Singleton fake workspace returned by the mocked Workspace constructor.
+// vi.hoisted() is required so it is defined before vi.mock() factories run.
+const fakeWorkspace = vi.hoisted(() => {
+  const ws: {
+    dir: string;
+    workspaceDir: string;
+    sessionId: string;
+    originalCwd: string;
+    isCreated: boolean;
+    confirm: ReturnType<typeof vi.fn>;
+    destroy: ReturnType<typeof vi.fn>;
+    checkSafety: ReturnType<typeof vi.fn>;
+    reset: ReturnType<typeof vi.fn>;
+    create: ReturnType<typeof vi.fn>;
+  } = {
+    dir: "/fake/workers/test-worker",
+    workspaceDir: "/fake/workers",
+    sessionId: "test-worker",
+    originalCwd: "/fake/original",
+    isCreated: false,
+    confirm: vi.fn().mockResolvedValue(true),
+    destroy: vi.fn().mockResolvedValue(undefined),
+    checkSafety: vi.fn().mockResolvedValue({
+      uncommittedFiles: [],
+      unpushedCommits: [],
+      noUpstream: false,
+    }),
+    reset: vi.fn().mockResolvedValue(undefined),
+    create: vi.fn().mockImplementation(async () => { ws.isCreated = true; }),
+  };
+  return ws;
+});
+
 vi.mock("../src/agent/workspace.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/agent/workspace.js")>();
+  // Use a regular function (not arrow) so it can be called with `new`.
+  // A constructor that returns an object explicitly uses that object (JS spec).
+  // eslint-disable-next-line prefer-arrow-callback
+  const MockWorkspace = vi.fn().mockImplementation(function() { return fakeWorkspace; });
+  // Keep the static prune method
+  (MockWorkspace as any).prune = vi.fn().mockResolvedValue([]);
   return {
     ...actual,
-    Workspace: {
-      create: vi.fn().mockResolvedValue({
-        dir: "/fake/workers/test-worker",
-        destroy: vi.fn().mockResolvedValue(undefined),
-        checkSafety: vi.fn().mockResolvedValue({
-          uncommittedFiles: [],
-          unpushedCommits: [],
-          noUpstream: false,
-        }),
-        reset: vi.fn().mockResolvedValue(undefined),
-      }),
-    },
+    Workspace: MockWorkspace,
     confirmIfUnsafe: vi.fn().mockResolvedValue(true),
   };
 });
@@ -45,7 +73,7 @@ vi.mock("../src/agent/input.js", async (importOriginal) => {
 
 import { main } from "../src/agent/index.js";
 import type { WorkerModeConfig } from "../src/agent/worker.js";
-import { Workspace, confirmIfUnsafe } from "../src/agent/workspace.js";
+import { confirmIfUnsafe } from "../src/agent/workspace.js";
 import * as inputModule from "../src/agent/input.js";
 import * as displayModule from "../src/agent/display.js";
 import { stripAnsi } from "./helpers.js";
@@ -124,6 +152,11 @@ describe("workerMain exit behavior", () => {
     // Default: ask returns __eof__ immediately (^D pressed)
     vi.mocked(inputModule.ask).mockResolvedValue("__eof__");
     vi.mocked(confirmIfUnsafe).mockResolvedValue(true);
+    // Reset fake workspace mocks between tests
+    fakeWorkspace.isCreated = false;
+    vi.mocked(fakeWorkspace.destroy).mockResolvedValue(undefined);
+    vi.mocked(fakeWorkspace.checkSafety).mockResolvedValue({ uncommittedFiles: [], unpushedCommits: [], noUpstream: false });
+    vi.mocked(fakeWorkspace.create).mockImplementation(async () => { fakeWorkspace.isCreated = true; });
   });
 
   afterEach(() => {
@@ -146,28 +179,11 @@ describe("workerMain exit behavior", () => {
   });
 
   it("destroys workspace before exiting when workspace is safe", async () => {
-    const fakeWorkspace = {
-      dir: "/fake/workers/test-worker",
-      destroy: vi.fn().mockResolvedValue(undefined),
-      checkSafety: vi.fn().mockResolvedValue({ uncommittedFiles: [], unpushedCommits: [], noUpstream: false }),
-      reset: vi.fn().mockResolvedValue(undefined),
-    };
-    vi.mocked(Workspace.create).mockResolvedValue(fakeWorkspace as any);
-
     await runWorkerMain();
-
     expect(fakeWorkspace.destroy).toHaveBeenCalledOnce();
   });
 
   it("does not call workspace.destroy when SIGINT fires while a query is running", async () => {
-    const fakeWorkspace = {
-      dir: "/fake/workers/test-worker",
-      destroy: vi.fn().mockResolvedValue(undefined),
-      checkSafety: vi.fn().mockResolvedValue({ uncommittedFiles: [], unpushedCommits: [], noUpstream: false }),
-      reset: vi.fn().mockResolvedValue(undefined),
-    };
-    vi.mocked(Workspace.create).mockResolvedValue(fakeWorkspace as any);
-
     // runQuery blocks until resolved — simulates a running query
     let resolveQuery!: (value: string | undefined) => void;
     const runQueryFn = vi.fn().mockImplementation(
@@ -186,8 +202,6 @@ describe("workerMain exit behavior", () => {
     const exitSpy = vi.spyOn(process, "exit").mockImplementation((code?: number | string) => {
       throw new Error("__process_exit__");
     }) as unknown as ReturnType<typeof vi.spyOn>;
-
-    const chdirSpy = vi.spyOn(process, "chdir").mockImplementation(() => {});
 
     let workerDone = false;
     const workerPromise = main(runQueryFn, permConfig, WORKER_CONFIG).then(
@@ -212,18 +226,9 @@ describe("workerMain exit behavior", () => {
     expect(workerDone).toBe(true);
 
     exitSpy.mockRestore();
-    chdirSpy.mockRestore();
   });
 
   it("does not call workspace.destroy a second time if SIGINT fires after loop exits", async () => {
-    const fakeWorkspace = {
-      dir: "/fake/workers/test-worker",
-      destroy: vi.fn().mockResolvedValue(undefined),
-      checkSafety: vi.fn().mockResolvedValue({ uncommittedFiles: [], unpushedCommits: [], noUpstream: false }),
-      reset: vi.fn().mockResolvedValue(undefined),
-    };
-    vi.mocked(Workspace.create).mockResolvedValue(fakeWorkspace as any);
-
     // Simulate: user types /exit, cleanup runs, process tries to exit.
     // Before process.exit completes (in our mock it throws), emit SIGINT.
     const exitSpy = vi.spyOn(process, "exit").mockImplementation((code?: number | string) => {

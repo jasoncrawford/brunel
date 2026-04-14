@@ -9,7 +9,6 @@ import { buildInitialPrompt, buildEventPrompt } from "./templates.js";
 import type { EffortValue } from "./effort.js";
 import * as Wire from "../../shared/wire.js";
 import { Workspace, confirmIfUnsafe } from "./workspace.js";
-import type { WorkspaceCommandDeps } from "./workspace.js";
 import { fmtError } from "../utils.js";
 import type { CommandRegistry } from "./command-registry.js";
 import { pick } from "./input.js";
@@ -183,17 +182,9 @@ export type WorkerDisplay = {
   setOnToolResultCallback?: (fn: ((toolName: string) => void) | null) => void;
 };
 
-export type WorkspaceCtx = {
-  workspace: Workspace;
-  originalCwd: string;
-  workspaceDir: string;
-  repoUrl: string;
-  confirm: (msg: string) => Promise<boolean>;
-};
-
 export type WorkerSessionOptions = {
   afterTask?: () => Promise<void>;
-  workspaceCtx?: WorkspaceCtx;
+  workspace?: Workspace;
   /** Interval in ms between worker-sent pings. Dead connections are detected after
    * one interval with no pong. Default is set in the config schema (pingIntervalMs). */
   pingIntervalMs?: number;
@@ -352,30 +343,9 @@ export class WorkerSession {
     return "task-complete";
   }
 
-  /**
-   * Returns the workspace command deps for use with registerWorkspaceCommands().
-   * Exposes a proxy so workspace mutations from commands update the session state.
-   */
-  get workspaceCommandDeps(): WorkspaceCommandDeps {
-    const self = this;
-    return {
-      workspace: {
-        get current() { return self.options.workspaceCtx?.workspace; },
-        set current(ws: Workspace | undefined) {
-          if (self.options.workspaceCtx) {
-            if (ws) { self.options.workspaceCtx.workspace = ws; }
-            else { self.options.workspaceCtx = undefined; }
-          }
-        },
-      },
-      config: this.options.workspaceCtx ? {
-        workspaceDir: this.options.workspaceCtx.workspaceDir,
-        repoUrl: this.options.workspaceCtx.repoUrl,
-        sessionId: this.agentStatus.agentId,
-      } : undefined,
-      originalCwd: this.options.workspaceCtx?.originalCwd ?? process.cwd(),
-      confirm: this.options.workspaceCtx?.confirm ?? (() => Promise.resolve(false)),
-    };
+  /** Returns the workspace for use with registerWorkspaceCommands(). */
+  get workspace(): Workspace | undefined {
+    return this.options.workspace;
   }
 
   /**
@@ -562,9 +532,9 @@ export class WorkerSession {
           branch: "",
         });
         this.display.print(display.c.amber("Task cancelled (reassigned to another worker)."));
-        const ctx = this.options.workspaceCtx;
-        if (ctx) {
-          void ctx.workspace.reset().then(() => {
+        const workspace = this.options.workspace;
+        if (workspace?.isCreated) {
+          void workspace.reset().then(() => {
             this.display.print(display.c.amber("Workspace reset."));
           }).catch((err: unknown) => {
             this.display.print(display.c.boldRed(`Workspace reset failed: ${err instanceof Error ? err.message : String(err)}`));
@@ -585,7 +555,7 @@ export class WorkerSession {
       this.prIsClosed = false;
       this.agentStatus.update({ taskNumber: msg.issue.number, prNumber: undefined });
       void this.refreshBranch();
-      const initialPrompt = buildInitialPrompt(msg.issue, !!this.options.workspaceCtx);
+      const initialPrompt = buildInitialPrompt(msg.issue, !!this.options.workspace);
       this.display.print(display.c.sageGreen(initialPrompt));
       this.enqueuePrompt(initialPrompt, true); // fresh=true: new task, reset session
     } else if (msg.type === "event_notification") {
@@ -693,17 +663,18 @@ export async function startWorkerMode(config: WorkerModeConfig, agentStatus: Age
   const workspaceDir = config.workspaceDir ?? path.join(os.homedir(), ".brunel", "workers");
   const repoUrl = config.repoUrl ?? `https://${config.githubToken}@github.com/${config.githubRepo}.git`;
 
-  const workspace = await Workspace.create(workspaceDir, agentStatus.agentId, repoUrl);
-  process.chdir(workspace.dir);
-
   const confirm = async (msg: string): Promise<boolean> => {
     display.print(display.c.amber(`\n⚠ Potential data loss:\n${msg}`));
     const idx = await pick(["Yes, proceed", "No, cancel"]);
     return idx === 0;
   };
 
+  const workspace = new Workspace(workspaceDir, agentStatus.agentId, repoUrl, originalCwd, confirm);
+  await workspace.create();
+  process.chdir(workspace.dir);
+
   const afterTask = async () => {
-    const ok = await confirmIfUnsafe(workspace, confirm);
+    const ok = await confirmIfUnsafe(workspace, workspace.confirm);
     if (!ok) {
       display.print(display.c.amber("Workspace reset cancelled. Task not marked complete."));
       throw new Error("cancelled");
@@ -744,14 +715,14 @@ export async function startWorkerMode(config: WorkerModeConfig, agentStatus: Age
 
   const session = new WorkerSession(agentStatus, wsFactory, workerDisplay, {
     afterTask,
-    workspaceCtx: { workspace, originalCwd, workspaceDir, repoUrl, confirm },
+    workspace,
     pingIntervalMs: config.pingIntervalMs,
   });
 
   const shutdown = async () => {
     if (shuttingDown) return;
     shuttingDown = true;
-    const ok = await confirmIfUnsafe(workspace, confirm);
+    const ok = await confirmIfUnsafe(workspace, workspace.confirm);
     if (ok) await workspace.destroy();
     process.exit(0);
   };
@@ -775,7 +746,7 @@ export async function startWorkerMode(config: WorkerModeConfig, agentStatus: Age
   const cleanup = async () => {
     session.sendGoodbye();
     shuttingDown = true;
-    const ok = await confirmIfUnsafe(workspace, confirm);
+    const ok = await confirmIfUnsafe(workspace, workspace.confirm);
     if (ok) await workspace.destroy();
     process.stdout.write("\x1b[?2004l\r\n");
     if (process.stdin.isTTY) process.stdin.setRawMode(false);
