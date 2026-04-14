@@ -36,11 +36,6 @@ function numProp(obj: unknown, key: string): number | null {
   return typeof val === "number" ? val : null;
 }
 
-function extractLinkedIssueNumber(body: string): number | null {
-  const match = /(?:closes|fixes|resolves)\s+#(\d+)/i.exec(body);
-  return match ? parseInt(match[1], 10) : null;
-}
-
 export interface RouteResult { taskId: string | null; workerId: string | null; }
 
 // ── ForemanWss class ──────────────────────────────────────────────────────────
@@ -73,6 +68,9 @@ export class ForemanWss {
     const debouncedBroadcast = debounce(() => this.broadcastSnapshot(), 10);
     taskManager.on("changed", debouncedBroadcast);
     Worker.events.on("changed", debouncedBroadcast);
+    taskManager.on("deps_loaded", () => {
+      this.assignWork().catch((err) => log(`ERROR assignWork after deps_loaded: ${fmtError(err)}`));
+    });
 
     const wss = new WebSocketServer({ noServer: true });
     this.wss = wss;
@@ -411,13 +409,7 @@ export class ForemanWss {
       this.sendMsg(worker, {
         type: "task_assigned",
         taskId: task.taskId,
-        issue: {
-          number: task.issueNumber,
-          title: task.title,
-          body: task.body,
-          labels: task.labels,
-          repoUrl: task.repoUrl,
-        },
+        issue: task.toAssignmentPayload(),
       });
       log(`[worker ${shortWorkerId(worker.workerId)}] → task_assigned #${task.issueNumber} "${task.title}"`);
       for (const evt of queued) {
@@ -425,12 +417,6 @@ export class ForemanWss {
         log(`[worker ${shortWorkerId(worker.workerId)}] → event_notification #${task.issueNumber} ${evt.eventName} (queued)`);
       }
     }
-  }
-
-  private startDepsLoad(issueNumber: number, body: string): void {
-    this.taskManager.fetchAndLoadDeps(issueNumber, body, { repo: this.repo, token: this.token, apiUrl: this.githubApiUrl })
-      .then(() => this.assignWork())
-      .catch((err) => log(`ERROR fetching deps for #${issueNumber}: ${fmtError(err)}`));
   }
 
   async routePrEvent(p: R, evt: WebhookEvent): Promise<RouteResult> {
@@ -445,44 +431,15 @@ export class ForemanWss {
     if (p.action === "synchronize") return result(await Task.getByPr(prNumber));
 
     if (p.action === "opened" && pr) {
-      const linkedIssue = extractLinkedIssueNumber(String(pr.body ?? ""));
-      if (linkedIssue !== null) {
-        const linkedTask = await Task.getByIssue(linkedIssue);
-        if (linkedTask) {
-          const branch = strProp(pr.head, "ref");
-          if (branch) this.taskManager.registerBranch(branch, linkedTask);
-          await linkedTask.registerPr(prNumber, branch ?? null).catch((err: unknown) =>
-            log(`ERROR Failed to register PR for task #${linkedTask.taskId}: ${fmtError(err)}`)
-          );
-          log(`[task #${linkedIssue}] PR #${prNumber} registered`);
-        }
-      }
+      const task = await this.taskManager.handlePrOpenedEvent(prNumber, String(pr.body ?? ""), strProp(pr.head, "ref"));
+      if (task) this.forwardEvent(task, evt, `PR #${prNumber}`);
+      return result(task);
     }
 
-    if (p.action === "closed" && pr && !pr.merged) {
-      const task = await Task.getByPr(prNumber);
-      if (task) {
-        log(`[task #${task.issueNumber}] PR #${prNumber} unregistered (closed without merging)`);
-        await task.unregisterPr().catch((err: unknown) =>
-          log(`ERROR Failed to unregister PR #${prNumber}: ${fmtError(err)}`)
-        );
-        this.forwardEvent(task, evt, `PR #${prNumber}`);
-        return result(task);
-      }
-      return result(null);
-    }
-
-    if (p.action === "closed" && pr && pr.merged) {
-      const task = await Task.getByPr(prNumber);
-      if (task) {
-        log(`[task #${task.issueNumber}] PR #${prNumber} merged`);
-        await task.mergePr().catch((err: unknown) =>
-          log(`ERROR Failed to record PR #${prNumber} merge: ${fmtError(err)}`)
-        );
-        this.forwardEvent(task, evt, `PR #${prNumber}`);
-        return result(task);
-      }
-      return result(null);
+    if (p.action === "closed" && pr) {
+      const task = await this.taskManager.handlePrClosedEvent(prNumber, !!pr.merged);
+      if (task) this.forwardEvent(task, evt, `PR #${prNumber}`);
+      return result(task);
     }
 
     const task = await Task.getByPr(prNumber);
@@ -510,19 +467,15 @@ export class ForemanWss {
 
     const inner = (name === "check_run" ? p.check_run : p.check_suite) as R | undefined;
     const prs = inner?.pull_requests as Array<{ number: number }> | undefined;
-
-    if (prs && prs.length > 0) {
-      const task = await Task.getByPr(prs[0].number);
-      if (task) { this.forwardEvent(task, evt, `PR #${prs[0].number}`); return result(task); }
-    }
-
     const headBranch = name === "check_run"
       ? strProp(inner?.check_suite, "head_branch") ?? ""
       : strProp(inner, "head_branch") ?? "";
-    if (headBranch) {
-      const task = await this.taskManager.getTaskForBranch(headBranch);
-      if (task) { this.forwardEvent(task, evt, `branch ${headBranch}`); return result(task); }
-    }
+
+    const found = await this.taskManager.getTaskForCheckEvent(
+      prs?.map((pr) => pr.number) ?? [],
+      headBranch,
+    );
+    if (found) { this.forwardEvent(found.task, evt, found.ref); return result(found.task); }
     return result(null);
   }
 
@@ -535,9 +488,10 @@ export class ForemanWss {
     // GitHub issue_comment events on PRs have the PR number in issue.number.
     if (!task) task = await Task.getByPr(issueNumber);
 
+    const action = p.action as string | undefined;
+
     // If the issue isn't queued yet, check if this webhook should enqueue it.
     if (!task) {
-      const action = p.action as string | undefined;
       const labeledNow =
         action === "labeled" &&
         (p.label as R | undefined)?.name === this.taskLabel;
@@ -546,26 +500,24 @@ export class ForemanWss {
         (issue.labels as Array<{ name: string }> | undefined)?.some((l) => l.name === this.taskLabel);
 
       if (labeledNow || openedWithLabel) {
-        const issueState = String(issue.state ?? "open");
-        if (issueState === "closed") {
-          log(`[task #${issueNumber}] issues/${action}: ignoring — issue is closed (title: ${JSON.stringify(String(issue.title ?? ""))})`);
-          return result(null);
-        }
-
         const labels = (issue.labels as Array<{ name: string }> | undefined)?.map((l) => l.name) ?? [];
-        // Track as open and persist to DB.
-        await this.taskManager.enqueueIssue(String(issueNumber), issueNumber, this.repo, String(issue.title ?? ""), String(issue.body ?? ""), labels)
-          .catch((err: unknown) => log(`ERROR Failed to persist task #${issueNumber}: ${fmtError(err)}`));
-
-        this.startDepsLoad(issueNumber, String(issue.body ?? ""));
-        await this.assignWork();
+        const enqueued = await this.taskManager.handleIssueLabeledEvent(
+          issueNumber,
+          this.repo,
+          String(issue.title ?? ""),
+          String(issue.body ?? ""),
+          labels,
+          String(issue.state ?? "open"),
+          { repo: this.repo, token: this.token, apiUrl: this.githubApiUrl },
+        ).catch((err: unknown) => {
+          log(`ERROR Failed to persist task #${issueNumber}: ${fmtError(err)}`);
+          return null;
+        });
+        if (!enqueued) return result(null);
         log(`[task #${issueNumber}] enqueued via issues/${action}`);
-        return { taskId: String(issueNumber), workerId: null };
+        return result(enqueued);
       }
     }
-
-    // ── Dependency graph updates ─────────────────────────────────────────────
-    const action = p.action as string | undefined;
 
     if (
       action === "unlabeled" &&
@@ -596,13 +548,12 @@ export class ForemanWss {
 
     if (action === "edited") {
       const changes = p.changes as R | undefined;
-      if (changes?.body) {
-        const trackedTask = await Task.getByIssue(issueNumber);
-        if (trackedTask) {
-          const newBody = String(issue.body ?? "");
-          this.taskManager.resetBlockers(issueNumber);
-          this.startDepsLoad(issueNumber, newBody);
-        }
+      if (changes?.body && task) {
+        this.taskManager.handleIssueBodyEditedEvent(
+          issueNumber,
+          String(issue.body ?? ""),
+          { repo: this.repo, token: this.token, apiUrl: this.githubApiUrl },
+        );
       }
     }
 
