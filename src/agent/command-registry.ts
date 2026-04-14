@@ -5,6 +5,70 @@ import fs from "fs";
 export type HandlerResult = void | "exit" | "task-complete";
 export type CommandHandler = (args: string) => Promise<HandlerResult>;
 
+// ── Argument application ─────────────────────────────────────────────────────
+
+/**
+ * Apply args to a loaded command/skill content string.
+ * If content contains $ARGUMENTS, all occurrences are replaced with args (even if empty).
+ * Otherwise, if args is non-empty, appends "\nARGUMENTS: <args>".
+ * Otherwise returns content unchanged.
+ */
+export function applyArguments(content: string, args: string): string {
+  if (content.includes("$ARGUMENTS")) {
+    return content.replaceAll("$ARGUMENTS", args);
+  }
+  if (args) {
+    return `${content}\nARGUMENTS: ${args}`;
+  }
+  return content;
+}
+
+// ── Dispatch types ────────────────────────────────────────────────────────────
+
+export type SlashCommandResult =
+  | { type: "command"; name: string }
+  | { type: "unknown_command"; command: string };
+
+export type DispatchResult =
+  | { type: "command"; name: string; args: string }
+  | { type: "unknown_command"; command: string }
+  | { type: "skip" }
+  | { type: "query"; prompt: string };
+
+// ── Command filtering ─────────────────────────────────────────────────────────
+
+/**
+ * Filter commands by substring. Case-insensitive. Empty query returns all.
+ * Prefix matches come before non-prefix substring matches. Preserves relative
+ * input order within each group.
+ */
+export function matchCommands(query: string, commands: string[]): string[] {
+  if (query === "") return commands;
+  const q = query.toLowerCase();
+  const prefix = commands.filter(cmd => cmd.toLowerCase().startsWith(q));
+  const nonPrefix = commands.filter(cmd => !cmd.toLowerCase().startsWith(q) && cmd.toLowerCase().includes(q));
+  return [...prefix, ...nonPrefix];
+}
+
+/**
+ * Filter CommandSuggestion objects by substring of name or description.
+ * Case-insensitive. Empty query returns all commands.
+ * Sort order: prefix matches of name, then non-prefix name substring matches,
+ * then description-only matches.
+ */
+export function filterCommands(query: string, commands: CommandSuggestion[]): CommandSuggestion[] {
+  if (query === "") return commands;
+  const q = query.toLowerCase();
+  const prefixName = commands.filter(c => c.name.toLowerCase().startsWith(q));
+  const substringName = commands.filter(
+    c => !c.name.toLowerCase().startsWith(q) && c.name.toLowerCase().includes(q),
+  );
+  const descOnly = commands.filter(
+    c => !c.name.toLowerCase().includes(q) && c.description.toLowerCase().includes(q),
+  );
+  return [...prefixName, ...substringName, ...descOnly];
+}
+
 export interface CommandEntry {
   /** Canonical command name, e.g. "workspace:create" */
   name: string;
@@ -306,6 +370,63 @@ export class CommandRegistry {
       const content = resolveContent(name, readFile);
       return { name, description: content ? extractDescription(content) : "" };
     });
+  }
+
+  /**
+   * Parse a slash command from raw user input.
+   * Returns null if the input is not a slash command.
+   * Looks up the command name in the registry.
+   * Returns the canonical command name on match, or unknown_command if not found.
+   */
+  parseSlashCommand(input: string): SlashCommandResult | null {
+    if (!input.startsWith("/")) return null;
+    const command = input.slice(1).split(/\s+/)[0];
+    if (!command) return null;
+    const entry = this._root._entries.get(command);
+    if (entry) return { type: "command", name: entry.name };
+    return { type: "unknown_command", command };
+  }
+
+  /**
+   * Dispatch user input to the appropriate REPL action.
+   * readFile is injectable for testing.
+   */
+  async dispatch(
+    input: string,
+    readFile: (path: string) => string | null = defaultReadFile,
+  ): Promise<DispatchResult> {
+    if (!input) return { type: "skip" };
+
+    const slash = this.parseSlashCommand(input);
+    if (slash) {
+      if (slash.type === "command") {
+        const rawCommand = input.slice(1).split(/\s+/)[0];
+        const args = input.slice(1 + rawCommand.length).trim();
+        return { type: "command", name: slash.name, args };
+      }
+      // unknown_command: look up command file or skill
+      const { command } = slash;
+      const content = resolveContent(command, readFile);
+      if (content === null) return { type: "unknown_command", command };
+      const args = input.slice(1 + command.length).trim();
+      const prompt = applyArguments(content, args);
+      return { type: "query", prompt };
+    }
+
+    return { type: "query", prompt: input };
+  }
+
+  /**
+   * Return filtered command suggestions matching the given query string.
+   * Calls listCommands() internally and applies filterCommands() logic.
+   */
+  suggest(
+    query: string,
+    listDir: ListDir = defaultListDir,
+    readFile: (path: string) => string | null = defaultReadFile,
+  ): CommandSuggestion[] {
+    const all = this.listCommands(listDir, readFile);
+    return filterCommands(query, all);
   }
 
   /** Reset the registry (for test isolation). */

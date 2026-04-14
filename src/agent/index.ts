@@ -7,7 +7,7 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { CanUseTool, PermissionMode, PermissionResult } from "@anthropic-ai/claude-agent-sdk";
 import * as display from "./display.js";
 import { setVerbose, setThinkOutLoud } from "./display.js";
-import { ask, dispatchInput, pick, pickMultiple, pickQuestion } from "./input.js";
+import { ask, pick, pickMultiple, pickQuestion } from "./input.js";
 import type { PickQuestionResult } from "./input.js";
 import { AgentStatus, WorkerSession, registerWorkerCommands, startWorkerMode } from "./worker.js";
 import type { RunQuery, WorkerModeConfig } from "./worker.js";
@@ -384,7 +384,7 @@ export async function main(
       continue;
     }
 
-    const action = await dispatchInput(input, registry);
+    const action = await registry.dispatch(input);
 
     if (action.type === "skip") continue;
 
