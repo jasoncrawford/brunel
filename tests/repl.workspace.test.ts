@@ -10,23 +10,17 @@ vi.mock("../src/agent/display.js", async (importOriginal) => {
   return { ...actual, print: vi.fn() };
 });
 
-import { Workspace, registerWorkspaceCommands, type WorkspaceCommandDeps } from "../src/agent/workspace.js";
+import { Workspace, registerWorkspaceCommands } from "../src/agent/workspace.js";
 import * as display from "../src/agent/display.js";
 import { CommandRegistry } from "../src/agent/command-registry.js";
 import { stripAnsi } from "./helpers.js";
 
-const cfg = { workspaceDir: "/base", repoUrl: "https://x@github.com/owner/repo.git", sessionId: "test-session-uuid" };
+const WORKSPACE_DIR = "/base";
+const SESSION_ID = "test-session-uuid";
+const REPO_URL = "https://x@github.com/owner/repo.git";
 const ORIGINAL_CWD = "/original";
 
-const mockInstance = {
-  dir: "/fake/workspace",
-  reset: vi.fn().mockResolvedValue(undefined),
-  destroy: vi.fn().mockResolvedValue(undefined),
-  checkSafety: vi.fn().mockResolvedValue({ uncommittedFiles: [], unpushedCommits: [], noUpstream: false }),
-} as unknown as Workspace;
-
 beforeEach(() => {
-  vi.spyOn(Workspace, "create").mockResolvedValue(mockInstance);
   vi.spyOn(Workspace, "prune").mockResolvedValue([]);
   vi.spyOn(process, "chdir").mockImplementation(() => undefined);
   vi.mocked(display.print).mockClear();
@@ -38,47 +32,47 @@ afterEach(() => {
 
 let registry: CommandRegistry;
 
-function makeAndRegister(overrides: Partial<WorkspaceCommandDeps> = {}) {
+/** Create a Workspace instance for testing (not yet cloned). */
+function makeWorkspace(confirm = vi.fn().mockResolvedValue(true)): Workspace {
+  const ws = new Workspace(WORKSPACE_DIR, SESSION_ID, REPO_URL, ORIGINAL_CWD, confirm);
+  vi.spyOn(ws, "create").mockImplementation(async () => { ws.isCreated = true; });
+  vi.spyOn(ws, "reset").mockResolvedValue(undefined);
+  vi.spyOn(ws, "destroy").mockImplementation(async () => { ws.isCreated = false; });
+  vi.spyOn(ws, "checkSafety").mockResolvedValue({ uncommittedFiles: [], unpushedCommits: [], noUpstream: false });
+  return ws;
+}
+
+function makeAndRegister(workspace: Workspace | undefined): void {
   registry = new CommandRegistry();
-  const workspaceRef: { current: Workspace | undefined } = { current: undefined };
-  const deps: WorkspaceCommandDeps = {
-    workspace: workspaceRef,
-    config: cfg,
-    originalCwd: ORIGINAL_CWD,
-    confirm: vi.fn().mockResolvedValue(true),
-    ...overrides,
-  };
-  registerWorkspaceCommands(deps, registry.scoped("workspace"));
-  return deps;
+  registerWorkspaceCommands(workspace, registry.scoped("workspace"));
 }
 
 // ── workspace:create ──────────────────────────────────────────────────────────
 
 describe("workspace:create", () => {
-  it("prints error if no config", async () => {
-    makeAndRegister({ config: undefined });
+  it("prints error if no workspace (no config)", async () => {
+    makeAndRegister(undefined);
     await registry.execute("workspace:create", "");
     expect(stripAnsi(vi.mocked(display.print).mock.calls[0][0])).toContain("no GitHub repo configured");
-    expect(Workspace.create).not.toHaveBeenCalled();
   });
 
   it("prints error if workspace already exists", async () => {
-    const existing = { dir: "/existing" } as any;
-    const deps = makeAndRegister();
-    deps.workspace.current = existing;
+    const ws = makeWorkspace();
+    ws.isCreated = true;
+    makeAndRegister(ws);
     await registry.execute("workspace:create", "");
     expect(stripAnsi(vi.mocked(display.print).mock.calls[0][0])).toContain("Workspace already exists");
-    expect(Workspace.create).not.toHaveBeenCalled();
+    expect(ws.create).not.toHaveBeenCalled();
   });
 
-  it("creates workspace, chdirs to it, and sets workspace.current", async () => {
-    const deps = makeAndRegister();
+  it("creates workspace, chdirs to it, and sets isCreated", async () => {
+    const ws = makeWorkspace();
+    makeAndRegister(ws);
     await registry.execute("workspace:create", "");
-    expect(Workspace.create).toHaveBeenCalledWith(cfg.workspaceDir, cfg.sessionId, cfg.repoUrl);
-    expect(process.chdir).toHaveBeenCalledWith("/fake/workspace");
+    expect(ws.create).toHaveBeenCalledOnce();
+    expect(process.chdir).toHaveBeenCalledWith(ws.dir);
     expect(stripAnsi(vi.mocked(display.print).mock.calls[0][0])).toContain("Workspace created");
-    expect(deps.workspace.current).toBeTruthy();
-    expect(deps.workspace.current!.dir).toBe("/fake/workspace");
+    expect(ws.isCreated).toBe(true);
   });
 });
 
@@ -86,29 +80,35 @@ describe("workspace:create", () => {
 
 describe("workspace:reset", () => {
   it("prints error if no workspace exists", async () => {
-    makeAndRegister();
+    makeAndRegister(undefined);
     await registry.execute("workspace:reset", "");
     expect(stripAnsi(vi.mocked(display.print).mock.calls[0][0])).toContain("No workspace");
   });
 
+  it("prints error if workspace not yet created", async () => {
+    const ws = makeWorkspace();
+    makeAndRegister(ws);
+    await registry.execute("workspace:reset", "");
+    expect(stripAnsi(vi.mocked(display.print).mock.calls[0][0])).toContain("No workspace");
+    expect(ws.reset).not.toHaveBeenCalled();
+  });
+
   it("resets workspace when clean", async () => {
-    const ws = { dir: "/ws", reset: vi.fn().mockResolvedValue(undefined), destroy: vi.fn(),
-      checkSafety: vi.fn().mockResolvedValue({ uncommittedFiles: [], unpushedCommits: [], noUpstream: false }) } as any;
-    const deps = makeAndRegister();
-    deps.workspace.current = ws;
+    const ws = makeWorkspace();
+    ws.isCreated = true;
+    makeAndRegister(ws);
     await registry.execute("workspace:reset", "");
     expect(ws.reset).toHaveBeenCalled();
     expect(stripAnsi(vi.mocked(display.print).mock.calls[0][0])).toContain("Workspace reset to main");
   });
 
   it("skips reset if user declines confirmation", async () => {
-    const ws = { dir: "/ws", reset: vi.fn(), destroy: vi.fn(),
-      checkSafety: vi.fn().mockResolvedValue({ uncommittedFiles: ["M foo.ts"], unpushedCommits: [], noUpstream: false }) } as any;
-    const deps = makeAndRegister({ confirm: vi.fn().mockResolvedValue(false) });
-    deps.workspace.current = ws;
+    const ws = makeWorkspace(vi.fn().mockResolvedValue(false));
+    ws.isCreated = true;
+    vi.mocked(ws.checkSafety).mockResolvedValue({ uncommittedFiles: ["M foo.ts"], unpushedCommits: [], noUpstream: false });
+    makeAndRegister(ws);
     await registry.execute("workspace:reset", "");
     expect(ws.reset).not.toHaveBeenCalled();
-    expect(deps.workspace.current).toBe(ws);
   });
 });
 
@@ -116,55 +116,64 @@ describe("workspace:reset", () => {
 
 describe("workspace:remove", () => {
   it("prints error if no workspace exists", async () => {
-    makeAndRegister();
+    makeAndRegister(undefined);
     await registry.execute("workspace:remove", "");
     expect(stripAnsi(vi.mocked(display.print).mock.calls[0][0])).toContain("No workspace in this session");
   });
 
-  it("destroys workspace, chdirs to originalCwd, clears workspace.current", async () => {
-    const ws = { dir: "/ws", reset: vi.fn(), destroy: vi.fn().mockResolvedValue(undefined),
-      checkSafety: vi.fn().mockResolvedValue({ uncommittedFiles: [], unpushedCommits: [], noUpstream: false }) } as any;
-    const deps = makeAndRegister();
-    deps.workspace.current = ws;
+  it("prints error if workspace not yet created", async () => {
+    const ws = makeWorkspace();
+    makeAndRegister(ws);
+    await registry.execute("workspace:remove", "");
+    expect(stripAnsi(vi.mocked(display.print).mock.calls[0][0])).toContain("No workspace in this session");
+    expect(ws.destroy).not.toHaveBeenCalled();
+  });
+
+  it("destroys workspace, chdirs to originalCwd, sets isCreated to false", async () => {
+    const ws = makeWorkspace();
+    ws.isCreated = true;
+    makeAndRegister(ws);
     await registry.execute("workspace:remove", "");
     expect(ws.destroy).toHaveBeenCalled();
     expect(process.chdir).toHaveBeenCalledWith(ORIGINAL_CWD);
     expect(stripAnsi(vi.mocked(display.print).mock.calls[0][0])).toContain("Workspace removed");
-    expect(deps.workspace.current).toBeUndefined();
+    expect(ws.isCreated).toBe(false);
   });
 
   it("skips removal if user declines confirmation", async () => {
-    const ws = { dir: "/ws", reset: vi.fn(), destroy: vi.fn(),
-      checkSafety: vi.fn().mockResolvedValue({ uncommittedFiles: ["M foo.ts"], unpushedCommits: [], noUpstream: false }) } as any;
-    const deps = makeAndRegister({ confirm: vi.fn().mockResolvedValue(false) });
-    deps.workspace.current = ws;
+    const ws = makeWorkspace(vi.fn().mockResolvedValue(false));
+    ws.isCreated = true;
+    vi.mocked(ws.checkSafety).mockResolvedValue({ uncommittedFiles: ["M foo.ts"], unpushedCommits: [], noUpstream: false });
+    makeAndRegister(ws);
     await registry.execute("workspace:remove", "");
     expect(ws.destroy).not.toHaveBeenCalled();
     expect(process.chdir).not.toHaveBeenCalled();
-    expect(deps.workspace.current).toBe(ws);
+    expect(ws.isCreated).toBe(true);
   });
 });
 
 // ── workspace:prune ───────────────────────────────────────────────────────────
 
 describe("workspace:prune", () => {
-  it("prints error if no config", async () => {
-    makeAndRegister({ config: undefined });
+  it("prints error if no workspace (no config)", async () => {
+    makeAndRegister(undefined);
     await registry.execute("workspace:prune", "");
     expect(stripAnsi(vi.mocked(display.print).mock.calls[0][0])).toContain("no workspace directory configured");
   });
 
   it("prints 'Nothing to prune' when no orphans found", async () => {
     vi.mocked(Workspace.prune).mockResolvedValue([]);
-    makeAndRegister();
+    const ws = makeWorkspace();
+    makeAndRegister(ws);
     await registry.execute("workspace:prune", "");
-    expect(Workspace.prune).toHaveBeenCalledWith(cfg.workspaceDir);
+    expect(Workspace.prune).toHaveBeenCalledWith(WORKSPACE_DIR);
     expect(stripAnsi(vi.mocked(display.print).mock.calls[0][0])).toContain("Nothing to prune");
   });
 
   it("lists removed dirs and prints summary when orphans are pruned", async () => {
     vi.mocked(Workspace.prune).mockResolvedValue(["/base/abc", "/base/def"]);
-    makeAndRegister();
+    const ws = makeWorkspace();
+    makeAndRegister(ws);
     await registry.execute("workspace:prune", "");
     const allOutput = vi.mocked(display.print).mock.calls.map(c => stripAnsi(c[0])).join("\n");
     expect(allOutput).toContain("/base/abc");

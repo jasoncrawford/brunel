@@ -30,7 +30,7 @@ async function makeWorkspace(
   exec = makeExec(),
   npm = makeNpmExec(),
 ): Promise<Workspace> {
-  const ws = new Workspace(BASE_DIR, WORKER_ID, REPO_URL, exec, npm);
+  const ws = new Workspace(BASE_DIR, WORKER_ID, REPO_URL, "/original-cwd", async () => true, exec, npm);
   await ws.create();
   return ws;
 }

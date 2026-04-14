@@ -255,7 +255,6 @@ export async function main(
 
   let sessionId: string | undefined;
   const originalCwd = process.cwd();
-  const workspaceRef: { current: Workspace | undefined } = { current: undefined };
 
   const confirm = async (msg: string): Promise<boolean> => {
     display.stopStatus();
@@ -264,12 +263,20 @@ export async function main(
     return idx === 0;
   };
 
+  // In REPL mode, create a Workspace (without cloning) if GitHub is configured.
+  // In worker mode, the workspace is owned by the session (already created).
+  const workspace: Workspace | undefined = session
+    ? session.workspace
+    : workspaceCfg
+      ? new Workspace(workspaceCfg.workspaceDir, agentId, workspaceCfg.repoUrl, originalCwd, confirm)
+      : undefined;
+
   // doExit handles REPL workspace cleanup and stdin/stdout teardown.
   // Only called in REPL mode (worker mode cleanup goes through workerCtx.cleanup()).
   const doExit = async () => {
-    if (workspaceRef.current) {
-      const ok = await confirmIfUnsafe(workspaceRef.current, confirm);
-      if (ok) await workspaceRef.current.destroy();
+    if (workspace?.isCreated) {
+      const ok = await confirmIfUnsafe(workspace, workspace.confirm);
+      if (ok) await workspace.destroy();
     }
     process.stdout.write("\x1b[?2004l\r\n");
     if (process.stdin.isTTY) process.stdin.setRawMode(false);
@@ -279,12 +286,7 @@ export async function main(
   // Register all commands. All commands are present in both REPL and worker
   // modes; commands that require a foreman connection degrade gracefully.
   const registry = new CommandRegistry();
-  registerWorkspaceCommands(
-    session
-      ? session.workspaceCommandDeps
-      : { workspace: workspaceRef, config: workspaceCfg ? { ...workspaceCfg, sessionId: agentId } : undefined, originalCwd, confirm },
-    registry.scoped("workspace"),
-  );
+  registerWorkspaceCommands(workspace, registry.scoped("workspace"));
   registerWorkerCommands(session, registry.scoped("worker"));
   registry.register("exit", {
     description: "Exit",

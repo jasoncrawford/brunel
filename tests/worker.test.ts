@@ -706,11 +706,16 @@ describe("hello_ack handshake — buffering", () => {
     }
   });
 
-  it("calls workspace.reset() on hello_ack cancelled when workspaceCtx is set", async () => {
+  it("calls workspace.reset() on hello_ack cancelled when workspace is set", async () => {
     vi.useFakeTimers();
     try {
       const workspace = {
         dir: "/tmp/test-workspace",
+        workspaceDir: "/tmp/workers",
+        sessionId: "test-agent",
+        originalCwd: "/original",
+        isCreated: true,
+        confirm: vi.fn(),
         reset: vi.fn().mockResolvedValue(undefined),
         destroy: vi.fn().mockResolvedValue(undefined),
         checkSafety: vi.fn().mockResolvedValue({ uncommittedFiles: [], unpushedCommits: [], noUpstream: false }),
@@ -721,9 +726,7 @@ describe("hello_ack handshake — buffering", () => {
       let callCount = 0;
       const wsFactoryWs = vi.fn().mockImplementation(() => callCount++ === 0 ? wsA : wsB);
 
-      const sessionWithWs = new WorkerSession(new AgentStatus(AGENT_ID), wsFactoryWs, display, {
-        workspaceCtx: { workspace, originalCwd: "/original", workspaceDir: "/tmp/workers", repoUrl: "https://github.com/owner/repo", confirm: vi.fn() },
-      });
+      const sessionWithWs = new WorkerSession(new AgentStatus(AGENT_ID), wsFactoryWs, display, { workspace });
       sessionWithWs.start(); // uses wsA
 
       const issue = makeIssue();
@@ -1310,12 +1313,17 @@ describe("prIsClosed guard", () => {
 import { Workspace, registerWorkspaceCommands } from "../src/agent/workspace.js";
 import { CommandRegistry } from "../src/agent/command-registry.js";
 
-// ── workspace slash commands via workspaceCommandDeps ─────────────────────────
+// ── workspace slash commands via WorkerSession.workspace ──────────────────────
 
 describe("workspace slash commands in WorkerSession", () => {
   function makeWorkspace(): Workspace {
     return {
       dir: "/tmp/test-workspace",
+      workspaceDir: "/tmp/workers",
+      sessionId: "test-agent-id",
+      originalCwd: "/original",
+      isCreated: true,
+      confirm: vi.fn().mockResolvedValue(true),
       reset: vi.fn().mockResolvedValue(undefined),
       destroy: vi.fn().mockResolvedValue(undefined),
       checkSafety: vi.fn().mockResolvedValue({
@@ -1326,19 +1334,10 @@ describe("workspace slash commands in WorkerSession", () => {
 
   it("/workspace:reset calls workspace.reset() when clean", async () => {
     const workspace = makeWorkspace();
-    const confirm = vi.fn().mockResolvedValue(true);
-    const sessionWs = new WorkerSession(new AgentStatus(AGENT_ID), wsFactory, display, {
-      workspaceCtx: {
-        workspace,
-        originalCwd: "/original",
-        workspaceDir: "/tmp/workers",
-        repoUrl: "https://token@github.com/owner/repo.git",
-        confirm,
-      },
-    });
+    const sessionWs = new WorkerSession(new AgentStatus(AGENT_ID), wsFactory, display, { workspace });
     sessionWs.start();
     const wsReg1 = new CommandRegistry();
-    registerWorkspaceCommands(sessionWs.workspaceCommandDeps, wsReg1.scoped("workspace"));
+    registerWorkspaceCommands(sessionWs.workspace, wsReg1.scoped("workspace"));
     await wsReg1.execute("workspace:reset", "");
     expect(workspace.reset).toHaveBeenCalledOnce();
   });
@@ -1348,59 +1347,38 @@ describe("workspace slash commands in WorkerSession", () => {
     (workspace.checkSafety as ReturnType<typeof vi.fn>).mockResolvedValue({
       uncommittedFiles: ["M foo.ts"], unpushedCommits: [], noUpstream: false,
     });
-    const confirm = vi.fn().mockResolvedValue(false);
-    const sessionWs = new WorkerSession(new AgentStatus(AGENT_ID), wsFactory, display, {
-      workspaceCtx: {
-        workspace,
-        originalCwd: "/original",
-        workspaceDir: "/tmp/workers",
-        repoUrl: "https://token@github.com/owner/repo.git",
-        confirm,
-      },
-    });
+    (workspace.confirm as ReturnType<typeof vi.fn>).mockResolvedValue(false);
+    const sessionWs = new WorkerSession(new AgentStatus(AGENT_ID), wsFactory, display, { workspace });
     sessionWs.start();
     const wsReg2 = new CommandRegistry();
-    registerWorkspaceCommands(sessionWs.workspaceCommandDeps, wsReg2.scoped("workspace"), true);
+    registerWorkspaceCommands(sessionWs.workspace, wsReg2.scoped("workspace"));
     await wsReg2.execute("workspace:reset", "");
     expect(workspace.reset).not.toHaveBeenCalled();
   });
 
   it("/workspace:remove calls destroy() when approved", async () => {
-    const workspace = makeWorkspace();
-    const confirm = vi.fn().mockResolvedValue(true);
-    const originalCwd = process.cwd();
-    const sessionWs = new WorkerSession(new AgentStatus(AGENT_ID), wsFactory, display, {
-      workspaceCtx: {
-        workspace,
-        originalCwd,
-        workspaceDir: "/tmp/workers",
-        repoUrl: "https://token@github.com/owner/repo.git",
-        confirm,
-      },
-    });
-    sessionWs.start();
-    const wsReg3 = new CommandRegistry();
-    registerWorkspaceCommands(sessionWs.workspaceCommandDeps, wsReg3.scoped("workspace"), true);
-    await wsReg3.execute("workspace:remove", "");
-    expect(workspace.destroy).toHaveBeenCalledOnce();
+    const chdirSpy = vi.spyOn(process, "chdir").mockImplementation(() => {});
+    try {
+      const workspace = makeWorkspace();
+      const sessionWs = new WorkerSession(new AgentStatus(AGENT_ID), wsFactory, display, { workspace });
+      sessionWs.start();
+      const wsReg3 = new CommandRegistry();
+      registerWorkspaceCommands(sessionWs.workspace, wsReg3.scoped("workspace"));
+      await wsReg3.execute("workspace:remove", "");
+      expect(workspace.destroy).toHaveBeenCalledOnce();
+    } finally {
+      chdirSpy.mockRestore();
+    }
   });
 
   it("/workspace:create prints 'already exists' when workspace is pre-created", async () => {
     const printSpy = vi.spyOn(displayModule, "print").mockImplementation(() => {});
     try {
       const workspace = makeWorkspace();
-      const sessionWs = new WorkerSession(new AgentStatus(AGENT_ID), wsFactory, display, {
-        workspaceCtx: {
-          workspace,
-          originalCwd: "/original",
-          workspaceDir: "/tmp/workers",
-          repoUrl: "https://token@github.com/owner/repo.git",
-          confirm: vi.fn(),
-        },
-      });
+      const sessionWs = new WorkerSession(new AgentStatus(AGENT_ID), wsFactory, display, { workspace });
       sessionWs.start();
       const wsReg4 = new CommandRegistry();
-      registerWorkspaceCommands(sessionWs.workspaceCommandDeps, wsReg4.scoped("workspace"));
+      registerWorkspaceCommands(sessionWs.workspace, wsReg4.scoped("workspace"));
       await wsReg4.execute("workspace:create", "");
       const printed = printSpy.mock.calls.map(([s]) => stripAnsi(s as string)).join("\n");
       expect(printed).toContain("Workspace already exists");
