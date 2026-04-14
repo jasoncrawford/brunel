@@ -1,13 +1,12 @@
 /**
- * Unit tests for handleBusyHello and handleIdleHello.
+ * Unit tests for ForemanWss.handleBusyHello and ForemanWss.handleIdleHello.
  *
- * These functions were extracted from handleWorkerHello in wss.ts so that
- * each reconnection case can be verified without spinning up a real WebSocket
- * server.
+ * Each reconnection case is verified by calling the public methods directly on
+ * a ForemanWss instance with sendMsg/flog spied out.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { handleBusyHello, handleIdleHello } from "../src/foreman/controllers/wss.js";
-import type { BusyHelloDeps, IdleHelloDeps } from "../src/foreman/controllers/wss.js";
+import http from "http";
+import { ForemanWss } from "../src/foreman/controllers/wss.js";
 import { Worker } from "../src/foreman/models/worker.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { setupInMemoryTasks } from "./helpers/task.js";
@@ -18,44 +17,20 @@ function fakeWs() {
   return { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
 }
 
-function makeBusyDeps(taskManager: TaskManager): BusyHelloDeps & {
-  sendMsg: ReturnType<typeof vi.fn>;
-  log: ReturnType<typeof vi.fn>;
-  flog: ReturnType<typeof vi.fn>;
-} {
-  const sendMsg = vi.fn();
-  const log = vi.fn();
-  const flog = vi.fn();
-  const deps: BusyHelloDeps = {
-    ws: fakeWs(),
+function makeWss(taskManager: TaskManager) {
+  const wss = new ForemanWss({
+    config: { taskLabel: "brunel:ready", githubRepo: "owner/repo", githubToken: "token", workerSecret: undefined, pingIntervalMs: 1e9 },
     taskManager,
-    sendMsg,
-    log,
-    flog,
-  };
-  return Object.assign(deps, { sendMsg, log, flog });
+    server: http.createServer(),
+  });
+  const sendMsg = vi.spyOn(wss, "sendMsg").mockImplementation(() => {});
+  const flog = vi.spyOn(wss, "flog").mockImplementation(() => {});
+  return { wss, sendMsg, flog };
 }
 
-function makeIdleDeps(): IdleHelloDeps & {
-  sendMsg: ReturnType<typeof vi.fn>;
-  log: ReturnType<typeof vi.fn>;
-  flog: ReturnType<typeof vi.fn>;
-} {
-  const sendMsg = vi.fn();
-  const log = vi.fn();
-  const flog = vi.fn();
-  const deps: IdleHelloDeps = {
-    ws: fakeWs(),
-    sendMsg,
-    log,
-    flog,
-  };
-  return Object.assign(deps, { sendMsg, log, flog });
-}
-
-/** Returns the hello_ack message from a sendMsg mock's calls. */
-function helloAck(sendMsg: ReturnType<typeof vi.fn>) {
-  const call = sendMsg.mock.calls.find(([, msg]) => msg.type === "hello_ack");
+/** Returns the hello_ack message from a sendMsg spy's calls. */
+function helloAck(sendMsg: ReturnType<typeof vi.spyOn>) {
+  const call = sendMsg.mock.calls.find(([, msg]) => (msg as { type: string }).type === "hello_ack");
   return call ? (call[1] as { type: string; status: string }) : undefined;
 }
 
@@ -79,19 +54,19 @@ afterEach(() => {
 describe("handleBusyHello", () => {
   describe("unknown task", () => {
     it("numeric taskId — creates placeholder and sends busy ack", async () => {
-      const deps = makeBusyDeps(taskManager);
-      await handleBusyHello("w1", "42", deps);
+      const { wss, sendMsg } = makeWss(taskManager);
+      await wss.handleBusyHello("w1", "42", fakeWs());
 
-      const ack = helloAck(deps.sendMsg);
+      const ack = helloAck(sendMsg);
       expect(ack?.status).toBe("busy");
       expect(Worker.get("w1")?.currentTaskId).toBe("42");
     });
 
     it("non-numeric taskId — sends cancelled ack", async () => {
-      const deps = makeBusyDeps(taskManager);
-      await handleBusyHello("w1", "not-a-number", deps);
+      const { wss, sendMsg } = makeWss(taskManager);
+      await wss.handleBusyHello("w1", "not-a-number", fakeWs());
 
-      const ack = helloAck(deps.sendMsg);
+      const ack = helloAck(sendMsg);
       expect(ack?.status).toBe("cancelled");
     });
   });
@@ -106,10 +81,10 @@ describe("handleBusyHello", () => {
         assigned_at: new Date().toISOString(),
       });
 
-      const deps = makeBusyDeps(taskManager);
-      await handleBusyHello("w1", "10", deps);
+      const { wss, sendMsg } = makeWss(taskManager);
+      await wss.handleBusyHello("w1", "10", fakeWs());
 
-      const ack = helloAck(deps.sendMsg);
+      const ack = helloAck(sendMsg);
       expect(ack?.status).toBe("busy");
       // task.assign must NOT be called because task is already complete
       expect(task.assign).not.toHaveBeenCalled();
@@ -125,10 +100,10 @@ describe("handleBusyHello", () => {
         assigned_at: new Date().toISOString(),
       });
 
-      const deps = makeBusyDeps(taskManager);
-      await handleBusyHello("w1", "10", deps);
+      const { wss, sendMsg } = makeWss(taskManager);
+      await wss.handleBusyHello("w1", "10", fakeWs());
 
-      const ack = helloAck(deps.sendMsg);
+      const ack = helloAck(sendMsg);
       expect(ack?.status).toBe("cancelled");
     });
   });
@@ -142,10 +117,10 @@ describe("handleBusyHello", () => {
         assigned_at: new Date().toISOString(),
       });
 
-      const deps = makeBusyDeps(taskManager);
-      await handleBusyHello("w1", "10", deps);
+      const { wss, sendMsg } = makeWss(taskManager);
+      await wss.handleBusyHello("w1", "10", fakeWs());
 
-      const ack = helloAck(deps.sendMsg);
+      const ack = helloAck(sendMsg);
       expect(ack?.status).toBe("cancelled");
     });
 
@@ -157,10 +132,10 @@ describe("handleBusyHello", () => {
         assigned_at: new Date().toISOString(),
       });
 
-      const deps = makeBusyDeps(taskManager);
-      await handleBusyHello("w1", "10", deps);
+      const { wss, sendMsg } = makeWss(taskManager);
+      await wss.handleBusyHello("w1", "10", fakeWs());
 
-      const ack = helloAck(deps.sendMsg);
+      const ack = helloAck(sendMsg);
       expect(ack?.status).toBe("busy");
       expect(task.assign).toHaveBeenCalledWith("w1");
       expect(Worker.get("w1")?.currentTaskId).toBe("10");
@@ -169,10 +144,10 @@ describe("handleBusyHello", () => {
     it("unassigned — reclaims (busy ack, task.assign called)", async () => {
       const task = addTask({ task_id: "10", issue_number: 10 });
 
-      const deps = makeBusyDeps(taskManager);
-      await handleBusyHello("w1", "10", deps);
+      const { wss, sendMsg } = makeWss(taskManager);
+      await wss.handleBusyHello("w1", "10", fakeWs());
 
-      const ack = helloAck(deps.sendMsg);
+      const ack = helloAck(sendMsg);
       expect(ack?.status).toBe("busy");
       expect(task.assign).toHaveBeenCalledWith("w1");
     });
@@ -190,10 +165,10 @@ describe("handleBusyHello", () => {
       // Queue an event manually via the task manager
       taskManager.queueEvent("10", { toWorkerPayload: () => ({ name: "issue_comment", payload: {} }), eventName: "issue_comment" } as any);
 
-      const deps = makeBusyDeps(taskManager);
-      await handleBusyHello("w1", "10", deps);
+      const { wss, sendMsg } = makeWss(taskManager);
+      await wss.handleBusyHello("w1", "10", fakeWs());
 
-      const eventNotifs = deps.sendMsg.mock.calls.filter(
+      const eventNotifs = sendMsg.mock.calls.filter(
         ([, msg]) => (msg as { type: string }).type === "event_notification"
       );
       expect(eventNotifs).toHaveLength(1);
@@ -205,10 +180,10 @@ describe("handleBusyHello", () => {
 
 describe("handleIdleHello", () => {
   it("no prior task — registers worker and sends idle ack", async () => {
-    const deps = makeIdleDeps();
-    await handleIdleHello("w1", deps);
+    const { wss, sendMsg } = makeWss(taskManager);
+    await wss.handleIdleHello("w1", fakeWs());
 
-    const ack = helloAck(deps.sendMsg);
+    const ack = helloAck(sendMsg);
     expect(ack?.status).toBe("idle");
     expect(Worker.get("w1")?.status).toBe("idle");
   });
@@ -221,11 +196,11 @@ describe("handleIdleHello", () => {
       assigned_at: new Date().toISOString(),
     });
 
-    const deps = makeIdleDeps();
-    await handleIdleHello("w1", deps);
+    const { wss, sendMsg } = makeWss(taskManager);
+    await wss.handleIdleHello("w1", fakeWs());
 
     expect(task.revert).toHaveBeenCalled();
-    const ack = helloAck(deps.sendMsg);
+    const ack = helloAck(sendMsg);
     expect(ack?.status).toBe("idle");
     expect(Worker.get("w1")?.status).toBe("idle");
   });
@@ -239,8 +214,8 @@ describe("handleIdleHello", () => {
     });
     vi.mocked(task.revert).mockRejectedValueOnce(new Error("DB down"));
 
-    const deps = makeIdleDeps();
-    await expect(handleIdleHello("w1", deps)).resolves.toBeUndefined();
-    expect(deps.flog).toHaveBeenCalledWith(expect.stringContaining("ERROR"));
+    const { wss, flog } = makeWss(taskManager);
+    await expect(wss.handleIdleHello("w1", fakeWs())).resolves.toBeUndefined();
+    expect(flog).toHaveBeenCalledWith(expect.stringContaining("ERROR"));
   });
 });
