@@ -20,11 +20,6 @@ import { handleEffortCommand } from "./effort.js";
 import type { EffortValue } from "./effort.js";
 import { CommandRegistry } from "./command-registry.js";
 import { QueryStats } from "./query-stats.js";
-export { parseSlashCommand, dispatchInput, matchCommands, ask } from "./input.js";
-export type { SlashCommandResult, DispatchResult } from "./input.js";
-export { handleModelCommand, getCachedModels, _resetCachedModels } from "./model.js";
-export { handleEffortCommand } from "./effort.js";
-
 // ── Log file ──────────────────────────────────────────────────────────────────
 
 const LOG_FILE = "repl.log";
