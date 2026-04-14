@@ -121,7 +121,7 @@ describe("forwardEvent — active tasks still receive events", () => {
 
     expect(sendMsg).toHaveBeenCalledOnce();
     expect(sendMsg).toHaveBeenCalledWith(
-      "worker-1",
+      expect.objectContaining({ workerId: "worker-1" }),
       expect.objectContaining({ type: "event_notification" }),
     );
   });
