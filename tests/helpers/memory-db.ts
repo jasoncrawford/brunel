@@ -79,14 +79,21 @@ export function createMemoryTaskDb(): SupabaseClient<Database> {
   // Stub for tables other than "tasks" — always returns empty results so that
   // WebhookEvent.query() / ForemanMessage.query() calls don't return task rows
   // by accident (the real tables don't exist in the in-memory store).
-  const emptyBuilder = {
+  // insert().select().single() returns an error so ActiveRecord.insert() throws,
+  // which is swallowed by the fire-and-forget log() callers.
+  const emptyInsertStub = {
+    select() { return emptyInsertStub; },
+    single() { return Promise.resolve({ data: null, error: new Error("stub: table not tracked in memory-db") }); },
+  };
+  const emptyBuilder: Record<string, (...args: unknown[]) => unknown> = {
     select(_cols?: string) { return emptyBuilder; },
     eq(_col: string, _val: unknown) { return emptyBuilder; },
     is(_col: string, _val: unknown) { return emptyBuilder; },
     order(_col: string, _opts?: unknown) { return emptyBuilder; },
     limit(_n: number) { return ok([] as DbRow[]); },
     maybeSingle() { return ok(null as DbRow | null); },
-    insert(_data: unknown) { return ok(null); },
+    single() { return ok(null as DbRow | null); },
+    insert(_data: unknown) { return emptyInsertStub; },
   };
 
   return {
@@ -125,11 +132,34 @@ export function createMemoryTaskDb(): SupabaseClient<Database> {
           return sb;
         },
         update(changes: Partial<DbRow>) {
-          return buildMutateQuery((filters) => {
-            for (const row of applyFilters([...store.values()], filters)) {
-              store.set(row.task_id, { ...row, ...changes });
-            }
-          });
+          // Build a fluent chain that supports both the old pattern
+          // (.update(changes).eq(...)) and the new base-class pattern
+          // (.update(changes).eq(...).select().single()) used by ActiveRecord.update().
+          const filters: Filters = [];
+          const builder = {
+            eq(col: string, val: unknown) {
+              filters.push({ col: col as keyof DbRow, op: "eq", val });
+              return builder;
+            },
+            is(col: string, val: unknown) {
+              filters.push({ col: col as keyof DbRow, op: "is", val });
+              return builder;
+            },
+            select(_cols?: string) { return builder; },
+            single() { return builder; },
+            then(
+              resolve: (v: { data: DbRow | null; error: null }) => void,
+              _reject?: (e: unknown) => void,
+            ) {
+              const matching = applyFilters([...store.values()], filters);
+              for (const row of matching) {
+                store.set(row.task_id, { ...row, ...changes });
+              }
+              const updated = applyFilters([...store.values()], filters);
+              resolve({ data: updated[0] ?? null, error: null });
+            },
+          };
+          return builder;
         },
         delete() {
           return buildMutateQuery((filters) => {

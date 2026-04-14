@@ -278,7 +278,11 @@ describe("pipeline: happy path and queued-then-assigned", () => {
     stubFetchNoBlockers();
     process.env.GITHUB_REPO = "owner/repo";
     process.env.GITHUB_TOKEN = "token";
-    await supabase.from("tasks").delete().in("task_id", ["42", "55"]);
+    await Promise.all([
+      supabase.from("tasks").delete().in("task_id", ["42", "55"]),
+      supabase.from("foreman_messages").delete().in("task_id", ["42", "55"]),
+      supabase.from("webhook_events").delete().in("task_id", ["42", "55"]),
+    ]);
     foreman = buildForeman();
     await new Promise<void>((resolve) =>
       foreman.httpServer.once("listening", resolve),
@@ -374,7 +378,11 @@ describe("pipeline: worker disconnect/reclaim", () => {
     stubFetchNoBlockers();
     process.env.GITHUB_REPO = "owner/repo";
     process.env.GITHUB_TOKEN = "token";
-    await supabase.from("tasks").delete().in("task_id", ["70"]);
+    await Promise.all([
+      supabase.from("tasks").delete().in("task_id", ["70"]),
+      supabase.from("foreman_messages").delete().in("task_id", ["70"]),
+      supabase.from("webhook_events").delete().in("task_id", ["70"]),
+    ]);
     foreman = buildForeman();
     await new Promise<void>((resolve) =>
       foreman.httpServer.once("listening", resolve),
@@ -463,7 +471,11 @@ describe("pipeline: dependency blocking", () => {
     );
     process.env.GITHUB_REPO = "owner/repo";
     process.env.GITHUB_TOKEN = "token";
-    await supabase.from("tasks").delete().in("task_id", ["91", "92"]);
+    await Promise.all([
+      supabase.from("tasks").delete().in("task_id", ["91", "92"]),
+      supabase.from("foreman_messages").delete().in("task_id", ["91", "92"]),
+      supabase.from("webhook_events").delete().in("task_id", ["91", "92"]),
+    ]);
     foreman = buildForeman();
     await new Promise<void>((resolve) =>
       foreman.httpServer.once("listening", resolve),

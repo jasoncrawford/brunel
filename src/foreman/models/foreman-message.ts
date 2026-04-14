@@ -1,11 +1,14 @@
 import type { Database, Json } from "../../database.types.js";
-import { db } from "../db-client.js";
+import { ActiveRecord } from "./active-record.js";
 
 type DbRow = Database["public"]["Tables"]["foreman_messages"]["Row"];
 
 // ── Model ──────────────────────────────────────────────────────────────────────
 
-export class ForemanMessage {
+export class ForemanMessage extends ActiveRecord {
+  protected static readonly tableName = "foreman_messages";
+  protected static readonly primaryKey = "id";
+
   readonly id: number;
   readonly createdAt: string;
   readonly direction: string;
@@ -15,6 +18,7 @@ export class ForemanMessage {
   readonly payload: Record<string, unknown>;
 
   private constructor(row: DbRow) {
+    super();
     this.id = row.id;
     this.createdAt = row.created_at;
     this.direction = row.direction;
@@ -26,7 +30,7 @@ export class ForemanMessage {
 
   // ── Persistence ─────────────────────────────────────────────────────────────
 
-  /** Insert into foreman_messages. Returns a promise (usually ignored). */
+  /** Insert into foreman_messages. Returns a promise (usually ignored with `void`). */
   static log(data: {
     direction: "sent" | "received";
     workerId: string | null;
@@ -34,43 +38,38 @@ export class ForemanMessage {
     msgType: string;
     payload: Record<string, unknown>;
   }): Promise<void> {
-    return Promise.resolve(db.from("foreman_messages").insert({
+    return ForemanMessage.insert({
       direction: data.direction,
       worker_id: data.workerId,
       task_id: data.taskId,
       msg_type: data.msgType,
       payload: data.payload as Json,
-    })).then(({ error }) => {
-      if (error) console.error("[db] foreman_messages insert error:", error);
-    }).catch((err: unknown) => console.error("[db] unexpected error:", err));
+    }).then(() => undefined).catch((err: unknown) => console.error("[db] foreman_messages insert error:", err));
   }
 
   // ── Queries ──────────────────────────────────────────────────────────────────
 
   static async queryForTask(taskId: string): Promise<ForemanMessage[]> {
-    const { data } = await db.from("foreman_messages")
-      .select("*")
+    const { data } = await ForemanMessage.select()
       .eq("task_id", taskId)
       .order("created_at", { ascending: false })
       .limit(500);
-    return (data ?? []).map((r) => new ForemanMessage(r));
+    return (data ?? []).map((r: DbRow) => new ForemanMessage(r));
   }
 
   static async queryForWorker(workerId: string): Promise<ForemanMessage[]> {
-    const { data } = await db.from("foreman_messages")
-      .select("*")
+    const { data } = await ForemanMessage.select()
       .eq("worker_id", workerId)
       .order("created_at", { ascending: false })
       .limit(500);
-    return (data ?? []).map((r) => new ForemanMessage(r));
+    return (data ?? []).map((r: DbRow) => new ForemanMessage(r));
   }
 
-  static async query(opts: { limit?: number } = {}): Promise<ForemanMessage[]> {
-    const { data } = await db.from("foreman_messages")
-      .select("*")
+  static async list(opts: { limit?: number } = {}): Promise<ForemanMessage[]> {
+    const { data } = await ForemanMessage.select()
       .order("created_at", { ascending: false })
       .limit(opts.limit ?? 100);
-    return (data ?? []).map((r) => new ForemanMessage(r));
+    return (data ?? []).map((r: DbRow) => new ForemanMessage(r));
   }
 
   // ── Display helper ───────────────────────────────────────────────────────────

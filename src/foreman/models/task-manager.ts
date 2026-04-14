@@ -130,18 +130,18 @@ export class TaskManager extends EventEmitter {
     this._blockers.delete(issueNumber);
     this._blockersLoaded.delete(issueNumber);
     const task = await Task.getByIssue(issueNumber);
-    if (task) await task.delete();
+    if (task) await task.deleteIfUnassigned();
   }
 
   /** Called when issues/closed fires: mark the issue as closed.
    *  Tasks that were ever assigned (assigned_at IS NOT NULL) are kept for historical purposes.
-   *  Tasks that were never assigned are deleted — task.delete() is a no-op when assigned_at is set. */
+   *  Tasks that were never assigned are deleted — deleteIfUnassigned() is a no-op when assigned_at is set. */
   async closeIssue(issueNumber: number): Promise<void> {
     this._openIssues.delete(issueNumber);
     const task = await Task.getByIssue(issueNumber);
     if (!task || task.status === "complete") return;
     await task.close();
-    await task.delete(); // no-op if ever assigned (assigned_at IS NOT NULL)
+    await task.deleteIfUnassigned(); // no-op if ever assigned (assigned_at IS NOT NULL)
   }
 
   /** Called when issues/reopened fires: mark the issue open again. */

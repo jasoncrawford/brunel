@@ -207,7 +207,7 @@ describe("TaskManager — cancel (delete behavior)", () => {
   it("removes a pending task so it is no longer retrievable", async () => {
     await registerBase();
     const t = await Task.get("42");
-    await t!.delete();
+    await t!.deleteIfUnassigned();
     expect(await Task.get("42")).toBeNull();
     expect(await Task.getByIssue(42)).toBeNull();
     expect(await m.nextPending()).toBeNull();
@@ -217,7 +217,7 @@ describe("TaskManager — cancel (delete behavior)", () => {
     await registerBase();
     const t = await Task.get("42");
     await t!.assign("w1");
-    await t!.delete();
+    await t!.deleteIfUnassigned();
     expect(await Task.get("42")).not.toBeNull();
   });
 

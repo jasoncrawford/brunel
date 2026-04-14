@@ -69,7 +69,7 @@ export async function loadIssuesToQueue(
   const allTasks = await Task.list({ cancelable: true });
   for (const t of allTasks) {
     if (!labeledNums.has(t.issueNumber)) {
-      await t.delete().catch((err: unknown) =>
+      await t.deleteIfUnassigned().catch((err: unknown) =>
         console.error(`[startup] ERROR deleting stale task #${t.taskId}: ${fmtError(err)}`)
       );
     }

@@ -130,7 +130,7 @@ describe("Task assign", () => {
   });
 });
 
-describe("Task.delete", () => {
+describe("Task.deleteIfUnassigned", () => {
   beforeEach(async () => {
     setupInMemoryTasks();
     await Task.upsert("42", 42, REPO, "Fix the bug", "It is broken", ["brunel:ready"]);
@@ -142,21 +142,21 @@ describe("Task.delete", () => {
 
   it("removes a pending task from the store", async () => {
     const t = await Task.get("42");
-    await t!.delete();
+    await t!.deleteIfUnassigned();
     expect(await Task.get("42")).toBeNull();
   });
 
   it("does not remove an assigned task (assignedAt set)", async () => {
     const t = await Task.get("42");
     await t!.assign("w1");
-    await t!.delete();
+    await t!.deleteIfUnassigned();
     expect(await Task.get("42")).not.toBeNull();
   });
 
   it("propagates errors to the caller", async () => {
     const t = await Task.get("42");
-    vi.spyOn(t!, "delete").mockRejectedValue(new Error("DB down"));
-    await expect(t!.delete()).rejects.toThrow("DB down");
+    vi.spyOn(t!, "deleteIfUnassigned").mockRejectedValue(new Error("DB down"));
+    await expect(t!.deleteIfUnassigned()).rejects.toThrow("DB down");
   });
 });
 

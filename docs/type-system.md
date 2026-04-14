@@ -27,7 +27,7 @@ Use TypeScript `interface` or `type` in `wire.ts`, never `class`. The `namespace
 
 ## Server model classes
 
-Model classes are active records. They own DB reads/writes, hold in-memory state, and emit change events. See the `Task` class for the canonical example.
+Model classes are active records. They own DB reads/writes, hold in-memory state, and emit change events. All DB-backed model classes extend `ActiveRecord` (`src/foreman/models/active-record.ts`), which provides shared CRUD boilerplate (`get`, `getBy`, `list`, `insert`, `update`, `delete`, `select`). See the `Task` class for the canonical example of a subclass.
 
 Each model class that needs to send data over a wire has a serialization method typed against the corresponding Wire interface:
 

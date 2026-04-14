@@ -28,8 +28,8 @@ export async function queryActivityLog(opts: QueryActivityLogOpts = {}): Promise
     ]);
   } else {
     [webhooks, messages] = await Promise.all([
-      WebhookEvent.query({ limit }),
-      ForemanMessage.query({ limit }),
+      WebhookEvent.list({ limit }),
+      ForemanMessage.list({ limit }),
     ]);
   }
 
