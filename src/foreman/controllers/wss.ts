@@ -214,14 +214,6 @@ export class ForemanWss {
     wss.on("connection", (ws) => {
       let workerId = "";
 
-      const helloDeps = () => ({
-        ws,
-        taskManager: this.taskManager,
-        sendMsg: (wid: string, msg: Wire.ForemanMessage, logTaskId?: string) => this.sendMsg(wid, msg, logTaskId),
-        log: (wid: string, line: string) => this.log(wid, line),
-        flog: (msg: string) => this.flog(msg),
-      });
-
       const handleWorkerHello = async (msg: Extract<Wire.WorkerMessage, { type: "worker_hello" }>) => {
         if (config.workerSecret && msg.workerSecret !== config.workerSecret) {
           ws.close(4001, "unauthorized");
@@ -231,9 +223,20 @@ export class ForemanWss {
         workerId = msg.workerId;
 
         if (msg.status === "busy" && msg.taskId) {
-          await handleBusyHello(workerId, msg.taskId, helloDeps());
+          await handleBusyHello(workerId, msg.taskId, {
+            ws,
+            taskManager: this.taskManager,
+            sendMsg: this.sendMsg.bind(this),
+            log: this.log.bind(this),
+            flog: this.flog.bind(this),
+          });
         } else {
-          await handleIdleHello(workerId, helloDeps());
+          await handleIdleHello(workerId, {
+            ws,
+            sendMsg: this.sendMsg.bind(this),
+            log: this.log.bind(this),
+            flog: this.flog.bind(this),
+          });
         }
       };
 
