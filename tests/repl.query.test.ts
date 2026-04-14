@@ -25,7 +25,8 @@ vi.mock("../src/agent/input.js", async (importOriginal) => {
 
 import { PassThrough } from "stream";
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { runQuery, getCachedModels, _resetCachedModels } from "../src/agent/index.js";
+import { runQuery } from "../src/agent/index.js";
+import { getCachedModels, _resetCachedModels } from "../src/agent/model.js";
 import { ask, pick, pickMultiple, pickQuestion } from "../src/agent/input.js";
 import { toolUseNames, stopStatus, setVerbose } from "../src/agent/display.js";
 
