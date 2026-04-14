@@ -6,11 +6,7 @@ import type { TaskManager } from "../models/task-manager.js";
 import { Task } from "../models/task.js";
 import { queryActivityLog } from "../models/activity-log.js";
 import type { TaskStatus } from "../../../shared/types.js";
-import { fmtError } from "../../utils.js";
-
-function flog(msg: string) {
-  console.log(`${new Date().toISOString()} ${msg}`);
-}
+import { fmtError, log } from "../../utils.js";
 
 export interface HttpServerOptions {
   webhooks: InstanceType<typeof Webhooks> | null;
@@ -49,7 +45,7 @@ export function createHttpServer({ webhooks, routeEvent, taskManager }: HttpServ
       }
       return c.text("OK", 200);
     } catch (err) {
-      flog(`ERROR Webhook processing error: ${fmtError(err)}`);
+      log(`ERROR Webhook processing error: ${fmtError(err)}`);
       return c.text("Bad Request", 400);
     }
   });
@@ -65,7 +61,7 @@ export function createHttpServer({ webhooks, routeEvent, taskManager }: HttpServ
       const entries = await queryActivityLog({ limit: 100 });
       return c.json(entries);
     } catch (err) {
-      flog(`ERROR API query failed: ${fmtError(err)}`);
+      log(`ERROR API query failed: ${fmtError(err)}`);
       return c.json({ error: "internal error" }, 500);
     }
   });
@@ -76,7 +72,7 @@ export function createHttpServer({ webhooks, routeEvent, taskManager }: HttpServ
       const entries = await queryActivityLog({ taskId });
       return c.json(entries);
     } catch (err) {
-      flog(`ERROR API query failed: ${fmtError(err)}`);
+      log(`ERROR API query failed: ${fmtError(err)}`);
       return c.json({ error: "internal error" }, 500);
     }
   });
@@ -87,7 +83,7 @@ export function createHttpServer({ webhooks, routeEvent, taskManager }: HttpServ
       const entries = await queryActivityLog({ workerId });
       return c.json(entries);
     } catch (err) {
-      flog(`ERROR API query failed: ${fmtError(err)}`);
+      log(`ERROR API query failed: ${fmtError(err)}`);
       return c.json({ error: "internal error" }, 500);
     }
   });
@@ -101,7 +97,7 @@ export function createHttpServer({ webhooks, routeEvent, taskManager }: HttpServ
         : tasks.filter((t) => t.status !== "complete");
       return c.json(filtered.map((t) => t.toWire()));
     } catch (err) {
-      flog(`ERROR API query failed: ${fmtError(err)}`);
+      log(`ERROR API query failed: ${fmtError(err)}`);
       return c.json({ error: "internal error" }, 500);
     }
   });

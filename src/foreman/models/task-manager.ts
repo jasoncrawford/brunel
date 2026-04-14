@@ -5,6 +5,7 @@ import { loadIssuesToQueue, fetchIssueStates } from "../github.js";
 import { EventQueue } from "../event-queue.js";
 import { Task } from "./task.js";
 import { Worker } from "./worker.js";
+import { log } from "../../utils.js";
 
 
 // ── TaskManager ────────────────────────────────────────────────────────────────
@@ -202,12 +203,12 @@ export class TaskManager extends EventEmitter {
   // ── Startup methods ────────────────────────────────────────────────────────
 
   /** Register ephemeral branch mappings from DB at startup. */
-  async loadActiveTasksFromDb(flog: (msg: string) => void): Promise<void> {
+  async loadActiveTasksFromDb(): Promise<void> {
     const tasks = await Task.list();
     for (const task of tasks) {
       if (task.completedAt) continue;
       if (task.branch) this.branchToTaskId.set(task.branch, task.taskId);
-      flog(`[startup] restored task #${task.taskId} (${task.status})`);
+      log(`[startup] restored task #${task.taskId} (${task.status})`);
     }
   }
 
@@ -233,7 +234,6 @@ export class TaskManager extends EventEmitter {
    *  Called at startup after loadActiveTasksFromDb. */
   async loadIssuesFromGithub(
     config: { githubRepo: string; githubToken: string; taskLabel: string; githubApiUrl?: string },
-    flog: (msg: string) => void,
   ): Promise<void> {
     await loadIssuesToQueue(this, config);
   }

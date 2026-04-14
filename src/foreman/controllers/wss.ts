@@ -5,7 +5,7 @@ import { ForemanMessage } from "../models/foreman-message.js";
 import { WebhookEvent } from "../models/webhook-event.js";
 import type { AdminWss } from "../admin-ws.js";
 import { fmtEvent } from "../event-fmt.js";
-import { fmtError } from "../../utils.js";
+import { fmtError, log } from "../../utils.js";
 import { shortWorkerId } from "../../../shared/utils.js";
 import type { BrunelConfig } from "../../config.js";
 import type { TaskManager } from "../models/task-manager.js";
@@ -103,28 +103,28 @@ export class ForemanWss {
       };
 
       const handleTaskComplete = async (msg: Extract<Wire.WorkerMessage, { type: "task_complete" }>) => {
-        this.log(workerId, `task_complete #${msg.taskId}`);
+        this.workerLog(workerId, `task_complete #${msg.taskId}`);
         const task = await Task.get(msg.taskId);
         if (task && task.workerId !== workerId) {
-          this.log(workerId, `task_complete #${msg.taskId} ignored — owned by ${task.workerId ?? "nobody"}`);
+          this.workerLog(workerId, `task_complete #${msg.taskId} ignored — owned by ${task.workerId ?? "nobody"}`);
           return;
         }
         if (task) {
           await task.complete().catch((err: unknown) =>
-            this.flog(`ERROR Failed to mark task #${msg.taskId} complete: ${fmtError(err)}`)
+            log(`ERROR Failed to mark task #${msg.taskId} complete: ${fmtError(err)}`)
           );
         }
         Worker.get(workerId)?.release();
       };
 
       const handleWorkerGoodbye = async (msg: Extract<Wire.WorkerMessage, { type: "worker_goodbye" }>) => {
-        this.log(workerId, `worker_goodbye (task=${msg.taskId ?? "none"})`);
+        this.workerLog(workerId, `worker_goodbye (task=${msg.taskId ?? "none"})`);
         if (msg.taskId) {
           const task = await Task.get(msg.taskId);
           if (task) {
-            this.log(workerId, `reverting task #${task.issueNumber} to pending (worker_goodbye)`);
+            this.workerLog(workerId, `reverting task #${task.issueNumber} to pending (worker_goodbye)`);
             await task.revert().catch((err: unknown) =>
-              this.flog(`ERROR Failed to revert task #${msg.taskId} to pending: ${fmtError(err)}`)
+              log(`ERROR Failed to revert task #${msg.taskId} to pending: ${fmtError(err)}`)
             );
           }
         }
@@ -151,9 +151,9 @@ export class ForemanWss {
           if (msg.type === "worker_hello") await handleWorkerHello(msg);
           else if (msg.type === "task_complete") await handleTaskComplete(msg);
           else if (msg.type === "worker_goodbye") await handleWorkerGoodbye(msg);
-          else { this.flog(`[worker ${workerId}] unknown message type: ${(msg as R).type}`); return; }
+          else { log(`[worker ${workerId}] unknown message type: ${(msg as R).type}`); return; }
           await this.assignWork();
-        })().catch(err => this.flog(`ERROR handling worker message: ${fmtError(err)}`));
+        })().catch(err => log(`ERROR handling worker message: ${fmtError(err)}`));
       });
 
       ws.on("close", (code, reason) => {
@@ -162,7 +162,7 @@ export class ForemanWss {
           if (currentWorker && !currentWorker.isCurrentSocket(ws)) return;
 
           const reasonStr = reason?.length ? `: ${reason}` : "";
-          this.log(workerId, `disconnected (code ${code}${reasonStr})`);
+          this.workerLog(workerId, `disconnected (code ${code}${reasonStr})`);
           const taskId = currentWorker?.currentTaskId ?? null;
           const disconnPayload = { code, reason: reason?.toString() ?? null };
           void ForemanMessage.log({
@@ -195,7 +195,7 @@ export class ForemanWss {
   async routeEvent(id: string, name: string, payload: unknown): Promise<void> {
     const p = payload as R;
     const evt = WebhookEvent.fromIncoming(id, name, p);
-    if (!evt.isMuted()) this.flog(evt.summary());
+    if (!evt.isMuted()) log(evt.summary());
 
     let taskId: string | null = null;
     let workerId: string | null = null;
@@ -255,10 +255,6 @@ export class ForemanWss {
     });
   }
 
-  flog(msg: string): void {
-    console.log(`${new Date().toISOString()} ${msg}`);
-  }
-
   sendMsg(workerId: string, msg: Wire.ForemanMessage, logTaskId?: string): void {
     const taskId = logTaskId ?? (("taskId" in msg ? msg.taskId : null) ?? null);
     Worker.get(workerId)?.send(msg);
@@ -288,8 +284,8 @@ export class ForemanWss {
     });
   }
 
-  private log(wid: string, line: string): void {
-    this.flog(`[worker ${shortWorkerId(wid)}] ${line}`);
+  private workerLog(wid: string, line: string): void {
+    log(`[worker ${shortWorkerId(wid)}] ${line}`);
   }
 
   // ── Hello handlers ───────────────────────────────────────────────────────────
@@ -297,7 +293,7 @@ export class ForemanWss {
   private flushQueuedEvents(workerId: string, taskId: string, issueRef: string | number): void {
     for (const evt of this.taskManager.drainEvents(taskId)) {
       this.sendMsg(workerId, { type: "event_notification", taskId, event: evt.toWorkerPayload() });
-      this.log(workerId, `→ event_notification #${issueRef} ${evt.eventName} (queued)`);
+      this.workerLog(workerId, `→ event_notification #${issueRef} ${evt.eventName} (queued)`);
     }
   }
 
@@ -333,7 +329,7 @@ export class ForemanWss {
     const existing = await Task.get(claimedTaskId);
 
     if (!existing) {
-      this.log(workerId, `hello busy task=#${claimedTaskId} — unknown task, respecting busy status`);
+      this.workerLog(workerId, `hello busy task=#${claimedTaskId} — unknown task, respecting busy status`);
       const issueNumber = parseInt(claimedTaskId, 10);
       let placeholderTask: Task | null = null;
       if (!isNaN(issueNumber)) {
@@ -346,17 +342,17 @@ export class ForemanWss {
       }
     } else if (existing.status === "complete") {
       if (existing.workerId && existing.workerId !== workerId) {
-        this.log(workerId, `hello busy task=#${claimedTaskId} — task complete but owned by another worker, cancelling`);
+        this.workerLog(workerId, `hello busy task=#${claimedTaskId} — task complete but owned by another worker, cancelling`);
         this.cancelWorker(workerId, claimedTaskId, ws);
       } else {
-        this.log(workerId, `hello busy task=#${claimedTaskId} — task already complete, reclaiming for finalization`);
+        this.workerLog(workerId, `hello busy task=#${claimedTaskId} — task already complete, reclaiming for finalization`);
         await this.reclaimWorker(workerId, existing, ws);
       }
     } else if (existing.workerId && existing.workerId !== workerId) {
-      this.log(workerId, `hello busy task=#${claimedTaskId} — task taken by another worker`);
+      this.workerLog(workerId, `hello busy task=#${claimedTaskId} — task taken by another worker`);
       this.cancelWorker(workerId, claimedTaskId, ws);
     } else {
-      this.log(workerId, `hello busy task=#${claimedTaskId} — reclaimed`);
+      this.workerLog(workerId, `hello busy task=#${claimedTaskId} — reclaimed`);
       await this.reclaimWorker(workerId, existing, ws);
     }
   }
@@ -370,11 +366,11 @@ export class ForemanWss {
     const priorTask = await Task.getByWorker(workerId);
     if (priorTask) {
       await priorTask.revert().catch((err: unknown) =>
-        this.flog(`ERROR Failed to revert task #${priorTask.taskId} to pending: ${fmtError(err)}`)
+        log(`ERROR Failed to revert task #${priorTask.taskId} to pending: ${fmtError(err)}`)
       );
-      this.log(workerId, `hello idle (had task #${priorTask.taskId}) — reverting task to pending`);
+      this.workerLog(workerId, `hello idle (had task #${priorTask.taskId}) — reverting task to pending`);
     } else {
-      this.log(workerId, "hello idle");
+      this.workerLog(workerId, "hello idle");
     }
     Worker.register(workerId, ws);
     this.sendMsg(workerId, { type: "hello_ack", workerId, status: "idle" });
@@ -386,29 +382,29 @@ export class ForemanWss {
     if (task.workerId) {
       const worker = Worker.get(task.workerId);
       if (worker && worker.currentTaskId !== task.taskId) {
-        this.flog(`[task ${ref}] ${evt.eventName} dropped — worker ${shortWorkerId(task.workerId)} is now on a different task`);
+        log(`[task ${ref}] ${evt.eventName} dropped — worker ${shortWorkerId(task.workerId)} is now on a different task`);
         return;
       }
       if (worker?.status === "disconnected") {
         this.taskManager.queueEvent(task.taskId, evt);
-        this.flog(`[task ${ref}] ${evt.eventName} queued (worker ${shortWorkerId(task.workerId)} disconnected)`);
+        log(`[task ${ref}] ${evt.eventName} queued (worker ${shortWorkerId(task.workerId)} disconnected)`);
       } else if (worker) {
         this.sendMsg(task.workerId, { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload() });
-        this.flog(`[worker ${shortWorkerId(task.workerId)}] → event_notification ${ref} ${evt.eventName}`);
+        log(`[worker ${shortWorkerId(task.workerId)}] → event_notification ${ref} ${evt.eventName}`);
       } else {
-        this.flog(`[task ${ref}] ${evt.eventName} DROPPED — worker ${shortWorkerId(task.workerId)} not in registry (disconnected?)`);
+        log(`[task ${ref}] ${evt.eventName} DROPPED — worker ${shortWorkerId(task.workerId)} not in registry (disconnected?)`);
       }
     } else if (task.status === "pending" || task.status === "blocked") {
       this.taskManager.queueEvent(task.taskId, evt);
-      this.flog(`[task ${ref}] ${evt.eventName} queued (no worker assigned)`);
+      log(`[task ${ref}] ${evt.eventName} queued (no worker assigned)`);
     }
   }
 
   async assignWork(): Promise<void> {
     for (const outcome of await this.taskManager.assignIdleWorkers()) {
       if (!outcome.ok) {
-        this.flog(`ERROR Failed to persist assignment: ${fmtError(outcome.err)}`);
-        this.flog(`[worker ${shortWorkerId(outcome.workerId)}] → idle (DB write failed)`);
+        log(`ERROR Failed to persist assignment: ${fmtError(outcome.err)}`);
+        log(`[worker ${shortWorkerId(outcome.workerId)}] → idle (DB write failed)`);
         continue;
       }
       const { task, queued, workerId: wid } = outcome;
@@ -423,10 +419,10 @@ export class ForemanWss {
           repoUrl: task.repoUrl,
         },
       });
-      this.flog(`[worker ${shortWorkerId(wid)}] → task_assigned #${task.issueNumber} "${task.title}"`);
+      log(`[worker ${shortWorkerId(wid)}] → task_assigned #${task.issueNumber} "${task.title}"`);
       for (const evt of queued) {
         this.sendMsg(wid, { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload() });
-        this.flog(`[worker ${shortWorkerId(wid)}] → event_notification #${task.issueNumber} ${evt.eventName} (queued)`);
+        log(`[worker ${shortWorkerId(wid)}] → event_notification #${task.issueNumber} ${evt.eventName} (queued)`);
       }
     }
   }
@@ -434,7 +430,7 @@ export class ForemanWss {
   private startDepsLoad(issueNumber: number, body: string): void {
     this.taskManager.fetchAndLoadDeps(issueNumber, body, { repo: this.repo, token: this.token, apiUrl: this.githubApiUrl })
       .then(() => this.assignWork())
-      .catch((err) => this.flog(`ERROR fetching deps for #${issueNumber}: ${fmtError(err)}`));
+      .catch((err) => log(`ERROR fetching deps for #${issueNumber}: ${fmtError(err)}`));
   }
 
   async routePrEvent(p: R, evt: WebhookEvent): Promise<RouteResult> {
@@ -456,9 +452,9 @@ export class ForemanWss {
           const branch = strProp(pr.head, "ref");
           if (branch) this.taskManager.registerBranch(branch, linkedTask.taskId);
           await linkedTask.registerPr(prNumber, branch ?? null).catch((err: unknown) =>
-            this.flog(`ERROR Failed to register PR for task #${linkedTask.taskId}: ${fmtError(err)}`)
+            log(`ERROR Failed to register PR for task #${linkedTask.taskId}: ${fmtError(err)}`)
           );
-          this.flog(`[task #${linkedIssue}] PR #${prNumber} registered`);
+          log(`[task #${linkedIssue}] PR #${prNumber} registered`);
         }
       }
     }
@@ -466,9 +462,9 @@ export class ForemanWss {
     if (p.action === "closed" && pr && !pr.merged) {
       const task = await Task.getByPr(prNumber);
       if (task) {
-        this.flog(`[task #${task.issueNumber}] PR #${prNumber} unregistered (closed without merging)`);
+        log(`[task #${task.issueNumber}] PR #${prNumber} unregistered (closed without merging)`);
         await task.unregisterPr().catch((err: unknown) =>
-          this.flog(`ERROR Failed to unregister PR #${prNumber}: ${fmtError(err)}`)
+          log(`ERROR Failed to unregister PR #${prNumber}: ${fmtError(err)}`)
         );
         this.forwardEvent(task, evt, `PR #${prNumber}`);
         return result(task);
@@ -479,9 +475,9 @@ export class ForemanWss {
     if (p.action === "closed" && pr && pr.merged) {
       const task = await Task.getByPr(prNumber);
       if (task) {
-        this.flog(`[task #${task.issueNumber}] PR #${prNumber} merged`);
+        log(`[task #${task.issueNumber}] PR #${prNumber} merged`);
         await task.mergePr().catch((err: unknown) =>
-          this.flog(`ERROR Failed to record PR #${prNumber} merge: ${fmtError(err)}`)
+          log(`ERROR Failed to record PR #${prNumber} merge: ${fmtError(err)}`)
         );
         this.forwardEvent(task, evt, `PR #${prNumber}`);
         return result(task);
@@ -552,18 +548,18 @@ export class ForemanWss {
       if (labeledNow || openedWithLabel) {
         const issueState = String(issue.state ?? "open");
         if (issueState === "closed") {
-          this.flog(`[task #${issueNumber}] issues/${action}: ignoring — issue is closed (title: ${JSON.stringify(String(issue.title ?? ""))})`);
+          log(`[task #${issueNumber}] issues/${action}: ignoring — issue is closed (title: ${JSON.stringify(String(issue.title ?? ""))})`);
           return result(null);
         }
 
         const labels = (issue.labels as Array<{ name: string }> | undefined)?.map((l) => l.name) ?? [];
         // Track as open and persist to DB.
         await this.taskManager.enqueueIssue(String(issueNumber), issueNumber, this.repo, String(issue.title ?? ""), String(issue.body ?? ""), labels)
-          .catch((err: unknown) => this.flog(`ERROR Failed to persist task #${issueNumber}: ${fmtError(err)}`));
+          .catch((err: unknown) => log(`ERROR Failed to persist task #${issueNumber}: ${fmtError(err)}`));
 
         this.startDepsLoad(issueNumber, String(issue.body ?? ""));
         await this.assignWork();
-        this.flog(`[task #${issueNumber}] enqueued via issues/${action}`);
+        log(`[task #${issueNumber}] enqueued via issues/${action}`);
         return { taskId: String(issueNumber), workerId: null };
       }
     }
@@ -576,15 +572,15 @@ export class ForemanWss {
       (p.label as R | undefined)?.name === this.taskLabel
     ) {
       await this.taskManager.dequeueIssue(issueNumber)
-        .catch((err: unknown) => this.flog(`ERROR Failed to dequeue task #${issueNumber}: ${fmtError(err)}`));
-      this.flog(`[task #${issueNumber}] dequeued (label removed)`);
+        .catch((err: unknown) => log(`ERROR Failed to dequeue task #${issueNumber}: ${fmtError(err)}`));
+      log(`[task #${issueNumber}] dequeued (label removed)`);
       await this.assignWork();
       return result(task);
     }
 
     if (action === "closed") {
       await this.taskManager.closeIssue(issueNumber).catch((err: unknown) =>
-        this.flog(`ERROR Failed to close issue #${issueNumber}: ${fmtError(err)}`)
+        log(`ERROR Failed to close issue #${issueNumber}: ${fmtError(err)}`)
       );
       await this.assignWork();
       return result(task);
@@ -592,7 +588,7 @@ export class ForemanWss {
 
     if (action === "reopened") {
       await this.taskManager.reopenIssue(issueNumber).catch((err: unknown) =>
-        this.flog(`ERROR Failed to reopen issue #${issueNumber}: ${fmtError(err)}`)
+        log(`ERROR Failed to reopen issue #${issueNumber}: ${fmtError(err)}`)
       );
       await this.assignWork();
       return result(task);

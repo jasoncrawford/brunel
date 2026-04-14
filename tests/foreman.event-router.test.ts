@@ -8,11 +8,12 @@
  * guard — so any case where the worker has moved on is caught.
  */
 import http from "http";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ForemanWss } from "../src/foreman/controllers/wss.js";
 import { Task } from "../src/foreman/models/task.js";
 import { Worker } from "../src/foreman/models/worker.js";
 import { WebhookEvent } from "../src/foreman/models/webhook-event.js";
+import * as utils from "../src/utils.js";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -24,18 +25,24 @@ function makeEvent(name = "issue_comment"): WebhookEvent {
   return WebhookEvent.fromIncoming("evt-1", name, {});
 }
 
-function makeWss(taskManager: any): { wss: ForemanWss; sendMsg: ReturnType<typeof vi.fn>; flog: ReturnType<typeof vi.fn> } {
+function makeWss(taskManager: any): { wss: ForemanWss; sendMsg: ReturnType<typeof vi.fn> } {
   const wss = new ForemanWss({
     config: { taskLabel: "brunel:ready", githubRepo: "owner/repo", githubToken: "token", workerSecret: undefined, pingIntervalMs: 1e9 },
     taskManager,
     server: http.createServer(),
   });
   const sendMsg = vi.spyOn(wss, "sendMsg").mockImplementation(() => {});
-  const flog = vi.spyOn(wss, "flog").mockImplementation(() => {});
-  return { wss, sendMsg, flog };
+  return { wss, sendMsg };
 }
 
-beforeEach(() => { Worker._reset(); });
+let logSpy: ReturnType<typeof vi.spyOn>;
+
+beforeEach(() => {
+  Worker._reset();
+  logSpy = vi.spyOn(utils, "log").mockImplementation(() => {});
+});
+
+afterEach(() => { vi.restoreAllMocks(); });
 
 // ── Core bug fix: worker that has moved on ─────────────────────────────────────
 
@@ -87,12 +94,12 @@ describe("forwardEvent — worker has moved on to a different task", () => {
     const w = Worker.register("worker-1", fakeWs());
     w.assign("other-task-id");
     const taskManager = { queueEvent: vi.fn(), assignIdleWorkers: vi.fn().mockResolvedValue([]), on: vi.fn() };
-    const { wss, flog } = makeWss(taskManager);
+    const { wss } = makeWss(taskManager);
 
     wss.forwardEvent(task, makeEvent("issue_comment"), "#42");
 
-    expect(flog).toHaveBeenCalledWith(expect.stringContaining("dropped"));
-    expect(flog).toHaveBeenCalledWith(expect.stringContaining("different task"));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("dropped"));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("different task"));
   });
 });
 
@@ -130,12 +137,12 @@ describe("forwardEvent — active tasks still receive events", () => {
     const w = Worker.register("worker-1", fakeWs());
     w.assign("42");
     const taskManager = { queueEvent: vi.fn(), assignIdleWorkers: vi.fn().mockResolvedValue([]), on: vi.fn() };
-    const { wss, sendMsg, flog } = makeWss(taskManager);
+    const { wss, sendMsg } = makeWss(taskManager);
 
     wss.forwardEvent(task, makeEvent(), "#42");
 
     expect(sendMsg).toHaveBeenCalledOnce();
-    expect(flog).not.toHaveBeenCalledWith(expect.stringContaining("dropped"));
+    expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("dropped"));
   });
 
   it("still forwards events when the task's issue is closed but worker is still on it", () => {
@@ -148,12 +155,12 @@ describe("forwardEvent — active tasks still receive events", () => {
     const w = Worker.register("worker-1", fakeWs());
     w.assign("42");
     const taskManager = { queueEvent: vi.fn(), assignIdleWorkers: vi.fn().mockResolvedValue([]), on: vi.fn() };
-    const { wss, sendMsg, flog } = makeWss(taskManager);
+    const { wss, sendMsg } = makeWss(taskManager);
 
     wss.forwardEvent(task, makeEvent(), "#42");
 
     expect(sendMsg).toHaveBeenCalledOnce();
-    expect(flog).not.toHaveBeenCalledWith(expect.stringContaining("dropped"));
+    expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("dropped"));
   });
 
   it("queues event for a pending task with no worker", () => {

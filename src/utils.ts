@@ -1,5 +1,10 @@
 import { randomInt } from "node:crypto";
 
+/** Write a timestamped log line to stdout. */
+export function log(msg: string): void {
+  console.log(`${new Date().toISOString()} ${msg}`);
+}
+
 export const WORKER_NAMES = [
   "abner",
   "adelaide",
