@@ -204,8 +204,8 @@ function stubFetchNoBlockers() {
 function buildForeman(): {
   taskModel: TaskManager;
   httpServer: http.Server;
+  foremanWss: ForemanWss;
   wss: WebSocketServer;
-  routeEvent: (id: string, name: string, payload: unknown) => Promise<void>;
   port: number;
   openClients: WebSocket[];
   connect: () => Promise<WebSocket>;
@@ -216,11 +216,12 @@ function buildForeman(): {
   const httpServer = http.createServer();
   const openClients: WebSocket[] = [];
 
-  const { wss, routeEvent } = new ForemanWss({ taskManager: taskModel, server: httpServer, config: {
+  const foremanWss = new ForemanWss({ taskManager: taskModel, server: httpServer, config: {
     ...defaultCfg,
     githubRepo: "owner/repo",
     githubToken: "token",
   } });
+  const { wss } = foremanWss;
 
   // port is assigned synchronously when listen() resolves; we'll resolve it
   // asynchronously below, but return the object immediately so the caller can
@@ -259,7 +260,7 @@ function buildForeman(): {
   }
 
   // Expose everything; caller must await `ready` before using `port`.
-  const result = { taskModel, httpServer, wss, routeEvent, port, openClients, connect, teardown };
+  const result = { taskModel, httpServer, foremanWss, wss, port, openClients, connect, teardown };
   // Patch port lazily via a getter so callers don't have to await ready separately
   Object.defineProperty(result, "port", { get: () => port });
   void ready; // ensure listen is called (it is already)
@@ -292,10 +293,10 @@ describe("pipeline: happy path and queued-then-assigned", () => {
   });
 
   it("webhook → task pending in DB → worker → task_assigned → task_complete → complete in DB", async () => {
-    const { taskModel, routeEvent, connect } = foreman;
+    const { taskModel, foremanWss, connect } = foreman;
 
     // 1. Webhook fires; foreman enqueues the task
-    await routeEvent("evt-1", "issues", labeledPayload(42));
+    await foremanWss.routeEvent("evt-1", "issues", labeledPayload(42));
 
     // 2. Task row appears in DB with status=pending
     const pendingRow = await pollUntil(() => getDbTask("42"));
@@ -334,10 +335,10 @@ describe("pipeline: happy path and queued-then-assigned", () => {
   });
 
   it("webhook with no worker → task pending in DB → worker connects → task assigned", async () => {
-    const { routeEvent, connect } = foreman;
+    const { foremanWss, connect } = foreman;
 
     // 1. Webhook fires but no worker is connected
-    await routeEvent("evt-1", "issues", labeledPayload(55));
+    await foremanWss.routeEvent("evt-1", "issues", labeledPayload(55));
 
     // 2. Task appears as pending in DB
     const pendingRow = await pollUntil(() => getDbTask("55"));
@@ -388,10 +389,10 @@ describe("pipeline: worker disconnect/reclaim", () => {
   });
 
   it("worker disconnects and reconnects as busy → task stays assigned in DB", async () => {
-    const { routeEvent, connect, openClients } = foreman;
+    const { foremanWss, connect, openClients } = foreman;
 
     // 1. Assign task to a worker
-    await routeEvent("evt-1", "issues", labeledPayload(70));
+    await foremanWss.routeEvent("evt-1", "issues", labeledPayload(70));
     const ws1 = await connect();
     const q1 = makeQueue(ws1);
     send(ws1, { type: "worker_hello", workerId: "w-reclaim", status: "idle" });
@@ -477,7 +478,7 @@ describe("pipeline: dependency blocking", () => {
   });
 
   it("task with open blocker is not assigned → blocker closed → worker receives task_assigned", async () => {
-    const { routeEvent, connect } = foreman;
+    const { foremanWss, connect } = foreman;
 
     // 1. Connect an idle worker
     const ws = await connect();
@@ -488,7 +489,7 @@ describe("pipeline: dependency blocking", () => {
     expect((ack as any).status).toBe("idle");
 
     // 2. Issue #92 depends on issue #91 (via body text). Issue #91 is open.
-    await routeEvent("evt-1", "issues", labeledPayload(92, "Depends on #91"));
+    await foremanWss.routeEvent("evt-1", "issues", labeledPayload(92, "Depends on #91"));
 
     // 3. Wait for the task row to appear in DB as pending (deps loaded, but blocked)
     await pollUntil(() => getDbTask("92"));
@@ -499,7 +500,7 @@ describe("pipeline: dependency blocking", () => {
     expect(q.isEmpty()).toBe(true);
 
     // 5. Close the blocker issue — this unblocks task #92
-    await routeEvent("evt-2", "issues", closedPayload(91));
+    await foremanWss.routeEvent("evt-2", "issues", closedPayload(91));
 
     // 6. Worker now receives task_assigned
     const assigned = await q.next();
@@ -544,10 +545,10 @@ describe("pipeline: PR events forwarded and logged to DB", () => {
   });
 
   it("check_run for worker's PR is forwarded as event_notification and logged in DB with task_id", async () => {
-    const { routeEvent, connect } = foreman;
+    const { foremanWss, connect } = foreman;
 
     // 1. Get a task assigned to a worker
-    await routeEvent("evt-1", "issues", labeledPayload(100));
+    await foremanWss.routeEvent("evt-1", "issues", labeledPayload(100));
     const ws = await connect();
     const q = makeQueue(ws);
     send(ws, { type: "worker_hello", workerId: "w-pr", status: "idle" });
@@ -558,8 +559,8 @@ describe("pipeline: PR events forwarded and logged to DB", () => {
     //    and a check_run fires for the PR.  Both are routed before awaiting any
     //    notifications to avoid a race where the check_run notification arrives
     //    before the pull_request notification due to async processing order.
-    await routeEvent("evt-pr", "pull_request", prOpenedPayload(20, "Closes #100"));
-    await routeEvent("evt-cr", "check_run", checkRunPayload(20));
+    await foremanWss.routeEvent("evt-pr", "pull_request", prOpenedPayload(20, "Closes #100"));
+    await foremanWss.routeEvent("evt-cr", "check_run", checkRunPayload(20));
 
     // 3. Collect both event_notifications.  Ordering is not guaranteed because
     //    the two events may be processed at different speeds on the foreman side.
