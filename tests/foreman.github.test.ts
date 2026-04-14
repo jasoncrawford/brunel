@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { loadIssuesToQueue, fetchIssueStates, fetchNativeBlockers } from "../src/foreman/github.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
+import { Worker } from "../src/foreman/models/worker.js";
 import { setupInMemoryTasks } from "./helpers/task.js";
 
 const mockIssues = [
@@ -13,6 +14,7 @@ const OPTS = { repo: "owner/repo", token: "token123" };
 const CONFIG_OPTS = { githubRepo: "owner/repo", githubToken: "token123", taskLabel: "brunel:ready" };
 
 beforeEach(() => {
+  Worker._reset();
   vi.stubGlobal("fetch", vi.fn());
 });
 
@@ -65,7 +67,8 @@ describe("loadIssuesToQueue", () => {
     // Task #1 already exists and is assigned to a worker (simulates foreman restart)
     await Task.upsert("1", 1, "owner/repo", "Original title", "Original body", ["brunel:ready"]);
     const t = await Task.getByIssue(1);
-    await t!.assign({ workerId: "worker-abc" });
+    const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
+    await t!.assign(Worker.register("worker-abc", fakeWs));
     expect(t!.workerId).toBe("worker-abc");
 
     // loadIssuesToQueue runs during startup and calls upsert for the same issue

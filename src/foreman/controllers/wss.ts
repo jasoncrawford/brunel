@@ -298,8 +298,8 @@ export class ForemanWss {
     }
   }
 
-  private cancelWorker(worker: Worker, taskId: string | undefined): void {
-    this.sendMsg(worker, { type: "hello_ack", workerId: worker.workerId, status: "cancelled" }, taskId);
+  private cancelWorker(worker: Worker, task: Task | null): void {
+    this.sendMsg(worker, { type: "hello_ack", workerId: worker.workerId, status: "cancelled" }, task?.taskId);
   }
 
   private async reclaimWorker(worker: Worker, task: Task): Promise<void> {
@@ -326,7 +326,7 @@ export class ForemanWss {
    */
   async handleBusyHello(workerId: string, claimedTaskId: string, ws: WebSocket): Promise<void> {
     const existing = await Task.get(claimedTaskId);
-    const w = Worker.register(workerId, ws);
+    const worker = Worker.register(workerId, ws);
 
     if (!existing) {
       this.workerLog(workerId, `hello busy task=#${claimedTaskId} — unknown task, respecting busy status`);
@@ -336,24 +336,24 @@ export class ForemanWss {
         placeholderTask = await Task.upsert(claimedTaskId, issueNumber, "", "", "", []);
       }
       if (placeholderTask) {
-        await this.reclaimWorker(w, placeholderTask);
+        await this.reclaimWorker(worker, placeholderTask);
       } else {
-        this.cancelWorker(w, claimedTaskId);
+        this.cancelWorker(worker, null);
       }
     } else if (existing.status === "complete") {
       if (existing.workerId && existing.workerId !== workerId) {
         this.workerLog(workerId, `hello busy task=#${claimedTaskId} — task complete but owned by another worker, cancelling`);
-        this.cancelWorker(w, claimedTaskId);
+        this.cancelWorker(worker, existing);
       } else {
         this.workerLog(workerId, `hello busy task=#${claimedTaskId} — task already complete, reclaiming for finalization`);
-        await this.reclaimWorker(w, existing);
+        await this.reclaimWorker(worker, existing);
       }
     } else if (existing.workerId && existing.workerId !== workerId) {
       this.workerLog(workerId, `hello busy task=#${claimedTaskId} — task taken by another worker`);
-      this.cancelWorker(w, claimedTaskId);
+      this.cancelWorker(worker, existing);
     } else {
       this.workerLog(workerId, `hello busy task=#${claimedTaskId} — reclaimed`);
-      await this.reclaimWorker(w, existing);
+      await this.reclaimWorker(worker, existing);
     }
   }
 

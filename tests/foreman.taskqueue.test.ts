@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
+import { Worker } from "../src/foreman/models/worker.js";
 import { setupInMemoryTasks } from "./helpers/task.js";
 import { WebhookEvent } from "../src/foreman/models/webhook-event.js";
 
@@ -18,6 +19,7 @@ async function registerBase(overrides: { taskId?: string; issueNumber?: number; 
 describe("TaskManager — queue operations", () => {
   let m: TaskManager;
   beforeEach(() => {
+    Worker._reset();
     m = new TaskManager();
     setupInMemoryTasks(m);
   });
@@ -41,7 +43,8 @@ describe("TaskManager — queue operations", () => {
   it("assign updates status and workerId", async () => {
     await registerBase();
     const t = await Task.get("42");
-    await t!.assign({ workerId: "w1" });
+    const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
+    await t!.assign(Worker.register("w1", fakeWs));
     const updated = await Task.get("42");
     expect(updated?.status).toBe("assigned");
     expect(updated?.workerId).toBe("w1");
@@ -50,7 +53,8 @@ describe("TaskManager — queue operations", () => {
   it("complete updates status", async () => {
     await registerBase();
     const t = await Task.get("42");
-    await t!.assign({ workerId: "w1" });
+    const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
+    await t!.assign(Worker.register("w1", fakeWs));
     await t!.complete();
     const updated = await Task.get("42");
     expect(updated?.status).toBe("complete");
@@ -169,10 +173,11 @@ describe("TaskManager — derived blocked status", () => {
     await Task.upsert("1", 1, repoSlug, "T1", "B", ["brunel:ready"]);
     await Task.upsert("2", 2, repoSlug, "T2", "B", ["brunel:ready"]);
     const t2 = await Task.get("2");
-    await t2!.assign({ workerId: "w1" });
+    const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
+    await t2!.assign(Worker.register("w1", fakeWs));
     await Task.upsert("3", 3, repoSlug, "T3", "B", ["brunel:ready"]);
     const t3 = await Task.get("3");
-    await t3!.assign({ workerId: "w2" });
+    await t3!.assign(Worker.register("w2", fakeWs));
     await t3!.complete();
     const result = await m.listActiveTasks();
     expect(result.map((t) => t.taskId)).toEqual(expect.arrayContaining(["1", "2"]));
@@ -202,6 +207,7 @@ describe("TaskManager — cancel (delete behavior)", () => {
   let m: TaskManager;
   let addTask: ReturnType<typeof setupInMemoryTasks>["addTask"];
   beforeEach(() => {
+    Worker._reset();
     m = new TaskManager();
     ({ addTask } = setupInMemoryTasks(m));
   });
@@ -219,7 +225,8 @@ describe("TaskManager — cancel (delete behavior)", () => {
   it("does not remove an assigned task", async () => {
     await registerBase();
     const t = await Task.get("42");
-    await t!.assign({ workerId: "w1" });
+    const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
+    await t!.assign(Worker.register("w1", fakeWs));
     await t!.deleteIfUnassigned();
     expect(await Task.get("42")).not.toBeNull();
   });
@@ -265,6 +272,7 @@ describe("TaskManager — nextPending with predicate", () => {
 describe("TaskManager changed events", () => {
   let m: TaskManager;
   beforeEach(() => {
+    Worker._reset();
     m = new TaskManager();
     setupInMemoryTasks(m);
   });
@@ -282,14 +290,16 @@ describe("TaskManager changed events", () => {
     const changed = vi.fn();
     m.on("changed", changed);
     const t = await Task.get("42");
-    await t!.assign({ workerId: "w1" });
+    const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
+    await t!.assign(Worker.register("w1", fakeWs));
     expect(changed).toHaveBeenCalledOnce();
   });
 
   it("complete emits changed", async () => {
     await Task.upsert("42", 42, repoSlug, "Fix the bug", "It is broken", ["brunel:ready"]);
     const t = await Task.get("42");
-    await t!.assign({ workerId: "w1" });
+    const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
+    await t!.assign(Worker.register("w1", fakeWs));
     const changed = vi.fn();
     m.on("changed", changed);
     await t!.complete();
@@ -299,7 +309,8 @@ describe("TaskManager changed events", () => {
   it("revert emits changed", async () => {
     await Task.upsert("42", 42, repoSlug, "Fix the bug", "It is broken", ["brunel:ready"]);
     const t = await Task.get("42");
-    await t!.assign({ workerId: "w1" });
+    const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
+    await t!.assign(Worker.register("w1", fakeWs));
     const changed = vi.fn();
     m.on("changed", changed);
     await t!.revert();
@@ -318,7 +329,8 @@ describe("TaskManager changed events", () => {
   it("delete emits changed even for assigned task (row preserved)", async () => {
     await Task.upsert("42", 42, repoSlug, "Fix the bug", "It is broken", ["brunel:ready"]);
     const t = await Task.get("42");
-    await t!.assign({ workerId: "w1" });
+    const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
+    await t!.assign(Worker.register("w1", fakeWs));
     const changed = vi.fn();
     m.on("changed", changed);
     await t!.delete(); // row not deleted (assignedAt set), but changed still emits

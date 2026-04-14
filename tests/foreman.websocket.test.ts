@@ -352,7 +352,10 @@ describe("foreman WebSocket protocol", () => {
   it("worker reconnects as busy with its own completed taskId is allowed to reclaim (finalization)", async () => {
     await makeTask(taskManager, 1);
     const t = await Task.get("1");
-    await t!.assign({ workerId: "w1" });
+    const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
+    const w1 = Worker.register("w1", fakeWs);
+    await t!.assign(w1);
+    w1.remove(); // deregister so waitUntil below detects the real reconnect
     await t!.complete();
 
     const ws = await connect();
@@ -460,7 +463,8 @@ describe("hello_ack handshake", () => {
   it("allows worker to reclaim task even if complete (issue closed, same worker)", async () => {
     await makeTask(taskManager, 1);
     const t = await Task.get("1");
-    await t!.assign({ workerId: "w1" });
+    const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
+    await t!.assign(Worker.register("w1", fakeWs));
     await t!.complete();
 
     const ws = await connect();
@@ -475,8 +479,9 @@ describe("hello_ack handshake", () => {
   it("cancels worker when task is assigned to a different worker", async () => {
     await makeTask(taskManager, 1);
     const t = await Task.get("1");
-    await t!.assign({ workerId: "w1" });
-    await t!.assign({ workerId: "w2" });
+    const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
+    await t!.assign(Worker.register("w1", fakeWs));
+    await t!.assign(Worker.register("w2", fakeWs));
 
     const ws = await connect();
     const ackPromise = nextMsg(ws);
@@ -489,8 +494,8 @@ describe("hello_ack handshake", () => {
   it("queued events are sent after hello_ack on reclaim", async () => {
     await makeTask(taskManager, 1);
     const t = await Task.get("1");
-    await t!.assign({ workerId: "w1" });
-    { const w = Worker.register("w1", {} as ReturnType<typeof connect> extends Promise<infer T> ? T : never); w.assign(t!); w.markDisconnected(); }
+    const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
+    { const w = Worker.register("w1", fakeWs); await t!.assign(w); w.assign(t!); w.markDisconnected(); }
     await foremanWss.routeEvent("evt-1", "issue_comment", { issue: { number: 1 } });
 
     const ws = await connect();
@@ -979,7 +984,8 @@ describe("issues/closed — close persistence", () => {
   it("calls task.close when an issue is closed while a worker is active", async () => {
     await Task.upsert("1", 1, "test/repo", "T", "b", []);
     const t = await Task.get("1");
-    await t!.assign({ workerId: "w1" });
+    const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
+    await t!.assign(Worker.register("w1", fakeWs));
     const spyClose = vi.spyOn(t!, "close");
     vi.spyOn(Task, "getByIssue").mockResolvedValue(t!);
 
@@ -997,7 +1003,8 @@ describe("worker_hello — reclaim complete task for finalization work", () => {
   it("allows worker to reclaim complete task", async () => {
     await Task.upsert("1", 1, "test/repo", "T", "b", []);
     const t = await Task.get("1");
-    await t!.assign({ workerId: "w1" });
+    const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
+    await t!.assign(Worker.register("w1", fakeWs));
     await t!.complete();
 
     const ws = await connect();
