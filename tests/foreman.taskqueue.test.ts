@@ -41,7 +41,7 @@ describe("TaskManager — queue operations", () => {
   it("assign updates status and workerId", async () => {
     await registerBase();
     const t = await Task.get("42");
-    await t!.assign("w1");
+    await t!.assign({ workerId: "w1" });
     const updated = await Task.get("42");
     expect(updated?.status).toBe("assigned");
     expect(updated?.workerId).toBe("w1");
@@ -50,7 +50,7 @@ describe("TaskManager — queue operations", () => {
   it("complete updates status", async () => {
     await registerBase();
     const t = await Task.get("42");
-    await t!.assign("w1");
+    await t!.assign({ workerId: "w1" });
     await t!.complete();
     const updated = await Task.get("42");
     expect(updated?.status).toBe("complete");
@@ -169,10 +169,10 @@ describe("TaskManager — derived blocked status", () => {
     await Task.upsert("1", 1, repoSlug, "T1", "B", ["brunel:ready"]);
     await Task.upsert("2", 2, repoSlug, "T2", "B", ["brunel:ready"]);
     const t2 = await Task.get("2");
-    await t2!.assign("w1");
+    await t2!.assign({ workerId: "w1" });
     await Task.upsert("3", 3, repoSlug, "T3", "B", ["brunel:ready"]);
     const t3 = await Task.get("3");
-    await t3!.assign("w2");
+    await t3!.assign({ workerId: "w2" });
     await t3!.complete();
     const result = await m.listActiveTasks();
     expect(result.map((t) => t.taskId)).toEqual(expect.arrayContaining(["1", "2"]));
@@ -219,7 +219,7 @@ describe("TaskManager — cancel (delete behavior)", () => {
   it("does not remove an assigned task", async () => {
     await registerBase();
     const t = await Task.get("42");
-    await t!.assign("w1");
+    await t!.assign({ workerId: "w1" });
     await t!.deleteIfUnassigned();
     expect(await Task.get("42")).not.toBeNull();
   });
@@ -282,14 +282,14 @@ describe("TaskManager changed events", () => {
     const changed = vi.fn();
     m.on("changed", changed);
     const t = await Task.get("42");
-    await t!.assign("w1");
+    await t!.assign({ workerId: "w1" });
     expect(changed).toHaveBeenCalledOnce();
   });
 
   it("complete emits changed", async () => {
     await Task.upsert("42", 42, repoSlug, "Fix the bug", "It is broken", ["brunel:ready"]);
     const t = await Task.get("42");
-    await t!.assign("w1");
+    await t!.assign({ workerId: "w1" });
     const changed = vi.fn();
     m.on("changed", changed);
     await t!.complete();
@@ -299,7 +299,7 @@ describe("TaskManager changed events", () => {
   it("revert emits changed", async () => {
     await Task.upsert("42", 42, repoSlug, "Fix the bug", "It is broken", ["brunel:ready"]);
     const t = await Task.get("42");
-    await t!.assign("w1");
+    await t!.assign({ workerId: "w1" });
     const changed = vi.fn();
     m.on("changed", changed);
     await t!.revert();
@@ -318,7 +318,7 @@ describe("TaskManager changed events", () => {
   it("delete emits changed even for assigned task (row preserved)", async () => {
     await Task.upsert("42", 42, repoSlug, "Fix the bug", "It is broken", ["brunel:ready"]);
     const t = await Task.get("42");
-    await t!.assign("w1");
+    await t!.assign({ workerId: "w1" });
     const changed = vi.fn();
     m.on("changed", changed);
     await t!.delete(); // row not deleted (assignedAt set), but changed still emits

@@ -307,7 +307,7 @@ export class ForemanWss {
     w.assign(task);
     // Only call assign if task is not already complete (to preserve task status)
     if (task.status !== "complete") {
-      await task.assign(w.workerId);
+      await task.assign(w);
     }
     // For complete tasks, the task stays complete while worker finishes cleanup/finalization work
     this.sendMsg(w.workerId, { type: "hello_ack", workerId: w.workerId, status: "busy" }, task.taskId);
@@ -404,11 +404,11 @@ export class ForemanWss {
     for (const outcome of await this.taskManager.assignIdleWorkers()) {
       if (!outcome.ok) {
         log(`ERROR Failed to persist assignment: ${fmtError(outcome.err)}`);
-        log(`[worker ${shortWorkerId(outcome.workerId)}] → idle (DB write failed)`);
+        log(`[worker ${shortWorkerId(outcome.worker.workerId)}] → idle (DB write failed)`);
         continue;
       }
-      const { task, queued, workerId: wid } = outcome;
-      this.sendMsg(wid, {
+      const { task, queued, worker } = outcome;
+      this.sendMsg(worker.workerId, {
         type: "task_assigned",
         taskId: task.taskId,
         issue: {
@@ -419,10 +419,10 @@ export class ForemanWss {
           repoUrl: task.repoUrl,
         },
       });
-      log(`[worker ${shortWorkerId(wid)}] → task_assigned #${task.issueNumber} "${task.title}"`);
+      log(`[worker ${shortWorkerId(worker.workerId)}] → task_assigned #${task.issueNumber} "${task.title}"`);
       for (const evt of queued) {
-        this.sendMsg(wid, { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload() });
-        log(`[worker ${shortWorkerId(wid)}] → event_notification #${task.issueNumber} ${evt.eventName} (queued)`);
+        this.sendMsg(worker.workerId, { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload() });
+        log(`[worker ${shortWorkerId(worker.workerId)}] → event_notification #${task.issueNumber} ${evt.eventName} (queued)`);
       }
     }
   }

@@ -16,7 +16,7 @@ describe("Task.complete", () => {
     setupInMemoryTasks(manager);
     await Task.upsert("42", 42, REPO, "Fix the bug", "It is broken", ["brunel:ready"]);
     const t = await Task.get("42");
-    await t!.assign("w1");
+    await t!.assign({ workerId: "w1" });
   });
 
   afterEach(() => {
@@ -45,7 +45,7 @@ describe("Task.revert", () => {
     setupInMemoryTasks(manager);
     await Task.upsert("42", 42, REPO, "Fix the bug", "It is broken", ["brunel:ready"]);
     const t = await Task.get("42");
-    await t!.assign("w1");
+    await t!.assign({ workerId: "w1" });
   });
 
   afterEach(() => {
@@ -107,7 +107,7 @@ describe("Task assign", () => {
 
   it("marks task assigned on success", async () => {
     const t = await Task.get("42");
-    await t!.assign("w1");
+    await t!.assign({ workerId: "w1" });
     const updated = await Task.get("42");
     expect(updated?.status).toBe("assigned");
     expect(updated?.workerId).toBe("w1");
@@ -119,14 +119,14 @@ describe("Task assign", () => {
     vi.spyOn(t!, "assign").mockImplementation(() =>
       new Promise<void>((r) => setTimeout(() => { assignWritten = true; r(); }, 10))
     );
-    await t!.assign("w1");
+    await t!.assign({ workerId: "w1" });
     expect(assignWritten).toBe(true);
   });
 
   it("throws when assign fails", async () => {
     const t = await Task.get("42");
     vi.spyOn(t!, "assign").mockRejectedValue(new Error("DB down"));
-    await expect(t!.assign("w1")).rejects.toThrow("DB down");
+    await expect(t!.assign({ workerId: "w1" })).rejects.toThrow("DB down");
   });
 });
 
@@ -148,7 +148,7 @@ describe("Task.deleteIfUnassigned", () => {
 
   it("does not remove an assigned task (assignedAt set)", async () => {
     const t = await Task.get("42");
-    await t!.assign("w1");
+    await t!.assign({ workerId: "w1" });
     await t!.deleteIfUnassigned();
     expect(await Task.get("42")).not.toBeNull();
   });
@@ -320,7 +320,7 @@ describe("TaskManager.assignIdleWorkers", () => {
       ok: true,
       task: expect.objectContaining({ taskId: "42", workerId: "worker-1" }),
       queued: [],
-      workerId: "worker-1",
+      worker: expect.objectContaining({ workerId: "worker-1" }),
     });
   });
 
@@ -360,7 +360,7 @@ describe("TaskManager.assignIdleWorkers", () => {
     expect(outcomes).toHaveLength(1);
     expect(outcomes[0]).toMatchObject({
       ok: false,
-      workerId: "worker-1",
+      worker: expect.objectContaining({ workerId: "worker-1" }),
       err: expect.any(Error),
     });
   });

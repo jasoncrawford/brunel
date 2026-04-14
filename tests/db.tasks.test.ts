@@ -76,7 +76,7 @@ describe("Task.upsert (Supabase)", () => {
   it("on conflict updates content fields only — status fields are preserved", async () => {
     await Task.upsert("dbt-42", 9042, "owner/repo", "Original title", "Original body", ["v1"]);
     const t = await Task.get("dbt-42");
-    await t!.assign("worker-1");
+    await t!.assign({ workerId: "worker-1" });
     await t!.complete();
 
     // Upsert again (e.g. startup sync): must update content but PRESERVE status fields.
@@ -100,7 +100,7 @@ describe("Task.assign (Supabase)", () => {
   it("sets worker_id and assigned_at", async () => {
     await insertProtected("dbt-42", 9042, "owner/repo", "Fix the bug");
     const t = await Task.get("dbt-42");
-    await t!.assign("worker-1");
+    await t!.assign({ workerId: "worker-1" });
 
     const task = await Task.get("dbt-42");
     expect(task!.workerId).toBe("worker-1");
@@ -112,7 +112,7 @@ describe("Task.complete (Supabase)", () => {
   it("sets completed_at", async () => {
     await insertProtected("dbt-42", 9042, "owner/repo", "Fix the bug");
     const t = await Task.get("dbt-42");
-    await t!.assign("worker-1");
+    await t!.assign({ workerId: "worker-1" });
     await t!.complete();
 
     const task = await Task.get("dbt-42");
@@ -124,7 +124,7 @@ describe("Task.revert (Supabase)", () => {
   it("clears worker_id", async () => {
     await insertProtected("dbt-42", 9042, "owner/repo", "Fix the bug");
     const t = await Task.get("dbt-42");
-    await t!.assign("worker-1");
+    await t!.assign({ workerId: "worker-1" });
     await t!.revert();
 
     const task = await Task.get("dbt-42");
@@ -193,7 +193,7 @@ describe("Task.list (Supabase)", () => {
     // Create a task that was assigned then completed (not cancelable)
     await insertProtected("dbt-2", 9002, "r/r", "Complete task");
     const t2 = await Task.get("dbt-2");
-    await t2!.assign("w1");
+    await t2!.assign({ workerId: "w1" });
     await t2!.complete();
 
     const cancelable = own(await Task.list({ cancelable: true }));
@@ -210,7 +210,7 @@ describe("Task.list (Supabase)", () => {
     await insertProtected("dbt-1", 9001, "r/r", "Pending");
     await insertProtected("dbt-2", 9002, "r/r", "Assigned");
     const t2 = await Task.get("dbt-2");
-    await t2!.assign("w1");
+    await t2!.assign({ workerId: "w1" });
 
     const all = own(await Task.list());
     expect(all).toHaveLength(2);
@@ -250,7 +250,7 @@ describe("Task.deleteIfUnassigned (Supabase)", () => {
   it("does NOT delete a row that was previously assigned (assigned_at is set)", async () => {
     await insertProtected("dbt-42", 9042, "owner/repo", "Fix");
     const t = await Task.get("dbt-42");
-    await t!.assign("worker-1");
+    await t!.assign({ workerId: "worker-1" });
     await t!.revert(); // revert (e.g. worker_goodbye) — assigned_at stays set
 
     await t!.deleteIfUnassigned();
@@ -320,7 +320,7 @@ describe("Task lookup methods (Supabase)", () => {
   it("getByWorker finds assigned task for worker", async () => {
     await insertProtected("dbt-42", 9042, "r/r", "title");
     const t = await Task.get("dbt-42");
-    await t!.assign("w1");
+    await t!.assign({ workerId: "w1" });
     const task = await Task.getByWorker("w1");
     expect(task?.taskId).toBe("dbt-42");
   });

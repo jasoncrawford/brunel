@@ -65,7 +65,7 @@ describe("loadIssuesToQueue", () => {
     // Task #1 already exists and is assigned to a worker (simulates foreman restart)
     await Task.upsert("1", 1, "owner/repo", "Original title", "Original body", ["brunel:ready"]);
     const t = await Task.getByIssue(1);
-    await t!.assign("worker-abc");
+    await t!.assign({ workerId: "worker-abc" });
     expect(t!.workerId).toBe("worker-abc");
 
     // loadIssuesToQueue runs during startup and calls upsert for the same issue

@@ -137,7 +137,7 @@ describe("handleBusyHello", () => {
 
       const ack = helloAck(sendMsg);
       expect(ack?.status).toBe("busy");
-      expect(task.assign).toHaveBeenCalledWith("w1");
+      expect(task.assign).toHaveBeenCalledWith(expect.objectContaining({ workerId: "w1" }));
       expect(Worker.get("w1")?.currentTaskId).toBe("10");
     });
 
@@ -149,7 +149,7 @@ describe("handleBusyHello", () => {
 
       const ack = helloAck(sendMsg);
       expect(ack?.status).toBe("busy");
-      expect(task.assign).toHaveBeenCalledWith("w1");
+      expect(task.assign).toHaveBeenCalledWith(expect.objectContaining({ workerId: "w1" }));
     });
   });
 

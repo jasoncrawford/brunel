@@ -172,7 +172,7 @@ describe("startup reconnect behaviour", () => {
     // After revert, tryAssignWork will offer the task again (correct: worker starts fresh).
     await registerReady(taskManager, "42", 42, "owner/repo", "Test task", "body", []);
     const t = await Task.get("42");
-    await t!.assign("w1"); // simulate what main block does after startup restore
+    await t!.assign({ workerId: "w1" }); // simulate what main block does after startup restore
 
     ({ wss } = new ForemanWss({ taskManager, server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } }));
 
@@ -189,7 +189,7 @@ describe("startup reconnect behaviour", () => {
   it("a different idle worker does not steal a startup-assigned task", async () => {
     await registerReady(taskManager, "42", 42, "owner/repo", "Test task", "body", []);
     const t = await Task.get("42");
-    await t!.assign("original-worker"); // simulate startup loading
+    await t!.assign({ workerId: "original-worker" }); // simulate startup loading
 
     ({ wss } = new ForemanWss({ taskManager, server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } }));
 
@@ -205,7 +205,7 @@ describe("startup reconnect behaviour", () => {
   it("busy worker reconnect correctly reclaims its task", async () => {
     await registerReady(taskManager, "42", 42, "owner/repo", "Test task", "body", []);
     const t = await Task.get("42");
-    await t!.assign("w1");
+    await t!.assign({ workerId: "w1" });
 
     ({ wss } = new ForemanWss({ taskManager, server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } }));
 
@@ -224,7 +224,7 @@ describe("PR tracking persistence", () => {
   it("calls task.registerPr when PR opened event is routed", async () => {
     await registerReady(taskManager, "42", 42, "owner/repo", "Test task", "body", []);
     const t = await Task.get("42");
-    await t!.assign("w1");
+    await t!.assign({ workerId: "w1" });
     const spyRegisterPr = vi.spyOn(t!, "registerPr");
 
     const result = new ForemanWss({ taskManager, server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } });
@@ -245,7 +245,7 @@ describe("PR tracking persistence", () => {
   it("calls task.registerPr with null branch when PR has no head ref", async () => {
     await registerReady(taskManager, "42", 42, "owner/repo", "Test task", "body", []);
     const t = await Task.get("42");
-    await t!.assign("w1");
+    await t!.assign({ workerId: "w1" });
     const spyRegisterPr = vi.spyOn(t!, "registerPr");
 
     const result = new ForemanWss({ taskManager, server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } });
@@ -282,7 +282,7 @@ async function restoreTasksFromDb(rows: Array<{
     tm.markBlockersLoaded(row.issueNumber);
     if (row.workerId) {
       const t = await Task.get(row.taskId);
-      if (t) await t.assign(row.workerId);
+      if (t) await t.assign({ workerId: row.workerId });
     }
     if (row.prNumber != null) {
       const t = await Task.get(row.taskId);
@@ -407,7 +407,7 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
     // Step 1: restore from DB — task is assigned to "original-worker"
     await Task.upsert("42", 42, "owner/repo", "Test task", "", []);
     const t = await Task.get("42");
-    await t!.assign("original-worker");
+    await t!.assign({ workerId: "original-worker" });
     taskManager.trackIssue(42);
     taskManager.markBlockersLoaded(42);
 
@@ -474,7 +474,7 @@ describe("startup reconnect — worker reconnects to complete task", () => {
     // Worker should be allowed to reclaim to do finalization work (doc updates, etc.).
     await registerReady(taskManager, "42", 42, "owner/repo", "Test task", "body", []);
     const t = await Task.get("42");
-    await t!.assign("w1");
+    await t!.assign({ workerId: "w1" });
     await t!.complete(); // issue closed while worker was active
 
     ({ wss } = new ForemanWss({ taskManager, server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } }));
@@ -492,7 +492,7 @@ describe("startup reconnect — worker reconnects to complete task", () => {
   it("busy worker that calls task_complete on a complete task releases correctly", async () => {
     await registerReady(taskManager, "42", 42, "owner/repo", "Test task", "body", []);
     const t = await Task.get("42");
-    await t!.assign("w1");
+    await t!.assign({ workerId: "w1" });
     await t!.complete();
 
     ({ wss } = new ForemanWss({ taskManager, server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } }));
@@ -519,7 +519,7 @@ describe("task_complete marks task complete", () => {
   it("calls task.complete when task_complete received", async () => {
     await registerReady(taskManager, "42", 42, "owner/repo", "Test task", "body", []);
     const t = await Task.get("42");
-    await t!.assign("w1");
+    await t!.assign({ workerId: "w1" });
 
     ({ wss } = new ForemanWss({ taskManager, server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } }));
 

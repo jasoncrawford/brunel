@@ -17,8 +17,8 @@ import { log } from "../../utils.js";
 // and after every worker registry change so the admin dashboard can refresh.
 
 export type AssignOutcome =
-  | { ok: true; task: Task; queued: WebhookEvent[]; workerId: string }
-  | { ok: false; workerId: string; err: unknown };
+  | { ok: true; task: Task; queued: WebhookEvent[]; worker: Worker }
+  | { ok: false; worker: Worker; err: unknown };
 
 export class TaskManager extends EventEmitter {
   // ── Ephemeral in-memory state (no DB backing) ────────────────────────────
@@ -84,11 +84,11 @@ export class TaskManager extends EventEmitter {
     if (!task) return null;
     worker.assign(task);
     try {
-      await task.assign(worker.workerId);
-      return { ok: true, task, queued: this.drainEvents(task), workerId: worker.workerId };
+      await task.assign(worker);
+      return { ok: true, task, queued: this.drainEvents(task), worker };
     } catch (err) {
       worker.release();
-      return { ok: false, workerId: worker.workerId, err };
+      return { ok: false, worker, err };
     }
   }
 

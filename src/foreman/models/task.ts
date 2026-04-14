@@ -208,8 +208,8 @@ export class Task extends ActiveRecord {
 
   // ── Instance mutations ──────────────────────────────────────────────────────
 
-  async assign(workerId: string): Promise<void> {
-    await this.save({ worker_id: workerId, assigned_at: new Date().toISOString() });
+  async assign(worker: { workerId: string }): Promise<void> {
+    await this.save({ worker_id: worker.workerId, assigned_at: new Date().toISOString() });
   }
 
   async complete(): Promise<void> {

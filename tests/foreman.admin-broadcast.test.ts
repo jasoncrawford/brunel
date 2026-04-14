@@ -212,7 +212,7 @@ describe("foreman admin broadcast — hello_ack log event summary", () => {
   it("hello_ack busy includes status and taskId in summary", async () => {
     await registerReady(taskManager, "42", 42, "owner/repo", "Fix the bug", "", []);
     const t = await Task.get("42");
-    await t!.assign("worker-abc");
+    await t!.assign({ workerId: "worker-abc" });
 
     const logEntries: LogEntry[] = [];
     adminWss.broadcastLogEvent = (entry) => logEntries.push(entry);
@@ -229,8 +229,8 @@ describe("foreman admin broadcast — hello_ack log event summary", () => {
   it("hello_ack with task transfer shows cancelled status in summary", async () => {
     await registerReady(taskManager, "42", 42, "owner/repo", "Fix the bug", "", []);
     const t = await Task.get("42");
-    await t!.assign("worker-xyz");
-    await t!.assign("worker-abc");
+    await t!.assign({ workerId: "worker-xyz" });
+    await t!.assign({ workerId: "worker-abc" });
 
     const logEntries: LogEntry[] = [];
     adminWss.broadcastLogEvent = (entry) => logEntries.push(entry);

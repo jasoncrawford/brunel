@@ -67,7 +67,7 @@ describe("reconcile()", () => {
   it("does NOT remove an assigned task (reconcile never deletes)", async () => {
     await Task.upsert("9", 9, "test/repo", "T", "b", []);
     const t = await Task.get("9");
-    await t!.assign("worker-1");
+    await t!.assign({ workerId: "worker-1" });
     await foremanWss.reconcile();
     expect(await Task.get("9")).toBeDefined();
     expect((await Task.get("9"))?.status).toBe("assigned");
@@ -89,7 +89,7 @@ describe("issues/closed — task lifecycle", () => {
     taskManager.markBlockersLoaded(142);
     await Task.upsert("142", 142, "test/repo", "T", "b", []);
     const t = await Task.get("142");
-    await t!.assign("worker-1");
+    await t!.assign({ workerId: "worker-1" });
 
     await foremanWss.routeEvent("evt-1", "issues", {
       action: "closed",
@@ -132,7 +132,7 @@ describe("issues/closed — task lifecycle", () => {
     taskManager.markBlockersLoaded(145);
     await Task.upsert("145", 145, "test/repo", "T", "b", []);
     const t = await Task.get("145");
-    await t!.assign("worker-1");
+    await t!.assign({ workerId: "worker-1" });
 
     await foremanWss.routeEvent("evt-1", "issues", {
       action: "closed",
