@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
+import { Worker } from "../src/foreman/models/worker.js";
 import { setupInMemoryTasks } from "./helpers/task.js";
 
 const REPO = "test/repo";
@@ -274,5 +275,107 @@ describe("Task.status (derived)", () => {
   it("returns 'complete' when completedAt is set", () => {
     const t = Task.fromTest({ task_id: "t1", issue_number: 1, completed_at: new Date().toISOString() });
     expect(t.status).toBe("complete");
+  });
+});
+
+// ── TaskManager.assignIdleWorkers ─────────────────────────────────────────────
+
+describe("TaskManager.assignIdleWorkers", () => {
+  let manager: TaskManager;
+
+  beforeEach(() => {
+    Worker._reset();
+    manager = new TaskManager();
+    setupInMemoryTasks(manager);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("does nothing when there are no idle workers", async () => {
+    await Task.upsert("42", 42, REPO, "Fix the bug", "Body", ["brunel:ready"]);
+    manager.markBlockersLoaded(42);
+    const outcomes = await manager.assignIdleWorkers();
+    expect(outcomes).toHaveLength(0);
+  });
+
+  it("does nothing when there are no pending tasks", async () => {
+    const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
+    Worker.register("worker-1", fakeWs);
+    const outcomes = await manager.assignIdleWorkers();
+    expect(outcomes).toHaveLength(0);
+  });
+
+  it("returns a success outcome with task, queued events, and workerId", async () => {
+    await Task.upsert("42", 42, REPO, "Fix the bug", "Body", ["brunel:ready"]);
+    manager.markBlockersLoaded(42);
+    const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
+    Worker.register("worker-1", fakeWs);
+
+    const outcomes = await manager.assignIdleWorkers();
+
+    expect(outcomes).toHaveLength(1);
+    expect(outcomes[0]).toMatchObject({
+      ok: true,
+      task: expect.objectContaining({ taskId: "42", workerId: "worker-1" }),
+      queued: [],
+      workerId: "worker-1",
+    });
+  });
+
+  it("marks the worker's in-memory currentTaskId on success", async () => {
+    await Task.upsert("42", 42, REPO, "Fix the bug", "Body", ["brunel:ready"]);
+    manager.markBlockersLoaded(42);
+    const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
+    const worker = Worker.register("worker-1", fakeWs);
+
+    await manager.assignIdleWorkers();
+    expect(worker.currentTaskId).toBe("42");
+  });
+
+  it("serialises concurrent calls — only one worker gets the task", async () => {
+    await Task.upsert("42", 42, REPO, "Fix the bug", "Body", ["brunel:ready"]);
+    manager.markBlockersLoaded(42);
+    const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
+    Worker.register("worker-1", fakeWs);
+    Worker.register("worker-2", fakeWs);
+
+    // Fire both concurrently — only one worker should win the task.
+    const [r1, r2] = await Promise.all([manager.assignIdleWorkers(), manager.assignIdleWorkers()]);
+    expect([...r1, ...r2].filter(o => o.ok)).toHaveLength(1);
+  });
+
+  it("returns a failure outcome and releases the worker when DB write fails", async () => {
+    await Task.upsert("42", 42, REPO, "Fix the bug", "Body", ["brunel:ready"]);
+    manager.markBlockersLoaded(42);
+    const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
+    Worker.register("worker-1", fakeWs);
+
+    const t = await Task.get("42");
+    vi.spyOn(t!, "assign").mockRejectedValue(new Error("DB down"));
+
+    const outcomes = await manager.assignIdleWorkers();
+
+    expect(outcomes).toHaveLength(1);
+    expect(outcomes[0]).toMatchObject({
+      ok: false,
+      workerId: "worker-1",
+      err: expect.any(Error),
+    });
+  });
+
+  it("leaves the mutex usable after a failure", async () => {
+    await Task.upsert("42", 42, REPO, "Fix the bug", "Body", ["brunel:ready"]);
+    manager.markBlockersLoaded(42);
+    const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
+    Worker.register("worker-1", fakeWs);
+
+    const t = await Task.get("42");
+    vi.spyOn(t!, "assign").mockRejectedValue(new Error("DB down"));
+
+    // Both calls should resolve (not hang), even though assignment fails.
+    await manager.assignIdleWorkers();
+    await manager.assignIdleWorkers();
   });
 });

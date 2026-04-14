@@ -76,9 +76,7 @@ function closeClient(ws: WebSocket): Promise<void> {
 let taskManager: TaskManager;
 let httpServer: http.Server;
 let wss: WebSocketServer;
-let routeEvent: (id: string, name: string, payload: unknown) => Promise<void>;
-let reconcile: () => Promise<void>;
-let shutdown: () => Promise<void>;
+let foremanWss: ForemanWss;
 let port: number;
 const openClients: WebSocket[] = [];
 
@@ -91,7 +89,8 @@ beforeEach(() => {
   taskManager = new TaskManager();
   setupInMemoryTasks(taskManager);
   httpServer = http.createServer();
-  ({ wss, routeEvent, reconcile, shutdown } = new ForemanWss({ taskManager, server: httpServer, config: defaultCfg }));
+  foremanWss = new ForemanWss({ taskManager, server: httpServer, config: defaultCfg });
+  ({ wss } = foremanWss);
 
   return new Promise<void>((resolve) => {
     httpServer.listen(0, () => {
@@ -179,7 +178,7 @@ describe("foreman WebSocket protocol", () => {
     await q2.next(); // hello_ack (no task yet)
 
     await makeTask(taskManager, 42);
-    await reconcile();
+    await foremanWss.reconcile();
 
     const w1Status = Worker.get("w1")?.status;
     const w2Status = Worker.get("w2")?.status;
@@ -202,7 +201,7 @@ describe("foreman WebSocket protocol", () => {
     await q2.next(); // hello_ack (no task yet)
 
     await makeTask(taskManager, 99);
-    await Promise.all([reconcile(), reconcile()]);
+    await Promise.all([foremanWss.reconcile(), foremanWss.reconcile()]);
 
     const w1Status = Worker.get("w1")?.status;
     const w2Status = Worker.get("w2")?.status;
@@ -279,7 +278,7 @@ describe("foreman WebSocket protocol", () => {
     await nextMsg(ws); // task_assigned
 
     const reply = nextMsg(ws);
-    routeEvent("evt-1", "issue_comment", { issue: { number: 1 }, comment: { body: "hi" } });
+    foremanWss.routeEvent("evt-1", "issue_comment", { issue: { number: 1 }, comment: { body: "hi" } });
     const msg = await reply;
     assert(msg.type === "event_notification");
     expect(msg.taskId).toBe("1");
@@ -288,7 +287,7 @@ describe("foreman WebSocket protocol", () => {
 
   it("routeEvent queues event when no worker is assigned", async () => {
     await makeTask(taskManager, 1);
-    await routeEvent("evt-1", "issue_comment", { issue: { number: 1 } });
+    await foremanWss.routeEvent("evt-1", "issue_comment", { issue: { number: 1 } });
     const events = taskManager.drainEvents("1");
     expect(events).toHaveLength(1);
     expect(events[0].eventName).toBe("issue_comment");
@@ -390,7 +389,7 @@ describe("foreman WebSocket protocol", () => {
       nextMsg(wsB).then(() => "message" as const),
       new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
     ]);
-    routeEvent("evt-1", "issue_comment", { issue: { number: taskA }, comment: { body: "update" } });
+    foremanWss.routeEvent("evt-1", "issue_comment", { issue: { number: taskA }, comment: { body: "update" } });
     expect(await replyA).toMatchObject({ type: "event_notification", taskId: String(taskA) });
     expect(await noMsgB).toBe("timeout");
 
@@ -399,7 +398,7 @@ describe("foreman WebSocket protocol", () => {
       nextMsg(wsA).then(() => "message" as const),
       new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
     ]);
-    routeEvent("evt-2", "issue_comment", { issue: { number: taskB }, comment: { body: "update" } });
+    foremanWss.routeEvent("evt-2", "issue_comment", { issue: { number: taskB }, comment: { body: "update" } });
     expect(await replyB).toMatchObject({ type: "event_notification", taskId: String(taskB) });
     expect(await noMsgA).toBe("timeout");
   });
@@ -491,7 +490,7 @@ describe("hello_ack handshake", () => {
     const t = await Task.get("1");
     await t!.assign("w1");
     { const w = Worker.register("w1", {} as ReturnType<typeof connect> extends Promise<infer T> ? T : never); w.assign("1"); w.markDisconnected(); }
-    await routeEvent("evt-1", "issue_comment", { issue: { number: 1 } });
+    await foremanWss.routeEvent("evt-1", "issue_comment", { issue: { number: 1 } });
 
     const ws = await connect();
     const messages: Wire.ForemanMessage[] = [];
@@ -563,7 +562,7 @@ describe("dependency-aware task assignment", () => {
     await ackP; // hello_ack (no task yet — task is blocked)
 
     const reply = nextMsg(ws);
-    routeEvent("evt-1", "issues", {
+    foremanWss.routeEvent("evt-1", "issues", {
       action: "closed",
       issue: { number: 10, title: "Blocker", body: "", labels: [] },
     });
@@ -574,7 +573,7 @@ describe("dependency-aware task assignment", () => {
     await makeTask(taskManager, 43);
     taskManager.setBlockers(43, [10]);
 
-    routeEvent("evt-1", "issues", {
+    foremanWss.routeEvent("evt-1", "issues", {
       action: "reopened",
       issue: { number: 10, title: "Blocker", body: "", labels: [] },
     });
@@ -805,7 +804,7 @@ describe("disconnected worker state", () => {
     await closeClient(ws);
     await waitUntil(() => Worker.get("w1")?.status === "disconnected");
 
-    await routeEvent("evt-1", "issue_comment", { issue: { number: 1 }, comment: { body: "hi" } });
+    await foremanWss.routeEvent("evt-1", "issue_comment", { issue: { number: 1 }, comment: { body: "hi" } });
 
     const queued = taskManager.drainEvents("1");
     expect(queued).toHaveLength(1);
@@ -821,7 +820,7 @@ describe("disconnected worker state", () => {
     await closeClient(ws1);
     await waitUntil(() => Worker.get("w1")?.status === "disconnected");
 
-    await routeEvent("evt-1", "issue_comment", { issue: { number: 1 }, comment: { body: "hi" } });
+    await foremanWss.routeEvent("evt-1", "issue_comment", { issue: { number: 1 }, comment: { body: "hi" } });
 
     const ws2 = await connect();
     const q2 = makeQueue(ws2);
@@ -985,7 +984,7 @@ describe("issues/closed — close persistence", () => {
     taskManager.trackIssue(1);
     taskManager.markBlockersLoaded(1);
 
-    await routeEvent("evt-1", "issues", { action: "closed", issue: { number: 1, title: "T", body: "", labels: [] } });
+    await foremanWss.routeEvent("evt-1", "issues", { action: "closed", issue: { number: 1, title: "T", body: "", labels: [] } });
 
     await waitUntil(() => spyClose.mock.calls.length > 0);
     expect(spyClose).toHaveBeenCalled();
@@ -1063,7 +1062,7 @@ describe("stale close from old connection", () => {
 
 describe("graceful shutdown", () => {
   it("resolves immediately when no workers are connected", async () => {
-    await expect(shutdown()).resolves.toBeUndefined();
+    await expect(foremanWss.shutdown()).resolves.toBeUndefined();
   });
 
   it("closes all connected workers with close code 1001", async () => {
@@ -1076,7 +1075,7 @@ describe("graceful shutdown", () => {
     const close1 = new Promise<number>((resolve) => { ws1.once("close", (code) => resolve(code)); });
     const close2 = new Promise<number>((resolve) => { ws2.once("close", (code) => resolve(code)); });
 
-    void shutdown();
+    void foremanWss.shutdown();
     const [code1, code2] = await Promise.all([close1, close2]);
     expect(code1).toBe(1001);
     expect(code2).toBe(1001);
@@ -1087,7 +1086,8 @@ describe("graceful shutdown", () => {
     const srv = http.createServer();
     const localTm = new TaskManager();
     setupInMemoryTasks(localTm);
-    const { wss: testWss, shutdown: localShutdown } = new ForemanWss({ taskManager: localTm, server: srv, config: defaultCfg });
+    const localForemanWss = new ForemanWss({ taskManager: localTm, server: srv, config: defaultCfg });
+    const { wss: testWss } = localForemanWss;
     const testPort = await new Promise<number>((r) => srv.listen(0, () => r((srv.address() as AddressInfo).port)));
 
     const ws = new WebSocket(`ws://localhost:${testPort}/worker`);
@@ -1095,7 +1095,7 @@ describe("graceful shutdown", () => {
     ws.send(JSON.stringify({ type: "worker_hello", workerId: "w-shutdown", status: "idle" }));
     await waitUntil(() => !!Worker.get("w-shutdown"));
 
-    await localShutdown();
+    await localForemanWss.shutdown();
 
     const calls = logSpy.mock.calls;
     const disconnectCall = calls.find((c) => c[0].msgType === "worker_disconnected");

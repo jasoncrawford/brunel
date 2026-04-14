@@ -1,9 +1,10 @@
 import { EventEmitter } from "events";
 import type { WebhookEvent } from "./webhook-event.js";
 import * as Wire from "../../../shared/wire.js";
-import { loadIssuesToQueue } from "../github.js";
+import { loadIssuesToQueue, fetchIssueStates } from "../github.js";
 import { EventQueue } from "../event-queue.js";
 import { Task } from "./task.js";
+import { Worker } from "./worker.js";
 
 
 // ── TaskManager ────────────────────────────────────────────────────────────────
@@ -14,10 +15,15 @@ import { Task } from "./task.js";
 // Emits "changed" after every Task mutation (by subscribing to Task.events)
 // and after every worker registry change so the admin dashboard can refresh.
 
+export type AssignOutcome =
+  | { ok: true; task: Task; queued: WebhookEvent[]; workerId: string }
+  | { ok: false; workerId: string; err: unknown };
+
 export class TaskManager extends EventEmitter {
   // ── Ephemeral in-memory state (no DB backing) ────────────────────────────
   private eventQueue = new EventQueue();
   private branchToTaskId = new Map<string, string>();
+  private assignLock = Promise.resolve();
 
   // ── GitHub issue state ────────────────────────────────────────────────────
   /** Open issues that are blockers (non-task issues whose open/closed state
@@ -54,6 +60,35 @@ export class TaskManager extends EventEmitter {
       if (isReady === undefined || isReady(task)) return task;
     }
     return null;
+  }
+
+  /** Assign pending tasks to all idle workers.
+   *  Uses a mutex (assignLock) to prevent concurrent calls from double-assigning.
+   *  Returns the list of assignment outcomes for the caller to act on. */
+  async assignIdleWorkers(): Promise<AssignOutcome[]> {
+    return new Promise((resolve) => {
+      this.assignLock = this.assignLock.then(async () => {
+        const outcomes: AssignOutcome[] = [];
+        for (const w of Worker.getIdle()) {
+          const outcome = await this.tryAssignWork(w.workerId);
+          if (outcome) outcomes.push(outcome);
+        }
+        resolve(outcomes);
+      });
+    });
+  }
+
+  private async tryAssignWork(workerId: string): Promise<AssignOutcome | null> {
+    const task = await this.nextPending(t => t.blockersLoaded && t.status === "pending");
+    if (!task) return null;
+    Worker.get(workerId)?.assign(task.taskId);
+    try {
+      await task.assign(workerId);
+      return { ok: true, task, queued: this.drainEvents(task.taskId), workerId };
+    } catch (err) {
+      Worker.get(workerId)?.release();
+      return { ok: false, workerId, err };
+    }
   }
 
   /** All active (non-complete) tasks — used by the dashboard task list API and dependency resolution. */
@@ -174,6 +209,24 @@ export class TaskManager extends EventEmitter {
       if (task.branch) this.branchToTaskId.set(task.branch, task.taskId);
       flog(`[startup] restored task #${task.taskId} (${task.status})`);
     }
+  }
+
+  /** Fetch and store blocker state for an issue. Called when a task is first
+   *  enqueued or when its body is edited. Fire-and-forget from the caller. */
+  async fetchAndLoadDeps(
+    issueNumber: number,
+    body: string,
+    config: { repo: string; token: string; apiUrl?: string },
+  ): Promise<void> {
+    const blockers = await Task.fetchBlockers(issueNumber, body, config);
+    this.setBlockers(issueNumber, blockers);
+    if (blockers.length > 0) {
+      const states = await fetchIssueStates(blockers, { repo: config.repo, token: config.token });
+      for (const [num, state] of states) {
+        this.setIssueOpenState(num, state === "open");
+      }
+    }
+    this.markBlockersLoaded(issueNumber);
   }
 
   /** Fetch brunel:ready issues from GitHub and load deps.

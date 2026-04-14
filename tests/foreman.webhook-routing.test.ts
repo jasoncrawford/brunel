@@ -211,8 +211,9 @@ function checkSuitePayload(prNumber: number, conclusion: string) {
 
 let taskManager: TaskManager;
 let httpServer: http.Server;
+let foremanWss: ForemanWss;
 let wss: WebSocketServer;
-let routeEvent: (id: string, name: string, payload: unknown) => Promise<void>;
+
 let port: number;
 const openClients: WebSocket[] = [];
 
@@ -230,7 +231,8 @@ beforeEach(() => {
   taskManager = new TaskManager();
   setupInMemoryTasks(taskManager);
   httpServer = http.createServer();
-  ({ wss, routeEvent } = new ForemanWss({ taskManager, server: httpServer, config: defaultCfg }));
+  foremanWss = new ForemanWss({ taskManager, server: httpServer, config: defaultCfg });
+  ({ wss } = foremanWss);
 
   return new Promise<void>((resolve) => {
     httpServer.listen(0, () => {
@@ -282,7 +284,7 @@ describe("webhook-triggered task routing", () => {
     // then startDepsLoad completes async → reconcile() assigns the task.
     // Use nextMsgWhere in case startDepsLoad resolves asynchronously before task_assigned.
     const reply = nextMsgWhere(ws, (m) => m.type === "task_assigned");
-    routeEvent("evt-1", "issues", labeledPayload(42, "brunel:ready"));
+    foremanWss.routeEvent("evt-1", "issues", labeledPayload(42, "brunel:ready"));
 
     const msg = await reply;
     expect(msg.type).toBe("task_assigned");
@@ -300,7 +302,7 @@ describe("webhook-triggered task routing", () => {
     await ackP; // consume hello_ack (worker is now registered)
 
     // No message should arrive after an unrelated label event
-    routeEvent("evt-1", "issues", labeledPayload(42, "some-other-label"));
+    foremanWss.routeEvent("evt-1", "issues", labeledPayload(42, "some-other-label"));
     const raceResult = await Promise.race([
       nextMsg(ws).then(() => "message" as const),
       new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
@@ -312,7 +314,7 @@ describe("webhook-triggered task routing", () => {
 
   it("issues/labeled with task label enqueues task when no idle worker available", async () => {
     // No worker connected at all
-    routeEvent("evt-1", "issues", labeledPayload(42, "brunel:ready"));
+    foremanWss.routeEvent("evt-1", "issues", labeledPayload(42, "brunel:ready"));
 
     // Allow async processing to complete
     await new Promise((r) => setTimeout(r, 50));
@@ -326,7 +328,7 @@ describe("webhook-triggered task routing", () => {
 
   it("pending task from webhook gets assigned when worker later connects", async () => {
     // Webhook fires before any worker is available
-    routeEvent("evt-1", "issues", labeledPayload(42, "brunel:ready"));
+    foremanWss.routeEvent("evt-1", "issues", labeledPayload(42, "brunel:ready"));
 
     // Allow async processing to complete
     await new Promise((r) => setTimeout(r, 50));
@@ -347,7 +349,7 @@ describe("webhook-triggered task routing", () => {
     // Pre-populate the queue with this issue (with deps loaded so it's assignable)
     await registerReady(taskManager, "42", 42, "owner/repo", "Existing Issue", "Body", ["brunel:ready"]);
 
-    routeEvent("evt-1", "issues", labeledPayload(42, "brunel:ready"));
+    foremanWss.routeEvent("evt-1", "issues", labeledPayload(42, "brunel:ready"));
 
     // Allow async processing to complete
     await new Promise((r) => setTimeout(r, 50));
@@ -365,7 +367,7 @@ describe("webhook-triggered task routing", () => {
     // then startDepsLoad completes async → reconcile() assigns the task.
     // Use nextMsgWhere in case startDepsLoad resolves asynchronously before task_assigned.
     const reply = nextMsgWhere(ws, (m) => m.type === "task_assigned");
-    routeEvent("evt-1", "issues", openedPayload(99, ["brunel:ready", "bug"]));
+    foremanWss.routeEvent("evt-1", "issues", openedPayload(99, ["brunel:ready", "bug"]));
 
     const msg = await reply;
     expect(msg.type).toBe("task_assigned");
@@ -380,7 +382,7 @@ describe("webhook-triggered task routing", () => {
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
     await ackP; // consume hello_ack
 
-    routeEvent("evt-1", "issues", openedPayload(99, ["bug", "enhancement"]));
+    foremanWss.routeEvent("evt-1", "issues", openedPayload(99, ["bug", "enhancement"]));
     const raceResult = await Promise.race([
       nextMsg(ws).then(() => "message" as const),
       new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
@@ -398,7 +400,7 @@ describe("webhook-triggered task routing", () => {
     await nextMsgWhere(ws, (m) => m.type === "task_assigned"); // task_assigned for issue 1
 
     // New issue arrives via webhook
-    routeEvent("evt-1", "issues", labeledPayload(2, "brunel:ready"));
+    foremanWss.routeEvent("evt-1", "issues", labeledPayload(2, "brunel:ready"));
 
     // Worker should NOT receive a new task_assigned while still busy
     const raceResult = await Promise.race([
@@ -423,11 +425,11 @@ describe("PR event forwarding to workers", () => {
     await nextMsgWhere(ws, (m) => m.type === "task_assigned");
 
     // Worker opens a PR that closes issue #42
-    await routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Fixes #42\n\nSome description."));
+    await foremanWss.routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Fixes #42\n\nSome description."));
 
     // check_run for that PR should now be forwarded to the worker
     const reply = nextMsgWhere(ws, m => m.type === "event_notification" && (m as any).event.name === "check_run");
-    routeEvent("evt-cr", "check_run", checkRunPayload(10, "failure"));
+    foremanWss.routeEvent("evt-cr", "check_run", checkRunPayload(10, "failure"));
 
     const msg = await reply;
     expect(msg.type).toBe("event_notification");
@@ -441,10 +443,10 @@ describe("PR event forwarding to workers", () => {
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
     await nextMsgWhere(ws, (m) => m.type === "task_assigned");
 
-    await routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Closes #42"));
+    await foremanWss.routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Closes #42"));
 
     const reply = nextMsgWhere(ws, m => m.type === "event_notification" && (m as any).event.name === "pull_request_review");
-    routeEvent("evt-rev", "pull_request_review", prReviewPayload(10));
+    foremanWss.routeEvent("evt-rev", "pull_request_review", prReviewPayload(10));
 
     const msg = await reply;
     expect(msg.type).toBe("event_notification");
@@ -458,10 +460,10 @@ describe("PR event forwarding to workers", () => {
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
     await nextMsgWhere(ws, (m) => m.type === "task_assigned");
 
-    await routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Resolves #42"));
+    await foremanWss.routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Resolves #42"));
 
     const reply = nextMsgWhere(ws, m => m.type === "event_notification" && (m as any).event.name === "pull_request_review_comment");
-    routeEvent("evt-cmt", "pull_request_review_comment", prReviewCommentPayload(10));
+    foremanWss.routeEvent("evt-cmt", "pull_request_review_comment", prReviewCommentPayload(10));
 
     const msg = await reply;
     expect(msg.type).toBe("event_notification");
@@ -476,10 +478,10 @@ describe("PR event forwarding to workers", () => {
     await nextMsgWhere(ws, (m) => m.type === "task_assigned");
 
     // PR with no linked issue — should be silently ignored
-    routeEvent("evt-pr", "pull_request", prOpenedPayload(99, "A new PR with no issue reference."));
+    foremanWss.routeEvent("evt-pr", "pull_request", prOpenedPayload(99, "A new PR with no issue reference."));
 
     // check_run for that PR should not be forwarded
-    routeEvent("evt-cr", "check_run", checkRunPayload(99, "failure"));
+    foremanWss.routeEvent("evt-cr", "check_run", checkRunPayload(99, "failure"));
     const raceResult = await Promise.race([
       nextMsg(ws).then(() => "message" as const),
       new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
@@ -493,7 +495,7 @@ describe("PR event forwarding to workers", () => {
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
     await ackP; // consume hello_ack
 
-    routeEvent("evt-cr", "check_run", checkRunPayload(999, "failure"));
+    foremanWss.routeEvent("evt-cr", "check_run", checkRunPayload(999, "failure"));
     const raceResult = await Promise.race([
       nextMsg(ws).then(() => "message" as const),
       new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
@@ -508,10 +510,10 @@ describe("PR event forwarding to workers", () => {
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
     await nextMsgWhere(ws, (m) => m.type === "task_assigned");
 
-    await routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Closes #42"));
+    await foremanWss.routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Closes #42"));
 
     const reply = nextMsgWhere(ws, m => m.type === "event_notification" && (m as any).event.name === "check_suite");
-    routeEvent("evt-cs", "check_suite", checkSuitePayload(10, "failure"));
+    foremanWss.routeEvent("evt-cs", "check_suite", checkSuitePayload(10, "failure"));
 
     const msg = await reply;
     expect(msg.type).toBe("event_notification");
@@ -524,7 +526,7 @@ describe("PR event forwarding to workers", () => {
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
     await ackP; // consume hello_ack
 
-    routeEvent("evt-cs", "check_suite", checkSuitePayload(999, "failure"));
+    foremanWss.routeEvent("evt-cs", "check_suite", checkSuitePayload(999, "failure"));
     const raceResult = await Promise.race([
       nextMsg(ws).then(() => "message" as const),
       new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
@@ -538,10 +540,10 @@ describe("PR event forwarding to workers", () => {
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
     await nextMsgWhere(ws, (m) => m.type === "task_assigned");
 
-    await routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Closes #42", "fix-issue-42"));
+    await foremanWss.routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Closes #42", "fix-issue-42"));
 
     const reply = nextMsgWhere(ws, m => m.type === "event_notification" && (m as any).event.name === "check_suite");
-    routeEvent("evt-cs", "check_suite", checkSuitePayloadByBranch("fix-issue-42", "failure"));
+    foremanWss.routeEvent("evt-cs", "check_suite", checkSuitePayloadByBranch("fix-issue-42", "failure"));
 
     const msg = await reply;
     expect(msg.type).toBe("event_notification");
@@ -554,10 +556,10 @@ describe("PR event forwarding to workers", () => {
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
     await nextMsgWhere(ws, (m) => m.type === "task_assigned");
 
-    await routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Closes #42", "fix-issue-42"));
+    await foremanWss.routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Closes #42", "fix-issue-42"));
 
     const reply = nextMsgWhere(ws, m => m.type === "event_notification" && (m as any).event.name === "check_run");
-    routeEvent("evt-cr", "check_run", checkRunPayloadByBranch("fix-issue-42", "failure"));
+    foremanWss.routeEvent("evt-cr", "check_run", checkRunPayloadByBranch("fix-issue-42", "failure"));
 
     const msg = await reply;
     expect(msg.type).toBe("event_notification");
@@ -570,7 +572,7 @@ describe("PR event forwarding to workers", () => {
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
     await ackP; // consume hello_ack
 
-    routeEvent("evt-cs", "check_suite", checkSuitePayloadByBranch("unknown-branch", "failure"));
+    foremanWss.routeEvent("evt-cs", "check_suite", checkSuitePayloadByBranch("unknown-branch", "failure"));
     const raceResult = await Promise.race([
       nextMsg(ws).then(() => "message" as const),
       new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
@@ -585,13 +587,13 @@ describe("PR event forwarding to workers", () => {
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
     await nextMsgWhere(ws, (m) => m.type === "task_assigned");
 
-    routeEvent("evt-pr-open", "pull_request", prOpenedPayload(10, "Closes #42"));
+    foremanWss.routeEvent("evt-pr-open", "pull_request", prOpenedPayload(10, "Closes #42"));
     // Wait for async PR registration
     await new Promise((r) => setTimeout(r, 50));
     expect((await Task.getByPr(10))?.taskId).toBe("42");
     expect((await Task.get("42"))?.prNumber).toBe(10);
 
-    routeEvent("evt-pr-close", "pull_request", prClosedPayload(10, false));
+    foremanWss.routeEvent("evt-pr-close", "pull_request", prClosedPayload(10, false));
     // Wait for async PR unregistration
     await new Promise((r) => setTimeout(r, 50));
     expect(await Task.getByPr(10)).toBeNull();
@@ -605,11 +607,11 @@ describe("PR event forwarding to workers", () => {
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
     await nextMsgWhere(ws, (m) => m.type === "task_assigned");
 
-    routeEvent("evt-pr-open", "pull_request", prOpenedPayload(10, "Closes #42"));
+    foremanWss.routeEvent("evt-pr-open", "pull_request", prOpenedPayload(10, "Closes #42"));
     await nextMsgWhere(ws, m => m.type === "event_notification" && (m as any).event.name === "pull_request");
 
     const reply = nextMsgWhere(ws, m => m.type === "event_notification" && (m as any).event.name === "pull_request");
-    routeEvent("evt-pr-close", "pull_request", prClosedPayload(10, false));
+    foremanWss.routeEvent("evt-pr-close", "pull_request", prClosedPayload(10, false));
     const msg = await reply;
     expect((msg as any).event.payload.action).toBe("closed");
   });
@@ -621,12 +623,12 @@ describe("PR event forwarding to workers", () => {
     send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
     await nextMsgWhere(ws, (m) => m.type === "task_assigned");
 
-    routeEvent("evt-pr-open", "pull_request", prOpenedPayload(10, "Closes #42"));
+    foremanWss.routeEvent("evt-pr-open", "pull_request", prOpenedPayload(10, "Closes #42"));
     // Wait for async PR registration
     await new Promise((r) => setTimeout(r, 50));
     expect((await Task.get("42"))?.prNumber).toBe(10);
 
-    routeEvent("evt-pr-close", "pull_request", prClosedPayload(10, true));
+    foremanWss.routeEvent("evt-pr-close", "pull_request", prClosedPayload(10, true));
     // Wait for async processing
     await new Promise((r) => setTimeout(r, 50));
     // Merged PR: keep the association (issue will close → task completes)
@@ -643,11 +645,11 @@ describe("PR event forwarding to workers", () => {
     await nextMsgWhere(ws, (m) => m.type === "task_assigned");
 
     // Worker opens PR #10 that closes issue #42
-    await routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Closes #42"));
+    await foremanWss.routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Closes #42"));
 
     // User posts a top-level comment on PR #10 — issue.number = 10 (the PR number)
     const reply = nextMsgWhere(ws, m => m.type === "event_notification" && (m as any).event.name === "issue_comment");
-    routeEvent("evt-cmt", "issue_comment", issueCommentPayload(10, "Please address the nit above."));
+    foremanWss.routeEvent("evt-cmt", "issue_comment", issueCommentPayload(10, "Please address the nit above."));
 
     const msg = await reply;
     expect(msg.type).toBe("event_notification");
@@ -663,11 +665,11 @@ describe("foreman event filtering", () => {
     await nextMsgWhere(ws, (m) => m.type === "task_assigned");
 
     // Register PR for the task (now also forwarded as event_notification — consume it)
-    routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Closes #42"));
+    foremanWss.routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Closes #42"));
     await nextMsgWhere(ws, m => m.type === "event_notification" && (m as any).event.name === "pull_request");
 
     // synchronize event should be silently dropped
-    routeEvent("evt-sync", "pull_request", {
+    foremanWss.routeEvent("evt-sync", "pull_request", {
       action: "synchronize",
       pull_request: { number: 10, title: "PR 10", body: "Closes #42", head: { ref: "branch" } },
       repository: { html_url: "https://github.com/owner/repo" },
@@ -682,13 +684,13 @@ describe("foreman event filtering", () => {
 
   it('issues/unlabeled with task label removes a pending task from the queue', async () => {
     // Enqueue task via webhook (no worker connected, so it stays pending)
-    routeEvent("evt-labeled", "issues", labeledPayload(42, "brunel:ready"));
+    foremanWss.routeEvent("evt-labeled", "issues", labeledPayload(42, "brunel:ready"));
     // Allow async processing to complete
     await new Promise((r) => setTimeout(r, 50));
     expect((await Task.getByIssue(42))?.status).toBe("pending");
 
     // Remove the label — pending task should be dequeued
-    routeEvent("evt-unlabeled", "issues", {
+    foremanWss.routeEvent("evt-unlabeled", "issues", {
       action: "unlabeled",
       label: { name: "brunel:ready" },
       issue: { number: 42, title: "Issue 42", body: "Body", labels: [] },
@@ -706,13 +708,13 @@ describe("foreman event filtering", () => {
     await waitUntil(() => !!Worker.get("w1"));
 
     const reply = nextMsgWhere(ws, (m) => m.type === "task_assigned");
-    routeEvent("evt-labeled", "issues", labeledPayload(42, "brunel:ready"));
+    foremanWss.routeEvent("evt-labeled", "issues", labeledPayload(42, "brunel:ready"));
     await reply; // task_assigned
 
     expect((await Task.getByIssue(42))?.status).toBe("assigned");
 
     // Removing the label should leave the assigned task intact
-    routeEvent("evt-unlabeled", "issues", {
+    foremanWss.routeEvent("evt-unlabeled", "issues", {
       action: "unlabeled",
       label: { name: "brunel:ready" },
       issue: { number: 42, title: "Issue 42", body: "Body", labels: [] },
@@ -725,12 +727,12 @@ describe("foreman event filtering", () => {
   });
 
   it('issues/unlabeled with non-task label does not remove a pending task', async () => {
-    routeEvent("evt-labeled", "issues", labeledPayload(42, "brunel:ready"));
+    foremanWss.routeEvent("evt-labeled", "issues", labeledPayload(42, "brunel:ready"));
     // Allow async processing to complete
     await new Promise((r) => setTimeout(r, 50));
     expect((await Task.getByIssue(42))?.status).toBe("pending");
 
-    routeEvent("evt-unlabeled", "issues", {
+    foremanWss.routeEvent("evt-unlabeled", "issues", {
       action: "unlabeled",
       label: { name: "some-other-label" },
       issue: { number: 42, title: "Issue 42", body: "Body", labels: [{ name: "brunel:ready" }] },
@@ -746,7 +748,7 @@ describe("foreman event filtering", () => {
     // Bug #489: delayed/retried webhooks for closed issues should not create tasks.
     // A closed issue re-labeled brunel:ready would otherwise upsert the DB row,
     // resetting status to pending and potentially overwriting title with a blank.
-    routeEvent("evt-1", "issues", {
+    foremanWss.routeEvent("evt-1", "issues", {
       action: "labeled",
       label: { name: "brunel:ready" },
       issue: {

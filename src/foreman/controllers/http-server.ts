@@ -7,15 +7,9 @@ import { Task } from "../models/task.js";
 import { queryActivityLog } from "../models/activity-log.js";
 import type { TaskStatus } from "../../../shared/types.js";
 import { fmtError } from "../../utils.js";
-import { summaryEvent, isMutedEvent } from "./event-router.js";
 
 function flog(msg: string) {
   console.log(`${new Date().toISOString()} ${msg}`);
-}
-
-function printEvent(id: string, name: string, payload: unknown) {
-  if (isMutedEvent(name)) return;
-  flog(summaryEvent(id, name, payload));
 }
 
 export interface HttpServerOptions {
@@ -51,7 +45,6 @@ export function createHttpServer({ webhooks, routeEvent, taskManager }: HttpServ
         });
       } else {
         const parsed = JSON.parse(rawBody) as unknown;
-        printEvent(id, name, parsed);
         await routeEvent(id, name, parsed);
       }
       return c.text("OK", 200);

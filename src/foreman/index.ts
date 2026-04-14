@@ -11,16 +11,10 @@ import { Worker } from "./models/worker.js";
 import { createHttpServer } from "./controllers/http-server.js";
 import { ForemanWss } from "./controllers/wss.js";
 import { createAdminWss } from "./admin-ws.js";
-import { isMutedEvent, summaryEvent } from "./controllers/event-router.js";
 import { fmtError } from "../utils.js";
 
 function flog(msg: string) {
   console.log(`${new Date().toISOString()} ${msg}`);
-}
-
-function printEvent(id: string, name: string, payload: unknown) {
-  if (isMutedEvent(name)) return;
-  flog(summaryEvent(id, name, payload));
 }
 
 // Only start listening when run directly (not when imported by tests)
@@ -55,7 +49,6 @@ if (isMain) {
 
   if (webhooks) {
     webhooks.onAny(async ({ id, name, payload }) => {
-      printEvent(id, name as string, payload);
       await foremanWss.routeEvent(id, name as string, payload);
     });
   }
