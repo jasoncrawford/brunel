@@ -58,7 +58,7 @@ beforeEach(() => {
     updatePersistentStatus: vi.fn(),
     setOnToolResultCallback: vi.fn(),
   };
-  session = new WorkerSession(new AgentStatus(AGENT_ID), wsFactory, display);
+  session = new WorkerSession(new AgentStatus({ agentId: AGENT_ID }), wsFactory, display);
   session.start();
 });
 
@@ -726,7 +726,7 @@ describe("hello_ack handshake — buffering", () => {
       let callCount = 0;
       const wsFactoryWs = vi.fn().mockImplementation(() => callCount++ === 0 ? wsA : wsB);
 
-      const sessionWithWs = new WorkerSession(new AgentStatus(AGENT_ID), wsFactoryWs, display, { workspace });
+      const sessionWithWs = new WorkerSession(new AgentStatus({ agentId: AGENT_ID }), wsFactoryWs, display, { workspace });
       sessionWithWs.start(); // uses wsA
 
       const issue = makeIssue();
@@ -1334,7 +1334,7 @@ describe("workspace slash commands in WorkerSession", () => {
 
   it("/workspace:reset calls workspace.reset() when clean", async () => {
     const workspace = makeWorkspace();
-    const sessionWs = new WorkerSession(new AgentStatus(AGENT_ID), wsFactory, display, { workspace });
+    const sessionWs = new WorkerSession(new AgentStatus({ agentId: AGENT_ID }), wsFactory, display, { workspace });
     sessionWs.start();
     const wsReg1 = new CommandRegistry();
     registerWorkspaceCommands(sessionWs.workspace, wsReg1.scoped("workspace"));
@@ -1348,7 +1348,7 @@ describe("workspace slash commands in WorkerSession", () => {
       uncommittedFiles: ["M foo.ts"], unpushedCommits: [], noUpstream: false,
     });
     (workspace.confirm as ReturnType<typeof vi.fn>).mockResolvedValue(false);
-    const sessionWs = new WorkerSession(new AgentStatus(AGENT_ID), wsFactory, display, { workspace });
+    const sessionWs = new WorkerSession(new AgentStatus({ agentId: AGENT_ID }), wsFactory, display, { workspace });
     sessionWs.start();
     const wsReg2 = new CommandRegistry();
     registerWorkspaceCommands(sessionWs.workspace, wsReg2.scoped("workspace"));
@@ -1360,7 +1360,7 @@ describe("workspace slash commands in WorkerSession", () => {
     const chdirSpy = vi.spyOn(process, "chdir").mockImplementation(() => {});
     try {
       const workspace = makeWorkspace();
-      const sessionWs = new WorkerSession(new AgentStatus(AGENT_ID), wsFactory, display, { workspace });
+      const sessionWs = new WorkerSession(new AgentStatus({ agentId: AGENT_ID }), wsFactory, display, { workspace });
       sessionWs.start();
       const wsReg3 = new CommandRegistry();
       registerWorkspaceCommands(sessionWs.workspace, wsReg3.scoped("workspace"));
@@ -1375,7 +1375,7 @@ describe("workspace slash commands in WorkerSession", () => {
     const printSpy = vi.spyOn(displayModule, "print").mockImplementation(() => {});
     try {
       const workspace = makeWorkspace();
-      const sessionWs = new WorkerSession(new AgentStatus(AGENT_ID), wsFactory, display, { workspace });
+      const sessionWs = new WorkerSession(new AgentStatus({ agentId: AGENT_ID }), wsFactory, display, { workspace });
       sessionWs.start();
       const wsReg4 = new CommandRegistry();
       registerWorkspaceCommands(sessionWs.workspace, wsReg4.scoped("workspace"));
@@ -1394,7 +1394,7 @@ describe("afterTask callback on /worker:complete", () => {
   it("calls afterTask before sending task_complete to foreman", async () => {
     const afterTask = vi.fn().mockResolvedValue(undefined);
     const sessionWithAfterTask = new WorkerSession(
-      new AgentStatus(AGENT_ID), wsFactory, display, { afterTask }
+      new AgentStatus({ agentId: AGENT_ID }), wsFactory, display, { afterTask }
     );
     sessionWithAfterTask.start();
 
@@ -1411,7 +1411,7 @@ describe("afterTask callback on /worker:complete", () => {
   it("does not send task_complete if afterTask throws", async () => {
     const afterTask = vi.fn().mockRejectedValue(new Error("reset failed"));
     const sessionWithAfterTask = new WorkerSession(
-      new AgentStatus(AGENT_ID), wsFactory, display, { afterTask }
+      new AgentStatus({ agentId: AGENT_ID }), wsFactory, display, { afterTask }
     );
     sessionWithAfterTask.start();
 
@@ -1480,7 +1480,7 @@ describe("heartbeat", () => {
   function makeHeartbeatSession(pingIntervalMs = 100) {
     const ws = new FakeWs();
     const factory = vi.fn().mockReturnValue(ws);
-    const s = new WorkerSession(new AgentStatus(AGENT_ID), factory, display, { pingIntervalMs });
+    const s = new WorkerSession(new AgentStatus({ agentId: AGENT_ID }), factory, display, { pingIntervalMs });
     s.start();
     return { ws, factory, s };
   }

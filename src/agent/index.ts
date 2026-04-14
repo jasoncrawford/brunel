@@ -232,7 +232,7 @@ export async function main(
   initialModel?: string,
   initialEffort?: EffortValue,
 ): Promise<void> {
-  const agentStatus = new AgentStatus(undefined, { model: initialModel, effort: initialEffort });
+  const agentStatus = new AgentStatus({ model: initialModel, effort: initialEffort });
 
   // Worker mode setup: create workspace, session, signal handlers.
   const workerCtx = workerConfig ? await startWorkerMode(workerConfig, agentStatus) : undefined;
