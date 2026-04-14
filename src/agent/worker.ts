@@ -1,6 +1,7 @@
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import { EventEmitter } from "node:events";
+import { randomInt } from "node:crypto";
 import path from "node:path";
 import os from "node:os";
 import { WebSocket } from "ws";
@@ -14,6 +15,35 @@ import type { CommandRegistry } from "./command-registry.js";
 import { pick } from "./input.js";
 
 const execAsync = promisify(exec);
+
+// ── Agent ID generation ───────────────────────────────────────────────────────
+
+const WORKER_NAMES = [
+  "abner", "adelaide", "albert", "alden", "alfred", "amelia", "amity", "amos",
+  "andrew", "arthur", "asa", "augustus", "aurelia", "beatrice", "benjamin",
+  "boaz", "caleb", "calvin", "cassandra", "cassius", "cecilia", "charity",
+  "charlotte", "chauncey", "clara", "clarence", "clement", "constance",
+  "cornelius", "cressida", "daniel", "deliverance", "dinah", "ebenezer",
+  "edmund", "edwin", "eleanor", "elihu", "endeavour", "ephraim", "ernest",
+  "esther", "experience", "ezekiel", "faith", "felicity", "frances",
+  "franklin", "frederick", "gideon", "grace", "harold", "harriet", "henry",
+  "herbert", "hezekiah", "hiram", "honour", "hope", "horatio", "humility",
+  "ichabod", "increase", "jedediah", "jeremiah", "jethro", "josephine",
+  "justice", "lavinia", "lawrence", "lemuel", "levi", "lucius", "lydia",
+  "mabel", "martha", "matilda", "mercy", "micah", "miles", "naomi", "obadiah",
+  "oliver", "parthenia", "patience", "peregrine", "perseverance", "philip",
+  "phineas", "priscilla", "prosper", "prudence", "resolve", "rosalind",
+  "roscoe", "rufus", "rupert", "ruth", "silas", "simon", "susannah", "tabitha",
+  "temperance", "thaddeus", "thankful", "theodore", "theophilus", "titus",
+  "tobias", "verity", "victor", "violet", "warren", "zephaniah",
+];
+
+/** Generate a human-readable agent ID by prepending a random human name to a UUID.
+ * E.g. "patience-a9bdda00-1234-5678-abcd-ef0123456789" */
+export function generateAgentId(): string {
+  const idx = randomInt(WORKER_NAMES.length);
+  return `${WORKER_NAMES[idx]}-${crypto.randomUUID()}`;
+}
 
 // ── Event classification ───────────────────────────────────────────────────────
 
@@ -89,6 +119,7 @@ export type WorkerStatusPatch = {
  * (driving the countdown display); the interval stops when reconnectAt is cleared.
  */
 export class AgentStatus extends EventEmitter {
+  public readonly agentId: string;
   private _connectionStatus: WorkerConnectionStatus = "disconnected";
   private _disconnectCode: number | undefined;
   private _reconnectAt: number | undefined;
@@ -99,17 +130,16 @@ export class AgentStatus extends EventEmitter {
   private _effort: EffortValue | undefined;
   private _countdownTimer: ReturnType<typeof setInterval> | null = null;
 
-  constructor(public readonly agentId: string, initial?: Omit<WorkerStatusPatch, "reconnectAt">) {
+  constructor({ agentId, ...initial }: { agentId?: string } & Omit<WorkerStatusPatch, "reconnectAt"> = {}) {
     super();
-    if (initial) {
-      if ("connectionStatus" in initial) this._connectionStatus = initial.connectionStatus!;
-      if ("disconnectCode" in initial) this._disconnectCode = initial.disconnectCode;
-      if ("taskNumber" in initial) this._taskNumber = initial.taskNumber;
-      if ("prNumber" in initial) this._prNumber = initial.prNumber;
-      if ("branch" in initial) this._branch = initial.branch!;
-      if ("model" in initial) this._model = initial.model;
-      if ("effort" in initial) this._effort = initial.effort;
-    }
+    this.agentId = agentId ?? generateAgentId();
+    if ("connectionStatus" in initial) this._connectionStatus = initial.connectionStatus!;
+    if ("disconnectCode" in initial) this._disconnectCode = initial.disconnectCode;
+    if ("taskNumber" in initial) this._taskNumber = initial.taskNumber;
+    if ("prNumber" in initial) this._prNumber = initial.prNumber;
+    if ("branch" in initial) this._branch = initial.branch!;
+    if ("model" in initial) this._model = initial.model;
+    if ("effort" in initial) this._effort = initial.effort;
   }
 
   get connectionStatus(): WorkerConnectionStatus { return this._connectionStatus; }

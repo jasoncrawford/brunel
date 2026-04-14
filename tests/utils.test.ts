@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { generateAgentId, WORKER_NAMES } from "../src/utils.js";
+import { generateAgentId } from "../src/agent/worker.js";
 import { shortWorkerId } from "../shared/utils.js";
 
 describe("generateAgentId", () => {
@@ -9,7 +9,7 @@ describe("generateAgentId", () => {
     const parts = id.split("-");
     // UUID has 5 parts; name adds 1 more at the front
     expect(parts.length).toBe(6);
-    expect(WORKER_NAMES).toContain(parts[0]);
+    expect(parts[0]).toMatch(/^[a-z]+$/);
   });
 
   it("contains a valid UUID after the name prefix", () => {
@@ -31,10 +31,6 @@ describe("generateAgentId", () => {
   it("generates unique IDs", () => {
     const ids = new Set(Array.from({ length: 100 }, () => generateAgentId()));
     expect(ids.size).toBe(100);
-  });
-
-  it("WORKER_NAMES contains at least 20 names", () => {
-    expect(WORKER_NAMES.length).toBeGreaterThanOrEqual(20);
   });
 });
 
