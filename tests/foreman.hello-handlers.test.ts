@@ -2,7 +2,7 @@
  * Unit tests for ForemanWss.handleBusyHello and ForemanWss.handleIdleHello.
  *
  * Each reconnection case is verified by calling the public methods directly on
- * a ForemanWss instance with sendMsg/flog spied out.
+ * a ForemanWss instance with sendMsg spied out.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import http from "http";
@@ -10,6 +10,7 @@ import { ForemanWss } from "../src/foreman/controllers/wss.js";
 import { Worker } from "../src/foreman/models/worker.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { setupInMemoryTasks } from "./helpers/task.js";
+import * as utils from "../src/utils.js";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -24,8 +25,7 @@ function makeWss(taskManager: TaskManager) {
     server: http.createServer(),
   });
   const sendMsg = vi.spyOn(wss, "sendMsg").mockImplementation(() => {});
-  const flog = vi.spyOn(wss, "flog").mockImplementation(() => {});
-  return { wss, sendMsg, flog };
+  return { wss, sendMsg };
 }
 
 /** Returns the hello_ack message from a sendMsg spy's calls. */
@@ -214,8 +214,9 @@ describe("handleIdleHello", () => {
     });
     vi.mocked(task.revert).mockRejectedValueOnce(new Error("DB down"));
 
-    const { wss, flog } = makeWss(taskManager);
+    const { wss } = makeWss(taskManager);
+    const logSpy = vi.spyOn(utils, "log").mockImplementation(() => {});
     await expect(wss.handleIdleHello("w1", fakeWs())).resolves.toBeUndefined();
-    expect(flog).toHaveBeenCalledWith(expect.stringContaining("ERROR"));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("ERROR"));
   });
 });

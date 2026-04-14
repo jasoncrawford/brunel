@@ -11,11 +11,7 @@ import { Worker } from "./models/worker.js";
 import { createHttpServer } from "./controllers/http-server.js";
 import { ForemanWss } from "./controllers/wss.js";
 import { createAdminWss } from "./admin-ws.js";
-import { fmtError } from "../utils.js";
-
-function flog(msg: string) {
-  console.log(`${new Date().toISOString()} ${msg}`);
-}
+import { fmtError, log } from "../utils.js";
 
 // Only start listening when run directly (not when imported by tests)
 import { fileURLToPath } from "url";
@@ -29,7 +25,7 @@ if (isMain) {
 
   // Setup DB and task manager (share the same Supabase client)
   if (!config.supabaseUrl || !config.supabaseSecretKey) {
-    flog("ERROR Supabase is required. Set BRUNEL_SUPABASE_URL and BRUNEL_SUPABASE_SECRET_KEY.");
+    log("ERROR Supabase is required. Set BRUNEL_SUPABASE_URL and BRUNEL_SUPABASE_SECRET_KEY.");
     process.exit(1);
   }
   const supabase = createClient<Database>(config.supabaseUrl, config.supabaseSecretKey);
@@ -56,21 +52,21 @@ if (isMain) {
   // Load all state before accepting WebSocket connections.
 
   // Step 1: Load active tasks from DB (primary source of truth).
-  flog("[startup] step 1: loading active tasks from DB...");
+  log("[startup] step 1: loading active tasks from DB...");
   try {
-    await taskManager.loadActiveTasksFromDb(flog);
+    await taskManager.loadActiveTasksFromDb();
   } catch (err) {
-    flog(`ERROR Failed to load tasks from DB: ${fmtError(err)}`);
+    log(`ERROR Failed to load tasks from DB: ${fmtError(err)}`);
     process.exit(1);
   }
 
   // Step 2: Fetch brunel:ready issues from GitHub for reconciliation.
-  flog("[startup] step 2: fetching brunel:ready issues from GitHub for reconciliation...");
+  log("[startup] step 2: fetching brunel:ready issues from GitHub for reconciliation...");
   try {
-    await taskManager.loadIssuesFromGithub(config, flog);
+    await taskManager.loadIssuesFromGithub(config);
     await foremanWss.reconcile();
   } catch (err) {
-    flog(`ERROR Failed to load issues from GitHub: ${fmtError(err)}`);
+    log(`ERROR Failed to load issues from GitHub: ${fmtError(err)}`);
     process.exit(1);
   }
 
@@ -78,17 +74,17 @@ if (isMain) {
   const httpBase = config.foremanUrl.replace(/^ws:\/\//, "http://").replace(/^wss:\/\//, "https://").replace(/\/$/, "");
   const wsBase = config.foremanUrl.replace(/\/$/, "");
   server.listen(config.port, () => {
-    flog(`Listening on ${httpBase}/webhook`);
-    flog(`WebSocket workers: ${wsBase}/worker`);
-    flog(`Admin WebSocket: ${wsBase}/admin/ws`);
-    flog("Waiting for events...");
+    log(`Listening on ${httpBase}/webhook`);
+    log(`WebSocket workers: ${wsBase}/worker`);
+    log(`Admin WebSocket: ${wsBase}/admin/ws`);
+    log("Waiting for events...");
   });
 
   process.on("SIGTERM", () => {
-    flog("SIGTERM received, shutting down gracefully...");
+    log("SIGTERM received, shutting down gracefully...");
     void foremanWss.shutdown().then(() => {
       setTimeout(() => {
-        flog("Shutdown complete.");
+        log("Shutdown complete.");
         process.exit(0);
       }, 2000);
     });

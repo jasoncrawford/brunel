@@ -9,6 +9,7 @@ import { Task } from "../src/foreman/models/task.js";
 import { Worker } from "../src/foreman/models/worker.js";
 import { WebhookEvent } from "../src/foreman/models/webhook-event.js";
 import { setupInMemoryTasks } from "./helpers/task.js";
+import * as utils from "../src/utils.js";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -23,7 +24,6 @@ function makeEvent(name = "pull_request"): WebhookEvent {
 interface TestDeps {
   wss: ForemanWss;
   sendMsg: ReturnType<typeof vi.fn>;
-  flog: ReturnType<typeof vi.fn>;
   taskManager: {
     queueEvent: ReturnType<typeof vi.fn>;
     registerBranch: ReturnType<typeof vi.fn>;
@@ -59,15 +59,16 @@ function makeDeps(): TestDeps {
     server: http.createServer(),
   });
   const sendMsg = vi.spyOn(wss, "sendMsg").mockImplementation(() => {});
-  const flog = vi.spyOn(wss, "flog").mockImplementation(() => {});
-  return { wss, sendMsg, flog, taskManager };
+  return { wss, sendMsg, taskManager };
 }
 
 let taskStore: ReturnType<typeof setupInMemoryTasks>;
+let logSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
   Worker._reset();
   taskStore = setupInMemoryTasks();
+  logSpy = vi.spyOn(utils, "log").mockImplementation(() => {});
 });
 
 afterEach(() => {
@@ -100,7 +101,7 @@ describe("routePrEvent — synchronize", () => {
 describe("routePrEvent — opened", () => {
   it("registers PR on a linked task when PR body closes the issue", async () => {
     const task = taskStore.addTask({ task_id: "42", issue_number: 42 });
-    const { wss, sendMsg, flog, taskManager } = makeDeps();
+    const { wss, sendMsg, taskManager } = makeDeps();
     const result = await wss.routePrEvent(
       {
         action: "opened",
@@ -115,7 +116,7 @@ describe("routePrEvent — opened", () => {
     expect(task.prNumber).toBe(99);
     expect(task.branch).toBe("feature-branch");
     expect(taskManager.registerBranch).toHaveBeenCalledWith("feature-branch", "42");
-    expect(flog).toHaveBeenCalledWith(expect.stringContaining("PR #99 registered"));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("PR #99 registered"));
     expect(result.taskId).toBe("42");
   });
 
@@ -136,19 +137,19 @@ describe("routePrEvent — closed without merge", () => {
     const w = Worker.register("worker-1", fakeWs());
     task.workerId = "worker-1";
     w.assign("42");
-    const { wss, sendMsg, flog } = makeDeps();
+    const { wss, sendMsg } = makeDeps();
     const result = await wss.routePrEvent(
       { action: "closed", pull_request: { number: 99, merged: false } },
       makeEvent(),
     );
     expect(task.prNumber).toBeNull();
-    expect(flog).toHaveBeenCalledWith(expect.stringContaining("unregistered"));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("unregistered"));
     expect(sendMsg).toHaveBeenCalledOnce();
     expect(result.taskId).toBe("42");
   });
 
   it("returns null when no task owns the PR", async () => {
-    const { wss, sendMsg, flog } = makeDeps();
+    const { wss, sendMsg } = makeDeps();
     const result = await wss.routePrEvent(
       { action: "closed", pull_request: { number: 99, merged: false } },
       makeEvent(),
@@ -163,13 +164,13 @@ describe("routePrEvent — closed with merge", () => {
     const w = Worker.register("worker-1", fakeWs());
     task.workerId = "worker-1";
     w.assign("42");
-    const { wss, sendMsg, flog } = makeDeps();
+    const { wss, sendMsg } = makeDeps();
     const result = await wss.routePrEvent(
       { action: "closed", pull_request: { number: 99, merged: true } },
       makeEvent(),
     );
     expect(task.prMergedAt).toBeTruthy();
-    expect(flog).toHaveBeenCalledWith(expect.stringContaining("merged"));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("merged"));
     expect(sendMsg).toHaveBeenCalledOnce();
     expect(result.taskId).toBe("42");
   });
@@ -339,7 +340,7 @@ describe("routeIssueEvent — enqueue on labeled", () => {
   });
 
   it("ignores a labeled event when the issue is already closed", async () => {
-    const { wss, flog, taskManager } = makeDeps();
+    const { wss, taskManager } = makeDeps();
     const issue = { number: 42, title: "Do something", body: "", state: "closed", labels: [{ name: "brunel:ready" }] };
     const result = await wss.routeIssueEvent(
       { action: "labeled", label: { name: "brunel:ready" } },
@@ -349,7 +350,7 @@ describe("routeIssueEvent — enqueue on labeled", () => {
     );
     expect(taskManager.enqueueIssue).not.toHaveBeenCalled();
     expect(result).toEqual({ taskId: null, workerId: null });
-    expect(flog).toHaveBeenCalledWith(expect.stringContaining("ignoring"));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("ignoring"));
   });
 
   it("ignores a labeled event for a different label", async () => {
@@ -397,7 +398,7 @@ describe("routeIssueEvent — enqueue on opened", () => {
 describe("routeIssueEvent — unlabeled (dequeue)", () => {
   it("dequeues the task when the task label is removed", async () => {
     taskStore.addTask({ task_id: "42", issue_number: 42 });
-    const { wss, flog, taskManager } = makeDeps();
+    const { wss, taskManager } = makeDeps();
     const issue = { number: 42 };
     await wss.routeIssueEvent(
       { action: "unlabeled", label: { name: "brunel:ready" } },
@@ -406,7 +407,7 @@ describe("routeIssueEvent — unlabeled (dequeue)", () => {
       42,
     );
     expect(taskManager.dequeueIssue).toHaveBeenCalledWith(42);
-    expect(flog).toHaveBeenCalledWith(expect.stringContaining("dequeued"));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("dequeued"));
   });
 
   it("does not dequeue when a different label is removed", async () => {
