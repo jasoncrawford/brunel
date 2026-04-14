@@ -137,7 +137,7 @@ describe("handleBusyHello", () => {
 
       const ack = helloAck(sendMsg);
       expect(ack?.status).toBe("busy");
-      expect(task.assign).toHaveBeenCalledWith("w1");
+      expect(task.assign).toHaveBeenCalledWith(expect.objectContaining({ workerId: "w1" }));
       expect(Worker.get("w1")?.currentTaskId).toBe("10");
     });
 
@@ -149,13 +149,13 @@ describe("handleBusyHello", () => {
 
       const ack = helloAck(sendMsg);
       expect(ack?.status).toBe("busy");
-      expect(task.assign).toHaveBeenCalledWith("w1");
+      expect(task.assign).toHaveBeenCalledWith(expect.objectContaining({ workerId: "w1" }));
     });
   });
 
   describe("queued events", () => {
     it("flushes queued events after reclaim", async () => {
-      addTask({
+      const task = addTask({
         task_id: "10",
         issue_number: 10,
         worker_id: "w1",
@@ -163,7 +163,7 @@ describe("handleBusyHello", () => {
       });
 
       // Queue an event manually via the task manager
-      taskManager.queueEvent("10", { toWorkerPayload: () => ({ name: "issue_comment", payload: {} }), eventName: "issue_comment" } as any);
+      taskManager.queueEvent(task, { toWorkerPayload: () => ({ name: "issue_comment", payload: {} }), eventName: "issue_comment" } as any);
 
       const { wss, sendMsg } = makeWss(taskManager);
       await wss.handleBusyHello("w1", "10", fakeWs());

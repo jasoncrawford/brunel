@@ -255,9 +255,10 @@ export class ForemanWss {
     });
   }
 
-  sendMsg(workerId: string, msg: Wire.ForemanMessage, logTaskId?: string): void {
+  sendMsg(worker: Worker, msg: Wire.ForemanMessage, logTaskId?: string): void {
     const taskId = logTaskId ?? (("taskId" in msg ? msg.taskId : null) ?? null);
-    Worker.get(workerId)?.send(msg);
+    const workerId = worker.workerId;
+    worker.send(msg);
     const msgPayload = msg as unknown as Record<string, unknown>;
     void ForemanMessage.log({ direction: "sent", workerId, taskId, msgType: msg.type, payload: msgPayload });
     this.broadcastMessageEvent({ direction: "sent", workerId, taskId, msgType: msg.type, payload: msgPayload });
@@ -290,28 +291,26 @@ export class ForemanWss {
 
   // ── Hello handlers ───────────────────────────────────────────────────────────
 
-  private flushQueuedEvents(workerId: string, taskId: string, issueRef: string | number): void {
-    for (const evt of this.taskManager.drainEvents(taskId)) {
-      this.sendMsg(workerId, { type: "event_notification", taskId, event: evt.toWorkerPayload() });
-      this.workerLog(workerId, `→ event_notification #${issueRef} ${evt.eventName} (queued)`);
+  private flushQueuedEvents(worker: Worker, task: Task): void {
+    for (const evt of this.taskManager.drainEvents(task)) {
+      this.sendMsg(worker, { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload() });
+      this.workerLog(worker.workerId, `→ event_notification #${task.issueNumber} ${evt.eventName} (queued)`);
     }
   }
 
-  private cancelWorker(workerId: string, taskId: string | undefined, ws: WebSocket): void {
-    Worker.register(workerId, ws);
-    this.sendMsg(workerId, { type: "hello_ack", workerId, status: "cancelled" }, taskId);
+  private cancelWorker(worker: Worker, task: Task | null): void {
+    this.sendMsg(worker, { type: "hello_ack", workerId: worker.workerId, status: "cancelled" }, task?.taskId);
   }
 
-  private async reclaimWorker(workerId: string, task: Task, ws: WebSocket): Promise<void> {
-    const w = Worker.register(workerId, ws);
-    w.assign(task.taskId);
+  private async reclaimWorker(worker: Worker, task: Task): Promise<void> {
+    worker.assign(task);
     // Only call assign if task is not already complete (to preserve task status)
     if (task.status !== "complete") {
-      await task.assign(workerId);
+      await task.assign(worker);
     }
     // For complete tasks, the task stays complete while worker finishes cleanup/finalization work
-    this.sendMsg(workerId, { type: "hello_ack", workerId, status: "busy" }, task.taskId);
-    this.flushQueuedEvents(workerId, task.taskId, task.issueNumber);
+    this.sendMsg(worker, { type: "hello_ack", workerId: worker.workerId, status: "busy" }, task.taskId);
+    this.flushQueuedEvents(worker, task);
   }
 
   /**
@@ -327,6 +326,7 @@ export class ForemanWss {
    */
   async handleBusyHello(workerId: string, claimedTaskId: string, ws: WebSocket): Promise<void> {
     const existing = await Task.get(claimedTaskId);
+    const worker = Worker.register(workerId, ws);
 
     if (!existing) {
       this.workerLog(workerId, `hello busy task=#${claimedTaskId} — unknown task, respecting busy status`);
@@ -336,24 +336,24 @@ export class ForemanWss {
         placeholderTask = await Task.upsert(claimedTaskId, issueNumber, "", "", "", []);
       }
       if (placeholderTask) {
-        await this.reclaimWorker(workerId, placeholderTask, ws);
+        await this.reclaimWorker(worker, placeholderTask);
       } else {
-        this.cancelWorker(workerId, claimedTaskId, ws);
+        this.cancelWorker(worker, null);
       }
     } else if (existing.status === "complete") {
       if (existing.workerId && existing.workerId !== workerId) {
         this.workerLog(workerId, `hello busy task=#${claimedTaskId} — task complete but owned by another worker, cancelling`);
-        this.cancelWorker(workerId, claimedTaskId, ws);
+        this.cancelWorker(worker, existing);
       } else {
         this.workerLog(workerId, `hello busy task=#${claimedTaskId} — task already complete, reclaiming for finalization`);
-        await this.reclaimWorker(workerId, existing, ws);
+        await this.reclaimWorker(worker, existing);
       }
     } else if (existing.workerId && existing.workerId !== workerId) {
       this.workerLog(workerId, `hello busy task=#${claimedTaskId} — task taken by another worker`);
-      this.cancelWorker(workerId, claimedTaskId, ws);
+      this.cancelWorker(worker, existing);
     } else {
       this.workerLog(workerId, `hello busy task=#${claimedTaskId} — reclaimed`);
-      await this.reclaimWorker(workerId, existing, ws);
+      await this.reclaimWorker(worker, existing);
     }
   }
 
@@ -372,8 +372,8 @@ export class ForemanWss {
     } else {
       this.workerLog(workerId, "hello idle");
     }
-    Worker.register(workerId, ws);
-    this.sendMsg(workerId, { type: "hello_ack", workerId, status: "idle" });
+    const w = Worker.register(workerId, ws);
+    this.sendMsg(w, { type: "hello_ack", workerId: w.workerId, status: "idle" });
   }
 
   // ── Routing ─────────────────────────────────────────────────────────────────
@@ -381,21 +381,21 @@ export class ForemanWss {
   forwardEvent(task: Task, evt: WebhookEvent, ref: string): void {
     if (task.workerId) {
       const worker = Worker.get(task.workerId);
-      if (worker && worker.currentTaskId !== task.taskId) {
+      if (worker && worker.currentTask?.taskId !== task.taskId) {
         log(`[task ${ref}] ${evt.eventName} dropped — worker ${shortWorkerId(task.workerId)} is now on a different task`);
         return;
       }
       if (worker?.status === "disconnected") {
-        this.taskManager.queueEvent(task.taskId, evt);
+        this.taskManager.queueEvent(task, evt);
         log(`[task ${ref}] ${evt.eventName} queued (worker ${shortWorkerId(task.workerId)} disconnected)`);
       } else if (worker) {
-        this.sendMsg(task.workerId, { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload() });
+        this.sendMsg(worker, { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload() });
         log(`[worker ${shortWorkerId(task.workerId)}] → event_notification ${ref} ${evt.eventName}`);
       } else {
         log(`[task ${ref}] ${evt.eventName} DROPPED — worker ${shortWorkerId(task.workerId)} not in registry (disconnected?)`);
       }
     } else if (task.status === "pending" || task.status === "blocked") {
-      this.taskManager.queueEvent(task.taskId, evt);
+      this.taskManager.queueEvent(task, evt);
       log(`[task ${ref}] ${evt.eventName} queued (no worker assigned)`);
     }
   }
@@ -404,11 +404,11 @@ export class ForemanWss {
     for (const outcome of await this.taskManager.assignIdleWorkers()) {
       if (!outcome.ok) {
         log(`ERROR Failed to persist assignment: ${fmtError(outcome.err)}`);
-        log(`[worker ${shortWorkerId(outcome.workerId)}] → idle (DB write failed)`);
+        log(`[worker ${shortWorkerId(outcome.worker.workerId)}] → idle (DB write failed)`);
         continue;
       }
-      const { task, queued, workerId: wid } = outcome;
-      this.sendMsg(wid, {
+      const { task, queued, worker } = outcome;
+      this.sendMsg(worker, {
         type: "task_assigned",
         taskId: task.taskId,
         issue: {
@@ -419,10 +419,10 @@ export class ForemanWss {
           repoUrl: task.repoUrl,
         },
       });
-      log(`[worker ${shortWorkerId(wid)}] → task_assigned #${task.issueNumber} "${task.title}"`);
+      log(`[worker ${shortWorkerId(worker.workerId)}] → task_assigned #${task.issueNumber} "${task.title}"`);
       for (const evt of queued) {
-        this.sendMsg(wid, { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload() });
-        log(`[worker ${shortWorkerId(wid)}] → event_notification #${task.issueNumber} ${evt.eventName} (queued)`);
+        this.sendMsg(worker, { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload() });
+        log(`[worker ${shortWorkerId(worker.workerId)}] → event_notification #${task.issueNumber} ${evt.eventName} (queued)`);
       }
     }
   }
@@ -450,7 +450,7 @@ export class ForemanWss {
         const linkedTask = await Task.getByIssue(linkedIssue);
         if (linkedTask) {
           const branch = strProp(pr.head, "ref");
-          if (branch) this.taskManager.registerBranch(branch, linkedTask.taskId);
+          if (branch) this.taskManager.registerBranch(branch, linkedTask);
           await linkedTask.registerPr(prNumber, branch ?? null).catch((err: unknown) =>
             log(`ERROR Failed to register PR for task #${linkedTask.taskId}: ${fmtError(err)}`)
           );

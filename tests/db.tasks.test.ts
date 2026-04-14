@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Task } from "../src/foreman/models/task.js";
+import { Worker } from "../src/foreman/models/worker.js";
 import { initDb } from "../src/foreman/db-client.js";
 import { createTestSupabase } from "./helpers/db.js";
 
@@ -12,6 +13,7 @@ initDb(supabase);
 const OWN_IDS = ["dbt-42", "dbt-1", "dbt-2", "dbt-3"];
 
 beforeEach(async () => {
+  Worker._reset();
   await supabase.from("tasks").delete().in("task_id", OWN_IDS);
 });
 
@@ -76,7 +78,8 @@ describe("Task.upsert (Supabase)", () => {
   it("on conflict updates content fields only — status fields are preserved", async () => {
     await Task.upsert("dbt-42", 9042, "owner/repo", "Original title", "Original body", ["v1"]);
     const t = await Task.get("dbt-42");
-    await t!.assign("worker-1");
+    const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
+    await t!.assign(Worker.register("worker-1", fakeWs));
     await t!.complete();
 
     // Upsert again (e.g. startup sync): must update content but PRESERVE status fields.
@@ -100,7 +103,8 @@ describe("Task.assign (Supabase)", () => {
   it("sets worker_id and assigned_at", async () => {
     await insertProtected("dbt-42", 9042, "owner/repo", "Fix the bug");
     const t = await Task.get("dbt-42");
-    await t!.assign("worker-1");
+    const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
+    await t!.assign(Worker.register("worker-1", fakeWs));
 
     const task = await Task.get("dbt-42");
     expect(task!.workerId).toBe("worker-1");
@@ -112,7 +116,8 @@ describe("Task.complete (Supabase)", () => {
   it("sets completed_at", async () => {
     await insertProtected("dbt-42", 9042, "owner/repo", "Fix the bug");
     const t = await Task.get("dbt-42");
-    await t!.assign("worker-1");
+    const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
+    await t!.assign(Worker.register("worker-1", fakeWs));
     await t!.complete();
 
     const task = await Task.get("dbt-42");
@@ -124,7 +129,8 @@ describe("Task.revert (Supabase)", () => {
   it("clears worker_id", async () => {
     await insertProtected("dbt-42", 9042, "owner/repo", "Fix the bug");
     const t = await Task.get("dbt-42");
-    await t!.assign("worker-1");
+    const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
+    await t!.assign(Worker.register("worker-1", fakeWs));
     await t!.revert();
 
     const task = await Task.get("dbt-42");
@@ -193,7 +199,8 @@ describe("Task.list (Supabase)", () => {
     // Create a task that was assigned then completed (not cancelable)
     await insertProtected("dbt-2", 9002, "r/r", "Complete task");
     const t2 = await Task.get("dbt-2");
-    await t2!.assign("w1");
+    const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
+    await t2!.assign(Worker.register("w1", fakeWs));
     await t2!.complete();
 
     const cancelable = own(await Task.list({ cancelable: true }));
@@ -210,7 +217,8 @@ describe("Task.list (Supabase)", () => {
     await insertProtected("dbt-1", 9001, "r/r", "Pending");
     await insertProtected("dbt-2", 9002, "r/r", "Assigned");
     const t2 = await Task.get("dbt-2");
-    await t2!.assign("w1");
+    const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
+    await t2!.assign(Worker.register("w1", fakeWs));
 
     const all = own(await Task.list());
     expect(all).toHaveLength(2);
@@ -250,7 +258,8 @@ describe("Task.deleteIfUnassigned (Supabase)", () => {
   it("does NOT delete a row that was previously assigned (assigned_at is set)", async () => {
     await insertProtected("dbt-42", 9042, "owner/repo", "Fix");
     const t = await Task.get("dbt-42");
-    await t!.assign("worker-1");
+    const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
+    await t!.assign(Worker.register("worker-1", fakeWs));
     await t!.revert(); // revert (e.g. worker_goodbye) — assigned_at stays set
 
     await t!.deleteIfUnassigned();
@@ -320,7 +329,8 @@ describe("Task lookup methods (Supabase)", () => {
   it("getByWorker finds assigned task for worker", async () => {
     await insertProtected("dbt-42", 9042, "r/r", "title");
     const t = await Task.get("dbt-42");
-    await t!.assign("w1");
+    const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
+    await t!.assign(Worker.register("w1", fakeWs));
     const task = await Task.getByWorker("w1");
     expect(task?.taskId).toBe("dbt-42");
   });

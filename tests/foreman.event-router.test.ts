@@ -57,7 +57,7 @@ describe("forwardEvent — worker has moved on to a different task", () => {
       completed_at: new Date().toISOString(),
     });
     const w = Worker.register("worker-1", fakeWs());
-    w.assign("other-task-id"); // worker has moved on to a different task
+    w.assign(Task.fromTest({ task_id: "other-task-id", issue_number: 999 })); // worker has moved on to a different task
     const taskManager = { queueEvent: vi.fn(), assignIdleWorkers: vi.fn().mockResolvedValue([]), on: vi.fn() };
     const { wss, sendMsg } = makeWss(taskManager);
 
@@ -92,7 +92,7 @@ describe("forwardEvent — worker has moved on to a different task", () => {
       completed_at: new Date().toISOString(),
     });
     const w = Worker.register("worker-1", fakeWs());
-    w.assign("other-task-id");
+    w.assign(Task.fromTest({ task_id: "other-task-id", issue_number: 999 })); // worker has moved on to a different task
     const taskManager = { queueEvent: vi.fn(), assignIdleWorkers: vi.fn().mockResolvedValue([]), on: vi.fn() };
     const { wss } = makeWss(taskManager);
 
@@ -113,7 +113,7 @@ describe("forwardEvent — active tasks still receive events", () => {
       worker_id: "worker-1",
     });
     const w = Worker.register("worker-1", fakeWs());
-    w.assign("42");
+    w.assign(task);
     const taskManager = { queueEvent: vi.fn(), assignIdleWorkers: vi.fn().mockResolvedValue([]), on: vi.fn() };
     const { wss, sendMsg } = makeWss(taskManager);
 
@@ -121,7 +121,7 @@ describe("forwardEvent — active tasks still receive events", () => {
 
     expect(sendMsg).toHaveBeenCalledOnce();
     expect(sendMsg).toHaveBeenCalledWith(
-      "worker-1",
+      expect.objectContaining({ workerId: "worker-1" }),
       expect.objectContaining({ type: "event_notification" }),
     );
   });
@@ -135,7 +135,7 @@ describe("forwardEvent — active tasks still receive events", () => {
       pr_merged_at: new Date().toISOString(),
     });
     const w = Worker.register("worker-1", fakeWs());
-    w.assign("42");
+    w.assign(task);
     const taskManager = { queueEvent: vi.fn(), assignIdleWorkers: vi.fn().mockResolvedValue([]), on: vi.fn() };
     const { wss, sendMsg } = makeWss(taskManager);
 
@@ -153,7 +153,7 @@ describe("forwardEvent — active tasks still receive events", () => {
       issue_closed_at: new Date().toISOString(),
     });
     const w = Worker.register("worker-1", fakeWs());
-    w.assign("42");
+    w.assign(task);
     const taskManager = { queueEvent: vi.fn(), assignIdleWorkers: vi.fn().mockResolvedValue([]), on: vi.fn() };
     const { wss, sendMsg } = makeWss(taskManager);
 

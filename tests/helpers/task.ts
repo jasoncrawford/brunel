@@ -1,5 +1,6 @@
 import { vi } from "vitest";
 import { Task } from "../../src/foreman/models/task.js";
+import { Worker } from "../../src/foreman/models/worker.js";
 
 /**
  * Sets up vi.spyOn on all Task static methods backed by an in-memory Map.
@@ -15,8 +16,8 @@ export function setupInMemoryTasks(emitter?: { emit: (event: string) => void }) 
   }
 
   function spyInstanceMethods(task: Task) {
-    vi.spyOn(task, "assign").mockImplementation(async (workerId: string) => {
-      task.workerId = workerId;
+    vi.spyOn(task, "assign").mockImplementation(async (worker: Worker) => {
+      task.workerId = worker.workerId;
       task.assignedAt = new Date().toISOString();
       notifyChange();
     });

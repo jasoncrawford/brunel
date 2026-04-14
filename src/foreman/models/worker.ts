@@ -1,6 +1,7 @@
 import { EventEmitter } from "events";
 import * as Wire from "../../../shared/wire.js";
 import type { WebSocket as WsSocket } from "ws";
+import type { Task } from "./task.js";
 
 const registry = new Map<string, Worker>();
 
@@ -13,8 +14,12 @@ export class Worker {
   ) {}
 
   status: "idle" | "busy" | "disconnected" = "idle";
-  currentTaskId?: string;
+  currentTask?: Task;
   disconnectedAt?: Date;
+
+  get currentTaskId(): string | undefined {
+    return this.currentTask?.taskId;
+  }
 
   // Static registry operations
 
@@ -51,15 +56,15 @@ export class Worker {
 
   // Instance operations
 
-  assign(taskId: string): void {
+  assign(task: Task): void {
     this.status = "busy";
-    this.currentTaskId = taskId;
+    this.currentTask = task;
     Worker.events.emit("changed");
   }
 
   release(): void {
     this.status = "idle";
-    this.currentTaskId = undefined;
+    this.currentTask = undefined;
     Worker.events.emit("changed");
   }
 
@@ -90,7 +95,7 @@ export class Worker {
     return {
       workerId: this.workerId,
       status: this.status,
-      currentTaskId: this.currentTaskId,
+      currentTaskId: this.currentTask?.taskId,
     };
   }
 }

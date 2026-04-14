@@ -1,4 +1,5 @@
 import type { WebhookEvent } from "./models/webhook-event.js";
+import type { Task } from "./models/task.js";
 
 // ── EventQueue ─────────────────────────────────────────────────────────────────
 // Buffers GitHub events for workers that aren't connected yet.
@@ -7,13 +8,15 @@ import type { WebhookEvent } from "./models/webhook-event.js";
 export class EventQueue {
   private queues = new Map<string, WebhookEvent[]>();
 
-  enqueue(taskId: string, event: WebhookEvent): void {
+  enqueue(task: Task, event: WebhookEvent): void {
+    const taskId = task.taskId;
     let q = this.queues.get(taskId);
     if (!q) { q = []; this.queues.set(taskId, q); }
     q.push(event);
   }
 
-  drain(taskId: string): WebhookEvent[] {
+  drain(task: Task): WebhookEvent[] {
+    const taskId = task.taskId;
     const q = this.queues.get(taskId);
     if (!q || q.length === 0) return [];
     this.queues.delete(taskId);

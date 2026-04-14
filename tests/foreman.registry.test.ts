@@ -1,9 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Worker } from "../src/foreman/models/worker.js";
+import { Task } from "../src/foreman/models/task.js";
 import * as Wire from "../shared/wire.js";
 
 function fakeWs() {
   return { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
+}
+
+function fakeTask(taskId: string) {
+  return Task.fromTest({ task_id: taskId, issue_number: parseInt(taskId, 10) || 0 });
 }
 
 beforeEach(() => { Worker._reset(); });
@@ -21,20 +26,20 @@ describe("Worker", () => {
 
   it("getIdle returns empty array when all busy", () => {
     const w = Worker.register("w1", fakeWs());
-    w.assign("42");
+    w.assign(fakeTask("42"));
     expect(Worker.getIdle()).toHaveLength(0);
   });
 
   it("assign marks worker busy with taskId", () => {
     const w = Worker.register("w1", fakeWs());
-    w.assign("42");
+    w.assign(fakeTask("42"));
     expect(w.status).toBe("busy");
     expect(w.currentTaskId).toBe("42");
   });
 
   it("release marks worker idle and clears taskId", () => {
     const w = Worker.register("w1", fakeWs());
-    w.assign("42");
+    w.assign(fakeTask("42"));
     w.release();
     expect(w.status).toBe("idle");
     expect(w.currentTaskId).toBeUndefined();
@@ -48,7 +53,7 @@ describe("Worker", () => {
 
   it("getByTask returns worker assigned to that task", () => {
     const w = Worker.register("w1", fakeWs());
-    w.assign("42");
+    w.assign(fakeTask("42"));
     expect(Worker.getByTask("42")?.workerId).toBe("w1");
   });
 
@@ -76,14 +81,14 @@ describe("Worker", () => {
 
   it("toWire returns WorkerSnapshot", () => {
     const w = Worker.register("w1", fakeWs());
-    w.assign("42");
+    w.assign(fakeTask("42"));
     expect(w.toWire()).toEqual({ workerId: "w1", status: "busy", currentTaskId: "42" });
   });
 
   describe("markDisconnected", () => {
     it("sets status to disconnected and records disconnectedAt", () => {
       const w = Worker.register("w1", fakeWs());
-      w.assign("42");
+      w.assign(fakeTask("42"));
       w.markDisconnected();
       expect(w.status).toBe("disconnected");
       expect(w.currentTaskId).toBe("42");
@@ -115,7 +120,7 @@ describe("Worker", () => {
 
     it("all includes disconnected workers", () => {
       const w = Worker.register("w1", fakeWs());
-      w.assign("42");
+      w.assign(fakeTask("42"));
       w.markDisconnected();
       const snapshots = Worker.all().map(x => x.toWire());
       expect(snapshots).toHaveLength(1);
@@ -181,14 +186,14 @@ describe("Worker changed events", () => {
     const w = Worker.register("w1", fakeWs());
     const changed = vi.fn();
     Worker.events.on("changed", changed);
-    w.assign("42");
+    w.assign(fakeTask("42"));
     expect(changed).toHaveBeenCalledOnce();
     Worker.events.off("changed", changed);
   });
 
   it("release emits changed", () => {
     const w = Worker.register("w1", fakeWs());
-    w.assign("42");
+    w.assign(fakeTask("42"));
     const changed = vi.fn();
     Worker.events.on("changed", changed);
     w.release();

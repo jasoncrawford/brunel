@@ -17,8 +17,8 @@ import { log } from "../../utils.js";
 // and after every worker registry change so the admin dashboard can refresh.
 
 export type AssignOutcome =
-  | { ok: true; task: Task; queued: WebhookEvent[]; workerId: string }
-  | { ok: false; workerId: string; err: unknown };
+  | { ok: true; task: Task; queued: WebhookEvent[]; worker: Worker }
+  | { ok: false; worker: Worker; err: unknown };
 
 export class TaskManager extends EventEmitter {
   // ── Ephemeral in-memory state (no DB backing) ────────────────────────────
@@ -70,8 +70,8 @@ export class TaskManager extends EventEmitter {
     return new Promise((resolve) => {
       this.assignLock = this.assignLock.then(async () => {
         const outcomes: AssignOutcome[] = [];
-        for (const w of Worker.getIdle()) {
-          const outcome = await this.tryAssignWork(w.workerId);
+        for (const worker of Worker.getIdle()) {
+          const outcome = await this.tryAssignWork(worker);
           if (outcome) outcomes.push(outcome);
         }
         resolve(outcomes);
@@ -79,16 +79,16 @@ export class TaskManager extends EventEmitter {
     });
   }
 
-  private async tryAssignWork(workerId: string): Promise<AssignOutcome | null> {
+  private async tryAssignWork(worker: Worker): Promise<AssignOutcome | null> {
     const task = await this.nextPending(t => t.blockersLoaded && t.status === "pending");
     if (!task) return null;
-    Worker.get(workerId)?.assign(task.taskId);
+    worker.assign(task);
     try {
-      await task.assign(workerId);
-      return { ok: true, task, queued: this.drainEvents(task.taskId), workerId };
+      await task.assign(worker);
+      return { ok: true, task, queued: this.drainEvents(task), worker };
     } catch (err) {
-      Worker.get(workerId)?.release();
-      return { ok: false, workerId, err };
+      worker.release();
+      return { ok: false, worker, err };
     }
   }
 
@@ -100,16 +100,16 @@ export class TaskManager extends EventEmitter {
 
   // ── Memory-only write operations (ephemeral data) ─────────────────────────
 
-  queueEvent(taskId: string, event: WebhookEvent): void {
-    this.eventQueue.enqueue(taskId, event);
+  queueEvent(task: Task, event: WebhookEvent): void {
+    this.eventQueue.enqueue(task, event);
   }
 
-  drainEvents(taskId: string): WebhookEvent[] {
-    return this.eventQueue.drain(taskId);
+  drainEvents(task: Task): WebhookEvent[] {
+    return this.eventQueue.drain(task);
   }
 
-  registerBranch(branch: string, taskId: string): void {
-    this.branchToTaskId.set(branch, taskId);
+  registerBranch(branch: string, task: Task): void {
+    this.branchToTaskId.set(branch, task.taskId);
   }
 
   // ── Issue-lifecycle methods ───────────────────────────────────────────────
@@ -207,7 +207,7 @@ export class TaskManager extends EventEmitter {
     const tasks = await Task.list();
     for (const task of tasks) {
       if (task.completedAt) continue;
-      if (task.branch) this.branchToTaskId.set(task.branch, task.taskId);
+      if (task.branch) this.registerBranch(task.branch, task);
       log(`[startup] restored task #${task.taskId} (${task.status})`);
     }
   }

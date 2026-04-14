@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import type { TaskStatus } from "../../../shared/types.js";
+import type { Worker } from "./worker.js";
 import type { Database } from "../../database.types.js";
 import * as Wire from "../../../shared/wire.js";
 import { fetchNativeBlockers } from "../github.js";
@@ -208,8 +209,8 @@ export class Task extends ActiveRecord {
 
   // ── Instance mutations ──────────────────────────────────────────────────────
 
-  async assign(workerId: string): Promise<void> {
-    await this.save({ worker_id: workerId, assigned_at: new Date().toISOString() });
+  async assign(worker: Worker): Promise<void> {
+    await this.save({ worker_id: worker.workerId, assigned_at: new Date().toISOString() });
   }
 
   async complete(): Promise<void> {
