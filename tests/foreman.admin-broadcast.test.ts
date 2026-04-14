@@ -71,7 +71,7 @@ let taskManager: TaskManager;
 let httpServer: http.Server;
 let wss: WebSocketServer;
 let adminWss: AdminWss;
-let routeEvent: (id: string, name: string, payload: unknown) => Promise<void>;
+let foremanWss: ForemanWss;
 let port: number;
 const openClients: WebSocket[] = [];
 
@@ -90,7 +90,8 @@ beforeEach(() => {
 
   adminWss = makeMockAdminWss();
   httpServer = http.createServer();
-  ({ wss, routeEvent } = new ForemanWss({ taskManager, server: httpServer, config: defaultCfg, adminWss }));
+  foremanWss = new ForemanWss({ taskManager, server: httpServer, config: defaultCfg, adminWss });
+  ({ wss } = foremanWss);
 
   return new Promise<void>((resolve) => {
     httpServer.listen(0, () => {
@@ -137,7 +138,7 @@ describe("foreman admin broadcast — snapshot on PR registration", () => {
     const snapshots: AdminSnapshot[] = [];
     adminWss.broadcastSnapshot = (snapshot) => snapshots.push(snapshot);
 
-    routeEvent("evt-1", "pull_request", {
+    foremanWss.routeEvent("evt-1", "pull_request", {
       action: "opened",
       pull_request: {
         number: 101,

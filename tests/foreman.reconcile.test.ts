@@ -16,15 +16,14 @@ function makeIssue(n: number): Wire.TaskIssue {
 }
 
 let taskManager: TaskManager;
-let reconcile: () => Promise<void>;
-let routeEvent: (id: string, name: string, payload: unknown) => Promise<void>;
+let foremanWss: ForemanWss;
 
 beforeEach(() => {
   Worker._reset();
   taskManager = new TaskManager();
   setupInMemoryTasks(taskManager);
   const server = http.createServer();
-  ({ reconcile, routeEvent } = new ForemanWss({ taskManager, server, config: { ...defaultCfg, taskLabel: TASK_LABEL } }));
+  foremanWss = new ForemanWss({ taskManager, server, config: { ...defaultCfg, taskLabel: TASK_LABEL } });
 });
 
 afterEach(() => {
@@ -33,7 +32,7 @@ afterEach(() => {
 
 describe("reconcile()", () => {
   it("is exposed on the ForemanWss instance", () => {
-    expect(typeof reconcile).toBe("function");
+    expect(typeof foremanWss.reconcile).toBe("function");
   });
 
   it("does not assign a pending task when its blockersLoaded is false", async () => {
@@ -42,7 +41,7 @@ describe("reconcile()", () => {
 
     await Task.upsert("42", 42, "test/repo", "T", "b", []);
     taskManager.trackIssue(42); // blockersLoaded defaults to false — NOT calling markBlockersLoaded
-    await reconcile();
+    await foremanWss.reconcile();
 
     expect(taskManager.isBlockersLoaded(42)).toBe(false);
     expect((await Task.get("42"))?.status).toBe("pending");
@@ -56,7 +55,7 @@ describe("reconcile()", () => {
     await Task.upsert("42", 42, "test/repo", "T", "b", []);
     taskManager.trackIssue(42);
     taskManager.markBlockersLoaded(42);
-    await reconcile();
+    await foremanWss.reconcile();
 
     await new Promise((r) => setImmediate(r));
 
@@ -69,7 +68,7 @@ describe("reconcile()", () => {
     await Task.upsert("9", 9, "test/repo", "T", "b", []);
     const t = await Task.get("9");
     await t!.assign("worker-1");
-    await reconcile();
+    await foremanWss.reconcile();
     expect(await Task.get("9")).toBeDefined();
     expect((await Task.get("9"))?.status).toBe("assigned");
   });
@@ -78,7 +77,7 @@ describe("reconcile()", () => {
     await Task.upsert("9", 9, "test/repo", "T", "b", []);
     const t = await Task.get("9");
     await t!.complete();
-    await reconcile();
+    await foremanWss.reconcile();
     expect(await Task.get("9")).toBeDefined();
     expect((await Task.get("9"))?.status).toBe("complete");
   });
@@ -92,7 +91,7 @@ describe("issues/closed — task lifecycle", () => {
     const t = await Task.get("142");
     await t!.assign("worker-1");
 
-    await routeEvent("evt-1", "issues", {
+    await foremanWss.routeEvent("evt-1", "issues", {
       action: "closed",
       issue: { number: 142, title: "T", body: "", labels: [] },
     });
@@ -107,7 +106,7 @@ describe("issues/closed — task lifecycle", () => {
     const t = await Task.get("143");
     await t!.complete();
 
-    await routeEvent("evt-1", "issues", {
+    await foremanWss.routeEvent("evt-1", "issues", {
       action: "closed",
       issue: { number: 143, title: "T", body: "", labels: [] },
     });
@@ -120,7 +119,7 @@ describe("issues/closed — task lifecycle", () => {
     taskManager.markBlockersLoaded(144);
     await Task.upsert("144", 144, "test/repo", "T", "b", []);
 
-    await routeEvent("evt-1", "issues", {
+    await foremanWss.routeEvent("evt-1", "issues", {
       action: "closed",
       issue: { number: 144, title: "T", body: "", labels: [] },
     });
@@ -135,7 +134,7 @@ describe("issues/closed — task lifecycle", () => {
     const t = await Task.get("145");
     await t!.assign("worker-1");
 
-    await routeEvent("evt-1", "issues", {
+    await foremanWss.routeEvent("evt-1", "issues", {
       action: "closed",
       issue: { number: 145, title: "T", body: "", labels: [] },
     });
@@ -151,7 +150,7 @@ describe("issues/closed — task lifecycle", () => {
     taskManager.trackIssue(42);
     taskManager.markBlockersLoaded(42);
 
-    await routeEvent("evt-1", "issues", {
+    await foremanWss.routeEvent("evt-1", "issues", {
       action: "closed",
       issue: { number: 42, title: "T", body: "", labels: [] },
     });
@@ -169,7 +168,7 @@ describe("startDepsLoad() error handling", () => {
   it("task remains pending with blockersLoaded: false when dep fetch fails", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network error")));
 
-    await routeEvent("evt-1", "issues", {
+    await foremanWss.routeEvent("evt-1", "issues", {
       action: "labeled",
       label: { name: TASK_LABEL },
       issue: {

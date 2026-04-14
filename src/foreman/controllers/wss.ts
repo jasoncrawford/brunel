@@ -193,11 +193,6 @@ export class ForemanWss {
   flog: (msg: string) => void;
   sendMsg: (workerId: string, msg: Wire.ForemanMessage, logTaskId?: string) => void;
 
-  // Stored as bound instance properties so callers (and tests) can destructure them safely.
-  readonly routeEvent: (id: string, name: string, payload: unknown) => Promise<void>;
-  readonly reconcile: () => Promise<void>;
-  readonly shutdown: () => Promise<void>;
-
   constructor({ config, server, taskManager, adminWss }: ForemanWssOptions) {
     this.taskManager = taskManager;
     this.repo = config.githubRepo;
@@ -346,62 +341,65 @@ export class ForemanWss {
       }
     });
 
-    this.routeEvent = async (id: string, name: string, payload: unknown): Promise<void> => {
-      const p = payload as R;
-      const evt = WebhookEvent.fromIncoming(id, name, p);
-      if (!evt.isMuted()) this.flog(evt.summary());
+  }
 
-      let taskId: string | null = null;
-      let workerId: string | null = null;
+  async routeEvent(id: string, name: string, payload: unknown): Promise<void> {
+    const p = payload as R;
+    const evt = WebhookEvent.fromIncoming(id, name, p);
+    if (!evt.isMuted()) this.flog(evt.summary());
 
-      if (name === "pull_request") {
-        ({ taskId, workerId } = await this.routePrEvent(p, evt));
-      } else if (name === "pull_request_review" || name === "pull_request_review_comment") {
-        ({ taskId, workerId } = await this.routePrReviewEvent(p, evt));
-      } else if (name === "check_run" || name === "check_suite") {
-        ({ taskId, workerId } = await this.routeCheckEvent(p, evt, name));
-      } else {
-        const issue = p.issue as R | undefined;
-        const issueNumber = numProp(issue, "number");
-        if (issueNumber !== null) {
-          ({ taskId, workerId } = await this.routeIssueEvent(p, evt, issue!, issueNumber));
-        }
+    let taskId: string | null = null;
+    let workerId: string | null = null;
+
+    if (name === "pull_request") {
+      ({ taskId, workerId } = await this.routePrEvent(p, evt));
+    } else if (name === "pull_request_review" || name === "pull_request_review_comment") {
+      ({ taskId, workerId } = await this.routePrReviewEvent(p, evt));
+    } else if (name === "check_run" || name === "check_suite") {
+      ({ taskId, workerId } = await this.routeCheckEvent(p, evt, name));
+    } else {
+      const issue = p.issue as R | undefined;
+      const issueNumber = numProp(issue, "number");
+      if (issueNumber !== null) {
+        ({ taskId, workerId } = await this.routeIssueEvent(p, evt, issue!, issueNumber));
       }
+    }
 
-      const action = typeof p.action === "string" ? p.action : null;
-      const webhookIssueNumber = typeof (p.issue as R | undefined)?.number === "number" ? (p.issue as R).number as number : null;
-      const webhookPrNumber = typeof (p.pull_request as R | undefined)?.number === "number" ? (p.pull_request as R).number as number : null;
-      void WebhookEvent.log({
-        deliveryId: id,
-        eventName: name,
-        action,
-        repo: typeof (p.repository as R | undefined)?.full_name === "string" ? (p.repository as R).full_name as string : null,
-        sender: typeof (p.sender as R | undefined)?.login === "string" ? (p.sender as R).login as string : null,
-        issueNumber: webhookIssueNumber,
-        prNumber: webhookPrNumber,
-        branch: null,
-        taskId,
-        workerId,
-        payload: p,
-      });
-      this.adminWss?.broadcastLogEvent({
-        kind: "webhook",
-        id: this.nextBroadcastId++,
-        timestamp: new Date().toISOString(),
-        taskId,
-        workerId,
-        summary: fmtEvent({ name: evt.eventName, payload: evt.payload }),
-      });
-    };
+    const action = typeof p.action === "string" ? p.action : null;
+    const webhookIssueNumber = typeof (p.issue as R | undefined)?.number === "number" ? (p.issue as R).number as number : null;
+    const webhookPrNumber = typeof (p.pull_request as R | undefined)?.number === "number" ? (p.pull_request as R).number as number : null;
+    void WebhookEvent.log({
+      deliveryId: id,
+      eventName: name,
+      action,
+      repo: typeof (p.repository as R | undefined)?.full_name === "string" ? (p.repository as R).full_name as string : null,
+      sender: typeof (p.sender as R | undefined)?.login === "string" ? (p.sender as R).login as string : null,
+      issueNumber: webhookIssueNumber,
+      prNumber: webhookPrNumber,
+      branch: null,
+      taskId,
+      workerId,
+      payload: p,
+    });
+    this.adminWss?.broadcastLogEvent({
+      kind: "webhook",
+      id: this.nextBroadcastId++,
+      timestamp: new Date().toISOString(),
+      taskId,
+      workerId,
+      summary: fmtEvent({ name: evt.eventName, payload: evt.payload }),
+    });
+  }
 
-    this.reconcile = async (): Promise<void> => {
-      await this.assignWork();
-    };
+  async reconcile(): Promise<void> {
+    await this.assignWork();
+  }
 
-    this.shutdown = (): Promise<void> => new Promise((resolve) => {
-      if (wss.clients.size === 0) { resolve(); return; }
-      let remaining = wss.clients.size;
-      for (const client of wss.clients) {
+  shutdown(): Promise<void> {
+    return new Promise((resolve) => {
+      if (this.wss.clients.size === 0) { resolve(); return; }
+      let remaining = this.wss.clients.size;
+      for (const client of this.wss.clients) {
         client.once("close", () => { if (--remaining === 0) resolve(); });
         client.close(1001, "Server shutting down");
       }

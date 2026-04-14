@@ -72,7 +72,7 @@ const ISO_TIMESTAMP_PREFIX = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z /;
 let taskManager: TaskManager;
 let httpServer: http.Server;
 let wss: WebSocketServer;
-let routeEvent: (id: string, name: string, payload: unknown) => Promise<void>;
+let foremanWss: ForemanWss;
 let port: number;
 let logLines: string[];
 const openClients: WebSocket[] = [];
@@ -95,7 +95,8 @@ beforeEach(() => {
   taskManager = new TaskManager();
   setupInMemoryTasks(taskManager);
   httpServer = http.createServer();
-  ({ wss, routeEvent } = new ForemanWss({ taskManager, server: httpServer, config: defaultCfg }));
+  foremanWss = new ForemanWss({ taskManager, server: httpServer, config: defaultCfg });
+  ({ wss } = foremanWss);
 
   return new Promise<void>((resolve) => {
     httpServer.listen(0, () => {
@@ -169,7 +170,7 @@ describe("foreman log timestamps", () => {
 
     logLines.length = 0;
     const reply = nextMsg(ws);
-    routeEvent("evt-1", "issue_comment", { issue: { number: 1 }, comment: { body: "hi" } });
+    foremanWss.routeEvent("evt-1", "issue_comment", { issue: { number: 1 }, comment: { body: "hi" } });
     await reply;
 
     for (const line of logLines) {
@@ -183,7 +184,7 @@ describe("foreman log timestamps", () => {
     await waitUntil(() => !!Worker.get("worker-abc123"));
 
     logLines.length = 0;
-    routeEvent("evt-1", "issues", {
+    foremanWss.routeEvent("evt-1", "issues", {
       action: "labeled",
       label: { name: "brunel:ready" },
       issue: { number: 5, title: "Do something", body: "", labels: [{ name: "brunel:ready" }] },

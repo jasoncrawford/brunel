@@ -49,7 +49,8 @@ describe("foreman — blocker transitions via routeEvent", () => {
     taskManager.markBlockersLoaded(10);
     taskManager.setIssueOpenState(5, true);
 
-    const { wss, routeEvent } = new ForemanWss({ taskManager, server, config: { ...defaultCfg, taskLabel: "brunel:ready" } });
+    const foremanWss = new ForemanWss({ taskManager, server, config: { ...defaultCfg, taskLabel: "brunel:ready" } });
+    const { wss } = foremanWss;
     wss.close();
 
     // Initially blocked
@@ -57,7 +58,7 @@ describe("foreman — blocker transitions via routeEvent", () => {
     expect(snapshots1[0].status).toBe("blocked");
 
     // Close the blocker
-    await routeEvent("evt-1", "issues", {
+    await foremanWss.routeEvent("evt-1", "issues", {
       action: "closed",
       issue: { number: 5, title: "Blocker", labels: [] },
     });
@@ -78,7 +79,8 @@ describe("foreman — blocker transitions via routeEvent", () => {
     taskManager.setIssueOpenState(5, true);
     taskManager.setIssueOpenState(6, true);
 
-    const { wss, routeEvent } = new ForemanWss({ taskManager, server, config: { ...defaultCfg, taskLabel: "brunel:ready" } });
+    const foremanWss = new ForemanWss({ taskManager, server, config: { ...defaultCfg, taskLabel: "brunel:ready" } });
+    const { wss } = foremanWss;
     wss.close();
 
     // Initially blocked
@@ -86,7 +88,7 @@ describe("foreman — blocker transitions via routeEvent", () => {
     expect(snapshots1[0].status).toBe("blocked");
 
     // Close issue 5 — but 6 is still open
-    await routeEvent("evt-1", "issues", {
+    await foremanWss.routeEvent("evt-1", "issues", {
       action: "closed",
       issue: { number: 5, title: "Blocker 5", labels: [] },
     });

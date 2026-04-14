@@ -365,8 +365,8 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
     // 2. GitHub data is loaded into labeledIssues (via loadIssuesToQueue)
     // 3. reconcile() is called to sync labeledIssues → taskQueue
     // 4. Worker connects and must receive the real body/labels in task_assigned
-    const { wss: fwss, reconcile } = new ForemanWss({ taskManager, server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } });
-    wss = fwss;
+    const localForemanWss = new ForemanWss({ taskManager, server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } });
+    wss = localForemanWss.wss;
 
     port = await startServer();
 
@@ -381,7 +381,7 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
     taskManager.markBlockersLoaded(42);
 
     // Step 3: reconcile assigns idle workers
-    await reconcile();
+    await localForemanWss.reconcile();
 
     // Step 4: worker connects and receives task_assigned with real body/labels
     const ws = await connect({ type: "worker_hello", workerId: "w1", status: "idle" });
@@ -399,8 +399,8 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
     // 1. Task is restored from DB with worker_id set (loadActiveTasksFromDb)
     // 2. GitHub sync calls Task.upsert() again for the same task (loadIssuesFromGithub)
     // 3. reconcile() runs — MUST NOT assign the task to a different idle worker
-    const { wss: fwss, reconcile } = new ForemanWss({ taskManager, server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } });
-    wss = fwss;
+    const localForemanWss2 = new ForemanWss({ taskManager, server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } });
+    wss = localForemanWss2.wss;
 
     port = await startServer();
 
@@ -418,7 +418,7 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
     expect((await Task.get("42"))?.workerId).toBe("original-worker");
 
     // Step 3: reconcile() — must NOT assign the task to a new worker
-    await reconcile();
+    await localForemanWss2.reconcile();
 
     expect((await Task.get("42"))?.workerId).toBe("original-worker");
     expect((await Task.get("42"))?.status).toBe("assigned");
