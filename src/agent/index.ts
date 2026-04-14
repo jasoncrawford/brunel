@@ -13,7 +13,7 @@ import { AgentStatus, WorkerSession, registerWorkerCommands, startWorkerMode } f
 import type { RunQuery, WorkerModeConfig } from "./worker.js";
 import { loadConfig } from "../config.js";
 import { Workspace, confirmIfUnsafe, registerWorkspaceCommands } from "./workspace.js";
-import { fmtError, generateAgentId } from "../utils.js";
+import { fmtError } from "../utils.js";
 import { handleModelCommand, getCachedModels, _resetCachedModels, setCachedModels } from "./model.js";
 import type { ModelInfo, FetchModelsFn } from "./model.js";
 import { handleEffortCommand } from "./effort.js";
@@ -232,9 +232,7 @@ export async function main(
   initialModel?: string,
   initialEffort?: EffortValue,
 ): Promise<void> {
-  // Generate agentId unconditionally — used as both workspace identity and foreman identity.
-  const agentId = generateAgentId();
-  const agentStatus = new AgentStatus(agentId, { model: initialModel, effort: initialEffort });
+  const agentStatus = new AgentStatus(undefined, { model: initialModel, effort: initialEffort });
 
   // Worker mode setup: create workspace, session, signal handlers.
   const workerCtx = workerConfig ? await startWorkerMode(workerConfig, agentStatus) : undefined;
@@ -268,7 +266,7 @@ export async function main(
   const workspace: Workspace | undefined = session
     ? session.workspace
     : workspaceCfg
-      ? new Workspace(workspaceCfg.workspaceDir, agentId, workspaceCfg.repoUrl, originalCwd, confirm)
+      ? new Workspace(workspaceCfg.workspaceDir, agentStatus.agentId, workspaceCfg.repoUrl, originalCwd, confirm)
       : undefined;
 
   // doExit handles REPL workspace cleanup and stdin/stdout teardown.
