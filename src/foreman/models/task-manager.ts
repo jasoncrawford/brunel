@@ -70,8 +70,8 @@ export class TaskManager extends EventEmitter {
     return new Promise((resolve) => {
       this.assignLock = this.assignLock.then(async () => {
         const outcomes: AssignOutcome[] = [];
-        for (const w of Worker.getIdle()) {
-          const outcome = await this.tryAssignWork(w.workerId);
+        for (const worker of Worker.getIdle()) {
+          const outcome = await this.tryAssignWork(worker);
           if (outcome) outcomes.push(outcome);
         }
         resolve(outcomes);
@@ -79,16 +79,16 @@ export class TaskManager extends EventEmitter {
     });
   }
 
-  private async tryAssignWork(workerId: string): Promise<AssignOutcome | null> {
+  private async tryAssignWork(worker: Worker): Promise<AssignOutcome | null> {
     const task = await this.nextPending(t => t.blockersLoaded && t.status === "pending");
     if (!task) return null;
-    Worker.get(workerId)?.assign(task);
+    worker.assign(task);
     try {
-      await task.assign(workerId);
-      return { ok: true, task, queued: this.drainEvents(task), workerId };
+      await task.assign(worker.workerId);
+      return { ok: true, task, queued: this.drainEvents(task), workerId: worker.workerId };
     } catch (err) {
-      Worker.get(workerId)?.release();
-      return { ok: false, workerId, err };
+      worker.release();
+      return { ok: false, workerId: worker.workerId, err };
     }
   }
 

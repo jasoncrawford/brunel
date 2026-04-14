@@ -290,10 +290,10 @@ export class ForemanWss {
 
   // ── Hello handlers ───────────────────────────────────────────────────────────
 
-  private flushQueuedEvents(workerId: string, task: Task): void {
+  private flushQueuedEvents(worker: Worker, task: Task): void {
     for (const evt of this.taskManager.drainEvents(task)) {
-      this.sendMsg(workerId, { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload() });
-      this.workerLog(workerId, `→ event_notification #${task.issueNumber} ${evt.eventName} (queued)`);
+      this.sendMsg(worker.workerId, { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload() });
+      this.workerLog(worker.workerId, `→ event_notification #${task.issueNumber} ${evt.eventName} (queued)`);
     }
   }
 
@@ -307,11 +307,11 @@ export class ForemanWss {
     w.assign(task);
     // Only call assign if task is not already complete (to preserve task status)
     if (task.status !== "complete") {
-      await task.assign(workerId);
+      await task.assign(w.workerId);
     }
     // For complete tasks, the task stays complete while worker finishes cleanup/finalization work
-    this.sendMsg(workerId, { type: "hello_ack", workerId, status: "busy" }, task.taskId);
-    this.flushQueuedEvents(workerId, task);
+    this.sendMsg(w.workerId, { type: "hello_ack", workerId: w.workerId, status: "busy" }, task.taskId);
+    this.flushQueuedEvents(w, task);
   }
 
   /**
