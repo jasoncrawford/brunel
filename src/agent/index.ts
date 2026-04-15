@@ -15,10 +15,8 @@ import type { RunQuery, WorkerModeConfig } from "./worker.js";
 import { loadConfig } from "../config.js";
 import { Workspace, confirmIfUnsafe, registerWorkspaceCommands } from "./workspace.js";
 import { fmtError } from "../utils.js";
-import { handleModelCommand, getCachedModels, _resetCachedModels, setCachedModels } from "./model.js";
-import type { ModelInfo, FetchModelsFn } from "./model.js";
-import { handleEffortCommand } from "./effort.js";
-import type { EffortValue } from "./effort.js";
+import { Settings, setCachedModels } from "./settings.js";
+import type { ModelInfo, FetchModelsFn, EffortValue } from "./settings.js";
 import { CommandRegistry } from "./command-registry.js";
 import { QueryStats } from "./query-stats.js";
 // ── Log file ──────────────────────────────────────────────────────────────────
@@ -233,6 +231,7 @@ export async function main(
   initialModel?: string,
   initialEffort?: EffortValue,
 ): Promise<void> {
+  const settings = new Settings({ model: initialModel, effort: initialEffort });
   statusBar.update({ model: initialModel, effort: initialEffort });
 
   // Worker mode setup: create workspace, session, signal handlers.
@@ -244,7 +243,7 @@ export async function main(
   // Print the startup banner.
   display.print(display.c.sageGreen(display.hr("═")));
   display.print(display.c.skyBlue(display.s.bold("  Brunel Agent")));
-  display.print(display.c.lavender(`  Permissions: ${permConfig.permissionMode} | Model: ${statusBar.model ?? "default"} | Effort: ${statusBar.effort ?? "auto"} | Output: ${verbose ? "verbose" : "quiet"} | Log: ${workerConfig?.logFile ?? LOG_FILE}`));
+  display.print(display.c.lavender(`  Permissions: ${permConfig.permissionMode} | Model: ${settings.model ?? "default"} | Effort: ${settings.effort ?? "auto"} | Output: ${verbose ? "verbose" : "quiet"} | Log: ${workerConfig?.logFile ?? LOG_FILE}`));
   display.print(display.c.sageGreen(display.hr("═")));
 
   process.stdout.write("\x1b[?2004h"); // enable bracketed paste mode
@@ -304,26 +303,24 @@ export async function main(
   registry.register("model", {
     description: "Select the Claude model to use",
     handler: async (args) => {
-      const newModel = await handleModelCommand(
+      await settings.pickModel(
         args,
-        statusBar.model,
         (opts, idx) => pick(opts, { currentIdx: idx, escapable: true }),
         fetchModelsFn,
         display.print,
       );
-      statusBar.update({ model: newModel });
+      statusBar.update({ model: settings.model });
     },
   });
   registry.register("effort", {
     description: "Set the effort level for Claude's thinking",
     handler: async (args) => {
-      const newEffort = await handleEffortCommand(
+      await settings.pickEffort(
         args,
-        statusBar.effort,
         (opts, idx) => pick(opts, { currentIdx: idx, escapable: true }),
         display.print,
       );
-      statusBar.update({ effort: newEffort });
+      statusBar.update({ effort: settings.effort });
     },
   });
 
@@ -337,7 +334,7 @@ export async function main(
     const ac = new AbortController();
     session?.notifyQueryStart(ac);
     try {
-      sessionId = await runQueryFn(prompt, sessionId, ac, statusBar.model, statusBar.effort) ?? sessionId;
+      sessionId = await runQueryFn(prompt, sessionId, ac, settings.model, settings.effort) ?? sessionId;
       return !ac.signal.aborted;
     } catch (err) {
       console.error(display.c.boldRed(`\nERROR: ${fmtError(err)}`));

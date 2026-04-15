@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { handleModelCommand, setCachedModels, _resetCachedModels, findModel } from "../src/agent/model.js";
+import { handleModelCommand, setCachedModels, _resetCachedModels, findModel } from "../src/agent/settings.js";
 import type { PickResult } from "../src/agent/input.js";
 import { stripAnsi } from "./helpers.js";
 

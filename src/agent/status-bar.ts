@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import { shortWorkerId } from "../../shared/utils.js";
 import { verbose } from "./display.js";
-import type { EffortValue } from "./effort.js";
+import type { EffortValue } from "./settings.js";
 
 // ── Worker status types ────────────────────────────────────────────────────────
 
