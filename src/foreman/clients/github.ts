@@ -1,6 +1,6 @@
-import type { TaskManager } from "./models/task-manager.js";
-import { Task } from "./models/task.js";
-import { fmtError } from "../utils.js";
+import type { TaskManager } from "../models/task-manager.js";
+import { Task } from "../models/task.js";
+import { fmtError } from "../../utils.js";
 
 // ── GitHub API helpers ────────────────────────────────────────────────────────
 

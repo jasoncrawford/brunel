@@ -22,7 +22,7 @@ import { Worker } from "../src/foreman/models/worker.js";
 import { ForemanWss } from "../src/foreman/controllers/wss.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
-import { initDb } from "../src/foreman/db-client.js";
+import { initDb } from "../src/foreman/clients/db-client.js";
 import { loadDefaultConfig } from "../src/config.js";
 import { createTestSupabase } from "./helpers/db.js";
 

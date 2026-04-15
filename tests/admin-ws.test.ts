@@ -3,7 +3,7 @@ import http from "http";
 import net from "net";
 import { WebSocket } from "ws";
 import type { AddressInfo } from "net";
-import { createAdminWss } from "../src/foreman/admin-ws.js";
+import { createAdminWss } from "../src/foreman/controllers/admin-ws.js";
 import type { AdminMessage, LogEntry, AdminSnapshot } from "../shared/wire.js";
 
 function startServer(): Promise<{ server: http.Server; port: number; adminWss: ReturnType<typeof createAdminWss> }> {

@@ -3,8 +3,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import * as Wire from "../../../shared/wire.js";
 import { ForemanMessage } from "../models/foreman-message.js";
 import { WebhookEvent } from "../models/webhook-event.js";
-import type { AdminWss } from "../admin-ws.js";
-import { fmtEvent } from "../event-fmt.js";
+import type { AdminWss } from "./admin-ws.js";
 import { fmtError, log } from "../../utils.js";
 import { shortWorkerId } from "../../../shared/utils.js";
 import type { BrunelConfig } from "../../config.js";
@@ -234,7 +233,7 @@ export class ForemanWss {
       timestamp: new Date().toISOString(),
       taskId,
       workerId,
-      summary: fmtEvent({ name: evt.eventName, payload: evt.payload }),
+      summary: evt.format(),
     });
   }
 

@@ -3,8 +3,8 @@ import type { TaskStatus } from "../../../shared/types.js";
 import type { Worker } from "./worker.js";
 import type { Database } from "../../database.types.js";
 import * as Wire from "../../../shared/wire.js";
-import { fetchNativeBlockers } from "../github.js";
-import { db } from "../db-client.js";
+import { fetchNativeBlockers } from "../clients/github.js";
+import { db } from "../clients/db-client.js";
 import { ActiveRecord } from "./active-record.js";
 
 type DbRow = Database["public"]["Tables"]["tasks"]["Row"];

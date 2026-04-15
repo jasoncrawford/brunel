@@ -1,7 +1,7 @@
 import http from "http";
 import { WebSocketServer } from "ws";
 import type { WebSocket as WsSocket } from "ws";
-import type { Task, Worker, LogEntry, AdminSnapshot, AdminMessage } from "../../shared/wire.js";
+import type { Task, Worker, LogEntry, AdminSnapshot, AdminMessage } from "../../../shared/wire.js";
 
 
 export interface AdminWss {

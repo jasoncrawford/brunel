@@ -1,8 +1,8 @@
 import { EventEmitter } from "events";
 import type { WebhookEvent } from "./webhook-event.js";
 import * as Wire from "../../../shared/wire.js";
-import { loadIssuesToQueue, fetchIssueStates } from "../github.js";
-import { EventQueue } from "../event-queue.js";
+import { loadIssuesToQueue, fetchIssueStates } from "../clients/github.js";
+import { EventQueue } from "./event-queue.js";
 import { Task } from "./task.js";
 import { Worker } from "./worker.js";
 import { fmtError, log } from "../../utils.js";

@@ -41,9 +41,9 @@ import { ForemanWss } from "../../src/foreman/controllers/wss.js";
 import { createHttpServer } from "../../src/foreman/controllers/http-server.js";
 import { TaskManager } from "../../src/foreman/models/task-manager.js";
 import { Task } from "../../src/foreman/models/task.js";
-import { initDb } from "../../src/foreman/db-client.js";
+import { initDb } from "../../src/foreman/clients/db-client.js";
 import { createMemoryTaskDb } from "../helpers/memory-db.js";
-import { createAdminWss } from "../../src/foreman/admin-ws.js";
+import { createAdminWss } from "../../src/foreman/controllers/admin-ws.js";
 import { loadDefaultConfig } from "../../src/config.js";
 
 const PORT = parseInt(process.env.PORT ?? "14567", 10);

@@ -1,5 +1,5 @@
-import type { WebhookEvent } from "./models/webhook-event.js";
-import type { Task } from "./models/task.js";
+import type { WebhookEvent } from "./webhook-event.js";
+import type { Task } from "./task.js";
 
 // ── EventQueue ─────────────────────────────────────────────────────────────────
 // Buffers GitHub events for workers that aren't connected yet.

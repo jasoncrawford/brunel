@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { WebhookEvent } from "../src/foreman/models/webhook-event.js";
 import { ForemanMessage } from "../src/foreman/models/foreman-message.js";
 import { queryActivityLog } from "../src/foreman/models/activity-log.js";
-import { initDb } from "../src/foreman/db-client.js";
+import { initDb } from "../src/foreman/clients/db-client.js";
 import { createTestSupabase } from "./helpers/db.js";
 
 const supabase = createTestSupabase();
