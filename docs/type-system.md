@@ -11,7 +11,7 @@ Every domain concept has at most two types:
 1. **A server model class** — rich, may persist to the DB, owns behavior
 2. **A `Wire.*` interface** — the shape of data as it crosses any wire boundary (WebSocket, HTTP)
 
-Shared domain types (enums, value objects used on both sides) live in `shared/types.ts`.
+Shared domain types (enums, value objects used on both sides) live in `shared/wire.ts` alongside the Wire interfaces.
 
 ## The Wire namespace
 
@@ -103,5 +103,5 @@ Payload types within the union reference the shared Wire interfaces directly rat
 |---|---|
 | Server model classes | `src/foreman/models/*.ts` |
 | Wire interfaces and protocol unions | `shared/wire.ts` |
-| Shared domain types (enums, value objects) | `shared/types.ts` |
+| Shared domain types (enums, value objects) | `shared/wire.ts` |
 | Frontend-only UI state | `frontend/src/` (local, not in wire.ts) |

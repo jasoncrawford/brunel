@@ -1,7 +1,7 @@
 // ── Wire types shared between the backend (src/) and frontend (frontend/src/)
 // Import with a namespace alias for clarity: import * as Wire from "../../shared/wire.js"
 
-import type { TaskStatus } from "./types.js";
+export type TaskStatus = "pending" | "assigned" | "pushed" | "merged" | "closed" | "complete" | "blocked";
 
 // ── Admin WebSocket wire types (admin dashboard ↔ server) ────────────────────
 

@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import type { TaskStatus } from "../../../shared/types.js";
+import type { TaskStatus } from "../../../shared/wire.js";
 import type { Worker } from "./worker.js";
 import type { Database } from "../../database.types.js";
 import * as Wire from "../../../shared/wire.js";

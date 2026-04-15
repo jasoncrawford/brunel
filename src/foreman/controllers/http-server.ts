@@ -5,7 +5,7 @@ import { getRequestListener } from "@hono/node-server";
 import type { TaskManager } from "../models/task-manager.js";
 import { Task } from "../models/task.js";
 import { queryActivityLog } from "../models/activity-log.js";
-import type { TaskStatus } from "../../../shared/types.js";
+import type { TaskStatus } from "../../../shared/wire.js";
 import { fmtError, log } from "../../utils.js";
 
 export interface HttpServerOptions {
