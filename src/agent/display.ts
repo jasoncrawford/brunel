@@ -1,7 +1,8 @@
 import * as Wire from "../../shared/wire.js";
+import type { WorkerStatusOpts } from "./status-bar.js";
 import {
   verbose, setVerbose,
-  WorkerStatusOpts, fmtWorkerStatus,
+  fmtWorkerStatus,
   startStatus, stopStatus,
   startPersistentStatus, stopPersistentStatus, updatePersistentStatus,
   drawStatusBarsRaw, clearStatusBars, drawStatusBars,
@@ -14,9 +15,10 @@ import {
 
 // Re-export everything from status-bar.ts so callers that import from display.ts
 // continue to work without changes.
+export type { WorkerStatusOpts } from "./status-bar.js";
 export {
   verbose, setVerbose,
-  WorkerStatusOpts, fmtWorkerStatus,
+  fmtWorkerStatus,
   startStatus, stopStatus,
   startPersistentStatus, stopPersistentStatus, updatePersistentStatus,
   drawStatusBarsRaw,
