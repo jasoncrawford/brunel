@@ -107,9 +107,12 @@ export class ForemanWss {
           return;
         }
         if (task) {
-          await task.complete().catch((err: unknown) =>
-            log(`ERROR Failed to mark task #${msg.taskId} complete: ${fmtError(err)}`)
-          );
+          try {
+            await task.complete();
+          } catch (err) {
+            log(`ERROR Failed to mark task #${msg.taskId} complete: ${fmtError(err)}`);
+            return; // don't release — keeps task assigned so the failure is visible
+          }
         }
         Worker.get(workerId)?.release();
       };
@@ -362,10 +365,13 @@ export class ForemanWss {
   async handleIdleHello(workerId: string, ws: WebSocket): Promise<void> {
     const priorTask = await Task.getByWorker(workerId);
     if (priorTask) {
-      await priorTask.revert().catch((err: unknown) =>
-        log(`ERROR Failed to revert task #${priorTask.taskId} to pending: ${fmtError(err)}`)
-      );
-      this.workerLog(workerId, `hello idle (had task #${priorTask.taskId}) — reverting task to pending`);
+      try {
+        await priorTask.revert();
+        this.workerLog(workerId, `hello idle (had task #${priorTask.taskId}) — reverting task to pending`);
+      } catch (err) {
+        log(`ERROR Failed to revert task #${priorTask.taskId} to pending: ${fmtError(err)}`);
+        return; // don't register as idle — task stays assigned, worker retries on reconnect
+      }
     } else {
       this.workerLog(workerId, "hello idle");
     }
@@ -522,25 +528,35 @@ export class ForemanWss {
       action === "unlabeled" &&
       (p.label as R | undefined)?.name === this.taskLabel
     ) {
-      await this.taskManager.dequeueIssue(issueNumber)
-        .catch((err: unknown) => log(`ERROR Failed to dequeue task #${issueNumber}: ${fmtError(err)}`));
-      log(`[task #${issueNumber}] dequeued (label removed)`);
+      try {
+        await this.taskManager.dequeueIssue(issueNumber);
+        log(`[task #${issueNumber}] dequeued (label removed)`);
+      } catch (err) {
+        log(`ERROR Failed to dequeue task #${issueNumber}: ${fmtError(err)}`);
+        return result(task);
+      }
       await this.assignWork();
       return result(task);
     }
 
     if (action === "closed") {
-      await this.taskManager.closeIssue(issueNumber).catch((err: unknown) =>
-        log(`ERROR Failed to close issue #${issueNumber}: ${fmtError(err)}`)
-      );
+      try {
+        await this.taskManager.closeIssue(issueNumber);
+      } catch (err) {
+        log(`ERROR Failed to close issue #${issueNumber}: ${fmtError(err)}`);
+        return result(task);
+      }
       await this.assignWork();
       return result(task);
     }
 
     if (action === "reopened") {
-      await this.taskManager.reopenIssue(issueNumber).catch((err: unknown) =>
-        log(`ERROR Failed to reopen issue #${issueNumber}: ${fmtError(err)}`)
-      );
+      try {
+        await this.taskManager.reopenIssue(issueNumber);
+      } catch (err) {
+        log(`ERROR Failed to reopen issue #${issueNumber}: ${fmtError(err)}`);
+        return result(task);
+      }
       await this.assignWork();
       return result(task);
     }

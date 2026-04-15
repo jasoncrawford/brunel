@@ -747,6 +747,53 @@ describe("hello_ack handshake — buffering", () => {
     }
   });
 
+  it("defers task_assigned prompt until workspace reset completes on hello_ack cancelled", async () => {
+    vi.useFakeTimers();
+    try {
+      let resolveReset!: () => void;
+      const resetPromise = new Promise<void>((resolve) => { resolveReset = resolve; });
+      const workspace = {
+        dir: "/tmp/test-workspace",
+        workspaceDir: "/tmp/workers",
+        sessionId: "test-agent",
+        originalCwd: "/original",
+        isCreated: true,
+        confirm: vi.fn(),
+        reset: vi.fn().mockReturnValue(resetPromise),
+        destroy: vi.fn().mockResolvedValue(undefined),
+        checkSafety: vi.fn().mockResolvedValue({ uncommittedFiles: [], unpushedCommits: [], noUpstream: false }),
+      } as unknown as import("../src/agent/workspace.js").Workspace;
+
+      const wsA = new FakeWs();
+      const wsB = new FakeWs();
+      let callCount = 0;
+      const wsFactoryWs = vi.fn().mockImplementation(() => callCount++ === 0 ? wsA : wsB);
+
+      const sessionWithWs = new WorkerSession(new AgentStatus({ agentId: AGENT_ID }), wsFactoryWs, display, { workspace });
+      sessionWithWs.start();
+
+      sendMsg(wsA, { type: "task_assigned", taskId: "42", issue: makeIssue() });
+      sessionWithWs.takeNextPrompt();
+
+      vi.spyOn(Math, "random").mockReturnValue(0);
+      wsA.emit("close", 1006, Buffer.from(""));
+      vi.advanceTimersByTime(2001);
+      wsB.emit("open");
+      sendMsg(wsB, { type: "hello_ack", workerId: AGENT_ID, status: "cancelled" });
+
+      // Prompt for next task arrives while reset is still running
+      sendMsg(wsB, { type: "task_assigned", taskId: "99", issue: makeIssue(2) });
+      expect(sessionWithWs.hasPendingPrompts()).toBe(false); // deferred
+
+      // Reset completes → prompt is now enqueued
+      resolveReset();
+      await vi.waitFor(() => expect(sessionWithWs.hasPendingPrompts()).toBe(true));
+    } finally {
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    }
+  });
+
   it("aborts running query when hello_ack cancelled is received", () => {
     vi.useFakeTimers();
     try {
@@ -1406,7 +1453,7 @@ describe("afterTask callback on /worker:complete", () => {
     expect(sentMsg.type).toBe("task_complete");
   });
 
-  it("does not send task_complete if afterTask throws", async () => {
+  it("sends task_complete even if afterTask throws (task must not get stuck on foreman)", async () => {
     const afterTask = vi.fn().mockRejectedValue(new Error("reset failed"));
     const sessionWithAfterTask = new WorkerSession(
       new StatusBar({ agentId: AGENT_ID }), wsFactory, display, { afterTask }
@@ -1422,7 +1469,7 @@ describe("afterTask callback on /worker:complete", () => {
     const taskCompleteSent = fakeWs.send.mock.calls
       .slice(sendCountBefore)
       .some(([data]: [string]) => JSON.parse(data).type === "task_complete");
-    expect(taskCompleteSent).toBe(false);
+    expect(taskCompleteSent).toBe(true);
   });
 
   it("sends task_complete normally with no afterTask", async () => {

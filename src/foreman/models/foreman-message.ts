@@ -1,5 +1,6 @@
 import type { Database, Json } from "../../database.types.js";
 import { ActiveRecord } from "./active-record.js";
+import { log, fmtError } from "../../utils.js";
 
 type DbRow = Database["public"]["Tables"]["foreman_messages"]["Row"];
 
@@ -44,7 +45,7 @@ export class ForemanMessage extends ActiveRecord {
       task_id: data.taskId,
       msg_type: data.msgType,
       payload: data.payload as Json,
-    }).then(() => undefined).catch((err: unknown) => console.error("[db] foreman_messages insert error:", err));
+    }).then(() => undefined).catch((err: unknown) => log(`[db] foreman_messages insert error: ${fmtError(err)}`));
   }
 
   // ── Queries ──────────────────────────────────────────────────────────────────
