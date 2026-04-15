@@ -6,7 +6,7 @@ import path from "node:path";
 import os from "node:os";
 import { WebSocket } from "ws";
 import * as display from "./display.js";
-import { buildInitialPrompt, buildEventPrompt } from "./templates.js";
+import { buildInitialPrompt, buildEventPrompt } from "./worker-prompts.js";
 import type { EffortValue } from "./effort.js";
 import * as Wire from "../../shared/wire.js";
 import { Workspace, confirmIfUnsafe } from "./workspace.js";
