@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Task } from "../src/foreman/models/task.js";
 import { Worker } from "../src/foreman/models/worker.js";
-import { initDb } from "../src/foreman/db-client.js";
+import { initDb } from "../src/foreman/clients/db-client.js";
 import { createTestSupabase } from "./helpers/db.js";
 
 const supabase = createTestSupabase();

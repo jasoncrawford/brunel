@@ -6,11 +6,11 @@ import type { Database } from "../database.types.js";
 import { Webhooks } from "@octokit/webhooks";
 import { loadConfig } from "../config.js";
 import { TaskManager } from "./models/task-manager.js";
-import { initDb } from "./db-client.js";
+import { initDb } from "./clients/db-client.js";
 import { Worker } from "./models/worker.js";
 import { createHttpServer } from "./controllers/http-server.js";
 import { ForemanWss } from "./controllers/wss.js";
-import { createAdminWss } from "./admin-ws.js";
+import { createAdminWss } from "./controllers/admin-ws.js";
 import { fmtError, log } from "../utils.js";
 
 // Only start listening when run directly (not when imported by tests)

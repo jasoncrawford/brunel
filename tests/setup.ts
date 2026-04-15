@@ -7,7 +7,7 @@
  * pipeline.test.ts) override this at module level with initDb(createTestSupabase()).
  */
 
-import { initDb } from "../src/foreman/db-client.js";
+import { initDb } from "../src/foreman/clients/db-client.js";
 import { createMemoryTaskDb } from "./helpers/memory-db.js";
 
 initDb(createMemoryTaskDb());

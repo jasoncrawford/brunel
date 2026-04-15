@@ -23,7 +23,7 @@ import { Task } from "../src/foreman/models/task.js";
 import { setupInMemoryTasks } from "./helpers/task.js";
 import { loadDefaultConfig } from "../src/config.js";
 const defaultCfg = await loadDefaultConfig();
-import type { AdminWss, AdminSnapshot, LogEntry } from "../src/foreman/admin-ws.js";
+import type { AdminWss, AdminSnapshot, LogEntry } from "../src/foreman/controllers/admin-ws.js";
 import { waitUntil } from "./helpers.js";
 
 // ── Mock AdminWss ─────────────────────────────────────────────────────────────

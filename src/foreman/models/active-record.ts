@@ -3,7 +3,7 @@
 // string so Supabase cannot infer per-table types, and `new (this as any)(row)`
 // is the standard pattern for polymorphic static factory methods in TypeScript.
 import { EventEmitter } from "node:events";
-import { db } from "../db-client.js";
+import { db } from "../clients/db-client.js";
 
 /**
  * Abstract base class for foreman active-record model classes.
