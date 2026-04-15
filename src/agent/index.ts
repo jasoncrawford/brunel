@@ -96,12 +96,12 @@ export async function runQuery(
   // fires on every display.print() call, adding an extra \r\n after each piece
   // of output and causing double-spacing. After the query finishes we restore
   // and invoke the callback so the prompt redraws once (fixes issue #108).
-  const savedInputCallback = statusBar.getInputPrint();
-  const savedStatusCallback = statusBar.getInputStatus();
-  const savedClearCallback = statusBar.getInputClear();
-  statusBar.setInputPrint(null);
-  statusBar.setInputStatus(null);
-  statusBar.setInputClear(null);
+  const savedInputCallback = statusBar.inputPrint;
+  const savedStatusCallback = statusBar.inputStatus;
+  const savedClearCallback = statusBar.inputClear;
+  statusBar.inputPrint = null;
+  statusBar.inputStatus = null;
+  statusBar.inputClear = null;
   if (savedInputCallback) {
     // ask() was active when this query started (e.g., debounce-triggered while the
     // worker prompt was showing). Clear from cursor to end of screen so the prompt
@@ -205,9 +205,9 @@ export async function runQuery(
 
   // Restore the callbacks and redraw the prompt. In worker mode this redraws
   // the waiting "[worker] > " prompt after query output has scrolled past it.
-  statusBar.setInputPrint(savedInputCallback);
-  statusBar.setInputStatus(savedStatusCallback);
-  statusBar.setInputClear(savedClearCallback);
+  statusBar.inputPrint = savedInputCallback;
+  statusBar.inputStatus = savedStatusCallback;
+  statusBar.inputClear = savedClearCallback;
   savedInputCallback?.();
 
   return capturedSessionId;

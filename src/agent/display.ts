@@ -666,15 +666,15 @@ function printLine(line: string): void {
 
 export function print(line: string | null) {
   if (line === null) return;
-  const inputPrint = statusBar.getInputPrint();
+  const inputPrint = statusBar.inputPrint;
   if (inputPrint) {
     // ask() is active: erase from current cursor position to end of screen
     // (clears the prompt, suggestion row, and status bars), write the new
     // content line, then let drawFresh redraw the prompt + status bars below.
     // If the prompt has a leading \n prefix (blank line above the prompt),
-    // _inputClear goes up to also erase that blank line first so it
+    // inputClear goes up to also erase that blank line first so it
     // is not orphaned above the printed message (issue #418).
-    const inputClear = statusBar.getInputClear();
+    const inputClear = statusBar.inputClear;
     if (inputClear) {
       inputClear();
     } else {

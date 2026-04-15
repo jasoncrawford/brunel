@@ -339,18 +339,18 @@ describe("ask() - status update during multiline input (issue #486)", () => {
 describe("display.print() callback for ask() redraw", () => {
   it("setInputPrintCallback registers a callback called on display.print()", () => {
     const callback = vi.fn();
-    statusBar.setInputPrint(callback);
+    statusBar.inputPrint = callback;
     // Spy on console.log to prevent actual output
     vi.spyOn(console, "log").mockImplementation(() => {});
     display.print("test message");
     expect(callback).toHaveBeenCalled();
-    statusBar.setInputPrint(null);
+    statusBar.inputPrint = null;
   });
 
   it("callback is not called after it is cleared", () => {
     const callback = vi.fn();
-    statusBar.setInputPrint(callback);
-    statusBar.setInputPrint(null);
+    statusBar.inputPrint = callback;
+    statusBar.inputPrint = null;
     vi.spyOn(console, "log").mockImplementation(() => {});
     display.print("test message");
     expect(callback).not.toHaveBeenCalled();

@@ -91,34 +91,34 @@ describe("StatusBar class", () => {
   });
 
   describe("callbacks", () => {
-    it("getInputPrint returns null by default", () => {
-      expect(bar.getInputPrint()).toBeNull();
+    it("inputPrint is null by default", () => {
+      expect(bar.inputPrint).toBeNull();
     });
 
-    it("setInputPrint/getInputPrint round-trips", () => {
+    it("inputPrint can be set and read back", () => {
       const fn = vi.fn();
-      bar.setInputPrint(fn);
-      expect(bar.getInputPrint()).toBe(fn);
+      bar.inputPrint = fn;
+      expect(bar.inputPrint).toBe(fn);
     });
 
-    it("getInputStatus returns null by default", () => {
-      expect(bar.getInputStatus()).toBeNull();
+    it("inputStatus is null by default", () => {
+      expect(bar.inputStatus).toBeNull();
     });
 
-    it("setInputStatus/getInputStatus round-trips", () => {
+    it("inputStatus can be set and read back", () => {
       const fn = vi.fn();
-      bar.setInputStatus(fn);
-      expect(bar.getInputStatus()).toBe(fn);
+      bar.inputStatus = fn;
+      expect(bar.inputStatus).toBe(fn);
     });
 
-    it("getInputClear returns null by default", () => {
-      expect(bar.getInputClear()).toBeNull();
+    it("inputClear is null by default", () => {
+      expect(bar.inputClear).toBeNull();
     });
 
-    it("setInputClear/getInputClear round-trips", () => {
+    it("inputClear can be set and read back", () => {
       const fn = vi.fn();
-      bar.setInputClear(fn);
-      expect(bar.getInputClear()).toBe(fn);
+      bar.inputClear = fn;
+      expect(bar.inputClear).toBe(fn);
     });
 
     it("fireOnToolResult calls the registered callback", () => {

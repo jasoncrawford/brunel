@@ -336,7 +336,7 @@ describe("print()", () => {
 
   it("print(text) with inputPrintCallback set: clears current line before logging", () => {
     const cb = vi.fn();
-    statusBar.setInputPrint(cb);
+    statusBar.inputPrint = cb;
     try {
       const output = captureOutput(() => {
         print("hello");
@@ -347,7 +347,7 @@ describe("print()", () => {
       expect(clearIdx).toBeGreaterThan(-1);
       expect(helloIdx).toBeGreaterThan(clearIdx);
     } finally {
-      statusBar.setInputPrint(null);
+      statusBar.inputPrint = null;
     }
   });
 

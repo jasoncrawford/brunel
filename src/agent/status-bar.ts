@@ -100,11 +100,11 @@ export class StatusBar extends EventEmitter {
 
   // Registered by ask() while it is active. print() routes through these so
   // output doesn't corrupt the interactive prompt/suggestion area.
-  private _inputPrint: (() => void) | null = null;
-  private _inputStatus: (() => void) | null = null;
+  inputPrint: (() => void) | null = null;
+  inputStatus: (() => void) | null = null;
   // Registered by ask(). Called by print() BEFORE writing output to clear the
   // prompt area including any leading blank line (see issue #418).
-  private _inputClear: (() => void) | null = null;
+  inputClear: (() => void) | null = null;
 
   constructor({ agentId, ...initial }: { agentId?: string } & Omit<WorkerStatusPatch, "reconnectAt"> = {}) {
     super();
@@ -215,15 +215,6 @@ export class StatusBar extends EventEmitter {
     this._onToolResult?.(name);
   }
 
-  setInputPrint(fn: (() => void) | null): void { this._inputPrint = fn; }
-  getInputPrint(): (() => void) | null { return this._inputPrint; }
-
-  setInputStatus(fn: (() => void) | null): void { this._inputStatus = fn; }
-  getInputStatus(): (() => void) | null { return this._inputStatus; }
-
-  setInputClear(fn: (() => void) | null): void { this._inputClear = fn; }
-  getInputClear(): (() => void) | null { return this._inputClear; }
-
   // ── Internal rendering helpers ─────────────────────────────────────────────
 
   private _lineCount(): number {
@@ -236,7 +227,7 @@ export class StatusBar extends EventEmitter {
    * (it handles its own redraws via the input callbacks).
    */
   clear(): void {
-    if (this._inputPrint || this._inputStatus) return; // ask() owns the screen
+    if (this.inputPrint || this.inputStatus) return; // ask() owns the screen
     const n = this._lineCount();
     if (n === 0) return;
     // Cursor rests on the blank separator row above the status lines.
@@ -254,15 +245,15 @@ export class StatusBar extends EventEmitter {
    * ask() is active so the prompt area is updated without misaligning the cursor.
    */
   draw(): void {
-    if (this._inputStatus) {
+    if (this.inputStatus) {
       // ask() is active and cursor is in the buffer area — use the status-aware
       // redraw that navigates back to the prompt line before redrawing.
-      this._inputStatus();
+      this.inputStatus();
       return;
     }
-    if (this._inputPrint) {
+    if (this.inputPrint) {
       // ask() is active after display.print() — cursor is at a fresh new line.
-      this._inputPrint();
+      this.inputPrint();
       return;
     }
     const n = this._lineCount();

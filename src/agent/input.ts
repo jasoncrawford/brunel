@@ -227,9 +227,9 @@ export function ask(
     // string means the caller doesn't want any prompt shown (e.g. worker
     // standby mode), so no redraw is needed and no line-clear should fire.
     if (promptLine) {
-      statusBar.setInputClear(clearForPrint);
-      statusBar.setInputPrint(drawFresh);
-      statusBar.setInputStatus(redrawFromCurrent);
+      statusBar.inputClear = clearForPrint;
+      statusBar.inputPrint = drawFresh;
+      statusBar.inputStatus = redrawFromCurrent;
     }
 
     if (abort) {
@@ -257,9 +257,9 @@ export function ask(
     }
 
     function cleanup() {
-      statusBar.setInputPrint(null);
-      statusBar.setInputClear(null);
-      statusBar.setInputStatus(null);
+      statusBar.inputPrint = null;
+      statusBar.inputClear = null;
+      statusBar.inputStatus = null;
       process.stdin.removeListener("data", onData);
     }
 
