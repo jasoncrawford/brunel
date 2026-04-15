@@ -5,7 +5,7 @@ import { loadIssuesToQueue, fetchIssueStates } from "../github.js";
 import { EventQueue } from "../event-queue.js";
 import { Task } from "./task.js";
 import { Worker } from "./worker.js";
-import { log } from "../../utils.js";
+import { fmtError, log } from "../../utils.js";
 
 
 // ── TaskManager ────────────────────────────────────────────────────────────────
@@ -120,9 +120,9 @@ export class TaskManager extends EventEmitter {
   }
 
   /** Track issue as open and persist it to DB. Called when issues/labeled fires. */
-  async enqueueIssue(taskId: string, issueNumber: number, repo: string, title: string, body: string, labels: string[]): Promise<void> {
+  async enqueueIssue(taskId: string, issueNumber: number, repo: string, title: string, body: string, labels: string[]): Promise<Task> {
     this._openIssues.add(issueNumber);
-    await Task.upsert(taskId, issueNumber, repo, title, body, labels);
+    return Task.upsert(taskId, issueNumber, repo, title, body, labels);
   }
 
   /** Stop tracking issue and remove it from DB. Called when brunel:ready label is removed. */
@@ -228,6 +228,108 @@ export class TaskManager extends EventEmitter {
       }
     }
     this.markBlockersLoaded(issueNumber);
+  }
+
+  /** Fire-and-forget wrapper: calls fetchAndLoadDeps then emits "deps_loaded" so the
+   *  controller can trigger work assignment without knowing about async deps loading. */
+  startDepsLoad(
+    issueNumber: number,
+    body: string,
+    config: { repo: string; token: string; apiUrl?: string },
+  ): void {
+    this.fetchAndLoadDeps(issueNumber, body, config)
+      .then(() => this.emit("deps_loaded"))
+      .catch((err) => log(`ERROR fetching deps for #${issueNumber}: ${fmtError(err)}`));
+  }
+
+  // ── Issue event handlers ───────────────────────────────────────────────────
+
+  /** Handle issues/labeled or issues/opened: enqueue the issue and start dep loading.
+   *  Returns the new Task if enqueued, or null if ignored (e.g. issue is already closed). */
+  async handleIssueLabeledEvent(
+    issueNumber: number,
+    repo: string,
+    title: string,
+    body: string,
+    labels: string[],
+    state: string,
+    config: { repo: string; token: string; apiUrl?: string },
+  ): Promise<Task | null> {
+    if (state === "closed") {
+      log(`[task #${issueNumber}] labeled: ignoring — issue is closed`);
+      return null;
+    }
+    const task = await this.enqueueIssue(String(issueNumber), issueNumber, repo, title, body, labels);
+    this.startDepsLoad(issueNumber, body, config);
+    return task;
+  }
+
+  /** Handle issues/edited when the body changes: reset blockers and reload them. */
+  handleIssueBodyEditedEvent(
+    issueNumber: number,
+    newBody: string,
+    config: { repo: string; token: string; apiUrl?: string },
+  ): void {
+    this.resetBlockers(issueNumber);
+    this.startDepsLoad(issueNumber, newBody, config);
+  }
+
+  // ── PR event handlers ──────────────────────────────────────────────────────
+
+  private static extractLinkedIssueNumber(body: string): number | null {
+    const match = /(?:closes|fixes|resolves)\s+#(\d+)/i.exec(body);
+    return match ? parseInt(match[1], 10) : null;
+  }
+
+  /** Handle pull_request/opened: find the linked issue, register the branch and PR.
+   *  Returns the linked task, or null if no linked issue is found. */
+  async handlePrOpenedEvent(prNumber: number, body: string, branch: string | null): Promise<Task | null> {
+    const linkedIssue = TaskManager.extractLinkedIssueNumber(body);
+    if (linkedIssue === null) return null;
+    const task = await Task.getByIssue(linkedIssue);
+    if (!task) return null;
+    if (branch) this.registerBranch(branch, task);
+    await task.registerPr(prNumber, branch).catch((err: unknown) =>
+      log(`ERROR Failed to register PR #${prNumber} for task #${task.taskId}: ${fmtError(err)}`)
+    );
+    log(`[task #${linkedIssue}] PR #${prNumber} registered`);
+    return task;
+  }
+
+  /** Handle pull_request/closed: unregister or record the merge on the linked task.
+   *  Returns the task, or null if no task owns the PR. */
+  async handlePrClosedEvent(prNumber: number, merged: boolean): Promise<Task | null> {
+    const task = await Task.getByPr(prNumber);
+    if (!task) return null;
+    if (merged) {
+      log(`[task #${task.issueNumber}] PR #${prNumber} merged`);
+      await task.mergePr().catch((err: unknown) =>
+        log(`ERROR Failed to record PR #${prNumber} merge: ${fmtError(err)}`)
+      );
+    } else {
+      log(`[task #${task.issueNumber}] PR #${prNumber} unregistered (closed without merging)`);
+      await task.unregisterPr().catch((err: unknown) =>
+        log(`ERROR Failed to unregister PR #${prNumber}: ${fmtError(err)}`)
+      );
+    }
+    return task;
+  }
+
+  // ── Check event handler ────────────────────────────────────────────────────
+
+  /** Find the task for a check_run or check_suite event.
+   *  Tries by PR number first, then falls back to branch name.
+   *  Returns the task and a display ref string, or null if not found. */
+  async getTaskForCheckEvent(prNumbers: number[], headBranch: string): Promise<{ task: Task; ref: string } | null> {
+    if (prNumbers.length > 0) {
+      const task = await Task.getByPr(prNumbers[0]);
+      if (task) return { task, ref: `PR #${prNumbers[0]}` };
+    }
+    if (headBranch) {
+      const task = await this.getTaskForBranch(headBranch);
+      if (task) return { task, ref: `branch ${headBranch}` };
+    }
+    return null;
   }
 
   /** Fetch brunel:ready issues from GitHub and load deps.

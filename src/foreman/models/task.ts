@@ -90,6 +90,16 @@ export class Task extends ActiveRecord {
     };
   }
 
+  toAssignmentPayload(): { number: number; title: string; body: string; labels: string[]; repoUrl: string } {
+    return {
+      number: this.issueNumber,
+      title: this.title,
+      body: this.body,
+      labels: this.labels,
+      repoUrl: this.repoUrl,
+    };
+  }
+
   static fromTest(fields: Partial<DbRow> & { task_id: string; issue_number: number }): Task {
     const row: DbRow = {
       repo: "",

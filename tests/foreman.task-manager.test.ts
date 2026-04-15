@@ -389,3 +389,234 @@ describe("TaskManager.assignIdleWorkers", () => {
     await manager.assignIdleWorkers();
   });
 });
+
+// ── TaskManager.handleIssueLabeledEvent ───────────────────────────────────────
+
+describe("TaskManager.handleIssueLabeledEvent", () => {
+  let manager: TaskManager;
+
+  beforeEach(() => {
+    Worker._reset();
+    manager = new TaskManager();
+    setupInMemoryTasks(manager);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: { repository: { issue: { blockedBy: { nodes: [] } } } } }),
+    }));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("enqueues the issue and returns the task when issue is open", async () => {
+    const config = { repo: REPO, token: "token" };
+    const task = await manager.handleIssueLabeledEvent(42, REPO, "Fix it", "Body", ["brunel:ready"], "open", config);
+    expect(task).not.toBeNull();
+    expect(task?.taskId).toBe("42");
+    expect(await Task.getByIssue(42)).not.toBeNull();
+  });
+
+  it("returns null and does not enqueue when issue is closed", async () => {
+    const config = { repo: REPO, token: "token" };
+    const task = await manager.handleIssueLabeledEvent(42, REPO, "Fix it", "Body", [], "closed", config);
+    expect(task).toBeNull();
+    expect(await Task.getByIssue(42)).toBeNull();
+  });
+
+  it("emits deps_loaded after fetching deps", async () => {
+    let depsDoneCount = 0;
+    manager.on("deps_loaded", () => { depsDoneCount++; });
+    const config = { repo: REPO, token: "token" };
+    await manager.handleIssueLabeledEvent(42, REPO, "Fix it", "Body", [], "open", config);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(depsDoneCount).toBe(1);
+  });
+});
+
+// ── TaskManager.handleIssueBodyEditedEvent ────────────────────────────────────
+
+describe("TaskManager.handleIssueBodyEditedEvent", () => {
+  let manager: TaskManager;
+
+  beforeEach(() => {
+    Worker._reset();
+    manager = new TaskManager();
+    setupInMemoryTasks(manager);
+    manager.setBlockers(42, [10]);
+    manager.markBlockersLoaded(42);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: { repository: { issue: { blockedBy: { nodes: [] } } } } }),
+    }));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("resets blockers for the issue", () => {
+    expect(manager.isBlockersLoaded(42)).toBe(true);
+    manager.handleIssueBodyEditedEvent(42, "new body", { repo: REPO, token: "token" });
+    expect(manager.isBlockersLoaded(42)).toBe(false);
+  });
+
+  it("emits deps_loaded after reloading deps", async () => {
+    let depsDoneCount = 0;
+    manager.on("deps_loaded", () => { depsDoneCount++; });
+    manager.handleIssueBodyEditedEvent(42, "new body", { repo: REPO, token: "token" });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(depsDoneCount).toBe(1);
+  });
+});
+
+// ── TaskManager.handlePrOpenedEvent ───────────────────────────────────────────
+
+describe("TaskManager.handlePrOpenedEvent", () => {
+  let manager: TaskManager;
+
+  beforeEach(async () => {
+    Worker._reset();
+    manager = new TaskManager();
+    setupInMemoryTasks(manager);
+    await Task.upsert("42", 42, REPO, "Fix the bug", "Body", ["brunel:ready"]);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("registers branch and PR when body links an issue", async () => {
+    const task = await manager.handlePrOpenedEvent(10, "Closes #42", "fix-branch");
+    expect(task?.taskId).toBe("42");
+    expect(task?.prNumber).toBe(10);
+    expect(task?.branch).toBe("fix-branch");
+    expect(await Task.getByPr(10)).not.toBeNull();
+  });
+
+  it("returns null when no linked issue in body", async () => {
+    const task = await manager.handlePrOpenedEvent(10, "no link", "branch");
+    expect(task).toBeNull();
+    expect(await Task.getByPr(10)).toBeNull();
+  });
+
+  it("returns null when linked issue has no corresponding task", async () => {
+    const task = await manager.handlePrOpenedEvent(10, "Closes #999", "branch");
+    expect(task).toBeNull();
+  });
+
+  it("registers branch mapping so getTaskForBranch works", async () => {
+    await manager.handlePrOpenedEvent(10, "Fixes #42", "my-fix-branch");
+    const found = await manager.getTaskForBranch("my-fix-branch");
+    expect(found?.taskId).toBe("42");
+  });
+});
+
+// ── TaskManager.handlePrClosedEvent ───────────────────────────────────────────
+
+describe("TaskManager.handlePrClosedEvent", () => {
+  let manager: TaskManager;
+
+  beforeEach(async () => {
+    Worker._reset();
+    manager = new TaskManager();
+    setupInMemoryTasks(manager);
+    await Task.upsert("42", 42, REPO, "Fix the bug", "Body", ["brunel:ready"]);
+    const t = await Task.get("42");
+    await t!.registerPr(10, "fix-branch");
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("unregisters PR when not merged and returns the task", async () => {
+    const task = await manager.handlePrClosedEvent(10, false);
+    expect(task?.taskId).toBe("42");
+    expect(task?.prNumber).toBeNull();
+    expect(await Task.getByPr(10)).toBeNull();
+  });
+
+  it("records merge when merged=true and keeps PR association", async () => {
+    const task = await manager.handlePrClosedEvent(10, true);
+    expect(task?.taskId).toBe("42");
+    expect(task?.prMergedAt).toBeTruthy();
+    expect(await Task.getByPr(10)).not.toBeNull();
+  });
+
+  it("returns null when no task owns the PR", async () => {
+    const task = await manager.handlePrClosedEvent(999, false);
+    expect(task).toBeNull();
+  });
+});
+
+// ── TaskManager.getTaskForCheckEvent ─────────────────────────────────────────
+
+describe("TaskManager.getTaskForCheckEvent", () => {
+  let manager: TaskManager;
+
+  beforeEach(async () => {
+    Worker._reset();
+    manager = new TaskManager();
+    setupInMemoryTasks(manager);
+    await Task.upsert("42", 42, REPO, "Fix the bug", "Body", ["brunel:ready"]);
+    const t = await Task.get("42");
+    await t!.registerPr(10, "fix-branch");
+    manager.registerBranch("fix-branch", t!);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("returns task by PR number when found", async () => {
+    const result = await manager.getTaskForCheckEvent([10], "");
+    expect(result?.task.taskId).toBe("42");
+    expect(result?.ref).toBe("PR #10");
+  });
+
+  it("falls back to branch lookup when PR lookup fails", async () => {
+    const result = await manager.getTaskForCheckEvent([], "fix-branch");
+    expect(result?.task.taskId).toBe("42");
+    expect(result?.ref).toBe("branch fix-branch");
+  });
+
+  it("prefers PR lookup over branch lookup", async () => {
+    const result = await manager.getTaskForCheckEvent([10], "fix-branch");
+    expect(result?.ref).toBe("PR #10");
+  });
+
+  it("returns null when neither PR nor branch matches", async () => {
+    const result = await manager.getTaskForCheckEvent([999], "unknown-branch");
+    expect(result).toBeNull();
+  });
+
+  it("returns null when lists are empty and branch is empty", async () => {
+    const result = await manager.getTaskForCheckEvent([], "");
+    expect(result).toBeNull();
+  });
+});
+
+// ── Task.toAssignmentPayload ──────────────────────────────────────────────────
+
+describe("Task.toAssignmentPayload", () => {
+  it("returns the issue payload fields used for task_assigned wire message", () => {
+    const task = Task.fromTest({
+      task_id: "42",
+      issue_number: 42,
+      repo: "owner/repo",
+      title: "Fix the bug",
+      body: "It is broken",
+      labels: ["bug", "brunel:ready"],
+    });
+    expect(task.toAssignmentPayload()).toEqual({
+      number: 42,
+      title: "Fix the bug",
+      body: "It is broken",
+      labels: ["bug", "brunel:ready"],
+      repoUrl: "https://github.com/owner/repo",
+    });
+  });
+});
