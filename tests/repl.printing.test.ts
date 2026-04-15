@@ -7,7 +7,7 @@ import {
   toolUseNames,
   setThinkOutLoud,
 } from "../src/agent/display.js";
-import { statusBar, setVerbose } from "../src/agent/status-bar.js";
+import { statusBar } from "../src/agent/status-bar.js";
 
 function captureOutput(fn: () => void): string {
   let output = "";
@@ -32,13 +32,13 @@ async function captureOutputAsync(fn: () => Promise<void>): Promise<string> {
 beforeEach(() => {
   toolUseNames.clear();
   statusBar.stop();
-  setVerbose(false);
+  statusBar.setVerbose(false);
 });
 
 afterEach(() => {
   toolUseNames.clear();
   statusBar.stop();
-  setVerbose(false);
+  statusBar.setVerbose(false);
   vi.restoreAllMocks();
 });
 
@@ -227,7 +227,7 @@ describe("printMessage", () => {
   });
 
   it("system/init → routed to SYSTEM_FMT (quiet mode = null)", () => {
-    setVerbose(false);
+    statusBar.setVerbose(false);
     const output = captureOutput(() => {
       printMessage({ type: "system", subtype: "init", session_id: "abc" });
     });
@@ -302,7 +302,7 @@ describe("printMessage", () => {
   });
 
   it("rate_limit_event, quiet mode → null (nothing printed)", () => {
-    setVerbose(false);
+    statusBar.setVerbose(false);
     const output = captureOutput(() => {
       printMessage({ type: "rate_limit_event", rate_limit_info: { status: "allowed" } });
     });
@@ -310,7 +310,7 @@ describe("printMessage", () => {
   });
 
   it("rate_limit_event, verbose mode, status=allowed → null (silenced)", () => {
-    setVerbose(true);
+    statusBar.setVerbose(true);
     const output = captureOutput(() => {
       printMessage({ type: "rate_limit_event", rate_limit_info: { status: "allowed" } });
     });

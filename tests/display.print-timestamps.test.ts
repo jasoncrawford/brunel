@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { stripAnsi } from "./helpers.js";
 import { print } from "../src/agent/display.js";
-import { statusBar, setVerbose } from "../src/agent/status-bar.js";
+import { statusBar } from "../src/agent/status-bar.js";
 
 function captureOutput(fn: () => void): string {
   let output = "";
@@ -15,18 +15,18 @@ function captureOutput(fn: () => void): string {
 
 beforeEach(() => {
   statusBar.stop();
-  setVerbose(false);
+  statusBar.setVerbose(false);
 });
 
 afterEach(() => {
   statusBar.stop();
-  setVerbose(false);
+  statusBar.setVerbose(false);
   vi.restoreAllMocks();
 });
 
 describe("print() timestamps", () => {
   it("verbose=false: no timestamp prepended", () => {
-    setVerbose(false);
+    statusBar.setVerbose(false);
     const output = captureOutput(() => print("hello"));
     const plain = stripAnsi(output);
     expect(plain).toContain("hello");
@@ -35,7 +35,7 @@ describe("print() timestamps", () => {
   });
 
   it("verbose=true: prepends HH:MM:SS timestamp", () => {
-    setVerbose(true);
+    statusBar.setVerbose(true);
     const output = captureOutput(() => print("hello"));
     const plain = stripAnsi(output);
     expect(plain).toContain("hello");
@@ -43,7 +43,7 @@ describe("print() timestamps", () => {
   });
 
   it("verbose=true: timestamp appears before message content", () => {
-    setVerbose(true);
+    statusBar.setVerbose(true);
     const output = captureOutput(() => print("world"));
     const plain = stripAnsi(output);
     const tsMatch = plain.match(/\d{2}:\d{2}:\d{2}/);
@@ -54,7 +54,7 @@ describe("print() timestamps", () => {
   });
 
   it("verbose=true: timestamp uses darkGray opener and foreground-only reset", () => {
-    setVerbose(true);
+    statusBar.setVerbose(true);
     const raw = captureOutput(() => print("styled"));
     // darkGray opener
     expect(raw).toContain("\x1b[90m");
@@ -67,7 +67,7 @@ describe("print() timestamps", () => {
   });
 
   it("verbose=true: opening color is re-applied to continuation lines", () => {
-    setVerbose(true);
+    statusBar.setVerbose(true);
     // Simulate a color-wrapped multi-line block like c.gray() produces
     const coloredBlock = `\x1b[38;5;246m\nline one\nline two\x1b[0m`;
     const raw = captureOutput(() => print(coloredBlock));
@@ -78,7 +78,7 @@ describe("print() timestamps", () => {
   });
 
   it("verbose=true: each line of multi-line output gets a timestamp", () => {
-    setVerbose(true);
+    statusBar.setVerbose(true);
     const output = captureOutput(() => print("line one\nline two\nline three"));
     const plain = stripAnsi(output);
     const matches = plain.match(/\d{2}:\d{2}:\d{2}/g);
@@ -89,7 +89,7 @@ describe("print() timestamps", () => {
   });
 
   it("verbose=true: print(null) still no-ops", () => {
-    setVerbose(true);
+    statusBar.setVerbose(true);
     const output = captureOutput(() => print(null));
     expect(output).toBe("");
   });

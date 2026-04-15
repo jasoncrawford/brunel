@@ -1,84 +1,77 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { setVerbose, verbose, fmtWorkerStatus, StatusBar } from "../src/agent/status-bar.js";
+import { StatusBar, statusBar } from "../src/agent/status-bar.js";
 
 // Strip ANSI codes for assertion
 function stripAnsi(s: string): string {
   return s.replace(/\x1b\[[0-9;]*m/g, "");
 }
 
-describe("verbose flag", () => {
+describe("StatusBar verbose flag", () => {
   afterEach(() => {
-    setVerbose(false);
+    statusBar.setVerbose(false);
   });
 
   it("defaults to false", () => {
-    expect(verbose).toBe(false);
+    expect(statusBar.verbose).toBe(false);
   });
 
   it("setVerbose(true) sets verbose to true", () => {
-    setVerbose(true);
-    expect(verbose).toBe(true);
+    statusBar.setVerbose(true);
+    expect(statusBar.verbose).toBe(true);
   });
 
   it("setVerbose(false) resets verbose", () => {
-    setVerbose(true);
-    setVerbose(false);
-    expect(verbose).toBe(false);
+    statusBar.setVerbose(true);
+    statusBar.setVerbose(false);
+    expect(statusBar.verbose).toBe(false);
   });
 });
 
-describe("fmtWorkerStatus", () => {
+describe("StatusBar getStatusText", () => {
   afterEach(() => {
-    setVerbose(false);
+    statusBar.setVerbose(false);
   });
 
   it("shows worker id and no current task when idle", () => {
-    const result = stripAnsi(fmtWorkerStatus({
-      workerId: "7c254628-abcd-1234-efgh-000000000000",
-      connectionStatus: "connected",
-      width: 80,
-    }));
+    const bar = new StatusBar({ agentId: "7c254628-abcd-1234-efgh-000000000000" });
+    bar.update({ connectionStatus: "connected" });
+    const result = stripAnsi(bar.getStatusText());
     expect(result).toContain("worker 7c254628");
     expect(result).toContain("no current task");
     expect(result).toContain("Connected");
   });
 
   it("shows disconnectCode in verbose mode", () => {
-    setVerbose(true);
-    const result = stripAnsi(fmtWorkerStatus({
-      workerId: "abc12345-0000-0000-0000-000000000000",
-      connectionStatus: "disconnected",
-      disconnectCode: 1006,
-      retryInSeconds: 2,
-      width: 80,
-    }));
-    expect(result).toContain("Disconnected (1006). Retrying in 2s");
+    const bar = new StatusBar({ agentId: "abc12345-0000-0000-0000-000000000000" });
+    bar.setVerbose(true);
+    bar.update({ connectionStatus: "disconnected", disconnectCode: 1006, reconnectAt: Date.now() + 2000 });
+    const result = stripAnsi(bar.getStatusText());
+    expect(result).toContain("Disconnected (1006)");
   });
 
   it("omits disconnectCode in non-verbose mode", () => {
-    setVerbose(false);
-    const result = stripAnsi(fmtWorkerStatus({
-      workerId: "abc12345-0000-0000-0000-000000000000",
-      connectionStatus: "disconnected",
-      disconnectCode: 1006,
-      width: 80,
-    }));
+    const bar = new StatusBar({ agentId: "abc12345-0000-0000-0000-000000000000" });
+    bar.setVerbose(false);
+    bar.update({ connectionStatus: "disconnected", disconnectCode: 1006 });
+    const result = stripAnsi(bar.getStatusText());
     expect(result).toContain("Disconnected");
     expect(result).not.toContain("1006");
   });
 
   it("shows task, PR, and branch when set", () => {
-    const result = stripAnsi(fmtWorkerStatus({
-      workerId: "7c254628-abcd-1234-efgh-000000000000",
-      taskNumber: 374,
-      prNumber: 406,
-      branch: "db-single-source-of-truth",
-      connectionStatus: "connected",
-      width: 120,
-    }));
-    expect(result).toContain("task #374");
-    expect(result).toContain("PR #406");
-    expect(result).toContain("db-single-source-of-truth");
+    const origColumns = Object.getOwnPropertyDescriptor(process.stdout, "columns");
+    Object.defineProperty(process.stdout, "columns", { value: 120, configurable: true });
+    try {
+      const bar = new StatusBar({ agentId: "7c254628-abcd-1234-efgh-000000000000" });
+      bar.update({ taskNumber: 374, prNumber: 406, branch: "db-single-source-of-truth", connectionStatus: "connected" });
+      const result = stripAnsi(bar.getStatusText());
+      expect(result).toContain("task #374");
+      expect(result).toContain("PR #406");
+      expect(result).toContain("db-single-source-of-truth");
+    } finally {
+      if (origColumns) Object.defineProperty(process.stdout, "columns", origColumns);
+      else delete (process.stdout as { columns?: number }).columns;
+    }
   });
 });
 
@@ -142,24 +135,25 @@ describe("StatusBar class", () => {
 
   describe("persistent status bar", () => {
     it("startPersistent draws a status line", () => {
-      bar.startPersistent(() => "worker abc • idle");
+      bar.update({ connectionStatus: "connected" });
+      bar.startPersistent();
       const writes = stdoutWrite.mock.calls.map(a => String(a[0]));
-      expect(writes.join("")).toContain("worker abc • idle");
+      expect(writes.join("")).toContain("Connected");
     });
 
     it("persistentActive is true after startPersistent", () => {
-      bar.startPersistent(() => "worker abc • idle");
+      bar.startPersistent();
       expect(bar.persistentActive).toBe(true);
     });
 
     it("persistentActive is false after stopPersistent", () => {
-      bar.startPersistent(() => "worker abc • idle");
+      bar.startPersistent();
       bar.stopPersistent();
       expect(bar.persistentActive).toBe(false);
     });
 
     it("stopPersistent clears the status line", () => {
-      bar.startPersistent(() => "worker abc • idle");
+      bar.startPersistent();
       stdoutWrite.mockClear();
       bar.stopPersistent();
       const writes = stdoutWrite.mock.calls.map(a => String(a[0]));
@@ -167,13 +161,11 @@ describe("StatusBar class", () => {
     });
 
     it("updatePersistent refreshes text", () => {
-      let text = "initial";
-      bar.startPersistent(() => text);
+      bar.startPersistent();
       stdoutWrite.mockClear();
-      text = "updated";
-      bar.updatePersistent();
+      bar.update({ connectionStatus: "connected" });
       const writes = stdoutWrite.mock.calls.map(a => String(a[0]));
-      expect(writes.join("")).toContain("updated");
+      expect(writes.join("")).toContain("Connected");
     });
 
     it("active is false by default", () => {

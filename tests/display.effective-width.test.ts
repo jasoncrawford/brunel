@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { stripAnsi } from "./helpers.js";
-import { setVerbose } from "../src/agent/status-bar.js";
+import { statusBar } from "../src/agent/status-bar.js";
 import {
   effectiveWidth,
   VERBOSE_PREFIX_LEN,
@@ -10,8 +10,8 @@ import {
   W,
 } from "../src/agent/display.js";
 
-beforeEach(() => setVerbose(false));
-afterEach(() => setVerbose(false));
+beforeEach(() => statusBar.setVerbose(false));
+afterEach(() => statusBar.setVerbose(false));
 
 describe("VERBOSE_PREFIX_LEN", () => {
   it("is 9 (length of 'HH:mm:ss ')", () => {
@@ -21,19 +21,19 @@ describe("VERBOSE_PREFIX_LEN", () => {
 
 describe("effectiveWidth()", () => {
   it("verbose=false: returns full terminal width", () => {
-    setVerbose(false);
+    statusBar.setVerbose(false);
     const expected = process.stdout.columns ?? W;
     expect(effectiveWidth()).toBe(expected);
   });
 
   it("verbose=true: returns terminal width minus VERBOSE_PREFIX_LEN", () => {
-    setVerbose(true);
+    statusBar.setVerbose(true);
     const expected = (process.stdout.columns ?? W) - VERBOSE_PREFIX_LEN;
     expect(effectiveWidth()).toBe(expected);
   });
 
   it("verbose=false with custom fallback: uses fallback when no columns", () => {
-    setVerbose(false);
+    statusBar.setVerbose(false);
     const cols = process.stdout.columns;
     if (cols == null) {
       expect(effectiveWidth(80)).toBe(80);
@@ -43,7 +43,7 @@ describe("effectiveWidth()", () => {
   });
 
   it("verbose=true with custom fallback: subtracts prefix from fallback when no columns", () => {
-    setVerbose(true);
+    statusBar.setVerbose(true);
     const cols = process.stdout.columns;
     if (cols == null) {
       expect(effectiveWidth(80)).toBe(80 - VERBOSE_PREFIX_LEN);
@@ -55,14 +55,14 @@ describe("effectiveWidth()", () => {
 
 describe("clearBreak() - verbose mode reduces width", () => {
   it("verbose=false: divider fills full terminal width", () => {
-    setVerbose(false);
+    statusBar.setVerbose(false);
     const expectedWidth = process.stdout.columns ?? W;
     const lines = stripAnsi(clearBreak()).split("\n");
     expect(lines[1]).toHaveLength(expectedWidth);
   });
 
   it("verbose=true: divider is narrower by VERBOSE_PREFIX_LEN", () => {
-    setVerbose(true);
+    statusBar.setVerbose(true);
     const expectedWidth = (process.stdout.columns ?? W) - VERBOSE_PREFIX_LEN;
     const lines = stripAnsi(clearBreak()).split("\n");
     expect(lines[1]).toHaveLength(expectedWidth);
@@ -77,7 +77,7 @@ describe("renderTable() - verbose mode reduces width", () => {
   ];
 
   it("verbose=false: uses full terminal width for layout", () => {
-    setVerbose(false);
+    statusBar.setVerbose(false);
     const fullWidth = process.stdout.columns ?? W;
     const verboseResult = stripAnsi(renderTable(tableLines));
     const explicitResult = stripAnsi(renderTable(tableLines, fullWidth));
@@ -85,7 +85,7 @@ describe("renderTable() - verbose mode reduces width", () => {
   });
 
   it("verbose=true: uses reduced width (same as maxWidth minus VERBOSE_PREFIX_LEN)", () => {
-    setVerbose(true);
+    statusBar.setVerbose(true);
     const reducedWidth = (process.stdout.columns ?? W) - VERBOSE_PREFIX_LEN;
     const verboseResult = stripAnsi(renderTable(tableLines));
     const explicitResult = stripAnsi(renderTable(tableLines, reducedWidth));
@@ -100,7 +100,7 @@ describe("fmtHunk() - verbose mode reduces padding width", () => {
   };
 
   it("verbose=false: diff lines padded to full terminal width", () => {
-    setVerbose(false);
+    statusBar.setVerbose(false);
     const fullWidth = process.stdout.columns ?? 80;
     const result = fmtHunk(hunk);
     // Strip ANSI and find the added line — it should be padded to fullWidth
@@ -110,7 +110,7 @@ describe("fmtHunk() - verbose mode reduces padding width", () => {
   });
 
   it("verbose=true: diff lines padded to reduced width", () => {
-    setVerbose(true);
+    statusBar.setVerbose(true);
     const reducedWidth = (process.stdout.columns ?? 80) - VERBOSE_PREFIX_LEN;
     const result = fmtHunk(hunk);
     const addedLine = stripAnsi(result).split("\n").find(l => l.startsWith("+"));

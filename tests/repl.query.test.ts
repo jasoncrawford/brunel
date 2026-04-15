@@ -29,7 +29,7 @@ import { runQuery } from "../src/agent/index.js";
 import { getCachedModels, _resetCachedModels } from "../src/agent/model.js";
 import { ask, pick, pickMultiple, pickQuestion } from "../src/agent/input.js";
 import { toolUseNames } from "../src/agent/display.js";
-import { statusBar, setVerbose } from "../src/agent/status-bar.js";
+import { statusBar } from "../src/agent/status-bar.js";
 
 const defaultPermConfig = {
   permissionMode: "default" as const,
@@ -70,7 +70,7 @@ function captureConsole() {
 beforeEach(() => {
   toolUseNames.clear();
   statusBar.stop();
-  setVerbose(false);
+  statusBar.setVerbose(false);
   vi.clearAllMocks();
 });
 

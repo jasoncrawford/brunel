@@ -1,79 +1,86 @@
+import { EventEmitter } from "node:events";
+import { randomInt } from "node:crypto";
 import { shortWorkerId } from "../../shared/utils.js";
+import type { EffortValue } from "./effort.js";
 
-// ── Verbose flag ───────────────────────────────────────────────────────────────
-// Owned here so both the status bar and display.ts share one source of truth
-// without a circular import.
+// ── Agent ID generation ────────────────────────────────────────────────────────
 
-export let verbose = false;
-export function setVerbose(v: boolean) { verbose = v; }
+const WORKER_NAMES = [
+  "abner", "adelaide", "albert", "alden", "alfred", "amelia", "amity", "amos",
+  "andrew", "arthur", "asa", "augustus", "aurelia", "beatrice", "benjamin",
+  "boaz", "caleb", "calvin", "cassandra", "cassius", "cecilia", "charity",
+  "charlotte", "chauncey", "clara", "clarence", "clement", "constance",
+  "cornelius", "cressida", "daniel", "deliverance", "dinah", "ebenezer",
+  "edmund", "edwin", "eleanor", "elihu", "endeavour", "ephraim", "ernest",
+  "esther", "experience", "ezekiel", "faith", "felicity", "frances",
+  "franklin", "frederick", "gideon", "grace", "harold", "harriet", "henry",
+  "herbert", "hezekiah", "hiram", "honour", "hope", "horatio", "humility",
+  "ichabod", "increase", "jedediah", "jeremiah", "jethro", "josephine",
+  "justice", "lavinia", "lawrence", "lemuel", "levi", "lucius", "lydia",
+  "mabel", "martha", "matilda", "mercy", "micah", "miles", "naomi", "obadiah",
+  "oliver", "parthenia", "patience", "peregrine", "perseverance", "philip",
+  "phineas", "priscilla", "prosper", "prudence", "resolve", "rosalind",
+  "roscoe", "rufus", "rupert", "ruth", "silas", "simon", "susannah", "tabitha",
+  "temperance", "thaddeus", "thankful", "theodore", "theophilus", "titus",
+  "tobias", "verity", "victor", "violet", "warren", "zephaniah",
+];
+
+/** Generate a human-readable agent ID by prepending a random human name to a UUID.
+ * E.g. "patience-a9bdda00-1234-5678-abcd-ef0123456789" */
+export function generateAgentId(): string {
+  const idx = randomInt(WORKER_NAMES.length);
+  return `${WORKER_NAMES[idx]}-${crypto.randomUUID()}`;
+}
+
+// ── Worker status types ────────────────────────────────────────────────────────
+
+export type WorkerConnectionStatus = "connected" | "disconnected" | "reconnecting" | "handshaking";
+
+export type WorkerStatusPatch = {
+  connectionStatus?: WorkerConnectionStatus;
+  disconnectCode?: number | undefined;
+  reconnectAt?: number | undefined;
+  taskNumber?: number | undefined;
+  prNumber?: number | undefined;
+  branch?: string;
+  model?: string | undefined;
+  effort?: EffortValue | undefined;
+};
 
 // ── Worker status bar formatting ──────────────────────────────────────────────
 
 const W = 70;
 
-export interface WorkerStatusOpts {
-  workerId: string;
-  /** Model alias (e.g. "opus", "haiku"). Undefined or "default" renders as "sonnet". */
-  model?: string;
-  /** Effort level. Omitted from display when undefined (auto/default). */
-  effort?: string;
-  taskNumber?: number;
-  prNumber?: number;
-  branch?: string;
-  connectionStatus: "connected" | "disconnected" | "reconnecting" | "handshaking";
-  /** WebSocket close code, shown in verbose mode when disconnected. */
-  disconnectCode?: number;
-  /** Seconds until reconnect attempt, shown when disconnected. */
-  retryInSeconds?: number;
-  width?: number;
-}
-
-export function fmtWorkerStatus(opts: WorkerStatusOpts): string {
-  const { workerId, model, effort, taskNumber, prNumber, branch, connectionStatus, disconnectCode, retryInSeconds } = opts;
-  const width = (opts.width ?? (process.stdout.columns ?? W)) - 1; // -1 to avoid last-column wrap
-
-  // Right side: connection status
-  const codeStr = verbose && disconnectCode != null ? ` (${disconnectCode})` : "";
-  const rightText =
-    connectionStatus === "connected"    ? "Connected" :
-    connectionStatus === "handshaking"  ? "Handshaking..." :
-    connectionStatus === "reconnecting" ? "Reconnecting..." :
-    retryInSeconds != null              ? `Disconnected${codeStr}. Retrying in ${retryInSeconds}s` :
-                                          `Disconnected${codeStr}`;
-
-  // Left side: worker {id8} ∙ {model} ∙ {task info}
-  const modelName = (!model || model === "default") ? "sonnet" : model;
-  const effortStr = effort ? ` (${effort})` : "";
-  const parts: string[] = [`worker ${shortWorkerId(workerId)}`, `${modelName}${effortStr}`];
-  if (taskNumber != null) parts.push(`task #${taskNumber}`);
-  else parts.push("no current task");
-  if (prNumber != null) parts.push(`PR #${prNumber}`);
-  if (branch) parts.push(branch);
-  let leftText = parts.join(" ∙ ");
-
-  // Truncate left side if needed to leave room for right side with a gap of 1
-  const maxLeftLen = Math.max(0, width - rightText.length - 1);
-  if (leftText.length > maxLeftLen) {
-    leftText = leftText.slice(0, Math.max(0, maxLeftLen - 1)) + "…";
-  }
-
-  const gap = Math.max(1, width - leftText.length - rightText.length);
-  // Dim sage-green background + bright-white text. No trailing reset: draw()
-  // appends \x1b[K (fills remaining width with the same background) then \x1b[0m.
-  return `\x1b[48;5;22m\x1b[97m${leftText + " ".repeat(gap) + rightText}`;
-}
-
 // ── StatusBar class ───────────────────────────────────────────────────────────
 
 /**
- * Manages the terminal status bar display. Two bars coexist: a primary
- * animated bar (query progress, spins every 500ms) and a persistent bar
- * (worker status, redraws only on discrete events).
+ * Reactive model + terminal renderer for the worker status bar. Holds all
+ * worker status state (connection, task, model, etc.) and manages the two
+ * terminal status bar rows (animated query-progress and persistent worker
+ * status). Call update() to change state — it re-renders automatically.
  *
  * Use the shared `statusBar` singleton for normal production use. Instantiate
  * directly in tests that need an isolated instance.
  */
-export class StatusBar {
+export class StatusBar extends EventEmitter {
+  // ── Worker status state ────────────────────────────────────────────────────
+  readonly agentId: string;
+  private _connectionStatus: WorkerConnectionStatus = "disconnected";
+  private _disconnectCode: number | undefined;
+  private _reconnectAt: number | undefined;
+  private _taskNumber: number | undefined;
+  private _prNumber: number | undefined;
+  private _branch = "";
+  private _model: string | undefined;
+  private _effort: EffortValue | undefined;
+  private _countdownTimer: ReturnType<typeof setInterval> | null = null;
+
+  // ── Verbose flag ──────────────────────────────────────────────────────────
+  /** Whether verbose output mode is active (affects timestamps, detail level). */
+  verbose = false;
+
+  setVerbose(v: boolean): void { this.verbose = v; }
+
   // ── Primary (animated query-progress) bar ──────────────────────────────────
   /** Whether the primary animated status bar is currently active. */
   active = false;
@@ -84,7 +91,6 @@ export class StatusBar {
   /** Whether the persistent worker status bar is currently active. */
   persistentActive = false;
   private _persistentText = "";
-  private _persistentGetText: (() => string) | null = null;
 
   // ── Callbacks ──────────────────────────────────────────────────────────────
 
@@ -99,6 +105,104 @@ export class StatusBar {
   // Registered by ask(). Called by print() BEFORE writing output to clear the
   // prompt area including any leading blank line (see issue #418).
   private _inputClear: (() => void) | null = null;
+
+  constructor({ agentId, ...initial }: { agentId?: string } & Omit<WorkerStatusPatch, "reconnectAt"> = {}) {
+    super();
+    this.agentId = agentId ?? generateAgentId();
+    if ("connectionStatus" in initial) this._connectionStatus = initial.connectionStatus!;
+    if ("disconnectCode" in initial) this._disconnectCode = initial.disconnectCode;
+    if ("taskNumber" in initial) this._taskNumber = initial.taskNumber;
+    if ("prNumber" in initial) this._prNumber = initial.prNumber;
+    if ("branch" in initial) this._branch = initial.branch!;
+    if ("model" in initial) this._model = initial.model;
+    if ("effort" in initial) this._effort = initial.effort;
+  }
+
+  // ── Worker status getters ──────────────────────────────────────────────────
+
+  get connectionStatus(): WorkerConnectionStatus { return this._connectionStatus; }
+  get disconnectCode(): number | undefined { return this._disconnectCode; }
+  get reconnectAt(): number | undefined { return this._reconnectAt; }
+  get taskNumber(): number | undefined { return this._taskNumber; }
+  get prNumber(): number | undefined { return this._prNumber; }
+  get branch(): string { return this._branch; }
+  get model(): string | undefined { return this._model; }
+  get effort(): EffortValue | undefined { return this._effort; }
+
+  /** Apply a partial status update, re-render the persistent bar, and emit "change". */
+  update(patch: WorkerStatusPatch): void {
+    if ("connectionStatus" in patch) this._connectionStatus = patch.connectionStatus!;
+    if ("disconnectCode" in patch) this._disconnectCode = patch.disconnectCode;
+    if ("reconnectAt" in patch) {
+      this._reconnectAt = patch.reconnectAt;
+      this._syncCountdownTimer();
+    }
+    if ("taskNumber" in patch) this._taskNumber = patch.taskNumber;
+    if ("prNumber" in patch) this._prNumber = patch.prNumber;
+    if ("branch" in patch) this._branch = patch.branch!;
+    if ("model" in patch) this._model = patch.model;
+    if ("effort" in patch) this._effort = patch.effort;
+    this.updatePersistent();
+    this.emit("change");
+  }
+
+  private _syncCountdownTimer(): void {
+    if (this._reconnectAt != null) {
+      if (!this._countdownTimer) {
+        this._countdownTimer = setInterval(() => {
+          this.updatePersistent();
+          this.emit("change");
+        }, 1000);
+      }
+    } else {
+      if (this._countdownTimer) {
+        clearInterval(this._countdownTimer);
+        this._countdownTimer = null;
+      }
+    }
+  }
+
+  /** Format the current worker status as a single terminal line. */
+  getStatusText(): string {
+    return this._fmtWorkerStatus();
+  }
+
+  private _fmtWorkerStatus(): string {
+    const width = (process.stdout.columns ?? W) - 1; // -1 to avoid last-column wrap
+
+    // Right side: connection status
+    const retryInSeconds = this._reconnectAt != null
+      ? Math.max(0, Math.ceil((this._reconnectAt - Date.now()) / 1000))
+      : undefined;
+    const codeStr = this.verbose && this._disconnectCode != null ? ` (${this._disconnectCode})` : "";
+    const rightText =
+      this._connectionStatus === "connected"    ? "Connected" :
+      this._connectionStatus === "handshaking"  ? "Handshaking..." :
+      this._connectionStatus === "reconnecting" ? "Reconnecting..." :
+      retryInSeconds != null                    ? `Disconnected${codeStr}. Retrying in ${retryInSeconds}s` :
+                                                  `Disconnected${codeStr}`;
+
+    // Left side: worker {id8} ∙ {model} ∙ {task info}
+    const modelName = (!this._model || this._model === "default") ? "sonnet" : this._model;
+    const effortStr = this._effort ? ` (${this._effort})` : "";
+    const parts: string[] = [`worker ${shortWorkerId(this.agentId)}`, `${modelName}${effortStr}`];
+    if (this._taskNumber != null) parts.push(`task #${this._taskNumber}`);
+    else parts.push("no current task");
+    if (this._prNumber != null) parts.push(`PR #${this._prNumber}`);
+    if (this._branch) parts.push(this._branch);
+    let leftText = parts.join(" ∙ ");
+
+    // Truncate left side if needed to leave room for right side with a gap of 1
+    const maxLeftLen = Math.max(0, width - rightText.length - 1);
+    if (leftText.length > maxLeftLen) {
+      leftText = leftText.slice(0, Math.max(0, maxLeftLen - 1)) + "…";
+    }
+
+    const gap = Math.max(1, width - leftText.length - rightText.length);
+    // Dim sage-green background + bright-white text. No trailing reset: draw()
+    // appends \x1b[K (fills remaining width with the same background) then \x1b[0m.
+    return `\x1b[48;5;22m\x1b[97m${leftText + " ".repeat(gap) + rightText}`;
+  }
 
   // ── Callback setters/getters ───────────────────────────────────────────────
 
@@ -218,15 +322,13 @@ export class StatusBar {
   // ── Persistent (worker) status bar ────────────────────────────────────────
 
   /**
-   * Show a status bar that redraws only when updatePersistent() is called.
-   * Used for state that changes on discrete events (task assigned, PR opened,
-   * connection status changed) rather than continuously over time.
+   * Show the worker status bar. Renders immediately using the current state
+   * and redraws automatically whenever update() is called.
    */
-  startPersistent(getText: () => string): void {
+  startPersistent(): void {
     this.clear();
     this.persistentActive = true;
-    this._persistentGetText = getText;
-    this._persistentText = getText();
+    this._persistentText = this._fmtWorkerStatus();
     this.draw();
   }
 
@@ -234,16 +336,15 @@ export class StatusBar {
   stopPersistent(): void {
     this.clear();
     this.persistentActive = false;
-    this._persistentGetText = null;
     this._persistentText = "";
     this.draw();
   }
 
   /** Refresh the persistent status line text and redraw. */
   updatePersistent(): void {
-    if (!this.persistentActive || !this._persistentGetText) return;
+    if (!this.persistentActive) return;
     this.clear();
-    this._persistentText = this._persistentGetText();
+    this._persistentText = this._fmtWorkerStatus();
     this.draw();
   }
 }

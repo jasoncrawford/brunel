@@ -7,10 +7,10 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { CanUseTool, PermissionMode, PermissionResult } from "@anthropic-ai/claude-agent-sdk";
 import * as display from "./display.js";
 import { setThinkOutLoud } from "./display.js";
-import { statusBar, setVerbose, verbose } from "./status-bar.js";
+import { statusBar } from "./status-bar.js";
 import { ask, pick, pickMultiple, pickQuestion } from "./input.js";
 import type { PickQuestionResult } from "./input.js";
-import { AgentStatus, WorkerSession, registerWorkerCommands, startWorkerMode } from "./worker.js";
+import { WorkerSession, registerWorkerCommands, startWorkerMode } from "./worker.js";
 import type { RunQuery, WorkerModeConfig } from "./worker.js";
 import { loadConfig } from "../config.js";
 import { Workspace, confirmIfUnsafe, registerWorkspaceCommands } from "./workspace.js";
@@ -233,10 +233,10 @@ export async function main(
   initialModel?: string,
   initialEffort?: EffortValue,
 ): Promise<void> {
-  const agentStatus = new AgentStatus({ model: initialModel, effort: initialEffort });
+  statusBar.update({ model: initialModel, effort: initialEffort });
 
   // Worker mode setup: create workspace, session, signal handlers.
-  const workerCtx = workerConfig ? await startWorkerMode(workerConfig, agentStatus) : undefined;
+  const workerCtx = workerConfig ? await startWorkerMode(workerConfig) : undefined;
   const session = workerCtx?.session;
 
   const fetchModelsFn = createFetchModelsFn(permConfig);
@@ -244,7 +244,7 @@ export async function main(
   // Print the startup banner.
   display.print(display.c.sageGreen(display.hr("═")));
   display.print(display.c.skyBlue(display.s.bold("  Brunel Agent")));
-  display.print(display.c.lavender(`  Permissions: ${permConfig.permissionMode} | Model: ${agentStatus.model ?? "default"} | Effort: ${agentStatus.effort ?? "auto"} | Output: ${verbose ? "verbose" : "quiet"} | Log: ${workerConfig?.logFile ?? LOG_FILE}`));
+  display.print(display.c.lavender(`  Permissions: ${permConfig.permissionMode} | Model: ${statusBar.model ?? "default"} | Effort: ${statusBar.effort ?? "auto"} | Output: ${statusBar.verbose ? "verbose" : "quiet"} | Log: ${workerConfig?.logFile ?? LOG_FILE}`));
   display.print(display.c.sageGreen(display.hr("═")));
 
   process.stdout.write("\x1b[?2004h"); // enable bracketed paste mode
@@ -267,7 +267,7 @@ export async function main(
   const workspace: Workspace | undefined = session
     ? session.workspace
     : workspaceCfg
-      ? new Workspace(workspaceCfg.workspaceDir, agentStatus.agentId, workspaceCfg.repoUrl, originalCwd, confirm)
+      ? new Workspace(workspaceCfg.workspaceDir, statusBar.agentId, workspaceCfg.repoUrl, originalCwd, confirm)
       : undefined;
 
   // doExit handles REPL workspace cleanup and stdin/stdout teardown.
@@ -306,12 +306,12 @@ export async function main(
     handler: async (args) => {
       const newModel = await handleModelCommand(
         args,
-        agentStatus.model,
+        statusBar.model,
         (opts, idx) => pick(opts, { currentIdx: idx, escapable: true }),
         fetchModelsFn,
         display.print,
       );
-      agentStatus.update({ model: newModel });
+      statusBar.update({ model: newModel });
     },
   });
   registry.register("effort", {
@@ -319,11 +319,11 @@ export async function main(
     handler: async (args) => {
       const newEffort = await handleEffortCommand(
         args,
-        agentStatus.effort,
+        statusBar.effort,
         (opts, idx) => pick(opts, { currentIdx: idx, escapable: true }),
         display.print,
       );
-      agentStatus.update({ effort: newEffort });
+      statusBar.update({ effort: newEffort });
     },
   });
 
@@ -337,7 +337,7 @@ export async function main(
     const ac = new AbortController();
     session?.notifyQueryStart(ac);
     try {
-      sessionId = await runQueryFn(prompt, sessionId, ac, agentStatus.model, agentStatus.effort) ?? sessionId;
+      sessionId = await runQueryFn(prompt, sessionId, ac, statusBar.model, statusBar.effort) ?? sessionId;
       return !ac.signal.aborted;
     } catch (err) {
       console.error(display.c.boldRed(`\nERROR: ${fmtError(err)}`));
@@ -427,7 +427,7 @@ export async function main(
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const config = await loadConfig(process.argv);
-  setVerbose(config.verbose);
+  statusBar.setVerbose(config.verbose);
   setThinkOutLoud(config.thinkOutLoud);
   const permConfig = {
     permissionMode: config.permissionMode,
