@@ -1,15 +1,6 @@
-import fs from "fs";
 import * as display from "./display.js";
-import { resolveContent } from "./command-registry.js";
-import type { CommandRegistry, CommandSuggestion } from "./command-registry.js";
-
-function defaultReadFile(path: string): string | null {
-  try {
-    return fs.readFileSync(path, "utf8");
-  } catch {
-    return null;
-  }
-}
+import { filterCommands } from "./command-registry.js";
+import type { CommandSuggestion } from "./command-registry.js";
 
 // ── Stash ─────────────────────────────────────────────────────────────────────
 
@@ -18,116 +9,6 @@ let stash: string | null = null;
 
 /** Reset the stash (exposed for testing). */
 export function _resetStash(): void { stash = null; }
-
-// ── Argument application ──────────────────────────────────────────────────────
-
-/**
- * Apply args to a loaded command/skill content string.
- * If content contains $ARGUMENTS, all occurrences are replaced with args (even if empty).
- * Otherwise, if args is non-empty, appends "\nARGUMENTS: <args>".
- * Otherwise returns content unchanged.
- */
-export function applyArguments(content: string, args: string): string {
-  if (content.includes("$ARGUMENTS")) {
-    return content.replaceAll("$ARGUMENTS", args);
-  }
-  if (args) {
-    return `${content}\nARGUMENTS: ${args}`;
-  }
-  return content;
-}
-
-// ── Slash commands ────────────────────────────────────────────────────────────
-
-export type SlashCommandResult =
-  | { type: "command"; name: string }
-  | { type: "unknown_command"; command: string };
-
-/**
- * Parse a slash command from raw user input.
- * Returns null if the input is not a slash command.
- * Looks up the command name (and any aliases) in the registry.
- * Returns the canonical command name on match.
- */
-export function parseSlashCommand(input: string, registry: CommandRegistry): SlashCommandResult | null {
-  if (!input.startsWith("/")) return null;
-  const command = input.slice(1).split(/\s+/)[0];
-  if (!command) return null;
-  const entry = registry.lookup(command);
-  if (entry) return { type: "command", name: entry.name };
-  return { type: "unknown_command", command };
-}
-
-export type DispatchResult =
-  | { type: "command"; name: string; args: string }
-  | { type: "unknown_command"; command: string }
-  | { type: "skip" }
-  | { type: "query"; prompt: string };
-
-/**
- * Dispatch user input to the appropriate REPL action.
- * readFile is injectable for testing.
- */
-export async function dispatchInput(
-  input: string,
-  registry: CommandRegistry,
-  readFile: (path: string) => string | null = defaultReadFile,
-): Promise<DispatchResult> {
-  if (!input) return { type: "skip" };
-
-  const slash = parseSlashCommand(input, registry);
-  if (slash) {
-    if (slash.type === "command") {
-      // Extract everything after "/commandName" as args
-      const rawCommand = input.slice(1).split(/\s+/)[0];
-      const args = input.slice(1 + rawCommand.length).trim();
-      return { type: "command", name: slash.name, args };
-    }
-    // unknown_command: look up command file or skill
-    const { command } = slash;
-    const content = resolveContent(command, readFile);
-    if (content === null) return { type: "unknown_command", command };
-    const args = input.slice(1 + command.length).trim();
-    const prompt = applyArguments(content, args);
-    return { type: "query", prompt };
-  }
-
-  return { type: "query", prompt: input };
-}
-
-// ── Autocomplete ─────────────────────────────────────────────────────────────
-
-/**
- * Filter commands by substring. Case-insensitive. Empty query returns all.
- * Prefix matches come before non-prefix substring matches. Preserves relative
- * input order within each group.
- */
-export function matchCommands(query: string, commands: string[]): string[] {
-  if (query === "") return commands;
-  const q = query.toLowerCase();
-  const prefix = commands.filter(cmd => cmd.toLowerCase().startsWith(q));
-  const nonPrefix = commands.filter(cmd => !cmd.toLowerCase().startsWith(q) && cmd.toLowerCase().includes(q));
-  return [...prefix, ...nonPrefix];
-}
-
-/**
- * Filter CommandSuggestion objects by substring of name or description.
- * Case-insensitive. Empty query returns all commands.
- * Sort order: prefix matches of name, then non-prefix name substring matches,
- * then description-only matches.
- */
-export function filterCommands(query: string, commands: CommandSuggestion[]): CommandSuggestion[] {
-  if (query === "") return commands;
-  const q = query.toLowerCase();
-  const prefixName = commands.filter(c => c.name.toLowerCase().startsWith(q));
-  const substringName = commands.filter(
-    c => !c.name.toLowerCase().startsWith(q) && c.name.toLowerCase().includes(q),
-  );
-  const descOnly = commands.filter(
-    c => !c.name.toLowerCase().includes(q) && c.description.toLowerCase().includes(q),
-  );
-  return [...prefixName, ...substringName, ...descOnly];
-}
 
 // ── Raw input with bracketed paste support ────────────────────────────────────
 
