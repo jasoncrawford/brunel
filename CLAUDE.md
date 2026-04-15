@@ -78,7 +78,7 @@ Most tests run without Supabase. DB tests (`db.*.test.ts`, `pipeline.test.ts`) r
 
 ## Type system
 
-See **`docs/type-system.md`** for the full design. In brief: one server model class per concept, one `Wire.*` interface per concept in `shared/wire.ts` (imported as `import * as Wire from "../../shared/wire.js"`), shared domain types in `shared/types.ts`. Prefer a single wire type with optional fields over multiple types for the same concept. Name things after the concept, not the form — `Wire.Task` not `Wire.TaskSnapshot`.
+See **`docs/type-system.md`** for the full design. In brief: one server model class per concept, one `Wire.*` interface per concept in `shared/wire.ts` (imported as `import * as Wire from "../../shared/wire.js"`), shared domain types in `shared/wire.ts`. Prefer a single wire type with optional fields over multiple types for the same concept. Name things after the concept, not the form — `Wire.Task` not `Wire.TaskSnapshot`.
 
 ## Key conventions
 
