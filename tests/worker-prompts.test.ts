@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildInitialPrompt, buildEventPrompt, fmtEventList, resolveEventTemplate, coalesceEvents, EVENT_FMT, formatCommentLocation, type EventTemplateFmtTable } from "../src/agent/templates.js";
+import { buildInitialPrompt, buildEventPrompt, fmtEventList, resolveEventTemplate, coalesceEvents, EVENT_FMT, formatCommentLocation, type EventTemplateFmtTable } from "../src/agent/worker-prompts.js";
 import * as Wire from "../shared/wire.js";
 
 describe("buildInitialPrompt", () => {
