@@ -4,7 +4,8 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from "vitest";
 import { stripAnsi } from "./helpers.js";
-import { printForemanMessage, stopStatus, setVerbose } from "../src/agent/display.js";
+import { printForemanMessage } from "../src/agent/display.js";
+import { statusBar, setVerbose } from "../src/agent/status-bar.js";
 import * as Wire from "../shared/wire.js";
 
 function captureOutput(fn: () => void): string {
@@ -18,12 +19,12 @@ function captureOutput(fn: () => void): string {
 }
 
 beforeEach(() => {
-  stopStatus();
+  statusBar.stop();
   setVerbose(false);
 });
 
 afterEach(() => {
-  stopStatus();
+  statusBar.stop();
   setVerbose(false);
   vi.restoreAllMocks();
   vi.useRealTimers();

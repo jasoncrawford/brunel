@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { stripAnsi } from "./helpers.js";
+import { setVerbose } from "../src/agent/status-bar.js";
 import {
-  setVerbose,
   effectiveWidth,
   VERBOSE_PREFIX_LEN,
   clearBreak,

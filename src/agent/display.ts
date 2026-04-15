@@ -1,33 +1,5 @@
 import * as Wire from "../../shared/wire.js";
-import type { WorkerStatusOpts } from "./status-bar.js";
-import {
-  verbose, setVerbose,
-  fmtWorkerStatus,
-  startStatus, stopStatus,
-  startPersistentStatus, stopPersistentStatus, updatePersistentStatus,
-  drawStatusBarsRaw, clearStatusBars, drawStatusBars,
-  _statusActive, _persistentStatusActive,
-  setOnToolResultCallback, fireOnToolResult,
-  setInputPrintCallback, getInputPrintCallback,
-  setInputStatusCallback, getInputStatusCallback,
-  setInputClearCallback, getInputClearCallback,
-} from "./status-bar.js";
-
-// Re-export everything from status-bar.ts so callers that import from display.ts
-// continue to work without changes.
-export type { WorkerStatusOpts } from "./status-bar.js";
-export {
-  verbose, setVerbose,
-  fmtWorkerStatus,
-  startStatus, stopStatus,
-  startPersistentStatus, stopPersistentStatus, updatePersistentStatus,
-  drawStatusBarsRaw,
-  _statusActive, _persistentStatusActive,
-  setOnToolResultCallback,
-  setInputPrintCallback, getInputPrintCallback,
-  setInputStatusCallback, getInputStatusCallback,
-  setInputClearCallback, getInputClearCallback,
-} from "./status-bar.js";
+import { verbose, statusBar } from "./status-bar.js";
 
 // ── Display width ─────────────────────────────────────────────────────────────
 
@@ -694,27 +666,27 @@ function printLine(line: string): void {
 
 export function print(line: string | null) {
   if (line === null) return;
-  const inputPrintCallback = getInputPrintCallback();
-  if (inputPrintCallback) {
+  const inputPrint = statusBar.getInputPrint();
+  if (inputPrint) {
     // ask() is active: erase from current cursor position to end of screen
     // (clears the prompt, suggestion row, and status bars), write the new
     // content line, then let drawFresh redraw the prompt + status bars below.
     // If the prompt has a leading \n prefix (blank line above the prompt),
-    // _inputClearCallback goes up to also erase that blank line first so it
+    // _inputClear goes up to also erase that blank line first so it
     // is not orphaned above the printed message (issue #418).
-    const inputClearCallback = getInputClearCallback();
-    if (inputClearCallback) {
-      inputClearCallback();
+    const inputClear = statusBar.getInputClear();
+    if (inputClear) {
+      inputClear();
     } else {
       process.stdout.write("\r\x1b[J");
     }
     printLine(line);
-    inputPrintCallback();
+    inputPrint();
     return;
   }
-  clearStatusBars();
+  statusBar.clear();
   printLine(line);
-  drawStatusBars();
+  statusBar.draw();
 }
 
 export function resolve(table: FmtTable, key: string, data: unknown): string | null {
@@ -744,7 +716,7 @@ export function printBlock(b: ContentBlock, role: "assistant" | "user", msg?: Re
     const _input = toolUseInputs.get(tr.tool_use_id);
     print(resolve(tr.is_error ? TOOL_ERROR_FMT : TOOL_RESULT_FMT, name, { ...tr, _msg: msg, _input }));
     // Fire after the tool result is printed — tool has just finished running.
-    fireOnToolResult(name);
+    statusBar.fireOnToolResult(name);
     return;
   }
   const blockFmt = role === "assistant" ? ASSISTANT_BLOCK_FMT : USER_BLOCK_FMT;

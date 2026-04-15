@@ -3,15 +3,11 @@ import { stripAnsi } from "./helpers.js";
 import {
   printBlock,
   printMessage,
-  startStatus,
-  stopStatus,
   print,
   toolUseNames,
-  setVerbose,
   setThinkOutLoud,
-  _statusActive,
-  setInputPrintCallback,
 } from "../src/agent/display.js";
+import { statusBar, setVerbose } from "../src/agent/status-bar.js";
 
 function captureOutput(fn: () => void): string {
   let output = "";
@@ -35,13 +31,13 @@ async function captureOutputAsync(fn: () => Promise<void>): Promise<string> {
 
 beforeEach(() => {
   toolUseNames.clear();
-  stopStatus();
+  statusBar.stop();
   setVerbose(false);
 });
 
 afterEach(() => {
   toolUseNames.clear();
-  stopStatus();
+  statusBar.stop();
   setVerbose(false);
   vi.restoreAllMocks();
 });
@@ -340,7 +336,7 @@ describe("print()", () => {
 
   it("print(text) with inputPrintCallback set: clears current line before logging", () => {
     const cb = vi.fn();
-    setInputPrintCallback(cb);
+    statusBar.setInputPrint(cb);
     try {
       const output = captureOutput(() => {
         print("hello");
@@ -351,7 +347,7 @@ describe("print()", () => {
       expect(clearIdx).toBeGreaterThan(-1);
       expect(helloIdx).toBeGreaterThan(clearIdx);
     } finally {
-      setInputPrintCallback(null);
+      statusBar.setInputPrint(null);
     }
   });
 
@@ -365,27 +361,27 @@ describe("print()", () => {
 
 describe("Status line", () => {
   afterEach(() => {
-    stopStatus();
+    statusBar.stop();
     vi.restoreAllMocks();
   });
 
   it("startStatus and stopStatus run without error", () => {
     vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-    startStatus(() => "Working...");
-    stopStatus();
+    statusBar.start(() => "Working...");
+    statusBar.stop();
   });
 
   it("stopStatus sets _statusActive=false", () => {
     vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-    startStatus(() => "Working...");
-    stopStatus();
+    statusBar.start(() => "Working...");
+    statusBar.stop();
     // Calling stopStatus again should not crash (idempotent)
-    stopStatus();
+    statusBar.stop();
   });
 
   it("calling stopStatus twice: no crash", () => {
     vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-    stopStatus();
-    stopStatus();
+    statusBar.stop();
+    statusBar.stop();
   });
 });

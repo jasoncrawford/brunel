@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import * as statusBar from "../src/agent/status-bar.js";
+import { setVerbose, verbose, fmtWorkerStatus, StatusBar } from "../src/agent/status-bar.js";
 
 // Strip ANSI codes for assertion
 function stripAnsi(s: string): string {
@@ -8,32 +8,32 @@ function stripAnsi(s: string): string {
 
 describe("verbose flag", () => {
   afterEach(() => {
-    statusBar.setVerbose(false);
+    setVerbose(false);
   });
 
   it("defaults to false", () => {
-    expect(statusBar.verbose).toBe(false);
+    expect(verbose).toBe(false);
   });
 
   it("setVerbose(true) sets verbose to true", () => {
-    statusBar.setVerbose(true);
-    expect(statusBar.verbose).toBe(true);
+    setVerbose(true);
+    expect(verbose).toBe(true);
   });
 
   it("setVerbose(false) resets verbose", () => {
-    statusBar.setVerbose(true);
-    statusBar.setVerbose(false);
-    expect(statusBar.verbose).toBe(false);
+    setVerbose(true);
+    setVerbose(false);
+    expect(verbose).toBe(false);
   });
 });
 
 describe("fmtWorkerStatus", () => {
   afterEach(() => {
-    statusBar.setVerbose(false);
+    setVerbose(false);
   });
 
   it("shows worker id and no current task when idle", () => {
-    const result = stripAnsi(statusBar.fmtWorkerStatus({
+    const result = stripAnsi(fmtWorkerStatus({
       workerId: "7c254628-abcd-1234-efgh-000000000000",
       connectionStatus: "connected",
       width: 80,
@@ -44,8 +44,8 @@ describe("fmtWorkerStatus", () => {
   });
 
   it("shows disconnectCode in verbose mode", () => {
-    statusBar.setVerbose(true);
-    const result = stripAnsi(statusBar.fmtWorkerStatus({
+    setVerbose(true);
+    const result = stripAnsi(fmtWorkerStatus({
       workerId: "abc12345-0000-0000-0000-000000000000",
       connectionStatus: "disconnected",
       disconnectCode: 1006,
@@ -56,8 +56,8 @@ describe("fmtWorkerStatus", () => {
   });
 
   it("omits disconnectCode in non-verbose mode", () => {
-    statusBar.setVerbose(false);
-    const result = stripAnsi(statusBar.fmtWorkerStatus({
+    setVerbose(false);
+    const result = stripAnsi(fmtWorkerStatus({
       workerId: "abc12345-0000-0000-0000-000000000000",
       connectionStatus: "disconnected",
       disconnectCode: 1006,
@@ -68,7 +68,7 @@ describe("fmtWorkerStatus", () => {
   });
 
   it("shows task, PR, and branch when set", () => {
-    const result = stripAnsi(statusBar.fmtWorkerStatus({
+    const result = stripAnsi(fmtWorkerStatus({
       workerId: "7c254628-abcd-1234-efgh-000000000000",
       taskNumber: 374,
       prNumber: 406,
@@ -82,113 +82,107 @@ describe("fmtWorkerStatus", () => {
   });
 });
 
-describe("callbacks", () => {
-  afterEach(() => {
-    statusBar.setOnToolResultCallback(null);
-    statusBar.setInputPrintCallback(null);
-    statusBar.setInputStatusCallback(null);
-    statusBar.setInputClearCallback(null);
-  });
-
-  it("getInputPrintCallback returns null by default", () => {
-    expect(statusBar.getInputPrintCallback()).toBeNull();
-  });
-
-  it("setInputPrintCallback/getInputPrintCallback round-trips", () => {
-    const fn = vi.fn();
-    statusBar.setInputPrintCallback(fn);
-    expect(statusBar.getInputPrintCallback()).toBe(fn);
-  });
-
-  it("getInputStatusCallback returns null by default", () => {
-    expect(statusBar.getInputStatusCallback()).toBeNull();
-  });
-
-  it("setInputStatusCallback/getInputStatusCallback round-trips", () => {
-    const fn = vi.fn();
-    statusBar.setInputStatusCallback(fn);
-    expect(statusBar.getInputStatusCallback()).toBe(fn);
-  });
-
-  it("getInputClearCallback returns null by default", () => {
-    expect(statusBar.getInputClearCallback()).toBeNull();
-  });
-
-  it("setInputClearCallback/getInputClearCallback round-trips", () => {
-    const fn = vi.fn();
-    statusBar.setInputClearCallback(fn);
-    expect(statusBar.getInputClearCallback()).toBe(fn);
-  });
-
-  it("fireOnToolResult calls the registered callback", () => {
-    const fn = vi.fn();
-    statusBar.setOnToolResultCallback(fn);
-    statusBar.fireOnToolResult("Bash");
-    expect(fn).toHaveBeenCalledWith("Bash");
-  });
-
-  it("fireOnToolResult does nothing when no callback registered", () => {
-    // should not throw
-    expect(() => statusBar.fireOnToolResult("Bash")).not.toThrow();
-  });
-});
-
-describe("persistent status bar", () => {
+describe("StatusBar class", () => {
+  let bar: StatusBar;
   let stdoutWrite: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
+    bar = new StatusBar();
     stdoutWrite = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-    statusBar.stopStatus();
-    statusBar.stopPersistentStatus();
   });
 
   afterEach(() => {
     stdoutWrite.mockRestore();
-    statusBar.stopStatus();
-    statusBar.stopPersistentStatus();
+    bar.stop();
+    bar.stopPersistent();
   });
 
-  it("startPersistentStatus draws a status line", () => {
-    statusBar.startPersistentStatus(() => "worker abc • idle");
-    const writes = stdoutWrite.mock.calls.map(a => String(a[0]));
-    expect(writes.join("")).toContain("worker abc • idle");
+  describe("callbacks", () => {
+    it("getInputPrint returns null by default", () => {
+      expect(bar.getInputPrint()).toBeNull();
+    });
+
+    it("setInputPrint/getInputPrint round-trips", () => {
+      const fn = vi.fn();
+      bar.setInputPrint(fn);
+      expect(bar.getInputPrint()).toBe(fn);
+    });
+
+    it("getInputStatus returns null by default", () => {
+      expect(bar.getInputStatus()).toBeNull();
+    });
+
+    it("setInputStatus/getInputStatus round-trips", () => {
+      const fn = vi.fn();
+      bar.setInputStatus(fn);
+      expect(bar.getInputStatus()).toBe(fn);
+    });
+
+    it("getInputClear returns null by default", () => {
+      expect(bar.getInputClear()).toBeNull();
+    });
+
+    it("setInputClear/getInputClear round-trips", () => {
+      const fn = vi.fn();
+      bar.setInputClear(fn);
+      expect(bar.getInputClear()).toBe(fn);
+    });
+
+    it("fireOnToolResult calls the registered callback", () => {
+      const fn = vi.fn();
+      bar.setOnToolResult(fn);
+      bar.fireOnToolResult("Bash");
+      expect(fn).toHaveBeenCalledWith("Bash");
+    });
+
+    it("fireOnToolResult does nothing when no callback registered", () => {
+      expect(() => bar.fireOnToolResult("Bash")).not.toThrow();
+    });
   });
 
-  it("_persistentStatusActive is true after start", () => {
-    statusBar.startPersistentStatus(() => "worker abc • idle");
-    expect(statusBar._persistentStatusActive).toBe(true);
-  });
+  describe("persistent status bar", () => {
+    it("startPersistent draws a status line", () => {
+      bar.startPersistent(() => "worker abc • idle");
+      const writes = stdoutWrite.mock.calls.map(a => String(a[0]));
+      expect(writes.join("")).toContain("worker abc • idle");
+    });
 
-  it("_persistentStatusActive is false after stop", () => {
-    statusBar.startPersistentStatus(() => "worker abc • idle");
-    statusBar.stopPersistentStatus();
-    expect(statusBar._persistentStatusActive).toBe(false);
-  });
+    it("persistentActive is true after startPersistent", () => {
+      bar.startPersistent(() => "worker abc • idle");
+      expect(bar.persistentActive).toBe(true);
+    });
 
-  it("stopPersistentStatus clears the status line", () => {
-    statusBar.startPersistentStatus(() => "worker abc • idle");
-    stdoutWrite.mockClear();
-    statusBar.stopPersistentStatus();
-    const writes = stdoutWrite.mock.calls.map(a => String(a[0]));
-    expect(writes.some(w => w.includes("\x1b[K"))).toBe(true);
-  });
+    it("persistentActive is false after stopPersistent", () => {
+      bar.startPersistent(() => "worker abc • idle");
+      bar.stopPersistent();
+      expect(bar.persistentActive).toBe(false);
+    });
 
-  it("updatePersistentStatus refreshes text", () => {
-    let text = "initial";
-    statusBar.startPersistentStatus(() => text);
-    stdoutWrite.mockClear();
-    text = "updated";
-    statusBar.updatePersistentStatus();
-    const writes = stdoutWrite.mock.calls.map(a => String(a[0]));
-    expect(writes.join("")).toContain("updated");
-  });
+    it("stopPersistent clears the status line", () => {
+      bar.startPersistent(() => "worker abc • idle");
+      stdoutWrite.mockClear();
+      bar.stopPersistent();
+      const writes = stdoutWrite.mock.calls.map(a => String(a[0]));
+      expect(writes.some(w => w.includes("\x1b[K"))).toBe(true);
+    });
 
-  it("_statusActive is false by default", () => {
-    expect(statusBar._statusActive).toBe(false);
-  });
+    it("updatePersistent refreshes text", () => {
+      let text = "initial";
+      bar.startPersistent(() => text);
+      stdoutWrite.mockClear();
+      text = "updated";
+      bar.updatePersistent();
+      const writes = stdoutWrite.mock.calls.map(a => String(a[0]));
+      expect(writes.join("")).toContain("updated");
+    });
 
-  it("stopStatus sets _statusActive to false", () => {
-    statusBar.stopStatus();
-    expect(statusBar._statusActive).toBe(false);
+    it("active is false by default", () => {
+      expect(bar.active).toBe(false);
+    });
+
+    it("stop sets active to false", () => {
+      bar.stop();
+      expect(bar.active).toBe(false);
+    });
   });
 });

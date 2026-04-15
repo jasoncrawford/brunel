@@ -28,7 +28,8 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import { runQuery } from "../src/agent/index.js";
 import { getCachedModels, _resetCachedModels } from "../src/agent/model.js";
 import { ask, pick, pickMultiple, pickQuestion } from "../src/agent/input.js";
-import { toolUseNames, stopStatus, setVerbose } from "../src/agent/display.js";
+import { toolUseNames } from "../src/agent/display.js";
+import { statusBar, setVerbose } from "../src/agent/status-bar.js";
 
 const defaultPermConfig = {
   permissionMode: "default" as const,
@@ -68,13 +69,13 @@ function captureConsole() {
 
 beforeEach(() => {
   toolUseNames.clear();
-  stopStatus();
+  statusBar.stop();
   setVerbose(false);
   vi.clearAllMocks();
 });
 
 afterEach(() => {
-  stopStatus();
+  statusBar.stop();
   vi.restoreAllMocks();
 });
 

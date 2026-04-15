@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import * as display from "../src/agent/display.js";
+import { setVerbose, fmtWorkerStatus, statusBar } from "../src/agent/status-bar.js";
 
 // Strip ANSI codes for assertion
 function stripAnsi(s: string): string {
@@ -9,11 +9,11 @@ function stripAnsi(s: string): string {
 describe("fmtWorkerStatus", () => {
   afterEach(() => {
     // Reset verbose flag so tests that call setVerbose(true) don't bleed over.
-    display.setVerbose(false);
+    setVerbose(false);
   });
 
   it("idle with no task shows worker id and no current task", () => {
-    const result = stripAnsi(display.fmtWorkerStatus({
+    const result = stripAnsi(fmtWorkerStatus({
       workerId: "7c254628-abcd-1234-efgh-000000000000",
       connectionStatus: "connected",
       width: 80,
@@ -24,7 +24,7 @@ describe("fmtWorkerStatus", () => {
   });
 
   it("with task, PR, and branch", () => {
-    const result = stripAnsi(display.fmtWorkerStatus({
+    const result = stripAnsi(fmtWorkerStatus({
       workerId: "7c254628-abcd-1234-efgh-000000000000",
       taskNumber: 374,
       prNumber: 406,
@@ -40,7 +40,7 @@ describe("fmtWorkerStatus", () => {
   });
 
   it("disconnected shows Disconnected on right", () => {
-    const result = stripAnsi(display.fmtWorkerStatus({
+    const result = stripAnsi(fmtWorkerStatus({
       workerId: "abc12345-0000-0000-0000-000000000000",
       connectionStatus: "disconnected",
       width: 80,
@@ -50,7 +50,7 @@ describe("fmtWorkerStatus", () => {
   });
 
   it("disconnected with retryInSeconds shows Retrying in", () => {
-    const result = stripAnsi(display.fmtWorkerStatus({
+    const result = stripAnsi(fmtWorkerStatus({
       workerId: "abc12345-0000-0000-0000-000000000000",
       connectionStatus: "disconnected",
       retryInSeconds: 3,
@@ -60,7 +60,7 @@ describe("fmtWorkerStatus", () => {
   });
 
   it("reconnecting shows Reconnecting... on right", () => {
-    const result = stripAnsi(display.fmtWorkerStatus({
+    const result = stripAnsi(fmtWorkerStatus({
       workerId: "abc12345-0000-0000-0000-000000000000",
       connectionStatus: "reconnecting",
       width: 80,
@@ -69,7 +69,7 @@ describe("fmtWorkerStatus", () => {
   });
 
   it("handshaking shows Handshaking... on right", () => {
-    const result = stripAnsi(display.fmtWorkerStatus({
+    const result = stripAnsi(fmtWorkerStatus({
       workerId: "abc12345-0000-0000-0000-000000000000",
       connectionStatus: "handshaking",
       width: 80,
@@ -78,8 +78,8 @@ describe("fmtWorkerStatus", () => {
   });
 
   it("disconnected with disconnectCode omits code in non-verbose mode", () => {
-    display.setVerbose(false);
-    const result = stripAnsi(display.fmtWorkerStatus({
+    setVerbose(false);
+    const result = stripAnsi(fmtWorkerStatus({
       workerId: "abc12345-0000-0000-0000-000000000000",
       connectionStatus: "disconnected",
       disconnectCode: 1006,
@@ -90,8 +90,8 @@ describe("fmtWorkerStatus", () => {
   });
 
   it("disconnected with disconnectCode shows code in verbose mode when retryInSeconds given", () => {
-    display.setVerbose(true);
-    const result = stripAnsi(display.fmtWorkerStatus({
+    setVerbose(true);
+    const result = stripAnsi(fmtWorkerStatus({
       workerId: "abc12345-0000-0000-0000-000000000000",
       connectionStatus: "disconnected",
       disconnectCode: 1006,
@@ -102,7 +102,7 @@ describe("fmtWorkerStatus", () => {
   });
 
   it("omits task when taskNumber is undefined", () => {
-    const result = stripAnsi(display.fmtWorkerStatus({
+    const result = stripAnsi(fmtWorkerStatus({
       workerId: "abc12345-0000-0000-0000-000000000000",
       connectionStatus: "connected",
       width: 80,
@@ -111,7 +111,7 @@ describe("fmtWorkerStatus", () => {
   });
 
   it("omits PR when prNumber is undefined", () => {
-    const result = stripAnsi(display.fmtWorkerStatus({
+    const result = stripAnsi(fmtWorkerStatus({
       workerId: "abc12345-0000-0000-0000-000000000000",
       taskNumber: 5,
       connectionStatus: "connected",
@@ -121,7 +121,7 @@ describe("fmtWorkerStatus", () => {
   });
 
   it("omits branch when branch is empty string", () => {
-    const result = stripAnsi(display.fmtWorkerStatus({
+    const result = stripAnsi(fmtWorkerStatus({
       workerId: "abc12345-0000-0000-0000-000000000000",
       taskNumber: 5,
       branch: "",
@@ -134,7 +134,7 @@ describe("fmtWorkerStatus", () => {
   });
 
   it("result fits within specified width", () => {
-    const result = stripAnsi(display.fmtWorkerStatus({
+    const result = stripAnsi(fmtWorkerStatus({
       workerId: "7c254628-abcd-1234-efgh-000000000000",
       taskNumber: 374,
       prNumber: 406,
@@ -146,7 +146,7 @@ describe("fmtWorkerStatus", () => {
   });
 
   it("shows 'sonnet' when model is undefined", () => {
-    const result = stripAnsi(display.fmtWorkerStatus({
+    const result = stripAnsi(fmtWorkerStatus({
       workerId: "abc12345-0000-0000-0000-000000000000",
       connectionStatus: "connected",
       width: 80,
@@ -155,7 +155,7 @@ describe("fmtWorkerStatus", () => {
   });
 
   it("shows 'sonnet' when model is 'default'", () => {
-    const result = stripAnsi(display.fmtWorkerStatus({
+    const result = stripAnsi(fmtWorkerStatus({
       workerId: "abc12345-0000-0000-0000-000000000000",
       model: "default",
       connectionStatus: "connected",
@@ -166,7 +166,7 @@ describe("fmtWorkerStatus", () => {
   });
 
   it("shows model name when model is set to non-default", () => {
-    const result = stripAnsi(display.fmtWorkerStatus({
+    const result = stripAnsi(fmtWorkerStatus({
       workerId: "abc12345-0000-0000-0000-000000000000",
       model: "opus",
       connectionStatus: "connected",
@@ -176,7 +176,7 @@ describe("fmtWorkerStatus", () => {
   });
 
   it("shows model after worker id and before task info", () => {
-    const result = stripAnsi(display.fmtWorkerStatus({
+    const result = stripAnsi(fmtWorkerStatus({
       workerId: "abc12345-0000-0000-0000-000000000000",
       model: "haiku",
       taskNumber: 42,
@@ -191,7 +191,7 @@ describe("fmtWorkerStatus", () => {
   });
 
   it("omits effort when effort is undefined", () => {
-    const result = stripAnsi(display.fmtWorkerStatus({
+    const result = stripAnsi(fmtWorkerStatus({
       workerId: "abc12345-0000-0000-0000-000000000000",
       model: "opus",
       connectionStatus: "connected",
@@ -202,7 +202,7 @@ describe("fmtWorkerStatus", () => {
   });
 
   it("shows effort in parentheses when effort is set", () => {
-    const result = stripAnsi(display.fmtWorkerStatus({
+    const result = stripAnsi(fmtWorkerStatus({
       workerId: "abc12345-0000-0000-0000-000000000000",
       model: "opus",
       effort: "medium",
@@ -213,7 +213,7 @@ describe("fmtWorkerStatus", () => {
   });
 
   it("shows effort with default sonnet model", () => {
-    const result = stripAnsi(display.fmtWorkerStatus({
+    const result = stripAnsi(fmtWorkerStatus({
       workerId: "abc12345-0000-0000-0000-000000000000",
       effort: "high",
       connectionStatus: "connected",
@@ -223,7 +223,7 @@ describe("fmtWorkerStatus", () => {
   });
 
   it("uses first 8 chars of workerId for legacy bare UUID IDs", () => {
-    const result = stripAnsi(display.fmtWorkerStatus({
+    const result = stripAnsi(fmtWorkerStatus({
       workerId: "7c254628-1111-2222-3333-444444444444",
       connectionStatus: "connected",
       width: 80,
@@ -233,7 +233,7 @@ describe("fmtWorkerStatus", () => {
   });
 
   it("shows name + first 8 chars of UUID for named worker IDs", () => {
-    const result = stripAnsi(display.fmtWorkerStatus({
+    const result = stripAnsi(fmtWorkerStatus({
       workerId: "obadiah-7143f5cc-abf3-4b8a-bdb5-86989c54d3b2",
       connectionStatus: "connected",
       width: 80,
@@ -249,48 +249,48 @@ describe("persistent status bar", () => {
   beforeEach(() => {
     stdoutWrite = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     // Ensure clean state
-    display.stopStatus();
-    display.stopPersistentStatus();
+    statusBar.stop();
+    statusBar.stopPersistent();
   });
 
   afterEach(() => {
     stdoutWrite.mockRestore();
-    display.stopStatus();
-    display.stopPersistentStatus();
+    statusBar.stop();
+    statusBar.stopPersistent();
   });
 
-  it("startPersistentStatus draws a status line", () => {
-    display.startPersistentStatus(() => "worker abc • idle");
+  it("startPersistent draws a status line", () => {
+    statusBar.startPersistent(() => "worker abc • idle");
     const writes = stdoutWrite.mock.calls.map(a => String(a[0]));
     const combined = writes.join("");
     expect(combined).toContain("worker abc • idle");
   });
 
-  it("stopPersistentStatus clears the status line", () => {
-    display.startPersistentStatus(() => "worker abc • idle");
+  it("stopPersistent clears the status line", () => {
+    statusBar.startPersistent(() => "worker abc • idle");
     stdoutWrite.mockClear();
-    display.stopPersistentStatus();
+    statusBar.stopPersistent();
     const writes = stdoutWrite.mock.calls.map(a => String(a[0]));
     // Should have written escape sequences to clear
     expect(writes.some(w => w.includes("\x1b[K"))).toBe(true);
   });
 
-  it("startStatus and startPersistentStatus coexist", () => {
-    display.startPersistentStatus(() => "worker abc • busy");
-    display.startStatus(() => "Working… 5s");
+  it("start and startPersistent coexist", () => {
+    statusBar.startPersistent(() => "worker abc • busy");
+    statusBar.start(() => "Working… 5s");
     const writes = stdoutWrite.mock.calls.map(a => String(a[0]));
     const combined = writes.join("");
     expect(combined).toContain("Working… 5s");
     expect(combined).toContain("worker abc • busy");
   });
 
-  it("stopStatus leaves persistent status active", () => {
-    display.startPersistentStatus(() => "worker abc • idle");
-    display.startStatus(() => "Working…");
+  it("stop leaves persistent status active", () => {
+    statusBar.startPersistent(() => "worker abc • idle");
+    statusBar.start(() => "Working…");
     stdoutWrite.mockClear();
-    display.stopStatus();
+    statusBar.stop();
     // persistent status is still active
-    expect(display._persistentStatusActive).toBe(true);
-    expect(display._statusActive).toBe(false);
+    expect(statusBar.persistentActive).toBe(true);
+    expect(statusBar.active).toBe(false);
   });
 });

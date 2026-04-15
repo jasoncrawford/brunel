@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { stripAnsi } from "./helpers.js";
-import { print, setVerbose, stopStatus } from "../src/agent/display.js";
+import { print } from "../src/agent/display.js";
+import { statusBar, setVerbose } from "../src/agent/status-bar.js";
 
 function captureOutput(fn: () => void): string {
   let output = "";
@@ -13,12 +14,12 @@ function captureOutput(fn: () => void): string {
 }
 
 beforeEach(() => {
-  stopStatus();
+  statusBar.stop();
   setVerbose(false);
 });
 
 afterEach(() => {
-  stopStatus();
+  statusBar.stop();
   setVerbose(false);
   vi.restoreAllMocks();
 });

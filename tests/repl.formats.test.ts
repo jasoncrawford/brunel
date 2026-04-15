@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { stripAnsi } from "./helpers.js";
+import { setVerbose } from "../src/agent/status-bar.js";
 import {
   resolve,
-  setVerbose,
   setThinkOutLoud,
   ASSISTANT_BLOCK_FMT,
   USER_BLOCK_FMT,

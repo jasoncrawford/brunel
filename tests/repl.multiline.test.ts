@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PassThrough } from "stream";
 import { ask } from "../src/agent/input.js";
 import * as display from "../src/agent/display.js";
+import { statusBar } from "../src/agent/status-bar.js";
 
 function makeStdin() {
   const stream = new PassThrough();
@@ -272,7 +273,7 @@ describe("ask() - status update during multiline input (issue #486)", () => {
     setColumns(10);
     const writeSpy = vi.mocked(process.stdout.write);
 
-    display.startPersistentStatus(() => "status");
+    statusBar.startPersistent(() => "status");
 
     await withFakeStdin(async (stdin) => {
       const p = ask("> ", () => []);
@@ -281,7 +282,7 @@ describe("ask() - status update during multiline input (issue #486)", () => {
 
       // Simulate a status update (e.g. branch refresh, WS reconnect) while
       // the cursor is sitting on row 1 of the multiline buffer.
-      display.updatePersistentStatus();
+      statusBar.updatePersistent();
 
       // The redraw must start by going up 1 row (\x1b[1A) to reach the prompt
       // line (row 0), then write the prompt "> ".  Without the fix, drawFresh()
@@ -299,7 +300,7 @@ describe("ask() - status update during multiline input (issue #486)", () => {
       expect(await p).toBe("123456789");
     });
 
-    display.stopPersistentStatus();
+    statusBar.stopPersistent();
   });
 
   it("status update while cursor is on row 0 does not emit spurious cursor-up", async () => {
@@ -308,14 +309,14 @@ describe("ask() - status update during multiline input (issue #486)", () => {
     setColumns(10);
     const writeSpy = vi.mocked(process.stdout.write);
 
-    display.startPersistentStatus(() => "status");
+    statusBar.startPersistent(() => "status");
 
     await withFakeStdin(async (stdin) => {
       const p = ask("> ", () => []);
       stdin.push("hello"); // 5 chars, stays on row 0
       writeSpy.mockClear();
 
-      display.updatePersistentStatus();
+      statusBar.updatePersistent();
 
       const output = collectOutput(writeSpy);
       // A \x1b[0A is a no-op (guard in fullRedraw), so we just verify the
@@ -329,7 +330,7 @@ describe("ask() - status update during multiline input (issue #486)", () => {
       expect(await p).toBe("hello");
     });
 
-    display.stopPersistentStatus();
+    statusBar.stopPersistent();
   });
 });
 
@@ -338,18 +339,18 @@ describe("ask() - status update during multiline input (issue #486)", () => {
 describe("display.print() callback for ask() redraw", () => {
   it("setInputPrintCallback registers a callback called on display.print()", () => {
     const callback = vi.fn();
-    display.setInputPrintCallback(callback);
+    statusBar.setInputPrint(callback);
     // Spy on console.log to prevent actual output
     vi.spyOn(console, "log").mockImplementation(() => {});
     display.print("test message");
     expect(callback).toHaveBeenCalled();
-    display.setInputPrintCallback(null);
+    statusBar.setInputPrint(null);
   });
 
   it("callback is not called after it is cleared", () => {
     const callback = vi.fn();
-    display.setInputPrintCallback(callback);
-    display.setInputPrintCallback(null);
+    statusBar.setInputPrint(callback);
+    statusBar.setInputPrint(null);
     vi.spyOn(console, "log").mockImplementation(() => {});
     display.print("test message");
     expect(callback).not.toHaveBeenCalled();

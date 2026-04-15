@@ -6,7 +6,8 @@ import { fileURLToPath } from "url";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { CanUseTool, PermissionMode, PermissionResult } from "@anthropic-ai/claude-agent-sdk";
 import * as display from "./display.js";
-import { setVerbose, setThinkOutLoud } from "./display.js";
+import { setThinkOutLoud } from "./display.js";
+import { statusBar, setVerbose, verbose } from "./status-bar.js";
 import { ask, pick, pickMultiple, pickQuestion } from "./input.js";
 import type { PickQuestionResult } from "./input.js";
 import { AgentStatus, WorkerSession, registerWorkerCommands, startWorkerMode } from "./worker.js";
@@ -43,7 +44,7 @@ export async function handleAskUserQuestion(
   input: Record<string, unknown>,
   getStatusText: () => string,
 ): Promise<PermissionResult> {
-  display.stopStatus();
+  statusBar.stop();
   const questions = (input.questions as Question[]) ?? [];
   const answers: Record<string, string> = {};
 
@@ -56,14 +57,14 @@ export async function handleAskUserQuestion(
     } else {
       const result: PickQuestionResult = await pickQuestion(q.options);
       if (result.type === "discuss") {
-        display.startStatus(getStatusText);
+        statusBar.start(getStatusText);
         return { behavior: "deny", message: "The user would like to discuss more before answering. Prompt them to begin the discussion." };
       }
       answers[q.question] = result.type === "answer" ? result.value : result.text;
     }
   }
 
-  display.startStatus(getStatusText);
+  statusBar.start(getStatusText);
   return { behavior: "allow", updatedInput: { ...input, answers } };
 }
 
@@ -72,10 +73,10 @@ export async function handleToolPermission(
   input: Record<string, unknown>,
   getStatusText: () => string,
 ): Promise<PermissionResult> {
-  display.stopStatus();
+  statusBar.stop();
   display.print(display.c.amber(`\n⚠ ${toolName}(${display.fmtArgs(input)})`));
   const idx = await pick(["Allow", "Deny"]);
-  display.startStatus(getStatusText);
+  statusBar.start(getStatusText);
   if (idx === 0) return { behavior: "allow", updatedInput: input };
   return { behavior: "deny", message: "User denied tool request" };
 }
@@ -95,12 +96,12 @@ export async function runQuery(
   // fires on every display.print() call, adding an extra \r\n after each piece
   // of output and causing double-spacing. After the query finishes we restore
   // and invoke the callback so the prompt redraws once (fixes issue #108).
-  const savedInputCallback = display.getInputPrintCallback();
-  const savedStatusCallback = display.getInputStatusCallback();
-  const savedClearCallback = display.getInputClearCallback();
-  display.setInputPrintCallback(null);
-  display.setInputStatusCallback(null);
-  display.setInputClearCallback(null);
+  const savedInputCallback = statusBar.getInputPrint();
+  const savedStatusCallback = statusBar.getInputStatus();
+  const savedClearCallback = statusBar.getInputClear();
+  statusBar.setInputPrint(null);
+  statusBar.setInputStatus(null);
+  statusBar.setInputClear(null);
   if (savedInputCallback) {
     // ask() was active when this query started (e.g., debounce-triggered while the
     // worker prompt was showing). Clear from cursor to end of screen so the prompt
@@ -110,7 +111,7 @@ export async function runQuery(
 
   const stats = new QueryStats();
   const getStatusText = () => display.c.darkGray(stats.getStatusText());
-  display.startStatus(getStatusText);
+  statusBar.start(getStatusText);
 
   const canUseTool: CanUseTool = async (toolName, input) => {
     if (toolName === "AskUserQuestion") {
@@ -184,7 +185,7 @@ export async function runQuery(
       // cleanly into the permanent summary line.
       if (message.type === "result") {
         resultReceived = true;
-        display.stopStatus();
+        statusBar.stop();
       }
 
       display.printMessage(message);
@@ -196,7 +197,7 @@ export async function runQuery(
     process.stdin.removeListener("data", onInterrupt);
   }
 
-  display.stopStatus(); // no-op if result message already stopped it
+  statusBar.stop(); // no-op if result message already stopped it
 
   if (!resultReceived) {
     display.print(display.c.darkGray("\nInterrupted. What should the agent do instead?"));
@@ -204,9 +205,9 @@ export async function runQuery(
 
   // Restore the callbacks and redraw the prompt. In worker mode this redraws
   // the waiting "[worker] > " prompt after query output has scrolled past it.
-  display.setInputPrintCallback(savedInputCallback);
-  display.setInputStatusCallback(savedStatusCallback);
-  display.setInputClearCallback(savedClearCallback);
+  statusBar.setInputPrint(savedInputCallback);
+  statusBar.setInputStatus(savedStatusCallback);
+  statusBar.setInputClear(savedClearCallback);
   savedInputCallback?.();
 
   return capturedSessionId;
@@ -243,7 +244,7 @@ export async function main(
   // Print the startup banner.
   display.print(display.c.sageGreen(display.hr("═")));
   display.print(display.c.skyBlue(display.s.bold("  Brunel Agent")));
-  display.print(display.c.lavender(`  Permissions: ${permConfig.permissionMode} | Model: ${agentStatus.model ?? "default"} | Effort: ${agentStatus.effort ?? "auto"} | Output: ${display.verbose ? "verbose" : "quiet"} | Log: ${workerConfig?.logFile ?? LOG_FILE}`));
+  display.print(display.c.lavender(`  Permissions: ${permConfig.permissionMode} | Model: ${agentStatus.model ?? "default"} | Effort: ${agentStatus.effort ?? "auto"} | Output: ${verbose ? "verbose" : "quiet"} | Log: ${workerConfig?.logFile ?? LOG_FILE}`));
   display.print(display.c.sageGreen(display.hr("═")));
 
   process.stdout.write("\x1b[?2004h"); // enable bracketed paste mode
@@ -255,7 +256,7 @@ export async function main(
   const originalCwd = process.cwd();
 
   const confirm = async (msg: string): Promise<boolean> => {
-    display.stopStatus();
+    statusBar.stop();
     display.print(display.c.amber(`\n⚠ Potential data loss:\n${msg}`));
     const idx = await pick(["Yes, proceed", "No, cancel"]);
     return idx === 0;

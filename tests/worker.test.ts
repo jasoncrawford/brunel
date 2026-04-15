@@ -40,10 +40,10 @@ let wsFactory: ReturnType<typeof vi.fn>;
 let display: {
   print: ReturnType<typeof vi.fn>;
   printForemanMessage: ReturnType<typeof vi.fn>;
-  startPersistentStatus: ReturnType<typeof vi.fn>;
-  stopPersistentStatus: ReturnType<typeof vi.fn>;
-  updatePersistentStatus: ReturnType<typeof vi.fn>;
-  setOnToolResultCallback: ReturnType<typeof vi.fn>;
+  startPersistent: ReturnType<typeof vi.fn>;
+  stopPersistent: ReturnType<typeof vi.fn>;
+  updatePersistent: ReturnType<typeof vi.fn>;
+  setOnToolResult: ReturnType<typeof vi.fn>;
 };
 let session: WorkerSession;
 
@@ -53,10 +53,10 @@ beforeEach(() => {
   display = {
     print: vi.fn(),
     printForemanMessage: vi.fn(),
-    startPersistentStatus: vi.fn(),
-    stopPersistentStatus: vi.fn(),
-    updatePersistentStatus: vi.fn(),
-    setOnToolResultCallback: vi.fn(),
+    startPersistent: vi.fn(),
+    stopPersistent: vi.fn(),
+    updatePersistent: vi.fn(),
+    setOnToolResult: vi.fn(),
   };
   session = new WorkerSession(new AgentStatus({ agentId: AGENT_ID }), wsFactory, display);
   session.start();
@@ -450,37 +450,37 @@ describe("connection status bar", () => {
     expect(stripAnsi(session.getStatusText())).toContain("Reconnecting");
   });
 
-  it("calls startPersistentStatus on start()", () => {
-    expect(display.startPersistentStatus).toHaveBeenCalledOnce();
+  it("calls startPersistent on start()", () => {
+    expect(display.startPersistent).toHaveBeenCalledOnce();
   });
 
   it("registers a tool result callback on start()", () => {
-    expect(display.setOnToolResultCallback).toHaveBeenCalledOnce();
-    expect(typeof display.setOnToolResultCallback.mock.calls[0][0]).toBe("function");
+    expect(display.setOnToolResult).toHaveBeenCalledOnce();
+    expect(typeof display.setOnToolResult.mock.calls[0][0]).toBe("function");
   });
 
   it("tool result callback refreshes status on Bash tool", async () => {
-    const cb = display.setOnToolResultCallback.mock.calls[0][0] as (toolName: string) => void;
-    display.updatePersistentStatus.mockClear();
+    const cb = display.setOnToolResult.mock.calls[0][0] as (toolName: string) => void;
+    display.updatePersistent.mockClear();
     cb("Bash");
-    await vi.waitFor(() => expect(display.updatePersistentStatus).toHaveBeenCalled());
+    await vi.waitFor(() => expect(display.updatePersistent).toHaveBeenCalled());
   });
 
   it("tool result callback does not refresh status for non-Bash tools", async () => {
-    const cb = display.setOnToolResultCallback.mock.calls[0][0] as (toolName: string) => void;
+    const cb = display.setOnToolResult.mock.calls[0][0] as (toolName: string) => void;
     // Drain startup calls: connect()'s synchronous refreshStatus() + refreshBranch()'s async one
-    await vi.waitFor(() => expect(display.updatePersistentStatus).toHaveBeenCalledTimes(2));
-    display.updatePersistentStatus.mockClear();
+    await vi.waitFor(() => expect(display.updatePersistent).toHaveBeenCalledTimes(2));
+    display.updatePersistent.mockClear();
     cb("Read");
     // Give a tick for any potential async work
     await new Promise((r) => setTimeout(r, 10));
-    expect(display.updatePersistentStatus).not.toHaveBeenCalled();
+    expect(display.updatePersistent).not.toHaveBeenCalled();
   });
 
-  it("calls updatePersistentStatus after open", () => {
-    display.updatePersistentStatus.mockClear();
+  it("calls updatePersistent after open", () => {
+    display.updatePersistent.mockClear();
     fakeWs.emit("open");
-    expect(display.updatePersistentStatus).toHaveBeenCalled();
+    expect(display.updatePersistent).toHaveBeenCalled();
   });
 
   it("shows Reconnecting in status text when connect() is called after disconnect", () => {

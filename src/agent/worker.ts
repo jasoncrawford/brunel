@@ -6,6 +6,7 @@ import path from "node:path";
 import os from "node:os";
 import { WebSocket } from "ws";
 import * as display from "./display.js";
+import { fmtWorkerStatus, setVerbose, statusBar } from "./status-bar.js";
 import { buildInitialPrompt, buildEventPrompt } from "./worker-prompts.js";
 import type { EffortValue } from "./effort.js";
 import * as Wire from "../../shared/wire.js";
@@ -184,7 +185,7 @@ export class AgentStatus extends EventEmitter {
     const retryInSeconds = this._reconnectAt != null
       ? Math.max(0, Math.ceil((this._reconnectAt - Date.now()) / 1000))
       : undefined;
-    return display.fmtWorkerStatus({
+    return fmtWorkerStatus({
       workerId: this.agentId,
       model: this._model,
       effort: this._effort,
@@ -205,11 +206,11 @@ export type RunQuery = (prompt: string, sessionId: string | undefined, abortCont
 export type WorkerDisplay = {
   print: (line: string | null) => void;
   printForemanMessage: (msg: Wire.ForemanMessage) => void;
-  startPersistentStatus?: (getText: () => string) => void;
-  stopPersistentStatus?: () => void;
-  updatePersistentStatus?: () => void;
+  startPersistent?: (getText: () => string) => void;
+  stopPersistent?: () => void;
+  updatePersistent?: () => void;
   /** Register a callback fired after each tool result (tool has just finished). */
-  setOnToolResultCallback?: (fn: ((toolName: string) => void) | null) => void;
+  setOnToolResult?: (fn: ((toolName: string) => void) | null) => void;
 };
 
 export type WorkerSessionOptions = {
@@ -299,9 +300,9 @@ export class WorkerSession {
   start(): void {
     // Subscribe to model changes — the display refreshes automatically whenever
     // any status field changes, without needing explicit refreshStatus() calls.
-    this.agentStatus.on("change", () => this.display.updatePersistentStatus?.());
-    this.display.startPersistentStatus?.(() => this.agentStatus.getStatusText());
-    this.display.setOnToolResultCallback?.((toolName) => {
+    this.agentStatus.on("change", () => this.display.updatePersistent?.());
+    this.display.startPersistent?.(() => this.agentStatus.getStatusText());
+    this.display.setOnToolResult?.((toolName) => {
       // Refresh the branch display after each Bash tool completes so the status
       // bar reflects branch changes (e.g. git checkout) without waiting for the
       // full query to finish.
@@ -687,7 +688,7 @@ export async function startWorkerMode(config: WorkerModeConfig, agentStatus: Age
   session: WorkerSession;
   cleanup: () => Promise<void>;
 }> {
-  display.setVerbose(config.verbose);
+  setVerbose(config.verbose);
 
   const originalCwd = process.cwd();
   const workspaceDir = config.workspaceDir ?? path.join(os.homedir(), ".brunel", "workers");
@@ -735,10 +736,10 @@ export async function startWorkerMode(config: WorkerModeConfig, agentStatus: Age
   const workerDisplay: WorkerDisplay = {
     print: display.print,
     printForemanMessage: display.printForemanMessage,
-    startPersistentStatus: display.startPersistentStatus,
-    stopPersistentStatus: display.stopPersistentStatus,
-    updatePersistentStatus: display.updatePersistentStatus,
-    setOnToolResultCallback: display.setOnToolResultCallback,
+    startPersistent: (getText) => statusBar.startPersistent(getText),
+    stopPersistent: () => statusBar.stopPersistent(),
+    updatePersistent: () => statusBar.updatePersistent(),
+    setOnToolResult: (fn) => statusBar.setOnToolResult(fn),
   };
 
   agentStatus.update({ model: config.model, effort: config.effort });
