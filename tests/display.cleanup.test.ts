@@ -1,17 +1,19 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { stripAnsi } from "./helpers.js";
 import {
-  print, setVerbose, stopStatus, fmtTime, s,
-  setInputPrintCallback, distributeWidths,
+  print, fmtTime, s,
+  distributeWidths,
+  setVerbose, verbose,
 } from "../src/agent/display.js";
+import { statusBar } from "../src/agent/status-bar.js";
 
 beforeEach(() => {
-  stopStatus();
+  statusBar.stop();
   setVerbose(false);
 });
 
 afterEach(() => {
-  stopStatus();
+  statusBar.stop();
   setVerbose(false);
   vi.restoreAllMocks();
 });
@@ -103,10 +105,10 @@ function captureOutput(fn: () => void): string {
 describe("print() via _inputPrintCallback path - verbose timestamp", () => {
   it("verbose=true: callback path still prepends HH:MM:SS timestamp", () => {
     const cb = vi.fn();
-    setInputPrintCallback(cb);
+    statusBar.inputPrint = cb;
     setVerbose(true);
     const output = captureOutput(() => print("hello"));
-    setInputPrintCallback(null);
+    statusBar.inputPrint = null;
 
     const plain = stripAnsi(output);
     expect(plain).toMatch(/\d{2}:\d{2}:\d{2}/);
@@ -116,10 +118,10 @@ describe("print() via _inputPrintCallback path - verbose timestamp", () => {
 
   it("verbose=false: callback path does not prepend timestamp", () => {
     const cb = vi.fn();
-    setInputPrintCallback(cb);
+    statusBar.inputPrint = cb;
     setVerbose(false);
     const output = captureOutput(() => print("world"));
-    setInputPrintCallback(null);
+    statusBar.inputPrint = null;
 
     const plain = stripAnsi(output);
     expect(plain).not.toMatch(/\d{2}:\d{2}:\d{2}/);
@@ -128,10 +130,10 @@ describe("print() via _inputPrintCallback path - verbose timestamp", () => {
 
   it("verbose=true: multi-line output in callback path gets timestamp on each line", () => {
     const cb = vi.fn();
-    setInputPrintCallback(cb);
+    statusBar.inputPrint = cb;
     setVerbose(true);
     const output = captureOutput(() => print("line one\nline two"));
-    setInputPrintCallback(null);
+    statusBar.inputPrint = null;
 
     const plain = stripAnsi(output);
     const matches = plain.match(/\d{2}:\d{2}:\d{2}/g);

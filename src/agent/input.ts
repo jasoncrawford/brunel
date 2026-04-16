@@ -1,4 +1,5 @@
 import * as display from "./display.js";
+import { statusBar } from "./status-bar.js";
 import { filterCommands } from "./command-registry.js";
 import type { CommandSuggestion } from "./command-registry.js";
 
@@ -134,7 +135,7 @@ export function ask(
 
       // 5. Draw status bars below suggestion rows (if any are active).
       //    Returns 0 when no bars are active, or 1+n for blank-separator + n bar rows.
-      totalDrawnRows += display.drawStatusBarsRaw();
+      totalDrawnRows += statusBar.drawRaw();
 
       // 6. Go from last drawn row back to prompt row 0.
       // Guard: \x1b[0A is treated as \x1b[1A in most terminals, so skip it when already at row 0.
@@ -178,7 +179,7 @@ export function ask(
       totalDrawnRows = sugLastRow;
 
       // Draw status bars below suggestion rows (if any are active).
-      totalDrawnRows += display.drawStatusBarsRaw();
+      totalDrawnRows += statusBar.drawRaw();
 
       // Guard: \x1b[0A is treated as \x1b[1A in most terminals, so skip it when already at row 0.
       if (totalDrawnRows > 0) process.stdout.write(`\x1b[${totalDrawnRows}A`);
@@ -226,9 +227,9 @@ export function ask(
     // string means the caller doesn't want any prompt shown (e.g. worker
     // standby mode), so no redraw is needed and no line-clear should fire.
     if (promptLine) {
-      display.setInputClearCallback(clearForPrint);
-      display.setInputPrintCallback(drawFresh);
-      display.setInputStatusCallback(redrawFromCurrent);
+      statusBar.inputClear = clearForPrint;
+      statusBar.inputPrint = drawFresh;
+      statusBar.inputStatus = redrawFromCurrent;
     }
 
     if (abort) {
@@ -256,9 +257,9 @@ export function ask(
     }
 
     function cleanup() {
-      display.setInputPrintCallback(null);
-      display.setInputClearCallback(null);
-      display.setInputStatusCallback(null);
+      statusBar.inputPrint = null;
+      statusBar.inputClear = null;
+      statusBar.inputStatus = null;
       process.stdin.removeListener("data", onData);
     }
 

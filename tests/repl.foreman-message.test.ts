@@ -3,8 +3,9 @@
  * This ensures no message arrives silently, even when the worker is busy running a query.
  */
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from "vitest";
+import { setVerbose, verbose, printForemanMessage } from "../src/agent/display.js";
 import { stripAnsi } from "./helpers.js";
-import { printForemanMessage, stopStatus, setVerbose } from "../src/agent/display.js";
+import { statusBar } from "../src/agent/status-bar.js";
 import * as Wire from "../shared/wire.js";
 
 function captureOutput(fn: () => void): string {
@@ -18,12 +19,12 @@ function captureOutput(fn: () => void): string {
 }
 
 beforeEach(() => {
-  stopStatus();
+  statusBar.stop();
   setVerbose(false);
 });
 
 afterEach(() => {
-  stopStatus();
+  statusBar.stop();
   setVerbose(false);
   vi.restoreAllMocks();
   vi.useRealTimers();

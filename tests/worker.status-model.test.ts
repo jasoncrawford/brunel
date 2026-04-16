@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { AgentStatus } from "../src/agent/worker.js";
+import { StatusBar as AgentStatus } from "../src/agent/status-bar.js";
 import { stripAnsi } from "./helpers.js";
 
 describe("AgentStatus", () => {

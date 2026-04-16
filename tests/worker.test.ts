@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "events";
-import { AgentStatus, WorkerSession, classifyEvent, debounceMs } from "../src/agent/worker.js";
+import { WorkerSession, classifyEvent, debounceMs } from "../src/agent/worker.js";
+import { StatusBar } from "../src/agent/status-bar.js";
 import * as Wire from "../shared/wire.js";
 import { stripAnsi } from "./helpers.js";
 import * as displayModule from "../src/agent/display.js";
@@ -37,13 +38,10 @@ function sendMsg(ws: FakeWs, msg: Wire.ForemanMessage) {
 
 let fakeWs: FakeWs;
 let wsFactory: ReturnType<typeof vi.fn>;
+let sb: StatusBar;
 let display: {
   print: ReturnType<typeof vi.fn>;
   printForemanMessage: ReturnType<typeof vi.fn>;
-  startPersistentStatus: ReturnType<typeof vi.fn>;
-  stopPersistentStatus: ReturnType<typeof vi.fn>;
-  updatePersistentStatus: ReturnType<typeof vi.fn>;
-  setOnToolResultCallback: ReturnType<typeof vi.fn>;
 };
 let session: WorkerSession;
 
@@ -53,12 +51,12 @@ beforeEach(() => {
   display = {
     print: vi.fn(),
     printForemanMessage: vi.fn(),
-    startPersistentStatus: vi.fn(),
-    stopPersistentStatus: vi.fn(),
-    updatePersistentStatus: vi.fn(),
-    setOnToolResultCallback: vi.fn(),
   };
-  session = new WorkerSession(new AgentStatus({ agentId: AGENT_ID }), wsFactory, display);
+  sb = new StatusBar({ agentId: AGENT_ID });
+  vi.spyOn(sb, "startPersistent").mockImplementation(() => {});
+  vi.spyOn(sb, "setOnToolResult");
+  vi.spyOn(sb, "updatePersistent").mockImplementation(() => {});
+  session = new WorkerSession(sb, wsFactory, display);
   session.start();
 });
 
@@ -450,37 +448,37 @@ describe("connection status bar", () => {
     expect(stripAnsi(session.getStatusText())).toContain("Reconnecting");
   });
 
-  it("calls startPersistentStatus on start()", () => {
-    expect(display.startPersistentStatus).toHaveBeenCalledOnce();
+  it("calls startPersistent on start()", () => {
+    expect(sb.startPersistent).toHaveBeenCalledOnce();
   });
 
   it("registers a tool result callback on start()", () => {
-    expect(display.setOnToolResultCallback).toHaveBeenCalledOnce();
-    expect(typeof display.setOnToolResultCallback.mock.calls[0][0]).toBe("function");
+    expect(sb.setOnToolResult).toHaveBeenCalledOnce();
+    expect(typeof (sb.setOnToolResult as ReturnType<typeof vi.spyOn>).mock.calls[0][0]).toBe("function");
   });
 
   it("tool result callback refreshes status on Bash tool", async () => {
-    const cb = display.setOnToolResultCallback.mock.calls[0][0] as (toolName: string) => void;
-    display.updatePersistentStatus.mockClear();
+    const cb = (sb.setOnToolResult as ReturnType<typeof vi.spyOn>).mock.calls[0][0] as (toolName: string) => void;
+    (sb.updatePersistent as ReturnType<typeof vi.spyOn>).mockClear();
     cb("Bash");
-    await vi.waitFor(() => expect(display.updatePersistentStatus).toHaveBeenCalled());
+    await vi.waitFor(() => expect(sb.updatePersistent).toHaveBeenCalled());
   });
 
   it("tool result callback does not refresh status for non-Bash tools", async () => {
-    const cb = display.setOnToolResultCallback.mock.calls[0][0] as (toolName: string) => void;
-    // Drain startup calls: connect()'s synchronous refreshStatus() + refreshBranch()'s async one
-    await vi.waitFor(() => expect(display.updatePersistentStatus).toHaveBeenCalledTimes(2));
-    display.updatePersistentStatus.mockClear();
+    const cb = (sb.setOnToolResult as ReturnType<typeof vi.spyOn>).mock.calls[0][0] as (toolName: string) => void;
+    // Drain startup calls: connect()'s synchronous update + refreshBranch()'s async one
+    await vi.waitFor(() => expect(sb.updatePersistent).toHaveBeenCalledTimes(2));
+    (sb.updatePersistent as ReturnType<typeof vi.spyOn>).mockClear();
     cb("Read");
     // Give a tick for any potential async work
     await new Promise((r) => setTimeout(r, 10));
-    expect(display.updatePersistentStatus).not.toHaveBeenCalled();
+    expect(sb.updatePersistent).not.toHaveBeenCalled();
   });
 
-  it("calls updatePersistentStatus after open", () => {
-    display.updatePersistentStatus.mockClear();
+  it("calls updatePersistent after open", () => {
+    (sb.updatePersistent as ReturnType<typeof vi.spyOn>).mockClear();
     fakeWs.emit("open");
-    expect(display.updatePersistentStatus).toHaveBeenCalled();
+    expect(sb.updatePersistent).toHaveBeenCalled();
   });
 
   it("shows Reconnecting in status text when connect() is called after disconnect", () => {
@@ -726,7 +724,7 @@ describe("hello_ack handshake — buffering", () => {
       let callCount = 0;
       const wsFactoryWs = vi.fn().mockImplementation(() => callCount++ === 0 ? wsA : wsB);
 
-      const sessionWithWs = new WorkerSession(new AgentStatus({ agentId: AGENT_ID }), wsFactoryWs, display, { workspace });
+      const sessionWithWs = new WorkerSession(new StatusBar({ agentId: AGENT_ID }), wsFactoryWs, display, { workspace });
       sessionWithWs.start(); // uses wsA
 
       const issue = makeIssue();
@@ -1334,7 +1332,7 @@ describe("workspace slash commands in WorkerSession", () => {
 
   it("/workspace:reset calls workspace.reset() when clean", async () => {
     const workspace = makeWorkspace();
-    const sessionWs = new WorkerSession(new AgentStatus({ agentId: AGENT_ID }), wsFactory, display, { workspace });
+    const sessionWs = new WorkerSession(new StatusBar({ agentId: AGENT_ID }), wsFactory, display, { workspace });
     sessionWs.start();
     const wsReg1 = new CommandRegistry();
     registerWorkspaceCommands(sessionWs.workspace, wsReg1.scoped("workspace"));
@@ -1348,7 +1346,7 @@ describe("workspace slash commands in WorkerSession", () => {
       uncommittedFiles: ["M foo.ts"], unpushedCommits: [], noUpstream: false,
     });
     (workspace.confirm as ReturnType<typeof vi.fn>).mockResolvedValue(false);
-    const sessionWs = new WorkerSession(new AgentStatus({ agentId: AGENT_ID }), wsFactory, display, { workspace });
+    const sessionWs = new WorkerSession(new StatusBar({ agentId: AGENT_ID }), wsFactory, display, { workspace });
     sessionWs.start();
     const wsReg2 = new CommandRegistry();
     registerWorkspaceCommands(sessionWs.workspace, wsReg2.scoped("workspace"));
@@ -1360,7 +1358,7 @@ describe("workspace slash commands in WorkerSession", () => {
     const chdirSpy = vi.spyOn(process, "chdir").mockImplementation(() => {});
     try {
       const workspace = makeWorkspace();
-      const sessionWs = new WorkerSession(new AgentStatus({ agentId: AGENT_ID }), wsFactory, display, { workspace });
+      const sessionWs = new WorkerSession(new StatusBar({ agentId: AGENT_ID }), wsFactory, display, { workspace });
       sessionWs.start();
       const wsReg3 = new CommandRegistry();
       registerWorkspaceCommands(sessionWs.workspace, wsReg3.scoped("workspace"));
@@ -1375,7 +1373,7 @@ describe("workspace slash commands in WorkerSession", () => {
     const printSpy = vi.spyOn(displayModule, "print").mockImplementation(() => {});
     try {
       const workspace = makeWorkspace();
-      const sessionWs = new WorkerSession(new AgentStatus({ agentId: AGENT_ID }), wsFactory, display, { workspace });
+      const sessionWs = new WorkerSession(new StatusBar({ agentId: AGENT_ID }), wsFactory, display, { workspace });
       sessionWs.start();
       const wsReg4 = new CommandRegistry();
       registerWorkspaceCommands(sessionWs.workspace, wsReg4.scoped("workspace"));
@@ -1394,7 +1392,7 @@ describe("afterTask callback on /worker:complete", () => {
   it("calls afterTask before sending task_complete to foreman", async () => {
     const afterTask = vi.fn().mockResolvedValue(undefined);
     const sessionWithAfterTask = new WorkerSession(
-      new AgentStatus({ agentId: AGENT_ID }), wsFactory, display, { afterTask }
+      new StatusBar({ agentId: AGENT_ID }), wsFactory, display, { afterTask }
     );
     sessionWithAfterTask.start();
 
@@ -1411,7 +1409,7 @@ describe("afterTask callback on /worker:complete", () => {
   it("does not send task_complete if afterTask throws", async () => {
     const afterTask = vi.fn().mockRejectedValue(new Error("reset failed"));
     const sessionWithAfterTask = new WorkerSession(
-      new AgentStatus({ agentId: AGENT_ID }), wsFactory, display, { afterTask }
+      new StatusBar({ agentId: AGENT_ID }), wsFactory, display, { afterTask }
     );
     sessionWithAfterTask.start();
 
@@ -1480,7 +1478,7 @@ describe("heartbeat", () => {
   function makeHeartbeatSession(pingIntervalMs = 100) {
     const ws = new FakeWs();
     const factory = vi.fn().mockReturnValue(ws);
-    const s = new WorkerSession(new AgentStatus({ agentId: AGENT_ID }), factory, display, { pingIntervalMs });
+    const s = new WorkerSession(new StatusBar({ agentId: AGENT_ID }), factory, display, { pingIntervalMs });
     s.start();
     return { ws, factory, s };
   }

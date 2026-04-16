@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { stripAnsi } from "./helpers.js";
+import { statusBar } from "../src/agent/status-bar.js";
 import {
   resolve,
-  setVerbose,
   setThinkOutLoud,
+  setVerbose, verbose,
   ASSISTANT_BLOCK_FMT,
   USER_BLOCK_FMT,
   TOOL_CALL_FMT,
