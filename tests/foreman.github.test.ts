@@ -4,18 +4,19 @@ import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
 import { Worker } from "../src/foreman/models/worker.js";
 import { setupInMemoryTasks } from "./helpers/task.js";
+import { getConfig } from "../src/config.js";
 
 const mockIssues = [
   { number: 1, title: "First issue", body: "body 1", labels: [{ name: "brunel:ready" }] },
   { number: 2, title: "Second issue", body: null, labels: [{ name: "brunel:ready" }] },
 ];
 
-const OPTS = { repo: "owner/repo", token: "token123" };
-const CONFIG_OPTS = { githubRepo: "owner/repo", githubToken: "token123", taskLabel: "brunel:ready" };
-
 beforeEach(() => {
   Worker._reset();
   vi.stubGlobal("fetch", vi.fn());
+  getConfig().githubRepo = "owner/repo";
+  getConfig().githubToken = "token123";
+  getConfig().taskLabel = "brunel:ready";
 });
 
 afterEach(() => {
@@ -34,7 +35,7 @@ describe("loadIssuesToQueue", () => {
     setupInMemoryTasks(taskManager);
     vi.spyOn(Task, "fetchBlockers").mockResolvedValue([]);
 
-    await loadIssuesToQueue(taskManager, CONFIG_OPTS);
+    await loadIssuesToQueue(taskManager);
 
     expect(fetch).toHaveBeenCalledWith(
       expect.stringContaining("owner/repo/issues"),
@@ -48,7 +49,7 @@ describe("loadIssuesToQueue", () => {
     vi.mocked(fetch).mockResolvedValueOnce({ ok: false, status: 403 } as any);
     const taskManager = new TaskManager();
     setupInMemoryTasks(taskManager);
-    await expect(loadIssuesToQueue(taskManager, CONFIG_OPTS)).rejects.toThrow("403");
+    await expect(loadIssuesToQueue(taskManager)).rejects.toThrow("403");
   });
 
   it("preserves existing task assignment when syncing content during startup", async () => {
@@ -72,7 +73,7 @@ describe("loadIssuesToQueue", () => {
     expect(t!.workerId).toBe("worker-abc");
 
     // loadIssuesToQueue runs during startup and calls upsert for the same issue
-    await loadIssuesToQueue(taskManager, CONFIG_OPTS);
+    await loadIssuesToQueue(taskManager);
 
     // Content should be updated, but assignment must be preserved
     const task = await Task.getByIssue(1);
@@ -87,20 +88,20 @@ describe("fetchIssueStates", () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce({ ok: true, json: async () => ({ number: 1, state: "open" }) } as any)
       .mockResolvedValueOnce({ ok: true, json: async () => ({ number: 2, state: "closed" }) } as any);
-    const states = await fetchIssueStates([1, 2], OPTS);
+    const states = await fetchIssueStates([1, 2]);
     expect(states.get(1)).toBe("open");
     expect(states.get(2)).toBe("closed");
   });
 
   it("returns empty map for empty input without calling fetch", async () => {
-    const states = await fetchIssueStates([], OPTS);
+    const states = await fetchIssueStates([]);
     expect(fetch).not.toHaveBeenCalled();
     expect(states.size).toBe(0);
   });
 
   it("throws on non-ok response", async () => {
     vi.mocked(fetch).mockResolvedValueOnce({ ok: false, status: 500 } as any);
-    await expect(fetchIssueStates([1], OPTS)).rejects.toThrow("500");
+    await expect(fetchIssueStates([1])).rejects.toThrow("500");
   });
 });
 
@@ -118,7 +119,7 @@ describe("fetchNativeBlockers", () => {
         },
       }),
     } as any);
-    const blockers = await fetchNativeBlockers(42, OPTS);
+    const blockers = await fetchNativeBlockers(42);
     expect(blockers).toEqual([5, 7]);
   });
 
@@ -129,7 +130,7 @@ describe("fetchNativeBlockers", () => {
         data: { repository: { issue: { blockedBy: { nodes: [] } } } },
       }),
     } as any);
-    expect(await fetchNativeBlockers(42, OPTS)).toEqual([]);
+    expect(await fetchNativeBlockers(42)).toEqual([]);
   });
 
   it("returns empty array when GraphQL field is null (feature unavailable)", async () => {
@@ -139,12 +140,12 @@ describe("fetchNativeBlockers", () => {
         data: { repository: { issue: { blockedBy: null } } },
       }),
     } as any);
-    expect(await fetchNativeBlockers(42, OPTS)).toEqual([]);
+    expect(await fetchNativeBlockers(42)).toEqual([]);
   });
 
   it("throws on non-ok HTTP response", async () => {
     vi.mocked(fetch).mockResolvedValueOnce({ ok: false, status: 403 } as any);
-    await expect(fetchNativeBlockers(42, OPTS)).rejects.toThrow("403");
+    await expect(fetchNativeBlockers(42)).rejects.toThrow("403");
   });
 });
 
@@ -166,7 +167,7 @@ describe("loadIssuesToQueue with blockers", () => {
     setupInMemoryTasks(taskManager);
     vi.spyOn(Task, "fetchBlockers").mockResolvedValueOnce([99]);
 
-    await loadIssuesToQueue(taskManager, CONFIG_OPTS);
+    await loadIssuesToQueue(taskManager);
 
     // Issue 1 is tracked and blocked by 99 which is open
     expect(taskManager.isBlockersLoaded(1)).toBe(true);
@@ -190,7 +191,7 @@ describe("loadIssuesToQueue with blockers", () => {
 
     const taskManager = new TaskManager();
     setupInMemoryTasks(taskManager);
-    await loadIssuesToQueue(taskManager, CONFIG_OPTS);
+    await loadIssuesToQueue(taskManager);
 
     // Blocker 50 is closed, so isBlocked should be false
     expect(taskManager.isBlocked(2)).toBe(false);

@@ -146,11 +146,10 @@ export class Task extends ActiveRecord {
   static async fetchBlockers(
     issueNumber: number,
     body: string,
-    opts: { repo: string; token: string; apiUrl?: string },
   ): Promise<number[]> {
     const [bodyBlockers, nativeBlockers] = await Promise.all([
       Promise.resolve(Task.parseBodyBlockers(body)),
-      fetchNativeBlockers(issueNumber, opts),
+      fetchNativeBlockers(issueNumber),
     ]);
     return Array.from(new Set([...bodyBlockers, ...nativeBlockers]));
   }

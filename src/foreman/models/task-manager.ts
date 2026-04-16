@@ -219,11 +219,10 @@ export class TaskManager extends EventEmitter {
     issueNumber: number,
     body: string,
   ): Promise<void> {
-    const { githubRepo: repo, githubToken: token, githubApiUrl: apiUrl } = getConfig();
-    const blockers = await Task.fetchBlockers(issueNumber, body, { repo, token, apiUrl });
+    const blockers = await Task.fetchBlockers(issueNumber, body);
     this.setBlockers(issueNumber, blockers);
     if (blockers.length > 0) {
-      const states = await fetchIssueStates(blockers, { repo, token });
+      const states = await fetchIssueStates(blockers);
       for (const [num, state] of states) {
         this.setIssueOpenState(num, state === "open");
       }
@@ -333,7 +332,7 @@ export class TaskManager extends EventEmitter {
   /** Fetch brunel:ready issues from GitHub and load deps.
    *  Called at startup after loadActiveTasksFromDb. */
   async loadIssuesFromGithub(): Promise<void> {
-    await loadIssuesToQueue(this, getConfig());
+    await loadIssuesToQueue(this);
   }
 
   // ── Private helpers ───────────────────────────────────────────────────────
