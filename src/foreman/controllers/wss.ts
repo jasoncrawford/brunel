@@ -149,7 +149,7 @@ export class ForemanWss {
           await this.assignWork();
         })().catch(err => {
           log(`ERROR handling worker message: ${fmtError(err)}`);
-          this.sendError(ws, `Internal error: ${fmtError(err)}`, false);
+          this.sendError(ws, `Internal error: ${fmtError(err)}`, false, workerId || null);
         });
       });
 
@@ -254,11 +254,13 @@ export class ForemanWss {
 
   sendMsg(worker: Worker, msg: Wire.ForemanMessage, logTaskId?: string): void {
     const taskId = logTaskId ?? (("taskId" in msg ? msg.taskId : null) ?? null);
-    const workerId = worker.workerId;
     worker.send(msg);
-    const msgPayload = msg as unknown as Record<string, unknown>;
-    void ForemanMessage.log({ direction: "sent", workerId, taskId, msgType: msg.type, payload: msgPayload });
-    this.broadcastMessageEvent({ direction: "sent", workerId, taskId, msgType: msg.type, payload: msgPayload });
+    this.logAndBroadcastSent(worker.workerId, taskId, msg.type, msg as unknown as Record<string, unknown>);
+  }
+
+  private logAndBroadcastSent(workerId: string | null, taskId: string | null, msgType: string, payload: Record<string, unknown>): void {
+    void ForemanMessage.log({ direction: "sent", workerId, taskId, msgType, payload });
+    this.broadcastMessageEvent({ direction: "sent", workerId, taskId, msgType, payload });
   }
 
   private broadcastMessageEvent(data: { direction: string; workerId: string | null; taskId: string | null; msgType: string; payload?: Record<string, unknown> }): void {
@@ -290,11 +292,14 @@ export class ForemanWss {
    * Send a foreman_error message directly to a WebSocket connection.
    * Used when a catastrophic error occurs during hello handling or message
    * processing — gives the worker an explanation instead of a silent drop.
+   * Also persists the error to foreman_messages so it appears in the activity log.
    */
-  private sendError(ws: WebSocket, message: string, fatal: boolean): void {
+  private sendError(ws: WebSocket, message: string, fatal: boolean, workerId: string | null, taskId: string | null = null): void {
+    const payload: Wire.ForemanMessage = { type: "foreman_error", message, fatal };
     if (ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: "foreman_error", message, fatal } satisfies Wire.ForemanMessage));
+      ws.send(JSON.stringify(payload));
     }
+    this.logAndBroadcastSent(workerId, taskId, payload.type, payload as unknown as Record<string, unknown>);
   }
 
   // ── Hello handlers ───────────────────────────────────────────────────────────
@@ -368,7 +373,7 @@ export class ForemanWss {
       log(`ERROR handleBusyHello ${workerId}: ${fmtError(err)}`);
       // DB error during task lookup or reclaim — recoverable: DB may be temporarily down.
       // Worker retries on reconnect and the operation succeeds once the DB recovers.
-      this.sendError(ws, `Internal error during reconnection: ${fmtError(err)}`, false);
+      this.sendError(ws, `Internal error during reconnection: ${fmtError(err)}`, false, workerId);
     }
   }
 
@@ -390,7 +395,7 @@ export class ForemanWss {
           // DB error reverting prior task — recoverable: task stays assigned so the
           // failure is visible; a new idle assignment would create a double assignment.
           // Worker retries on reconnect and the revert succeeds once the DB recovers.
-          this.sendError(ws, `Failed to revert prior task to pending: ${fmtError(err)}`, false);
+          this.sendError(ws, `Failed to revert prior task to pending: ${fmtError(err)}`, false, workerId, priorTask.taskId);
           return; // don't register as idle — task stays assigned, worker retries on reconnect
         }
       } else {
@@ -402,7 +407,7 @@ export class ForemanWss {
       log(`ERROR handleIdleHello ${workerId}: ${fmtError(err)}`);
       // DB error during worker lookup — recoverable: DB may be temporarily down.
       // Worker retries on reconnect and the operation succeeds once the DB recovers.
-      this.sendError(ws, `Internal error during idle hello: ${fmtError(err)}`, false);
+      this.sendError(ws, `Internal error during idle hello: ${fmtError(err)}`, false, workerId);
     }
   }
 
