@@ -169,6 +169,20 @@ function prClosedPayload(prNumber: number, merged: boolean) {
   };
 }
 
+function prEditedPayload(prNumber: number, newBody: string, headBranch = `branch-for-pr-${prNumber}`) {
+  return {
+    action: "edited",
+    pull_request: {
+      number: prNumber,
+      title: `PR ${prNumber}`,
+      body: newBody,
+      head: { ref: headBranch },
+    },
+    changes: { body: { from: "old body without closing keyword" } },
+    repository: { html_url: "https://github.com/owner/repo" },
+  };
+}
+
 function prReviewPayload(prNumber: number) {
   return {
     action: "submitted",
@@ -487,6 +501,79 @@ describe("PR event forwarding to workers", () => {
       new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
     ]);
     expect(raceResult).toBe("timeout");
+  });
+
+  it("pull_request/edited with closing keyword added registers PR and forwards event to worker", async () => {
+    await registerReady(taskManager, "42", 42, "owner/repo", "Issue 42", "Body", ["brunel:ready"]);
+
+    const ws = await connect();
+    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    await nextMsgWhere(ws, (m) => m.type === "task_assigned");
+
+    // PR opened without closing keyword — not linked
+    await foremanWss.routeEvent("evt-pr-open", "pull_request", prOpenedPayload(10, "A PR with no issue reference."));
+    expect((await Task.getByIssue(42))?.prNumber).toBeNull();
+
+    // Body edited to add closing keyword — should now link the PR
+    const reply = nextMsgWhere(ws, m => m.type === "event_notification" && (m as any).event.name === "pull_request");
+    await foremanWss.routeEvent("evt-pr-edit", "pull_request", prEditedPayload(10, "Closes #42\n\nSome description."));
+
+    const msg = await reply;
+    expect(msg.type).toBe("event_notification");
+    expect((msg as any).event.name).toBe("pull_request");
+
+    // PR should now be registered on the task
+    const task = await Task.getByIssue(42);
+    expect(task?.prNumber).toBe(10);
+  });
+
+  it("pull_request/edited with closing keyword enables check_run routing to worker", async () => {
+    await registerReady(taskManager, "42", 42, "owner/repo", "Issue 42", "Body", ["brunel:ready"]);
+
+    const ws = await connect();
+    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    await nextMsgWhere(ws, (m) => m.type === "task_assigned");
+
+    // PR opened without closing keyword — not linked
+    await foremanWss.routeEvent("evt-pr-open", "pull_request", prOpenedPayload(10, "No issue link."));
+    // Body edited to add closing keyword — links the PR
+    await foremanWss.routeEvent("evt-pr-edit", "pull_request", prEditedPayload(10, "Closes #42"));
+    // Consume the edit event forwarded to the worker
+    await nextMsgWhere(ws, m => m.type === "event_notification" && (m as any).event.name === "pull_request");
+
+    // check_run for the now-linked PR should be forwarded to the worker
+    const reply = nextMsgWhere(ws, m => m.type === "event_notification" && (m as any).event.name === "check_run");
+    foremanWss.routeEvent("evt-cr", "check_run", checkRunPayload(10, "success"));
+    const msg = await reply;
+    expect(msg.type).toBe("event_notification");
+    expect((msg as any).event.name).toBe("check_run");
+  });
+
+  it("pull_request/edited without body change does not link PR (passthrough)", async () => {
+    await registerReady(taskManager, "42", 42, "owner/repo", "Issue 42", "Body", ["brunel:ready"]);
+
+    const ws = await connect();
+    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    await nextMsgWhere(ws, (m) => m.type === "task_assigned");
+
+    // PR opened with closing keyword — linked
+    await foremanWss.routeEvent("evt-pr-open", "pull_request", prOpenedPayload(10, "Closes #42"));
+    // Consume the opened event forwarded to worker
+    await nextMsgWhere(ws, m => m.type === "event_notification" && (m as any).event.name === "pull_request");
+
+    // Edited event with no body change (e.g. title changed) — still forwarded to worker
+    const reply = nextMsgWhere(ws, m => m.type === "event_notification" && (m as any).event.name === "pull_request");
+    foremanWss.routeEvent("evt-pr-edit", "pull_request", {
+      action: "edited",
+      pull_request: { number: 10, title: "PR 10 (updated title)", body: "Closes #42", head: { ref: "branch-for-pr-10" } },
+      changes: { title: { from: "PR 10" } }, // no body change
+      repository: { html_url: "https://github.com/owner/repo" },
+    });
+    const msg = await reply;
+    expect(msg.type).toBe("event_notification");
+    // PR is still registered (unchanged)
+    const task = await Task.getByIssue(42);
+    expect(task?.prNumber).toBe(10);
   });
 
   it("check_run for unknown PR is silently dropped", async () => {

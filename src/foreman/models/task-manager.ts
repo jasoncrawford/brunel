@@ -293,6 +293,21 @@ export class TaskManager extends EventEmitter {
     return task;
   }
 
+  /** Handle pull_request/edited when the body changes: (re)register the PR-issue link.
+   *  Returns the task if a closing keyword is found in the new body, or null otherwise. */
+  async handlePrEditedEvent(prNumber: number, body: string, branch: string | null): Promise<Task | null> {
+    const linkedIssue = TaskManager.extractLinkedIssueNumber(body);
+    if (linkedIssue === null) return null;
+    const task = await Task.getByIssue(linkedIssue);
+    if (!task) return null;
+    if (branch) this.registerBranch(branch, task);
+    await task.registerPr(prNumber, branch).catch((err: unknown) =>
+      log(`ERROR Failed to register PR #${prNumber} for task #${task.taskId}: ${fmtError(err)}`)
+    );
+    log(`[task #${linkedIssue}] PR #${prNumber} registered (body edited)`);
+    return task;
+  }
+
   /** Handle pull_request/closed: unregister or record the merge on the linked task.
    *  Returns the task, or null if no task owns the PR. */
   async handlePrClosedEvent(prNumber: number, merged: boolean): Promise<Task | null> {
