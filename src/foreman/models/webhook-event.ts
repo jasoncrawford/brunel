@@ -2,6 +2,7 @@ import type { Json } from "../../database.types.js";
 import type { DbRow } from "../clients/db-client.js";
 import * as Wire from "../../../shared/wire.js";
 import { ActiveRecord } from "./active-record.js";
+import { log, fmtError } from "../../utils.js";
 
 type Row = DbRow<"webhook_events">;
 
@@ -100,7 +101,7 @@ export class WebhookEvent extends ActiveRecord {
       task_id: data.taskId,
       worker_id: data.workerId,
       payload: data.payload as Json,
-    }).then(() => undefined).catch((err: unknown) => console.error("[db] webhook_events insert error:", err));
+    }).then(() => undefined).catch((err: unknown) => log(`[db] webhook_events insert error: ${fmtError(err)}`));
   }
 
   // ── Queries ──────────────────────────────────────────────────────────────────

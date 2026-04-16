@@ -249,6 +249,17 @@ describe("Workspace.checkSafety", () => {
     const result = await ws.checkSafety();
     expect(result.noUpstream).toBe(true);
   });
+
+  it("re-throws unexpected git errors (not 'no upstream')", async () => {
+    const exec = vi.fn().mockImplementation(async (args: string[]) => {
+      if (args[0] === "clone") { fs.mkdirSync(path.join(args[2], ".git"), { recursive: true }); return ""; }
+      if (args[0] === "status") return "";
+      if (args[0] === "log") throw new Error("fatal: corrupt object store");
+      return "";
+    });
+    const ws = await makeWorkspace(exec);
+    await expect(ws.checkSafety()).rejects.toThrow("corrupt object store");
+  });
 });
 
 // ── confirmIfUnsafe ─────────────────────────────────────────────────────────

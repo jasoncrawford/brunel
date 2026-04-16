@@ -131,6 +131,8 @@ export class Workspace {
       const msg = String(err);
       if (msg.includes("no upstream") || msg.includes("no tracking information")) {
         noUpstream = true;
+      } else {
+        throw err;
       }
     }
 

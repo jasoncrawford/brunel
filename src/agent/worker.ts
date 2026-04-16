@@ -159,6 +159,7 @@ export class WorkerSession {
   private _queryRunning = false;
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private prIsClosed = false;
+  private _resetPromise: Promise<void> | null = null;
   // Handshake lifecycle: "registered" = hello_ack received (or initial state);
   // "hello_sent" = worker_hello was sent but hello_ack not yet received.
   // Initialized to "registered" so sessions that never emit "open" (e.g. tests)
@@ -251,7 +252,11 @@ export class WorkerSession {
   async completeCurrentTask(): Promise<"task-complete" | undefined> {
     if (!this.currentTaskId) return undefined;
     if (this.options.afterTask) {
-      try { await this.options.afterTask(); } catch { return undefined; }
+      try { await this.options.afterTask(); } catch (err) {
+        // Log but don't abort — the task IS complete even if workspace cleanup fails.
+        // Returning early here would leave the task stuck on the foreman forever.
+        this.display.print(display.c.amber(`afterTask failed: ${fmtError(err)}`));
+      }
     }
     this.sendTaskMessage({
       type: "task_complete",
@@ -456,10 +461,14 @@ export class WorkerSession {
         this.display.print(display.c.amber("Task cancelled (reassigned to another worker)."));
         const workspace = this.options.workspace;
         if (workspace?.isCreated) {
-          void workspace.reset().then(() => {
+          // Track the reset promise so that task_assigned prompts are deferred until
+          // the workspace is clean — preventing a new task from running in a dirty state.
+          this._resetPromise = workspace.reset().then(() => {
             this.display.print(display.c.amber("Workspace reset."));
           }).catch((err: unknown) => {
             this.display.print(display.c.boldRed(`Workspace reset failed: ${err instanceof Error ? err.message : String(err)}`));
+          }).finally(() => {
+            this._resetPromise = null;
           });
         }
       } else {
@@ -479,7 +488,14 @@ export class WorkerSession {
       void this.refreshBranch();
       const initialPrompt = buildInitialPrompt(msg.issue, !!this.options.workspace);
       this.display.print(display.c.sageGreen(initialPrompt));
-      this.enqueuePrompt(initialPrompt, true); // fresh=true: new task, reset session
+      // If a workspace reset is in progress (from a cancelled hello_ack), defer the
+      // prompt until the reset finishes — otherwise the task could run in a dirty workspace.
+      const enqueue = () => this.enqueuePrompt(initialPrompt, true);
+      if (this._resetPromise) {
+        void this._resetPromise.then(enqueue, enqueue);
+      } else {
+        enqueue(); // fresh=true: new task, reset session
+      }
     } else if (msg.type === "event_notification") {
       // Ignore stale events forwarded for tasks we're no longer working on.
       if (msg.taskId !== this.currentTaskId) {

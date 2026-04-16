@@ -205,7 +205,7 @@ describe("handleIdleHello", () => {
     expect(Worker.get("w1")?.status).toBe("idle");
   });
 
-  it("revert failure is logged but does not throw", async () => {
+  it("revert failure is logged and worker is NOT registered (task stays assigned, worker retries)", async () => {
     const task = addTask({
       task_id: "10",
       issue_number: 10,
@@ -214,9 +214,15 @@ describe("handleIdleHello", () => {
     });
     vi.mocked(task.revert).mockRejectedValueOnce(new Error("DB down"));
 
-    const { wss } = makeWss(taskManager);
+    const { wss, sendMsg } = makeWss(taskManager);
     const logSpy = vi.spyOn(utils, "log").mockImplementation(() => {});
     await expect(wss.handleIdleHello("w1", fakeWs())).resolves.toBeUndefined();
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("ERROR"));
+    // Worker must NOT be registered — allowing a new assignment would leave two tasks
+    // pointing at this worker in the DB.
+    expect(Worker.get("w1")).toBeUndefined();
+    // No hello_ack should have been sent either
+    const ackCall = sendMsg.mock.calls.find(([, msg]) => (msg as { type: string }).type === "hello_ack");
+    expect(ackCall).toBeUndefined();
   });
 });
