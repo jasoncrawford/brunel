@@ -8,6 +8,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import http from "http";
 import { ForemanWss } from "../src/foreman/controllers/wss.js";
 import { Worker } from "../src/foreman/models/worker.js";
+import { Task } from "../src/foreman/models/task.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { setupInMemoryTasks } from "./helpers/task.js";
 import * as utils from "../src/utils.js";
@@ -252,8 +253,50 @@ describe("handleIdleHello", () => {
 });
 
 // ── handleBusyHello error handling ─────────────────────────────────────────────
+//
+// All errors in handleBusyHello are transient DB errors (Task.get failing,
+// Task.upsert failing, or task.assign failing during reclaim). These are
+// recoverable — the DB may be temporarily down — so fatal: false is correct.
+// The worker retries on reconnect and the operation succeeds once the DB recovers.
 
 describe("handleBusyHello — error handling", () => {
+  it("sends foreman_error (non-fatal) when Task.get throws (DB read failure)", async () => {
+    vi.mocked(Task.get).mockRejectedValueOnce(new Error("DB connection lost"));
+
+    const { wss } = makeWss(taskManager);
+    vi.spyOn(utils, "log").mockImplementation(() => {});
+    const ws = fakeWs();
+    await wss.handleBusyHello("w1", "10", ws);
+
+    const errorCall = ws.send.mock.calls.find(([data]: [string]) => {
+      const msg = JSON.parse(data);
+      return msg.type === "foreman_error";
+    });
+    expect(errorCall).toBeDefined();
+    const parsed = JSON.parse(errorCall![0]);
+    expect(parsed.fatal).toBe(false);
+    expect(parsed.message).toContain("DB connection lost");
+  });
+
+  it("sends foreman_error (non-fatal) when Task.upsert throws during placeholder creation", async () => {
+    // Task.get returns null (unknown task), numeric taskId, upsert fails
+    vi.mocked(Task.upsert).mockRejectedValueOnce(new Error("DB write failed"));
+
+    const { wss } = makeWss(taskManager);
+    vi.spyOn(utils, "log").mockImplementation(() => {});
+    const ws = fakeWs();
+    await wss.handleBusyHello("w1", "42", ws);
+
+    const errorCall = ws.send.mock.calls.find(([data]: [string]) => {
+      const msg = JSON.parse(data);
+      return msg.type === "foreman_error";
+    });
+    expect(errorCall).toBeDefined();
+    const parsed = JSON.parse(errorCall![0]);
+    expect(parsed.fatal).toBe(false);
+    expect(parsed.message).toContain("DB write failed");
+  });
+
   it("sends foreman_error (non-fatal) when task.assign throws during reclaim", async () => {
     const task = addTask({
       task_id: "10",
@@ -276,5 +319,44 @@ describe("handleBusyHello — error handling", () => {
     const parsed = JSON.parse(errorCall![0]);
     expect(parsed.fatal).toBe(false);
     expect(parsed.message).toContain("DB write failed");
+  });
+});
+
+// ── handleIdleHello error handling ─────────────────────────────────────────────
+//
+// All errors in handleIdleHello are transient DB errors (Task.getByWorker
+// failing, or priorTask.revert failing). These are recoverable — the DB may be
+// temporarily down — so fatal: false is correct in both cases. The worker
+// retries on reconnect and the operation succeeds once the DB recovers.
+
+describe("handleIdleHello — error handling", () => {
+  it("sends foreman_error (non-fatal) when Task.getByWorker throws (DB read failure)", async () => {
+    vi.mocked(Task.getByWorker).mockRejectedValueOnce(new Error("DB connection lost"));
+
+    const { wss } = makeWss(taskManager);
+    vi.spyOn(utils, "log").mockImplementation(() => {});
+    const ws = fakeWs();
+    await wss.handleIdleHello("w1", ws);
+
+    const errorCall = ws.send.mock.calls.find(([data]: [string]) => {
+      const msg = JSON.parse(data);
+      return msg.type === "foreman_error";
+    });
+    expect(errorCall).toBeDefined();
+    const parsed = JSON.parse(errorCall![0]);
+    expect(parsed.fatal).toBe(false);
+    expect(parsed.message).toContain("DB connection lost");
+  });
+
+  it("does not register worker when Task.getByWorker throws", async () => {
+    vi.mocked(Task.getByWorker).mockRejectedValueOnce(new Error("DB connection lost"));
+
+    const { wss, sendMsg } = makeWss(taskManager);
+    vi.spyOn(utils, "log").mockImplementation(() => {});
+    await wss.handleIdleHello("w1", fakeWs());
+
+    expect(Worker.get("w1")).toBeUndefined();
+    const ackCall = sendMsg.mock.calls.find(([, msg]) => (msg as { type: string }).type === "hello_ack");
+    expect(ackCall).toBeUndefined();
   });
 });
