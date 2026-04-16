@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { setVerbose, verbose } from "../src/agent/verbose.js";
+import { setVerbose, verbose } from "../src/agent/display.js";
 import { stripAnsi } from "./helpers.js";
 
 // Mock the SDK before importing runQuery

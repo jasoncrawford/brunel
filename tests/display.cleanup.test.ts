@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { setVerbose, verbose } from "../src/agent/verbose.js";
 import { stripAnsi } from "./helpers.js";
 import {
   print, fmtTime, s,
   distributeWidths,
+  setVerbose, verbose,
 } from "../src/agent/display.js";
 import { statusBar } from "../src/agent/status-bar.js";
 

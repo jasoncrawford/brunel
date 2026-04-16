@@ -1,6 +1,5 @@
 import * as Wire from "../../shared/wire.js";
 import { statusBar } from "./status-bar.js";
-import { verbose } from "./verbose.js";
 
 // ── Display width ─────────────────────────────────────────────────────────────
 
@@ -18,6 +17,11 @@ export const VERBOSE_PREFIX_LEN = 9;
 export function effectiveWidth(fallback = W): number {
   return (process.stdout.columns ?? fallback) - (verbose ? VERBOSE_PREFIX_LEN : 0);
 }
+
+// ── Verbose flag ──────────────────────────────────────────────────────────────
+
+export let verbose = false;
+export function setVerbose(v: boolean) { verbose = v; }
 
 // ── Think-out-loud flag ───────────────────────────────────────────────────────
 

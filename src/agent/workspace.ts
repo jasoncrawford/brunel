@@ -3,7 +3,7 @@ import path from "node:path";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
 import * as display from "./display.js";
-import { verbose } from "./verbose.js";
+import { verbose } from "./display.js";
 import { fmtError } from "../utils.js";
 import type { CommandRegistry } from "./command-registry.js";
 

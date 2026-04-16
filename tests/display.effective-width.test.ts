@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { stripAnsi } from "./helpers.js";
 import { statusBar } from "../src/agent/status-bar.js";
-import { setVerbose, verbose } from "../src/agent/verbose.js";
 import {
   effectiveWidth,
   VERBOSE_PREFIX_LEN,
@@ -9,6 +8,7 @@ import {
   renderTable,
   fmtHunk,
   W,
+  setVerbose, verbose,
 } from "../src/agent/display.js";
 
 beforeEach(() => setVerbose(false));
