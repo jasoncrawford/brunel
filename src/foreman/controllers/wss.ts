@@ -479,6 +479,17 @@ export class ForemanWss {
       return result(task);
     }
 
+    if (p.action === "edited" && pr) {
+      const changes = p.changes as R | undefined;
+      let task: Task | null = null;
+      if (changes?.body) {
+        task = await this.taskManager.handlePrEditedEvent(prNumber, String(pr.body ?? ""), strProp(pr.head, "ref"));
+      }
+      if (!task) task = await Task.getByPr(prNumber);
+      if (task) this.forwardEvent(task, evt, `PR #${prNumber}`);
+      return result(task);
+    }
+
     const task = await Task.getByPr(prNumber);
     if (task) this.forwardEvent(task, evt, `PR #${prNumber}`);
     return result(task);
