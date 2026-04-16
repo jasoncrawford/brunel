@@ -769,7 +769,7 @@ describe("hello_ack handshake — buffering", () => {
       let callCount = 0;
       const wsFactoryWs = vi.fn().mockImplementation(() => callCount++ === 0 ? wsA : wsB);
 
-      const sessionWithWs = new WorkerSession(new AgentStatus({ agentId: AGENT_ID }), wsFactoryWs, display, { workspace });
+      const sessionWithWs = new WorkerSession(new StatusBar({ agentId: AGENT_ID }), wsFactoryWs, display, { workspace });
       sessionWithWs.start();
 
       sendMsg(wsA, { type: "task_assigned", taskId: "42", issue: makeIssue() });
