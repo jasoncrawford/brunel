@@ -365,6 +365,13 @@ export async function main(
     // same tick as the ask() call; never a user action).
     if (input === "__abort__") continue;
 
+    // WS_FATAL: a fatal foreman_error was received — drop back to interactive REPL.
+    // The session has already stopped reconnecting; just show the prompt and continue.
+    if (WorkerSession.isFatalSignal(input)) {
+      showPrompt = true;
+      continue;
+    }
+
     // WS_PROMPT: a task prompt or debounced event prompt is ready. Hide the
     // prompt, drain all queued prompts through runQueryFn, then show the prompt
     // again. Stops draining if a prompt is interrupted or errors.

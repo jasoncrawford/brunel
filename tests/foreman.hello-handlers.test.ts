@@ -225,4 +225,56 @@ describe("handleIdleHello", () => {
     const ackCall = sendMsg.mock.calls.find(([, msg]) => (msg as { type: string }).type === "hello_ack");
     expect(ackCall).toBeUndefined();
   });
+
+  it("revert failure sends foreman_error (non-fatal) to the worker ws", async () => {
+    const task = addTask({
+      task_id: "10",
+      issue_number: 10,
+      worker_id: "w1",
+      assigned_at: new Date().toISOString(),
+    });
+    vi.mocked(task.revert).mockRejectedValueOnce(new Error("DB down"));
+
+    const { wss } = makeWss(taskManager);
+    vi.spyOn(utils, "log").mockImplementation(() => {});
+    const ws = fakeWs();
+    await wss.handleIdleHello("w1", ws);
+
+    const errorCall = ws.send.mock.calls.find(([data]: [string]) => {
+      const msg = JSON.parse(data);
+      return msg.type === "foreman_error";
+    });
+    expect(errorCall).toBeDefined();
+    const parsed = JSON.parse(errorCall![0]);
+    expect(parsed.fatal).toBe(false);
+    expect(parsed.message).toContain("DB down");
+  });
+});
+
+// ── handleBusyHello error handling ─────────────────────────────────────────────
+
+describe("handleBusyHello — error handling", () => {
+  it("sends foreman_error (non-fatal) when task.assign throws during reclaim", async () => {
+    const task = addTask({
+      task_id: "10",
+      issue_number: 10,
+      worker_id: "w1",
+      assigned_at: new Date().toISOString(),
+    });
+    vi.mocked(task.assign).mockRejectedValueOnce(new Error("DB write failed"));
+
+    const { wss } = makeWss(taskManager);
+    vi.spyOn(utils, "log").mockImplementation(() => {});
+    const ws = fakeWs();
+    await wss.handleBusyHello("w1", "10", ws);
+
+    const errorCall = ws.send.mock.calls.find(([data]: [string]) => {
+      const msg = JSON.parse(data);
+      return msg.type === "foreman_error";
+    });
+    expect(errorCall).toBeDefined();
+    const parsed = JSON.parse(errorCall![0]);
+    expect(parsed.fatal).toBe(false);
+    expect(parsed.message).toContain("DB write failed");
+  });
 });

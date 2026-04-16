@@ -39,6 +39,8 @@ Every `worker_hello` gets a `hello_ack` with one of three statuses before any ta
 - `busy` — reconnection accepted, worker may resume
 - `cancelled` — task was taken or completed; worker should reset and become idle
 
+If a catastrophic error occurs during hello handling or message processing, the foreman sends `foreman_error` (`{ type, message, fatal }`) instead of silently dropping the connection. `fatal: true` causes the worker to stop reconnecting and return to interactive REPL mode; `fatal: false` is informational and the worker continues.
+
 ## Dev workflow
 
 Three terminals:

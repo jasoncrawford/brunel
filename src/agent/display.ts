@@ -653,6 +653,7 @@ export const FOREMAN_MESSAGE_FMT: FmtTable = {
   task_assigned:      { verbose: (m) => c.darkGray(`Task assigned: #${m.issue.number}, ${m.issue.title}`) },
   event_notification: { verbose: (m) => c.darkGray(`Event received [${fmtTime()}]: ${fmtEvent(m.event as Wire.WebhookEvent)}`) },
   hello_ack:          { verbose: (m) => c.darkGray(`hello_ack: ${m.status}`) },
+  foreman_error:      (m) => c.boldRed(`[foreman error] ${m.message}`),
   _default:           (m) => c.darkGray(`Unknown foreman message: ${m.type}`),
 };
 

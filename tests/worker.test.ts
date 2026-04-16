@@ -12,6 +12,10 @@ class FakeWs extends EventEmitter {
   readyState = 1; // OPEN
   send = vi.fn();
   ping = vi.fn();
+  close = vi.fn().mockImplementation(() => {
+    this.readyState = 3; // CLOSED
+    this.emit("close", 1000, Buffer.from(""));
+  });
   terminate = vi.fn().mockImplementation(() => {
     this.readyState = 3; // CLOSED
     this.emit("close", 1006, Buffer.from(""));
@@ -1357,6 +1361,75 @@ describe("prIsClosed guard", () => {
 
 import { Workspace, registerWorkspaceCommands } from "../src/agent/workspace.js";
 import { CommandRegistry } from "../src/agent/command-registry.js";
+// ── foreman_error ─────────────────────────────────────────────────────────────
+
+describe("foreman_error", () => {
+  it("non-fatal: calls printForemanMessage and does not queue a prompt", () => {
+    sendMsg(fakeWs, { type: "foreman_error", message: "Something went wrong", fatal: false });
+    expect(display.printForemanMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "foreman_error", message: "Something went wrong", fatal: false })
+    );
+    expect(session.hasPendingPrompts()).toBe(false);
+  });
+
+  it("non-fatal: does not stop reconnecting (close still triggers reconnect)", async () => {
+    vi.useFakeTimers();
+    try {
+      sendMsg(fakeWs, { type: "foreman_error", message: "Transient error", fatal: false });
+      fakeWs.emit("close", 1006, Buffer.from(""));
+      vi.advanceTimersByTime(6000);
+      // A new connection should have been made
+      expect(wsFactory).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("fatal: resolves WS input promise with the fatal sentinel", async () => {
+    const wsInput = session.createWsInputPromise();
+    sendMsg(fakeWs, { type: "foreman_error", message: "Catastrophic failure", fatal: true });
+    const result = await wsInput;
+    expect(WorkerSession.isFatalSignal(result)).toBe(true);
+  });
+
+  it("fatal: does not reconnect after ws closes", async () => {
+    vi.useFakeTimers();
+    try {
+      sendMsg(fakeWs, { type: "foreman_error", message: "Fatal error", fatal: true });
+      // The fatal handler closes the ws, which triggers close event
+      // Advance past any reconnect delay
+      vi.advanceTimersByTime(10000);
+      // Should NOT have created a second connection
+      expect(wsFactory).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("fatal: aborts any running query", () => {
+    const ac = new AbortController();
+    session.notifyQueryStart(ac);
+    sendMsg(fakeWs, { type: "foreman_error", message: "Fatal error", fatal: true });
+    expect(ac.signal.aborted).toBe(true);
+    session.notifyQueryEnd(true);
+  });
+
+  it("fatal: calls printForemanMessage so the error is displayed", () => {
+    sendMsg(fakeWs, { type: "foreman_error", message: "Critical failure", fatal: true });
+    expect(display.printForemanMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "foreman_error", fatal: true })
+    );
+  });
+
+  it("isFatalSignal returns true for the fatal sentinel and false for others", async () => {
+    const wsInput = session.createWsInputPromise();
+    sendMsg(fakeWs, { type: "foreman_error", message: "Fatal", fatal: true });
+    const sentinel = await wsInput;
+    expect(WorkerSession.isFatalSignal(sentinel)).toBe(true);
+    expect(WorkerSession.isFatalSignal("")).toBe(false);
+    expect(WorkerSession.isWsSignal(sentinel)).toBe(false);
+  });
+});
 
 // ── workspace slash commands via WorkerSession.workspace ──────────────────────
 
