@@ -1361,6 +1361,8 @@ describe("prIsClosed guard", () => {
 
 import { Workspace, registerWorkspaceCommands } from "../src/agent/workspace.js";
 import { CommandRegistry } from "../src/agent/command-registry.js";
+import { confirmTaskQuit } from "../src/agent/worker.js";
+import type { TaskQuitInfo } from "../src/agent/worker.js";
 // ── foreman_error ─────────────────────────────────────────────────────────────
 
 describe("foreman_error", () => {
@@ -1715,5 +1717,154 @@ describe("heartbeat", () => {
     // Even after another interval, no more pings sent on the closed socket
     vi.advanceTimersByTime(100);
     expect(ws.ping).not.toHaveBeenCalled();
+  });
+});
+
+// ── getTaskQuitInfo ───────────────────────────────────────────────────────────
+
+describe("getTaskQuitInfo", () => {
+  it("returns undefined when no task is assigned", () => {
+    expect(session.getTaskQuitInfo()).toBeUndefined();
+  });
+
+  it("returns task info with issueClosed=false when task is assigned", () => {
+    const issue = makeIssue(7);
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "t7", issue });
+    const info = session.getTaskQuitInfo();
+    expect(info).toEqual({ taskNumber: 7, workerId: AGENT_ID, issueClosed: false });
+  });
+
+  it("returns undefined after task is completed", async () => {
+    const issue = makeIssue();
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "t1", issue });
+    session.takeNextPrompt();
+    await session.completeCurrentTask();
+    expect(session.getTaskQuitInfo()).toBeUndefined();
+  });
+
+  it("returns issueClosed=true after issues/closed event is received", () => {
+    const issue = makeIssue(5);
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "t5", issue });
+    session.takeNextPrompt();
+
+    const closedEvt: Wire.WebhookEvent = { id: "e1", name: "issues", payload: { action: "closed" } };
+    sendMsg(fakeWs, { type: "event_notification", taskId: "t5", event: closedEvt });
+
+    expect(session.getTaskQuitInfo()?.issueClosed).toBe(true);
+  });
+
+  it("returns issueClosed=false after issues/reopened follows issues/closed", () => {
+    const issue = makeIssue(5);
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "t5", issue });
+    session.takeNextPrompt();
+
+    sendMsg(fakeWs, { type: "event_notification", taskId: "t5", event: { id: "e1", name: "issues", payload: { action: "closed" } } });
+    expect(session.getTaskQuitInfo()?.issueClosed).toBe(true);
+
+    sendMsg(fakeWs, { type: "event_notification", taskId: "t5", event: { id: "e2", name: "issues", payload: { action: "reopened" } } });
+    expect(session.getTaskQuitInfo()?.issueClosed).toBe(false);
+  });
+
+  it("resets issueClosed to false on new task_assigned", () => {
+    const issue1 = makeIssue(1);
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "t1", issue: issue1 });
+    session.takeNextPrompt();
+
+    sendMsg(fakeWs, { type: "event_notification", taskId: "t1", event: { id: "e1", name: "issues", payload: { action: "closed" } } });
+    expect(session.getTaskQuitInfo()?.issueClosed).toBe(true);
+
+    const issue2 = makeIssue(2);
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "t2", issue: issue2 });
+    expect(session.getTaskQuitInfo()?.issueClosed).toBe(false);
+  });
+
+  it("does not set issueClosed when issues/closed is for a different task", () => {
+    const issue = makeIssue(5);
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "t5", issue });
+    session.takeNextPrompt();
+
+    // Event for a different task — should be ignored entirely
+    sendMsg(fakeWs, { type: "event_notification", taskId: "t99", event: { id: "e1", name: "issues", payload: { action: "closed" } } });
+    expect(session.getTaskQuitInfo()?.issueClosed).toBe(false);
+  });
+});
+
+// ── confirmTaskQuit ───────────────────────────────────────────────────────────
+
+describe("confirmTaskQuit", () => {
+  const openTask: TaskQuitInfo = { taskNumber: 42, workerId: "test-worker", issueClosed: false };
+  const closedTask: TaskQuitInfo = { taskNumber: 42, workerId: "test-worker", issueClosed: true };
+
+  it("open issue: returns 'cancel' when user picks 'No, keep working' (index 0)", async () => {
+    const mockPick = vi.fn().mockResolvedValue(0);
+    const result = await confirmTaskQuit(openTask, mockPick);
+    expect(result).toBe("cancel");
+  });
+
+  it("open issue: returns 'quit' when user picks 'Yes, quit anyway' (index 1)", async () => {
+    const mockPick = vi.fn().mockResolvedValue(1);
+    const result = await confirmTaskQuit(openTask, mockPick);
+    expect(result).toBe("quit");
+  });
+
+  it("open issue: prompt mentions task number and worker id", async () => {
+    const printSpy = vi.spyOn(displayModule, "print").mockImplementation(() => {});
+    try {
+      const mockPick = vi.fn().mockResolvedValue(0);
+      await confirmTaskQuit(openTask, mockPick);
+      const printed = printSpy.mock.calls.map(([s]) => stripAnsi(s as string)).join("\n");
+      expect(printed).toContain("#42");
+      expect(printed).toContain("test-worker");
+    } finally {
+      printSpy.mockRestore();
+    }
+  });
+
+  it("closed issue: returns 'complete-and-quit' when user picks index 0 (yes, complete)", async () => {
+    const mockPick = vi.fn().mockResolvedValue(0);
+    const result = await confirmTaskQuit(closedTask, mockPick);
+    expect(result).toBe("complete-and-quit");
+  });
+
+  it("closed issue: returns 'quit' when user picks index 1 (no, just exit)", async () => {
+    const mockPick = vi.fn().mockResolvedValue(1);
+    const result = await confirmTaskQuit(closedTask, mockPick);
+    expect(result).toBe("quit");
+  });
+
+  it("closed issue: returns 'cancel' when user picks index 2 (don't exit)", async () => {
+    const mockPick = vi.fn().mockResolvedValue(2);
+    const result = await confirmTaskQuit(closedTask, mockPick);
+    expect(result).toBe("cancel");
+  });
+
+  it("closed issue: prompt mentions task number", async () => {
+    const printSpy = vi.spyOn(displayModule, "print").mockImplementation(() => {});
+    try {
+      const mockPick = vi.fn().mockResolvedValue(0);
+      await confirmTaskQuit(closedTask, mockPick);
+      const printed = printSpy.mock.calls.map(([s]) => stripAnsi(s as string)).join("\n");
+      expect(printed).toContain("#42");
+    } finally {
+      printSpy.mockRestore();
+    }
+  });
+
+  it("open issue: pick is called with two options (No first, Yes second)", async () => {
+    const mockPick = vi.fn().mockResolvedValue(0);
+    await confirmTaskQuit(openTask, mockPick);
+    expect(mockPick).toHaveBeenCalledOnce();
+    const options = mockPick.mock.calls[0][0] as string[];
+    expect(options).toHaveLength(2);
+    expect(options[0].toLowerCase()).toContain("no");
+    expect(options[1].toLowerCase()).toContain("yes");
+  });
+
+  it("closed issue: pick is called with three options", async () => {
+    const mockPick = vi.fn().mockResolvedValue(0);
+    await confirmTaskQuit(closedTask, mockPick);
+    expect(mockPick).toHaveBeenCalledOnce();
+    const options = mockPick.mock.calls[0][0] as string[];
+    expect(options).toHaveLength(3);
   });
 });

@@ -9,7 +9,7 @@ import * as display from "./display.js";
 import { StatusBar, statusBar, initStatusBar } from "./status-bar.js";
 import { ask, pick, pickMultiple, pickQuestion } from "./input.js";
 import type { PickQuestionResult } from "./input.js";
-import { WorkerSession, registerWorkerCommands, startWorkerMode, generateAgentId } from "./worker.js";
+import { WorkerSession, registerWorkerCommands, startWorkerMode, generateAgentId, confirmTaskQuit } from "./worker.js";
 import type { RunQuery } from "./worker.js";
 import { loadConfig, getConfig } from "../config.js";
 import { Workspace, confirmIfUnsafe, registerWorkspaceCommands } from "./workspace.js";
@@ -288,7 +288,13 @@ export async function main(
   registry.register("exit", {
     description: "Exit",
     handler: async () => {
-      if (!session) await doExit();
+      if (!session) { await doExit(); return "exit"; }
+      const taskInfo = session.getTaskQuitInfo();
+      if (taskInfo) {
+        const choice = await confirmTaskQuit(taskInfo);
+        if (choice === "cancel") return undefined;
+        if (choice === "complete-and-quit") await session.completeCurrentTask();
+      }
       return "exit";
     },
   });
@@ -356,7 +362,13 @@ export async function main(
 
     // ^D / ^C on empty buffer — treat as exit.
     if (input === "__eof__") {
-      if (!session) await doExit();
+      if (!session) { await doExit(); break; }
+      const taskInfo = session.getTaskQuitInfo();
+      if (taskInfo) {
+        const choice = await confirmTaskQuit(taskInfo);
+        if (choice === "cancel") continue;
+        if (choice === "complete-and-quit") await session.completeCurrentTask();
+      }
       break;
     }
 
