@@ -51,12 +51,14 @@ export class StatusBar extends EventEmitter {
   /** Whether the primary animated status bar is currently active. */
   active = false;
   private _text = "";
+  private _getText: (() => string) | null = null;
   private _interval: ReturnType<typeof setInterval> | null = null;
 
   // ── Persistent (worker) bar ────────────────────────────────────────────────
   /** Whether the persistent worker status bar is currently active. */
   persistentActive = false;
   private _persistentText = "";
+  private _resizeHandler: (() => void) | null = null;
 
   // ── Callbacks ──────────────────────────────────────────────────────────────
 
@@ -268,6 +270,7 @@ export class StatusBar extends EventEmitter {
   start(getText: () => string): void {
     this.clear();
     this.active = true;
+    this._getText = getText;
     this._text = getText();
     this.draw();
     this._interval = setInterval(() => {
@@ -282,6 +285,7 @@ export class StatusBar extends EventEmitter {
     if (this._interval) { clearInterval(this._interval); this._interval = null; }
     this.clear();
     this.active = false;
+    this._getText = null;
     this._text = "";
     this.draw();
   }
@@ -290,20 +294,38 @@ export class StatusBar extends EventEmitter {
 
   /**
    * Show the worker status bar. Renders immediately using the current state
-   * and redraws automatically whenever update() is called.
+   * and redraws automatically whenever update() is called or the terminal
+   * is resized.
    */
   startPersistent(): void {
     this.clear();
     this.persistentActive = true;
     this._persistentText = this._fmtWorkerStatus();
     this.draw();
+    if (!this._resizeHandler) {
+      this._resizeHandler = () => this._handleResize();
+      process.stdout.on("resize", this._resizeHandler);
+    }
   }
 
   /** Stop the persistent bar and redraw the primary bar if still active. */
   stopPersistent(): void {
+    if (this._resizeHandler) {
+      process.stdout.off("resize", this._resizeHandler);
+      this._resizeHandler = null;
+    }
     this.clear();
     this.persistentActive = false;
     this._persistentText = "";
+    this.draw();
+  }
+
+  /** Handle terminal resize: recompute and redraw all active bars. */
+  private _handleResize(): void {
+    if (!this.persistentActive && !this.active) return;
+    this.clear();
+    if (this._getText) this._text = this._getText();
+    this._persistentText = this._fmtWorkerStatus();
     this.draw();
   }
 

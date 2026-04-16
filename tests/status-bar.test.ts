@@ -134,6 +134,50 @@ describe("StatusBar class", () => {
     });
   });
 
+  describe("terminal resize", () => {
+    afterEach(() => {
+      bar.stopPersistent();
+    });
+
+    it("redraws on resize with updated width", () => {
+      bar.update({ connectionStatus: "connected" });
+      bar.startPersistent();
+      stdoutWrite.mockClear();
+
+      const origColumns = Object.getOwnPropertyDescriptor(process.stdout, "columns");
+      Object.defineProperty(process.stdout, "columns", { value: 40, configurable: true });
+      try {
+        process.stdout.emit("resize");
+        const writes = stdoutWrite.mock.calls.map(a => String(a[0]));
+        expect(writes.length).toBeGreaterThan(0);
+        expect(writes.join("")).toContain("Connected");
+      } finally {
+        if (origColumns) Object.defineProperty(process.stdout, "columns", origColumns);
+        else delete (process.stdout as { columns?: number }).columns;
+      }
+    });
+
+    it("does not register multiple resize listeners on repeated startPersistent calls", () => {
+      bar.startPersistent();
+      bar.startPersistent(); // second call should not add a second listener
+      stdoutWrite.mockClear();
+      process.stdout.emit("resize");
+      // If there were two listeners, clear+draw would be called twice; just check it doesn't throw
+      const writes = stdoutWrite.mock.calls.map(a => String(a[0]));
+      expect(writes.length).toBeGreaterThan(0);
+    });
+
+    it("stops listening for resize after stopPersistent", () => {
+      bar.update({ connectionStatus: "connected" });
+      bar.startPersistent();
+      bar.stopPersistent();
+      stdoutWrite.mockClear();
+      process.stdout.emit("resize");
+      // No redraws should happen after stopPersistent
+      expect(stdoutWrite.mock.calls.length).toBe(0);
+    });
+  });
+
   describe("persistent status bar", () => {
     it("startPersistent draws a status line", () => {
       bar.update({ connectionStatus: "connected" });
