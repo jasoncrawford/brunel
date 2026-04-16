@@ -366,6 +366,8 @@ export class ForemanWss {
       }
     } catch (err) {
       log(`ERROR handleBusyHello ${workerId}: ${fmtError(err)}`);
+      // DB error during task lookup or reclaim — recoverable: DB may be temporarily down.
+      // Worker retries on reconnect and the operation succeeds once the DB recovers.
       this.sendError(ws, `Internal error during reconnection: ${fmtError(err)}`, false);
     }
   }
@@ -376,21 +378,32 @@ export class ForemanWss {
    * registers the worker, and sends an idle hello_ack.
    */
   async handleIdleHello(workerId: string, ws: WebSocket): Promise<void> {
-    const priorTask = await Task.getByWorker(workerId);
-    if (priorTask) {
-      try {
-        await priorTask.revert();
-        this.workerLog(workerId, `hello idle (had task #${priorTask.taskId}) — reverting task to pending`);
-      } catch (err) {
-        log(`ERROR Failed to revert task #${priorTask.taskId} to pending: ${fmtError(err)}`);
-        this.sendError(ws, `Failed to revert prior task to pending: ${fmtError(err)}`, false);
-        return; // don't register as idle — task stays assigned, worker retries on reconnect
+    try {
+      // DB error here is transient — recoverable: worker retries on reconnect.
+      const priorTask = await Task.getByWorker(workerId);
+      if (priorTask) {
+        try {
+          await priorTask.revert();
+          this.workerLog(workerId, `hello idle (had task #${priorTask.taskId}) — reverting task to pending`);
+        } catch (err) {
+          log(`ERROR Failed to revert task #${priorTask.taskId} to pending: ${fmtError(err)}`);
+          // DB error reverting prior task — recoverable: task stays assigned so the
+          // failure is visible; a new idle assignment would create a double assignment.
+          // Worker retries on reconnect and the revert succeeds once the DB recovers.
+          this.sendError(ws, `Failed to revert prior task to pending: ${fmtError(err)}`, false);
+          return; // don't register as idle — task stays assigned, worker retries on reconnect
+        }
+      } else {
+        this.workerLog(workerId, "hello idle");
       }
-    } else {
-      this.workerLog(workerId, "hello idle");
+      const w = Worker.register(workerId, ws);
+      this.sendMsg(w, { type: "hello_ack", workerId: w.workerId, status: "idle" });
+    } catch (err) {
+      log(`ERROR handleIdleHello ${workerId}: ${fmtError(err)}`);
+      // DB error during worker lookup — recoverable: DB may be temporarily down.
+      // Worker retries on reconnect and the operation succeeds once the DB recovers.
+      this.sendError(ws, `Internal error during idle hello: ${fmtError(err)}`, false);
     }
-    const w = Worker.register(workerId, ws);
-    this.sendMsg(w, { type: "hello_ack", workerId: w.workerId, status: "idle" });
   }
 
   // ── Routing ─────────────────────────────────────────────────────────────────
