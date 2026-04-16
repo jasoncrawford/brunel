@@ -15,62 +15,6 @@ export const EFFORT_LEVELS = [
 export const VALID_EFFORT_VALUES = ["low", "medium", "high", "max"] as const;
 export type EffortValue = typeof VALID_EFFORT_VALUES[number];
 
-// ── Effort selection ─────────────────────────────────────────────────────────
-
-/**
- * Handle the /effort command: show a picker or set directly from an argument.
- * Returns the new effort value (undefined = auto/default).
- */
-export async function handleEffortCommand(
-  args: string,
-  currentEffort: EffortValue | undefined,
-  pickEffortFn: (options: string[], currentIdx: number) => Promise<PickResult>,
-  print: (msg: string) => void,
-): Promise<EffortValue | undefined> {
-  // Direct set: /effort <level>
-  if (args) {
-    if (args === "auto") {
-      print(display.c.darkGray("Effort set to auto (default)."));
-      return undefined;
-    }
-    const match = EFFORT_LEVELS.find(l => l.value === args);
-    if (match && match.value !== "auto") {
-      print(display.c.darkGray(`Effort set to ${match.value}.`));
-      return match.value as EffortValue;
-    }
-    // Unknown level — reject (unlike model, effort is a closed set)
-    const names = EFFORT_LEVELS.map(l => l.value).join(", ");
-    print(display.c.amber(`Unknown effort level "${args}". Valid levels: ${names}`));
-    return currentEffort;
-  }
-
-  // Interactive picker
-  const options: string[] = [];
-  let currentIdx = 0;
-  for (let i = 0; i < EFFORT_LEVELS.length; i++) {
-    const l = EFFORT_LEVELS[i];
-    const desc = l.description ? ` · ${l.description}` : "";
-    options.push(`${l.displayName}${desc}`);
-    if (l.value === (currentEffort ?? "auto")) currentIdx = i;
-  }
-
-  print(display.c.yellow("\nSelect effort level:"));
-  const result = await pickEffortFn(options, currentIdx);
-
-  if (result.type !== "selected") {
-    return currentEffort;
-  }
-
-  const chosen = EFFORT_LEVELS[result.index];
-  if (chosen.value === "auto") {
-    if (currentEffort === undefined) return currentEffort; // already auto, no-op
-    print(display.c.darkGray(`Effort set to auto (default).`));
-    return undefined;
-  }
-  print(display.c.darkGray(`Effort set to ${chosen.value}.`));
-  return chosen.value as EffortValue;
-}
-
 // ── Model cache ───────────────────────────────────────────────────────────────
 
 export type ModelInfo = { value: string; displayName: string; description: string };
@@ -95,96 +39,9 @@ export function findModel(models: ModelInfo[], input: string): ModelInfo | undef
   return models.find(m => m.value === input);
 }
 
-// ── Model selection ───────────────────────────────────────────────────────────
-
-export type FetchModelsFn = () => Promise<ModelInfo[]>;
-
-/**
- * Handle the /model command: show a picker or set directly from an argument.
- * Returns the new model value (undefined = default).
- */
-export async function handleModelCommand(
-  args: string,
-  currentModel: string | undefined,
-  pickModelFn: (options: string[], currentIdx: number) => Promise<PickResult>,
-  fetchModelsFn: FetchModelsFn | undefined,
-  print: (msg: string) => void,
-): Promise<string | undefined> {
-  // Ensure models are loaded
-  if (!_cachedModels && fetchModelsFn) {
-    try {
-      _cachedModels = await fetchModelsFn();
-    } catch {
-      // fall through with null cache
-    }
-  }
-  const models = _cachedModels;
-
-  // Direct set: /model <alias-or-id>
-  if (args) {
-    if (args === "default" || args === "sonnet") {
-      print(display.c.darkGray("Model set to default."));
-      return undefined;
-    }
-    if (models) {
-      const match = findModel(models, args);
-      if (match) {
-        print(display.c.darkGray(`Model set to ${match.displayName}.`));
-        return match.value;
-      }
-      // Unknown model — warn but accept (power-user escape hatch)
-      const names = models.map(m => m.value).join(", ");
-      print(display.c.amber(`Warning: "${args}" is not a known model. Known models: ${names}`));
-      print(display.c.darkGray(`Model set to ${args}.`));
-      return args;
-    }
-    // No cache — accept as-is
-    print(display.c.darkGray(`Model set to ${args}.`));
-    return args;
-  }
-
-  // Interactive picker
-  if (!models || models.length === 0) {
-    print(display.c.amber("No model list available yet. Run a query first, or use /model <name>."));
-    return currentModel;
-  }
-
-  // Build options from SDK model list — known models only, no "Other".
-  const options: string[] = [];
-  let currentIdx = -1;
-  for (let i = 0; i < models.length; i++) {
-    const m = models[i];
-    const desc = m.description ? ` \u00b7 ${m.description}` : "";
-    options.push(`${m.displayName}${desc}`);
-    if (m.value === currentModel) currentIdx = i;
-  }
-  // If currentModel is undefined (default), mark the first entry as current
-  if (currentModel === undefined) currentIdx = 0;
-
-  print(display.c.yellow("\nSelect model:"));
-  const result = await pickModelFn(options, currentIdx);
-
-  if (result.type !== "selected") {
-    return currentModel;
-  }
-
-  // Selected a model from the list
-  const chosen = models[result.index];
-  if (result.index === 0 && currentModel === undefined) {
-    // Already on default, no change
-    return currentModel;
-  }
-  // Selecting the first (default/recommended) entry resets to undefined
-  if (result.index === 0) {
-    print(display.c.darkGray(`Model set to ${chosen.displayName}.`));
-    return undefined;
-  }
-  print(display.c.darkGray(`Model set to ${chosen.displayName}.`));
-  return chosen.value;
-}
-
 // ── Settings ──────────────────────────────────────────────────────────────────
 
+export type FetchModelsFn = () => Promise<ModelInfo[]>;
 type PickFn = (options: string[], currentIdx: number) => Promise<PickResult>;
 
 /** Owns the runtime-settable preferences (model and effort) and operations on them. */
@@ -200,20 +57,134 @@ export class Settings {
   get model(): string | undefined { return this._model; }
   get effort(): EffortValue | undefined { return this._effort; }
 
+  /** Handle the /model command: show a picker or set directly from an argument. */
   async pickModel(
     args: string,
     pickFn: PickFn,
     fetchModelsFn: FetchModelsFn | undefined,
     print: (msg: string) => void,
   ): Promise<void> {
-    this._model = await handleModelCommand(args, this._model, pickFn, fetchModelsFn, print);
+    // Ensure models are loaded
+    if (!_cachedModels && fetchModelsFn) {
+      try {
+        _cachedModels = await fetchModelsFn();
+      } catch {
+        // fall through with null cache
+      }
+    }
+    const models = _cachedModels;
+
+    // Direct set: /model <alias-or-id>
+    if (args) {
+      if (args === "default" || args === "sonnet") {
+        print(display.c.darkGray("Model set to default."));
+        this._model = undefined;
+        return;
+      }
+      if (models) {
+        const match = findModel(models, args);
+        if (match) {
+          print(display.c.darkGray(`Model set to ${match.displayName}.`));
+          this._model = match.value;
+          return;
+        }
+        // Unknown model — warn but accept (power-user escape hatch)
+        const names = models.map(m => m.value).join(", ");
+        print(display.c.amber(`Warning: "${args}" is not a known model. Known models: ${names}`));
+        print(display.c.darkGray(`Model set to ${args}.`));
+        this._model = args;
+        return;
+      }
+      // No cache — accept as-is
+      print(display.c.darkGray(`Model set to ${args}.`));
+      this._model = args;
+      return;
+    }
+
+    // Interactive picker
+    if (!models || models.length === 0) {
+      print(display.c.amber("No model list available yet. Run a query first, or use /model <name>."));
+      return;
+    }
+
+    // Build options from SDK model list — known models only, no "Other".
+    const options: string[] = [];
+    let currentIdx = -1;
+    for (let i = 0; i < models.length; i++) {
+      const m = models[i];
+      const desc = m.description ? ` \u00b7 ${m.description}` : "";
+      options.push(`${m.displayName}${desc}`);
+      if (m.value === this._model) currentIdx = i;
+    }
+    // If model is undefined (default), mark the first entry as current
+    if (this._model === undefined) currentIdx = 0;
+
+    print(display.c.yellow("\nSelect model:"));
+    const result = await pickFn(options, currentIdx);
+
+    if (result.type !== "selected") return;
+
+    // Selected a model from the list
+    const chosen = models[result.index];
+    if (result.index === 0 && this._model === undefined) return; // already on default, no-op
+    // Selecting the first (default/recommended) entry resets to undefined
+    if (result.index === 0) {
+      print(display.c.darkGray(`Model set to ${chosen.displayName}.`));
+      this._model = undefined;
+      return;
+    }
+    print(display.c.darkGray(`Model set to ${chosen.displayName}.`));
+    this._model = chosen.value;
   }
 
+  /** Handle the /effort command: show a picker or set directly from an argument. */
   async pickEffort(
     args: string,
     pickFn: PickFn,
     print: (msg: string) => void,
   ): Promise<void> {
-    this._effort = await handleEffortCommand(args, this._effort, pickFn, print);
+    // Direct set: /effort <level>
+    if (args) {
+      if (args === "auto") {
+        print(display.c.darkGray("Effort set to auto (default)."));
+        this._effort = undefined;
+        return;
+      }
+      const match = EFFORT_LEVELS.find(l => l.value === args);
+      if (match && match.value !== "auto") {
+        print(display.c.darkGray(`Effort set to ${match.value}.`));
+        this._effort = match.value as EffortValue;
+        return;
+      }
+      // Unknown level — reject (unlike model, effort is a closed set)
+      const names = EFFORT_LEVELS.map(l => l.value).join(", ");
+      print(display.c.amber(`Unknown effort level "${args}". Valid levels: ${names}`));
+      return;
+    }
+
+    // Interactive picker
+    const options: string[] = [];
+    let currentIdx = 0;
+    for (let i = 0; i < EFFORT_LEVELS.length; i++) {
+      const l = EFFORT_LEVELS[i];
+      const desc = l.description ? ` · ${l.description}` : "";
+      options.push(`${l.displayName}${desc}`);
+      if (l.value === (this._effort ?? "auto")) currentIdx = i;
+    }
+
+    print(display.c.yellow("\nSelect effort level:"));
+    const result = await pickFn(options, currentIdx);
+
+    if (result.type !== "selected") return;
+
+    const chosen = EFFORT_LEVELS[result.index];
+    if (chosen.value === "auto") {
+      if (this._effort === undefined) return; // already auto, no-op
+      print(display.c.darkGray(`Effort set to auto (default).`));
+      this._effort = undefined;
+      return;
+    }
+    print(display.c.darkGray(`Effort set to ${chosen.value}.`));
+    this._effort = chosen.value as EffortValue;
   }
 }
