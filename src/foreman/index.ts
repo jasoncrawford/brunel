@@ -63,7 +63,7 @@ if (isMain) {
   // Step 2: Fetch brunel:ready issues from GitHub for reconciliation.
   log("[startup] step 2: fetching brunel:ready issues from GitHub for reconciliation...");
   try {
-    await taskManager.loadIssuesFromGithub(config);
+    await taskManager.loadIssuesFromGithub();
     await foremanWss.reconcile();
   } catch (err) {
     log(`ERROR Failed to load issues from GitHub: ${fmtError(err)}`);

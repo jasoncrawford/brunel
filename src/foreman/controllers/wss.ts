@@ -522,12 +522,10 @@ export class ForemanWss {
         const labels = (issue.labels as Array<{ name: string }> | undefined)?.map((l) => l.name) ?? [];
         const enqueued = await this.taskManager.handleIssueLabeledEvent(
           issueNumber,
-          this.config.githubRepo,
           String(issue.title ?? ""),
           String(issue.body ?? ""),
           labels,
           String(issue.state ?? "open"),
-          { repo: this.config.githubRepo, token: this.config.githubToken, apiUrl: this.config.githubApiUrl },
         ).catch((err: unknown) => {
           log(`ERROR Failed to persist task #${issueNumber}: ${fmtError(err)}`);
           return null;
@@ -581,7 +579,6 @@ export class ForemanWss {
         this.taskManager.handleIssueBodyEditedEvent(
           issueNumber,
           String(issue.body ?? ""),
-          { repo: this.config.githubRepo, token: this.config.githubToken, apiUrl: this.config.githubApiUrl },
         );
       }
     }
