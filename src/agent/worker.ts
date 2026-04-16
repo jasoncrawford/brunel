@@ -130,9 +130,9 @@ export type WorkerModeConfig = {
 };
 
 // Sentinel: a prompt is ready for main() to execute
-export const WS_PROMPT = "__ws_prompt__";
+const WS_PROMPT = "__ws_prompt__";
 // Sentinel: a fatal foreman error was received; main() should drop back to interactive REPL
-export const WS_FATAL = "__ws_fatal__";
+const WS_FATAL = "__ws_fatal__";
 
 /** A prompt queued by WorkerSession for main() to execute. */
 export type QueuedPrompt = { prompt: string; fresh: boolean };

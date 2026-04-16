@@ -1361,8 +1361,6 @@ describe("prIsClosed guard", () => {
 
 import { Workspace, registerWorkspaceCommands } from "../src/agent/workspace.js";
 import { CommandRegistry } from "../src/agent/command-registry.js";
-import { WS_FATAL } from "../src/agent/worker.js";
-
 // ── foreman_error ─────────────────────────────────────────────────────────────
 
 describe("foreman_error", () => {
@@ -1387,11 +1385,11 @@ describe("foreman_error", () => {
     }
   });
 
-  it("fatal: resolves WS input promise with WS_FATAL sentinel", async () => {
+  it("fatal: resolves WS input promise with the fatal sentinel", async () => {
     const wsInput = session.createWsInputPromise();
     sendMsg(fakeWs, { type: "foreman_error", message: "Catastrophic failure", fatal: true });
     const result = await wsInput;
-    expect(result).toBe(WS_FATAL);
+    expect(WorkerSession.isFatalSignal(result)).toBe(true);
   });
 
   it("fatal: does not reconnect after ws closes", async () => {
@@ -1423,10 +1421,13 @@ describe("foreman_error", () => {
     );
   });
 
-  it("isFatalSignal returns true only for WS_FATAL sentinel", () => {
-    expect(WorkerSession.isFatalSignal(WS_FATAL)).toBe(true);
-    expect(WorkerSession.isFatalSignal("__ws_prompt__")).toBe(false);
+  it("isFatalSignal returns true for the fatal sentinel and false for others", async () => {
+    const wsInput = session.createWsInputPromise();
+    sendMsg(fakeWs, { type: "foreman_error", message: "Fatal", fatal: true });
+    const sentinel = await wsInput;
+    expect(WorkerSession.isFatalSignal(sentinel)).toBe(true);
     expect(WorkerSession.isFatalSignal("")).toBe(false);
+    expect(WorkerSession.isWsSignal(sentinel)).toBe(false);
   });
 });
 

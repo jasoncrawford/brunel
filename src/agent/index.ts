@@ -10,7 +10,7 @@ import { setThinkOutLoud, setVerbose, verbose } from "./display.js";
 import { StatusBar, statusBar, initStatusBar } from "./status-bar.js";
 import { ask, pick, pickMultiple, pickQuestion } from "./input.js";
 import type { PickQuestionResult } from "./input.js";
-import { WorkerSession, registerWorkerCommands, startWorkerMode, generateAgentId, WS_FATAL } from "./worker.js";
+import { WorkerSession, registerWorkerCommands, startWorkerMode, generateAgentId } from "./worker.js";
 import type { RunQuery, WorkerModeConfig } from "./worker.js";
 import { loadConfig } from "../config.js";
 import { Workspace, confirmIfUnsafe, registerWorkspaceCommands } from "./workspace.js";
@@ -367,7 +367,7 @@ export async function main(
 
     // WS_FATAL: a fatal foreman_error was received — drop back to interactive REPL.
     // The session has already stopped reconnecting; just show the prompt and continue.
-    if (input === WS_FATAL) {
+    if (WorkerSession.isFatalSignal(input)) {
       showPrompt = true;
       continue;
     }
