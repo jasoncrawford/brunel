@@ -19,11 +19,6 @@ export function effectiveWidth(fallback = W): number {
   return (process.stdout.columns ?? fallback) - (getConfig().verbose ? VERBOSE_PREFIX_LEN : 0);
 }
 
-// ── Verbose / think-out-loud setters (update the config singleton) ─────────────
-
-export function setVerbose(v: boolean) { getConfig().verbose = v; }
-export function setThinkOutLoud(v: boolean) { getConfig().thinkOutLoud = v; }
-
 // ── Colors ────────────────────────────────────────────────────────────────────
 
 export const c = {

@@ -75,7 +75,7 @@ import { main } from "../src/agent/index.js";
 import { confirmIfUnsafe } from "../src/agent/workspace.js";
 import * as inputModule from "../src/agent/input.js";
 import * as displayModule from "../src/agent/display.js";
-import { setVerbose } from "../src/agent/display.js";
+import { getConfig } from "../src/config.js";
 import { stripAnsi } from "./helpers.js";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -116,11 +116,11 @@ describe("workerMain startup banner", () => {
     printSpy = vi.spyOn(displayModule, "print").mockImplementation(() => {});
     vi.mocked(inputModule.ask).mockResolvedValue("__eof__");
     vi.mocked(confirmIfUnsafe).mockResolvedValue(true);
-    setVerbose(true);
+    getConfig().verbose = true;
   });
 
   afterEach(() => {
-    setVerbose(false);
+    getConfig().verbose = false;
     chdirSpy.mockRestore();
     printSpy.mockRestore();
     vi.clearAllMocks();

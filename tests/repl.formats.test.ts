@@ -1,10 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { stripAnsi } from "./helpers.js";
 import { statusBar } from "../src/agent/status-bar.js";
+import { getConfig } from "../src/config.js";
 import {
   resolve,
-  setThinkOutLoud,
-  setVerbose,
   ASSISTANT_BLOCK_FMT,
   USER_BLOCK_FMT,
   TOOL_CALL_FMT,
@@ -26,7 +25,7 @@ function r(table: FmtTable, key: string, data: any): string | null {
 }
 
 describe("resolve()", () => {
-  afterEach(() => setVerbose(false));
+  afterEach(() => getConfig().verbose = false);
 
   it("key exists as Fmt function → calls it", () => {
     const table: FmtTable = { foo: (d) => `value:${d.x}` };
@@ -44,7 +43,7 @@ describe("resolve()", () => {
   });
 
   it("key as { quiet, verbose }, VERBOSE=false → calls quiet", () => {
-    setVerbose(false);
+    getConfig().verbose = false;
     const table: FmtTable = {
       foo: { quiet: () => "quiet", verbose: () => "verbose" },
     };
@@ -52,7 +51,7 @@ describe("resolve()", () => {
   });
 
   it("key as { quiet, verbose }, VERBOSE=true → calls verbose", () => {
-    setVerbose(true);
+    getConfig().verbose = true;
     const table: FmtTable = {
       foo: { quiet: () => "quiet", verbose: () => "verbose" },
     };
@@ -60,13 +59,13 @@ describe("resolve()", () => {
   });
 
   it("{ verbose: fn } with VERBOSE=false → returns null", () => {
-    setVerbose(false);
+    getConfig().verbose = false;
     const table: FmtTable = { foo: { verbose: () => "v" } };
     expect(resolve(table, "foo", {})).toBeNull();
   });
 
   it("{ verbose: fn } with VERBOSE=true → calls fn", () => {
-    setVerbose(true);
+    getConfig().verbose = true;
     const table: FmtTable = { foo: { verbose: () => "v" } };
     expect(r(table, "foo", {})).toBe("v");
   });
@@ -79,9 +78,9 @@ describe("resolve()", () => {
 
 describe("ASSISTANT_BLOCK_FMT", () => {
   it("thinking block: thinkOutLoud=true shows content wrapped in gray", () => {
-    setThinkOutLoud(true);
+    getConfig().thinkOutLoud = true;
     const result = resolve(ASSISTANT_BLOCK_FMT, "thinking", { thinking: "hello" })!;
-    setThinkOutLoud(false);
+    getConfig().thinkOutLoud = false;
     expect(stripAnsi(result)).toContain("hello");
     // gray color: \x1b[38;5;246m
     expect(result).toContain("\x1b[38;5;246m");
@@ -500,15 +499,15 @@ describe("TOOL_ERROR_FMT", () => {
 });
 
 describe("SYSTEM_FMT", () => {
-  afterEach(() => setVerbose(false));
+  afterEach(() => getConfig().verbose = false);
 
   it("init, VERBOSE=false → null", () => {
-    setVerbose(false);
+    getConfig().verbose = false;
     expect(resolve(SYSTEM_FMT, "init", { session_id: "abc" })).toBeNull();
   });
 
   it("init, VERBOSE=true → session: <session_id>", () => {
-    setVerbose(true);
+    getConfig().verbose = true;
     expect(r(SYSTEM_FMT, "init", { session_id: "abc" })).toBe("init: session abc");
   });
 
@@ -554,7 +553,7 @@ describe("SYSTEM_FMT", () => {
   });
 
   it("compact_boundary → always shown (not verbose-only)", () => {
-    setVerbose(false);
+    getConfig().verbose = false;
     const msg = {
       subtype: "compact_boundary",
       compact_metadata: { trigger: "auto", pre_tokens: 1000 },
@@ -564,7 +563,7 @@ describe("SYSTEM_FMT", () => {
 
   it("status/compacting → shows compacting notice (verbose and quiet)", () => {
     for (const v of [false, true]) {
-      setVerbose(v);
+      getConfig().verbose = v;
       const msg = { subtype: "status", status: "compacting" };
       const result = r(SYSTEM_FMT, "status", msg);
       expect(result).not.toBeNull();
@@ -578,41 +577,41 @@ describe("SYSTEM_FMT", () => {
   });
 
   it("hook_started, VERBOSE=false → null", () => {
-    setVerbose(false);
+    getConfig().verbose = false;
     expect(resolve(SYSTEM_FMT, "hook_started", { hook_name: "my-hook", hook_event: "PreToolUse" })).toBeNull();
   });
 
   it("hook_started, VERBOSE=true → hook: <hook_name> (<hook_event>)", () => {
-    setVerbose(true);
+    getConfig().verbose = true;
     expect(r(SYSTEM_FMT, "hook_started", { hook_name: "my-hook", hook_event: "PreToolUse" }))
       .toBe("hook: my-hook (PreToolUse)");
   });
 
   it("hook_response, VERBOSE=false → null", () => {
-    setVerbose(false);
+    getConfig().verbose = false;
     expect(resolve(SYSTEM_FMT, "hook_response", { hook_name: "my-hook", hook_event: "PreToolUse", outcome: "success" })).toBeNull();
   });
 
   it("hook_response, VERBOSE=true, success → hook: <hook_name> — success", () => {
-    setVerbose(true);
+    getConfig().verbose = true;
     expect(r(SYSTEM_FMT, "hook_response", { hook_name: "my-hook", hook_event: "PreToolUse", outcome: "success" }))
       .toBe("hook: my-hook — success");
   });
 
   it("hook_response, VERBOSE=true, error with exit code → includes [exit N]", () => {
-    setVerbose(true);
+    getConfig().verbose = true;
     expect(r(SYSTEM_FMT, "hook_response", { hook_name: "lint-hook", hook_event: "PostToolUse", outcome: "error", exit_code: 1 }))
       .toBe("hook: lint-hook — error [exit 1]");
   });
 
   it("hook_response, VERBOSE=true, exit_code=0 → no exit suffix", () => {
-    setVerbose(true);
+    getConfig().verbose = true;
     expect(r(SYSTEM_FMT, "hook_response", { hook_name: "my-hook", hook_event: "PreToolUse", outcome: "success", exit_code: 0 }))
       .toBe("hook: my-hook — success");
   });
 
   it("api_retry → shown in non-verbose mode (not verbose-only)", () => {
-    setVerbose(false);
+    getConfig().verbose = false;
     const msg = { subtype: "api_retry", attempt: 1, max_retries: 10, retry_delay_ms: 500 };
     expect(resolve(SYSTEM_FMT, "api_retry", msg)).not.toBeNull();
   });
@@ -655,18 +654,18 @@ describe("SYSTEM_FMT", () => {
   });
 
   it("_default, VERBOSE=false → null", () => {
-    setVerbose(false);
+    getConfig().verbose = false;
     expect(resolve(SYSTEM_FMT, "unknown_subtype", { subtype: "unknown_subtype" })).toBeNull();
   });
 
   it("_default, VERBOSE=true → system/<subtype>", () => {
-    setVerbose(true);
+    getConfig().verbose = true;
     expect(r(SYSTEM_FMT, "_default", { subtype: "whatever" })).toBe("system/whatever");
   });
 });
 
 describe("MESSAGE_FMT", () => {
-  afterEach(() => setVerbose(false));
+  afterEach(() => getConfig().verbose = false);
 
   it("_empty → [<type> — empty] in darkGray", () => {
     const raw = resolve(MESSAGE_FMT, "_empty", { type: "assistant" })!;
@@ -690,17 +689,17 @@ describe("MESSAGE_FMT", () => {
   });
 
   it("rate_limit_event, status=allowed, VERBOSE=false → null", () => {
-    setVerbose(false);
+    getConfig().verbose = false;
     expect(resolve(MESSAGE_FMT, "rate_limit_event", { rate_limit_info: { status: "allowed" } })).toBeNull();
   });
 
   it("rate_limit_event, status=allowed, VERBOSE=true → null (silenced)", () => {
-    setVerbose(true);
+    getConfig().verbose = true;
     expect(resolve(MESSAGE_FMT, "rate_limit_event", { rate_limit_info: { status: "allowed" } })).toBeNull();
   });
 
   it("rate_limit_event, status=allowed_warning, VERBOSE=false → shows warning (not verbose-only)", () => {
-    setVerbose(false);
+    getConfig().verbose = false;
     const result = r(MESSAGE_FMT, "rate_limit_event", {
       rate_limit_info: { status: "allowed_warning", rateLimitType: "seven_day", utilization: 0.85 },
     });
@@ -709,7 +708,7 @@ describe("MESSAGE_FMT", () => {
   });
 
   it("rate_limit_event, status=allowed_warning, VERBOSE=true → shows warning with details", () => {
-    setVerbose(true);
+    getConfig().verbose = true;
     const result = r(MESSAGE_FMT, "rate_limit_event", {
       rate_limit_info: { status: "allowed_warning", rateLimitType: "seven_day", utilization: 0.85 },
     });
@@ -718,7 +717,7 @@ describe("MESSAGE_FMT", () => {
   });
 
   it("rate_limit_event, status=allowed_warning, five_hour type → formats correctly", () => {
-    setVerbose(false);
+    getConfig().verbose = false;
     const result = r(MESSAGE_FMT, "rate_limit_event", {
       rate_limit_info: { status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.72 },
     });
@@ -726,7 +725,7 @@ describe("MESSAGE_FMT", () => {
   });
 
   it("rate_limit_event, status=allowed_warning, seven_day_sonnet type → formats correctly", () => {
-    setVerbose(false);
+    getConfig().verbose = false;
     const result = r(MESSAGE_FMT, "rate_limit_event", {
       rate_limit_info: { status: "allowed_warning", rateLimitType: "seven_day_sonnet", utilization: 0.9 },
     });
@@ -734,7 +733,7 @@ describe("MESSAGE_FMT", () => {
   });
 
   it("rate_limit_event, status=allowed_warning, no rateLimitType → omits limit type", () => {
-    setVerbose(false);
+    getConfig().verbose = false;
     const result = r(MESSAGE_FMT, "rate_limit_event", {
       rate_limit_info: { status: "allowed_warning", utilization: 0.82 },
     });
@@ -742,7 +741,7 @@ describe("MESSAGE_FMT", () => {
   });
 
   it("rate_limit_event, status=rejected, VERBOSE=false → shows rejection (not verbose-only)", () => {
-    setVerbose(false);
+    getConfig().verbose = false;
     const result = r(MESSAGE_FMT, "rate_limit_event", {
       rate_limit_info: { status: "rejected" },
     });
@@ -751,7 +750,7 @@ describe("MESSAGE_FMT", () => {
   });
 
   it("rate_limit_event, status=rejected, VERBOSE=true → shows rejection", () => {
-    setVerbose(true);
+    getConfig().verbose = true;
     const result = r(MESSAGE_FMT, "rate_limit_event", {
       rate_limit_info: { status: "rejected" },
     });
@@ -760,7 +759,7 @@ describe("MESSAGE_FMT", () => {
   });
 
   it("rate_limit_event, status=rejected, with rateLimitType → includes limit type", () => {
-    setVerbose(false);
+    getConfig().verbose = false;
     const result = r(MESSAGE_FMT, "rate_limit_event", {
       rate_limit_info: { status: "rejected", rateLimitType: "seven_day_opus" },
     });

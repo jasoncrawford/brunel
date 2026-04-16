@@ -8,8 +8,7 @@
  *
  * Also initialises the config singleton (required by display.ts, status-bar.ts,
  * and other modules that call getConfig() at runtime). Tests that need to toggle
- * verbose can call setVerbose(true/false) directly — setVerbose mutates the
- * config singleton, so afterEach resets are still just setVerbose(false).
+ * verbose can do getConfig().verbose = true/false directly.
  */
 
 import { initDb } from "../src/foreman/clients/db-client.js";

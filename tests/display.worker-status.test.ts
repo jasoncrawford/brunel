@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { StatusBar, statusBar } from "../src/agent/status-bar.js";
-import { setVerbose } from "../src/agent/display.js";
+import { getConfig } from "../src/config.js";
 
 // Strip ANSI codes for assertion
 function stripAnsi(s: string): string {
@@ -21,7 +21,7 @@ function getStatus(opts: {
   verbose?: boolean;
 }): string {
   const bar = new StatusBar({ agentId: opts.agentId });
-  if (opts.verbose !== undefined) setVerbose(opts.verbose);
+  if (opts.verbose !== undefined) getConfig().verbose = opts.verbose;
   bar.update({
     connectionStatus: opts.connectionStatus,
     taskNumber: opts.taskNumber,
@@ -37,7 +37,7 @@ function getStatus(opts: {
 
 describe("StatusBar status text", () => {
   afterEach(() => {
-    setVerbose(false);
+    getConfig().verbose = false;
     vi.useRealTimers();
   });
 
