@@ -182,7 +182,7 @@ describe("printForemanMessage - foreman_error", () => {
   });
 
   it("foreman_error prints even when verbose=false", () => {
-    setVerbose(false);
+    getConfig().verbose = false;
     const msg: Wire.ForemanMessage = { type: "foreman_error", message: "Visible error", fatal: false };
     const output = captureOutput(() => printForemanMessage(msg));
     expect(stripAnsi(output.trim())).not.toBe("");
