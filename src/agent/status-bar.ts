@@ -305,12 +305,8 @@ export class StatusBar extends EventEmitter {
   }
 }
 
-/**
- * Shared singleton. Initialized with a plain UUID at module load; call
- * initStatusBar() early in startup to replace it with one that has a
- * human-readable agent ID.
- */
-export let statusBar: StatusBar = new StatusBar({ agentId: crypto.randomUUID() });
+/** Shared singleton. Call initStatusBar() at startup before first use. */
+export let statusBar: StatusBar = undefined!;
 
 /** Replace the shared singleton (called once at startup from index.ts). */
 export function initStatusBar(sb: StatusBar): void { statusBar = sb; }
