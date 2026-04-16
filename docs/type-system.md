@@ -81,7 +81,8 @@ The foreman↔worker WebSocket protocol is defined as union types in `wire.ts`:
 export type ForemanMessage =
   | { type: "task_assigned"; taskId: string; task: Task }
   | { type: "event_notification"; taskId: string; event: WebhookEvent }
-  | { type: "hello_ack"; workerId: string; status: "idle" | "busy" | "cancelled" };
+  | { type: "hello_ack"; workerId: string; status: "idle" | "busy" | "cancelled" }
+  | { type: "foreman_error"; message: string; fatal: boolean };
 
 export type WorkerMessage =
   | { type: "worker_hello"; workerId: string; claimedTaskId?: string }

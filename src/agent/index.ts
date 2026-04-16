@@ -10,7 +10,7 @@ import { setThinkOutLoud, setVerbose, verbose } from "./display.js";
 import { StatusBar, statusBar, initStatusBar } from "./status-bar.js";
 import { ask, pick, pickMultiple, pickQuestion } from "./input.js";
 import type { PickQuestionResult } from "./input.js";
-import { WorkerSession, registerWorkerCommands, startWorkerMode, generateAgentId } from "./worker.js";
+import { WorkerSession, registerWorkerCommands, startWorkerMode, generateAgentId, WS_FATAL } from "./worker.js";
 import type { RunQuery, WorkerModeConfig } from "./worker.js";
 import { loadConfig } from "../config.js";
 import { Workspace, confirmIfUnsafe, registerWorkspaceCommands } from "./workspace.js";
@@ -364,6 +364,13 @@ export async function main(
     // Ignore the internal abort sentinel (fired when wsAbort resolves at the
     // same tick as the ask() call; never a user action).
     if (input === "__abort__") continue;
+
+    // WS_FATAL: a fatal foreman_error was received — drop back to interactive REPL.
+    // The session has already stopped reconnecting; just show the prompt and continue.
+    if (input === WS_FATAL) {
+      showPrompt = true;
+      continue;
+    }
 
     // WS_PROMPT: a task prompt or debounced event prompt is ready. Hide the
     // prompt, drain all queued prompts through runQueryFn, then show the prompt

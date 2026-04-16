@@ -153,7 +153,10 @@ export class ForemanWss {
           else if (msg.type === "worker_goodbye") await handleWorkerGoodbye(msg);
           else { log(`[worker ${workerId}] unknown message type: ${(msg as R).type}`); return; }
           await this.assignWork();
-        })().catch(err => log(`ERROR handling worker message: ${fmtError(err)}`));
+        })().catch(err => {
+          log(`ERROR handling worker message: ${fmtError(err)}`);
+          this.sendError(ws, `Internal error: ${fmtError(err)}`, false);
+        });
       });
 
       ws.on("close", (code, reason) => {
@@ -289,6 +292,17 @@ export class ForemanWss {
     log(`[worker ${shortWorkerId(wid)}] ${line}`);
   }
 
+  /**
+   * Send a foreman_error message directly to a WebSocket connection.
+   * Used when a catastrophic error occurs during hello handling or message
+   * processing — gives the worker an explanation instead of a silent drop.
+   */
+  private sendError(ws: WebSocket, message: string, fatal: boolean): void {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "foreman_error", message, fatal } satisfies Wire.ForemanMessage));
+    }
+  }
+
   // ── Hello handlers ───────────────────────────────────────────────────────────
 
   private flushQueuedEvents(worker: Worker, task: Task): void {
@@ -325,35 +339,40 @@ export class ForemanWss {
    * 6. Otherwise (live task, same or no worker) → reclaim
    */
   async handleBusyHello(workerId: string, claimedTaskId: string, ws: WebSocket): Promise<void> {
-    const existing = await Task.get(claimedTaskId);
-    const worker = Worker.register(workerId, ws);
+    try {
+      const existing = await Task.get(claimedTaskId);
+      const worker = Worker.register(workerId, ws);
 
-    if (!existing) {
-      this.workerLog(workerId, `hello busy task=#${claimedTaskId} — unknown task, respecting busy status`);
-      const issueNumber = parseInt(claimedTaskId, 10);
-      let placeholderTask: Task | null = null;
-      if (!isNaN(issueNumber)) {
-        placeholderTask = await Task.upsert(claimedTaskId, issueNumber, "", "", "", []);
-      }
-      if (placeholderTask) {
-        await this.reclaimWorker(worker, placeholderTask);
-      } else {
-        this.cancelWorker(worker, null);
-      }
-    } else if (existing.status === "complete") {
-      if (existing.workerId && existing.workerId !== workerId) {
-        this.workerLog(workerId, `hello busy task=#${claimedTaskId} — task complete but owned by another worker, cancelling`);
+      if (!existing) {
+        this.workerLog(workerId, `hello busy task=#${claimedTaskId} — unknown task, respecting busy status`);
+        const issueNumber = parseInt(claimedTaskId, 10);
+        let placeholderTask: Task | null = null;
+        if (!isNaN(issueNumber)) {
+          placeholderTask = await Task.upsert(claimedTaskId, issueNumber, "", "", "", []);
+        }
+        if (placeholderTask) {
+          await this.reclaimWorker(worker, placeholderTask);
+        } else {
+          this.cancelWorker(worker, null);
+        }
+      } else if (existing.status === "complete") {
+        if (existing.workerId && existing.workerId !== workerId) {
+          this.workerLog(workerId, `hello busy task=#${claimedTaskId} — task complete but owned by another worker, cancelling`);
+          this.cancelWorker(worker, existing);
+        } else {
+          this.workerLog(workerId, `hello busy task=#${claimedTaskId} — task already complete, reclaiming for finalization`);
+          await this.reclaimWorker(worker, existing);
+        }
+      } else if (existing.workerId && existing.workerId !== workerId) {
+        this.workerLog(workerId, `hello busy task=#${claimedTaskId} — task taken by another worker`);
         this.cancelWorker(worker, existing);
       } else {
-        this.workerLog(workerId, `hello busy task=#${claimedTaskId} — task already complete, reclaiming for finalization`);
+        this.workerLog(workerId, `hello busy task=#${claimedTaskId} — reclaimed`);
         await this.reclaimWorker(worker, existing);
       }
-    } else if (existing.workerId && existing.workerId !== workerId) {
-      this.workerLog(workerId, `hello busy task=#${claimedTaskId} — task taken by another worker`);
-      this.cancelWorker(worker, existing);
-    } else {
-      this.workerLog(workerId, `hello busy task=#${claimedTaskId} — reclaimed`);
-      await this.reclaimWorker(worker, existing);
+    } catch (err) {
+      log(`ERROR handleBusyHello ${workerId}: ${fmtError(err)}`);
+      this.sendError(ws, `Internal error during reconnection: ${fmtError(err)}`, false);
     }
   }
 
@@ -370,6 +389,7 @@ export class ForemanWss {
         this.workerLog(workerId, `hello idle (had task #${priorTask.taskId}) — reverting task to pending`);
       } catch (err) {
         log(`ERROR Failed to revert task #${priorTask.taskId} to pending: ${fmtError(err)}`);
+        this.sendError(ws, `Failed to revert prior task to pending: ${fmtError(err)}`, false);
         return; // don't register as idle — task stays assigned, worker retries on reconnect
       }
     } else {

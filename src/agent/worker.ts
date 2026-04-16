@@ -131,6 +131,8 @@ export type WorkerModeConfig = {
 
 // Sentinel: a prompt is ready for main() to execute
 export const WS_PROMPT = "__ws_prompt__";
+// Sentinel: a fatal foreman error was received; main() should drop back to interactive REPL
+export const WS_FATAL = "__ws_fatal__";
 
 /** A prompt queued by WorkerSession for main() to execute. */
 export type QueuedPrompt = { prompt: string; fresh: boolean };
@@ -160,6 +162,7 @@ export class WorkerSession {
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private prIsClosed = false;
   private _resetPromise: Promise<void> | null = null;
+  private stopped = false;
   // Handshake lifecycle: "registered" = hello_ack received (or initial state);
   // "hello_sent" = worker_hello was sent but hello_ack not yet received.
   // Initialized to "registered" so sessions that never emit "open" (e.g. tests)
@@ -327,6 +330,15 @@ export class WorkerSession {
     return input === WS_PROMPT;
   }
 
+  /**
+   * Returns true if the input string is the fatal-error sentinel emitted by
+   * WorkerSession when a fatal foreman_error is received. Used by main() to
+   * drop back to interactive REPL mode without exiting the process.
+   */
+  static isFatalSignal(input: string): boolean {
+    return input === WS_FATAL;
+  }
+
   // ── Private ───────────────────────────────────────────────────────────────
 
   /**
@@ -419,6 +431,7 @@ export class WorkerSession {
     ws.on("close", (code: number, _reason: Buffer) => {
       clearPingTimer(); // always clean up the ping timer when this socket closes
       if (ws !== this.ws) return; // stale close from a previous connection
+      if (this.stopped) return; // fatal error received; don't reconnect
       const delay = 2000 + Math.random() * 3000;
       // Setting reconnectAt starts a 1-second countdown timer in the model.
       this.statusBar.update({
@@ -440,6 +453,17 @@ export class WorkerSession {
 
   private handleMessage(msg: Wire.ForemanMessage): void {
     this.display.printForemanMessage(msg);
+
+    if (msg.type === "foreman_error") {
+      if (msg.fatal) {
+        this.stopped = true;
+        this.currentAc?.abort(); // abort any running query immediately
+        this.ws?.close();
+        this.resolveWsInput?.(WS_FATAL);
+        this.resolveWsInput = null;
+      }
+      return;
+    }
 
     if (msg.type === "hello_ack") {
       if (msg.status === "cancelled") {

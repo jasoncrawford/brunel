@@ -167,6 +167,34 @@ describe("printForemanMessage - hello_ack", () => {
   });
 });
 
+describe("printForemanMessage - foreman_error", () => {
+  it("foreman_error always prints the message (not verbose-only)", () => {
+    const msg: Wire.ForemanMessage = { type: "foreman_error", message: "DB connection lost", fatal: false };
+    const output = captureOutput(() => printForemanMessage(msg));
+    expect(stripAnsi(output)).toContain("DB connection lost");
+  });
+
+  it("foreman_error fatal=true also prints the message", () => {
+    const msg: Wire.ForemanMessage = { type: "foreman_error", message: "Catastrophic failure", fatal: true };
+    const output = captureOutput(() => printForemanMessage(msg));
+    expect(stripAnsi(output)).toContain("Catastrophic failure");
+  });
+
+  it("foreman_error prints even when verbose=false", () => {
+    setVerbose(false);
+    const msg: Wire.ForemanMessage = { type: "foreman_error", message: "Visible error", fatal: false };
+    const output = captureOutput(() => printForemanMessage(msg));
+    expect(stripAnsi(output.trim())).not.toBe("");
+    expect(stripAnsi(output)).toContain("Visible error");
+  });
+
+  it("foreman_error output contains error prefix", () => {
+    const msg: Wire.ForemanMessage = { type: "foreman_error", message: "Something broke", fatal: false };
+    const output = captureOutput(() => printForemanMessage(msg));
+    expect(stripAnsi(output)).toContain("[foreman error]");
+  });
+});
+
 describe("printForemanMessage - _default", () => {
   it("unknown type prints <type>", () => {
     const output = captureOutput(() => printForemanMessage({ type: "unknown_future_type" } as any));

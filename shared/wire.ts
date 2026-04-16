@@ -82,4 +82,5 @@ export type WorkerMessage =
 export type ForemanMessage =
   | { type: "task_assigned"; taskId: string; issue: TaskIssue }
   | { type: "event_notification"; taskId: string; event: WebhookEvent }
-  | { type: "hello_ack"; workerId: string; status: "idle" | "busy" | "cancelled" };
+  | { type: "hello_ack"; workerId: string; status: "idle" | "busy" | "cancelled" }
+  | { type: "foreman_error"; message: string; fatal: boolean };
