@@ -6,12 +6,12 @@ import os from "node:os";
 import { WebSocket } from "ws";
 import * as display from "./display.js";
 import { StatusBar, statusBar } from "./status-bar.js";
-import { setVerbose } from "./display.js";
 import { buildInitialPrompt, buildEventPrompt } from "./worker-prompts.js";
 import type { EffortValue } from "./settings.js";
 import * as Wire from "../../shared/wire.js";
 import { Workspace, confirmIfUnsafe } from "./workspace.js";
 import { fmtError } from "../utils.js";
+import { getConfig } from "../config.js";
 import type { CommandRegistry } from "./command-registry.js";
 import { pick } from "./input.js";
 
@@ -113,20 +113,6 @@ export type WorkerSessionOptions = {
   /** Interval in ms between worker-sent pings. Dead connections are detected after
    * one interval with no pong. Default is set in the config schema (pingIntervalMs). */
   pingIntervalMs?: number;
-};
-
-/** Configuration for starting the worker process. */
-export type WorkerModeConfig = {
-  foremanUrl: string;
-  workspaceDir?: string;
-  githubToken: string;
-  githubRepo: string;
-  repoUrl?: string;
-  verbose: boolean;
-  logFile: string;
-  model?: string;
-  effort?: EffortValue;
-  pingIntervalMs: number;
 };
 
 // Sentinel: a prompt is ready for main() to execute
@@ -615,12 +601,11 @@ export function registerWorkerCommands(session: WorkerSession | undefined, regis
  * a cleanup function — does NOT call main(). The caller (main itself) owns
  * the query loop and calls cleanup() after the loop exits.
  */
-export async function startWorkerMode(config: WorkerModeConfig): Promise<{
+export async function startWorkerMode(): Promise<{
   session: WorkerSession;
   cleanup: () => Promise<void>;
 }> {
-  setVerbose(config.verbose);
-
+  const config = getConfig();
   const originalCwd = process.cwd();
   const workspaceDir = config.workspaceDir ?? path.join(os.homedir(), ".brunel", "workers");
   const repoUrl = config.repoUrl ?? `https://${config.githubToken}@github.com/${config.githubRepo}.git`;
@@ -652,7 +637,7 @@ export async function startWorkerMode(config: WorkerModeConfig): Promise<{
   let shuttingDown = false;
 
   const wsFactory: WsFactory = (agentId, taskId) => {
-    const ws = new WebSocket(`${config.foremanUrl}/worker`);
+    const ws = new WebSocket(`${getConfig().foremanUrl}/worker`);
     ws.on("open", () => {
       ws.send(JSON.stringify({
         type: "worker_hello",
@@ -669,12 +654,12 @@ export async function startWorkerMode(config: WorkerModeConfig): Promise<{
     printForemanMessage: display.printForemanMessage,
   };
 
-  statusBar.update({ model: config.model, effort: config.effort });
+  statusBar.update({ model: getConfig().model, effort: getConfig().effort });
 
   const session = new WorkerSession(statusBar, wsFactory, workerDisplay, {
     afterTask,
     workspace,
-    pingIntervalMs: config.pingIntervalMs,
+    pingIntervalMs: getConfig().pingIntervalMs,
   });
 
   const shutdown = async () => {

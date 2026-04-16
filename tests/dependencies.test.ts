@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Task } from "../src/foreman/models/task.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { setupInMemoryTasks } from "./helpers/task.js";
+import { getConfig } from "../src/config.js";
 
 describe("Task.parseBodyBlockers", () => {
   it("parses 'Depends on #N' from body", () => {
@@ -126,10 +127,10 @@ describe("TaskManager — setBlockers / isBlocked", () => {
 });
 
 describe("Task.fetchBlockers", () => {
-  const OPTS = { repo: "owner/repo", token: "token123" };
-
   beforeEach(() => {
     vi.stubGlobal("fetch", vi.fn());
+    getConfig().githubRepo = "owner/repo";
+    getConfig().githubToken = "token123";
   });
 
   afterEach(() => {
@@ -141,7 +142,7 @@ describe("Task.fetchBlockers", () => {
       ok: true,
       json: async () => ({ data: { repository: { issue: { blockedBy: { nodes: [] } } } } }),
     } as any);
-    const blockers = await Task.fetchBlockers(42, "Depends on #5\nBlocked by #6", OPTS);
+    const blockers = await Task.fetchBlockers(42, "Depends on #5\nBlocked by #6");
     expect(blockers).toEqual(expect.arrayContaining([5, 6]));
     expect(blockers).toHaveLength(2);
   });
@@ -153,7 +154,7 @@ describe("Task.fetchBlockers", () => {
         data: { repository: { issue: { blockedBy: { nodes: [{ number: 5 }, { number: 9 }] } } } },
       }),
     } as any);
-    const blockers = await Task.fetchBlockers(42, "Depends on #5", OPTS);
+    const blockers = await Task.fetchBlockers(42, "Depends on #5");
     expect(new Set(blockers)).toEqual(new Set([5, 9]));
   });
 
@@ -162,6 +163,6 @@ describe("Task.fetchBlockers", () => {
       ok: true,
       json: async () => ({ data: { repository: { issue: { blockedBy: { nodes: [] } } } } }),
     } as any);
-    expect(await Task.fetchBlockers(42, "No dependencies here", OPTS)).toEqual([]);
+    expect(await Task.fetchBlockers(42, "No dependencies here")).toEqual([]);
   });
 });

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { StatusBar, statusBar } from "../src/agent/status-bar.js";
-import { setVerbose, verbose } from "../src/agent/display.js";
+import { getConfig } from "../src/config.js";
 
 // Strip ANSI codes for assertion
 function stripAnsi(s: string): string {
@@ -9,28 +9,28 @@ function stripAnsi(s: string): string {
 
 describe("StatusBar verbose flag", () => {
   afterEach(() => {
-    setVerbose(false);
+    getConfig().verbose = false;
   });
 
   it("defaults to false", () => {
-    expect(verbose).toBe(false);
+    expect(getConfig().verbose).toBe(false);
   });
 
-  it("setVerbose(true) sets verbose to true", () => {
-    setVerbose(true);
-    expect(verbose).toBe(true);
+  it("getConfig().verbose = true sets verbose to true", () => {
+    getConfig().verbose = true;
+    expect(getConfig().verbose).toBe(true);
   });
 
-  it("setVerbose(false) resets verbose", () => {
-    setVerbose(true);
-    setVerbose(false);
-    expect(verbose).toBe(false);
+  it("getConfig().verbose = false resets verbose", () => {
+    getConfig().verbose = true;
+    getConfig().verbose = false;
+    expect(getConfig().verbose).toBe(false);
   });
 });
 
 describe("StatusBar getStatusText", () => {
   afterEach(() => {
-    setVerbose(false);
+    getConfig().verbose = false;
   });
 
   it("shows worker id and no current task when idle", () => {
@@ -44,7 +44,7 @@ describe("StatusBar getStatusText", () => {
 
   it("shows disconnectCode in verbose mode", () => {
     const bar = new StatusBar({ agentId: "abc12345-0000-0000-0000-000000000000" });
-    setVerbose(true);
+    getConfig().verbose = true;
     bar.update({ connectionStatus: "disconnected", disconnectCode: 1006, reconnectAt: Date.now() + 2000 });
     const result = stripAnsi(bar.getStatusText());
     expect(result).toContain("Disconnected (1006)");
@@ -52,7 +52,7 @@ describe("StatusBar getStatusText", () => {
 
   it("omits disconnectCode in non-verbose mode", () => {
     const bar = new StatusBar({ agentId: "abc12345-0000-0000-0000-000000000000" });
-    setVerbose(false);
+    getConfig().verbose = false;
     bar.update({ connectionStatus: "disconnected", disconnectCode: 1006 });
     const result = stripAnsi(bar.getStatusText());
     expect(result).toContain("Disconnected");

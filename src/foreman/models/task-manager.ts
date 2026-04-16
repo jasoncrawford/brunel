@@ -6,6 +6,7 @@ import { EventQueue } from "./event-queue.js";
 import { Task } from "./task.js";
 import { Worker } from "./worker.js";
 import { fmtError, log } from "../../utils.js";
+import { getConfig } from "../../config.js";
 
 
 // ── TaskManager ────────────────────────────────────────────────────────────────
@@ -217,12 +218,11 @@ export class TaskManager extends EventEmitter {
   async fetchAndLoadDeps(
     issueNumber: number,
     body: string,
-    config: { repo: string; token: string; apiUrl?: string },
   ): Promise<void> {
-    const blockers = await Task.fetchBlockers(issueNumber, body, config);
+    const blockers = await Task.fetchBlockers(issueNumber, body);
     this.setBlockers(issueNumber, blockers);
     if (blockers.length > 0) {
-      const states = await fetchIssueStates(blockers, { repo: config.repo, token: config.token });
+      const states = await fetchIssueStates(blockers);
       for (const [num, state] of states) {
         this.setIssueOpenState(num, state === "open");
       }
@@ -235,9 +235,8 @@ export class TaskManager extends EventEmitter {
   startDepsLoad(
     issueNumber: number,
     body: string,
-    config: { repo: string; token: string; apiUrl?: string },
   ): void {
-    this.fetchAndLoadDeps(issueNumber, body, config)
+    this.fetchAndLoadDeps(issueNumber, body)
       .then(() => this.emit("deps_loaded"))
       .catch((err) => log(`ERROR fetching deps for #${issueNumber}: ${fmtError(err)}`));
   }
@@ -248,19 +247,18 @@ export class TaskManager extends EventEmitter {
    *  Returns the new Task if enqueued, or null if ignored (e.g. issue is already closed). */
   async handleIssueLabeledEvent(
     issueNumber: number,
-    repo: string,
     title: string,
     body: string,
     labels: string[],
     state: string,
-    config: { repo: string; token: string; apiUrl?: string },
   ): Promise<Task | null> {
     if (state === "closed") {
       log(`[task #${issueNumber}] labeled: ignoring — issue is closed`);
       return null;
     }
+    const { githubRepo: repo } = getConfig();
     const task = await this.enqueueIssue(String(issueNumber), issueNumber, repo, title, body, labels);
-    this.startDepsLoad(issueNumber, body, config);
+    this.startDepsLoad(issueNumber, body);
     return task;
   }
 
@@ -268,10 +266,9 @@ export class TaskManager extends EventEmitter {
   handleIssueBodyEditedEvent(
     issueNumber: number,
     newBody: string,
-    config: { repo: string; token: string; apiUrl?: string },
   ): void {
     this.resetBlockers(issueNumber);
-    this.startDepsLoad(issueNumber, newBody, config);
+    this.startDepsLoad(issueNumber, newBody);
   }
 
   // ── PR event handlers ──────────────────────────────────────────────────────
@@ -334,10 +331,8 @@ export class TaskManager extends EventEmitter {
 
   /** Fetch brunel:ready issues from GitHub and load deps.
    *  Called at startup after loadActiveTasksFromDb. */
-  async loadIssuesFromGithub(
-    config: { githubRepo: string; githubToken: string; taskLabel: string; githubApiUrl?: string },
-  ): Promise<void> {
-    await loadIssuesToQueue(this, config);
+  async loadIssuesFromGithub(): Promise<void> {
+    await loadIssuesToQueue(this);
   }
 
   // ── Private helpers ───────────────────────────────────────────────────────

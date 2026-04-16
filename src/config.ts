@@ -218,6 +218,20 @@ function readFallbackEnvVars(env: NodeJS.ProcessEnv): Record<string, unknown> {
   return result;
 }
 
+// ── Config singleton ──────────────────────────────────────────────────────────
+
+let _config: BrunelConfig | null = null;
+
+/**
+ * Returns the loaded config. Throws if called before loadConfig() completes.
+ * Entry points call loadConfig() before anything else, so this is always
+ * safe by the time any module reads it at runtime.
+ */
+export function getConfig(): BrunelConfig {
+  if (!_config) throw new Error("Config not initialized — call loadConfig() first");
+  return _config;
+}
+
 // ── loadConfig ────────────────────────────────────────────────────────────────
 
 export async function loadConfig(
@@ -263,12 +277,14 @@ export async function loadConfig(
     return {} as BrunelConfig;
   }
 
-  return {
+  const result: BrunelConfig = {
     ...parsed,
     thinkOutLoud: parsed.thinkOutLoud ?? parsed.verbose,
     allowDangerouslySkipPermissions: parsed.permissionMode === "bypassPermissions",
     effort: parsed.effort === "auto" ? undefined : parsed.effort,
   };
+  _config = result;
+  return result;
 }
 
 /**

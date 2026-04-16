@@ -346,8 +346,7 @@ describe("routeIssueEvent — enqueue on labeled", () => {
       42,
     );
     expect(taskManager.handleIssueLabeledEvent).toHaveBeenCalledWith(
-      42, "owner/repo", "Do something", "details", ["brunel:ready"], "open",
-      expect.objectContaining({ repo: "owner/repo" }),
+      42, "Do something", "details", ["brunel:ready"], "open",
     );
     expect(result).toEqual({ taskId: "42", workerId: null });
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("enqueued via issues/labeled"));
@@ -480,7 +479,7 @@ describe("routeIssueEvent — edited", () => {
       42,
     );
     expect(taskManager.handleIssueBodyEditedEvent).toHaveBeenCalledWith(
-      42, "updated body", expect.objectContaining({ repo: "owner/repo" }),
+      42, "updated body",
     );
   });
 

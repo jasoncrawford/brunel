@@ -1,6 +1,7 @@
 import type { TaskManager } from "../models/task-manager.js";
 import { Task } from "../models/task.js";
 import { fmtError } from "../../utils.js";
+import { getConfig } from "../../config.js";
 
 // ── GitHub API helpers ────────────────────────────────────────────────────────
 
@@ -16,9 +17,8 @@ function ghHeaders(token: string) {
 
 export async function loadIssuesToQueue(
   taskModel: TaskManager,
-  config: { githubRepo: string; githubToken: string; taskLabel: string; githubApiUrl?: string },
 ): Promise<void> {
-  const { githubRepo: repo, githubToken: token, taskLabel, githubApiUrl: apiUrl = "https://api.github.com" } = config;
+  const { githubRepo: repo, githubToken: token, taskLabel, githubApiUrl: apiUrl = "https://api.github.com" } = getConfig();
   const [owner, repoName] = repo.split("/");
   const url = `${apiUrl}/repos/${owner}/${repoName}/issues?labels=${encodeURIComponent(taskLabel)}&state=open&per_page=100`;
   const res = await fetch(url, { headers: ghHeaders(token) });
@@ -46,14 +46,14 @@ export async function loadIssuesToQueue(
     await taskModel.enqueueIssue(String(issue.number), issue.number, repo, issue.title, body, labels)
       .catch((err: unknown) => console.error(`[startup] ERROR upserting task #${issue.number}: ${fmtError(err)}`));
 
-    const blockers = await Task.fetchBlockers(issue.number, body, { repo, token, apiUrl });
+    const blockers = await Task.fetchBlockers(issue.number, body);
     taskModel.setBlockers(issue.number, blockers);
     for (const b of blockers) allBlockerNumbers.add(b);
     loadedIssueNumbers.push(issue.number);
   }
 
   if (allBlockerNumbers.size > 0) {
-    const states = await fetchIssueStates(Array.from(allBlockerNumbers), { repo, token });
+    const states = await fetchIssueStates(Array.from(allBlockerNumbers));
     for (const [num, state] of states) {
       taskModel.setIssueOpenState(num, state === "open");
     }
@@ -79,10 +79,9 @@ export async function loadIssuesToQueue(
 
 export async function fetchIssueStates(
   issueNumbers: number[],
-  opts: { repo: string; token: string },
 ): Promise<Map<number, "open" | "closed">> {
   if (issueNumbers.length === 0) return new Map();
-  const { repo, token } = opts;
+  const { githubRepo: repo, githubToken: token } = getConfig();
   const [owner, repoName] = repo.split("/");
   const result = new Map<number, "open" | "closed">();
   await Promise.all(
@@ -99,9 +98,8 @@ export async function fetchIssueStates(
 
 export async function fetchNativeBlockers(
   issueNumber: number,
-  opts: { repo: string; token: string; apiUrl?: string },
 ): Promise<number[]> {
-  const { repo, token, apiUrl = "https://api.github.com" } = opts;
+  const { githubRepo: repo, githubToken: token, githubApiUrl: apiUrl = "https://api.github.com" } = getConfig();
   const [owner, repoName] = repo.split("/");
   const query = `
     query($owner: String!, $repo: String!, $number: Int!) {

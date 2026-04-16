@@ -1,12 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { stripAnsi } from "./helpers.js";
+import { getConfig } from "../src/config.js";
 import {
   printBlock,
   printMessage,
   print,
   toolUseNames,
-  setThinkOutLoud,
-  setVerbose, verbose,
 } from "../src/agent/display.js";
 import { statusBar } from "../src/agent/status-bar.js";
 
@@ -33,13 +32,13 @@ async function captureOutputAsync(fn: () => Promise<void>): Promise<string> {
 beforeEach(() => {
   toolUseNames.clear();
   statusBar.stop();
-  setVerbose(false);
+  getConfig().verbose = false;
 });
 
 afterEach(() => {
   toolUseNames.clear();
   statusBar.stop();
-  setVerbose(false);
+  getConfig().verbose = false;
   vi.restoreAllMocks();
 });
 
@@ -141,11 +140,11 @@ describe("printBlock - tool_result blocks", () => {
 
 describe("printBlock - assistant blocks (non-tool)", () => {
   it("thinking type → ASSISTANT_BLOCK_FMT: thinkOutLoud=true shows content", () => {
-    setThinkOutLoud(true);
+    getConfig().thinkOutLoud = true;
     const output = captureOutput(() => {
       printBlock({ type: "thinking", thinking: "my thoughts" }, "assistant");
     });
-    setThinkOutLoud(false);
+    getConfig().thinkOutLoud = false;
     expect(stripAnsi(output)).toContain("my thoughts");
   });
 
@@ -228,7 +227,7 @@ describe("printMessage", () => {
   });
 
   it("system/init → routed to SYSTEM_FMT (quiet mode = null)", () => {
-    setVerbose(false);
+    getConfig().verbose = false;
     const output = captureOutput(() => {
       printMessage({ type: "system", subtype: "init", session_id: "abc" });
     });
@@ -303,7 +302,7 @@ describe("printMessage", () => {
   });
 
   it("rate_limit_event, quiet mode → null (nothing printed)", () => {
-    setVerbose(false);
+    getConfig().verbose = false;
     const output = captureOutput(() => {
       printMessage({ type: "rate_limit_event", rate_limit_info: { status: "allowed" } });
     });
@@ -311,7 +310,7 @@ describe("printMessage", () => {
   });
 
   it("rate_limit_event, verbose mode, status=allowed → null (silenced)", () => {
-    setVerbose(true);
+    getConfig().verbose = true;
     const output = captureOutput(() => {
       printMessage({ type: "rate_limit_event", rate_limit_info: { status: "allowed" } });
     });

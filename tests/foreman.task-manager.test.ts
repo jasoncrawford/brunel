@@ -411,16 +411,14 @@ describe("TaskManager.handleIssueLabeledEvent", () => {
   });
 
   it("enqueues the issue and returns the task when issue is open", async () => {
-    const config = { repo: REPO, token: "token" };
-    const task = await manager.handleIssueLabeledEvent(42, REPO, "Fix it", "Body", ["brunel:ready"], "open", config);
+    const task = await manager.handleIssueLabeledEvent(42, "Fix it", "Body", ["brunel:ready"], "open");
     expect(task).not.toBeNull();
     expect(task?.taskId).toBe("42");
     expect(await Task.getByIssue(42)).not.toBeNull();
   });
 
   it("returns null and does not enqueue when issue is closed", async () => {
-    const config = { repo: REPO, token: "token" };
-    const task = await manager.handleIssueLabeledEvent(42, REPO, "Fix it", "Body", [], "closed", config);
+    const task = await manager.handleIssueLabeledEvent(42, "Fix it", "Body", [], "closed");
     expect(task).toBeNull();
     expect(await Task.getByIssue(42)).toBeNull();
   });
@@ -428,8 +426,7 @@ describe("TaskManager.handleIssueLabeledEvent", () => {
   it("emits deps_loaded after fetching deps", async () => {
     let depsDoneCount = 0;
     manager.on("deps_loaded", () => { depsDoneCount++; });
-    const config = { repo: REPO, token: "token" };
-    await manager.handleIssueLabeledEvent(42, REPO, "Fix it", "Body", [], "open", config);
+    await manager.handleIssueLabeledEvent(42, "Fix it", "Body", [], "open");
     await new Promise((r) => setTimeout(r, 50));
     expect(depsDoneCount).toBe(1);
   });
@@ -459,14 +456,14 @@ describe("TaskManager.handleIssueBodyEditedEvent", () => {
 
   it("resets blockers for the issue", () => {
     expect(manager.isBlockersLoaded(42)).toBe(true);
-    manager.handleIssueBodyEditedEvent(42, "new body", { repo: REPO, token: "token" });
+    manager.handleIssueBodyEditedEvent(42, "new body");
     expect(manager.isBlockersLoaded(42)).toBe(false);
   });
 
   it("emits deps_loaded after reloading deps", async () => {
     let depsDoneCount = 0;
     manager.on("deps_loaded", () => { depsDoneCount++; });
-    manager.handleIssueBodyEditedEvent(42, "new body", { repo: REPO, token: "token" });
+    manager.handleIssueBodyEditedEvent(42, "new body");
     await new Promise((r) => setTimeout(r, 50));
     expect(depsDoneCount).toBe(1);
   });
