@@ -10,6 +10,7 @@ import { ForemanWss } from "../src/foreman/controllers/wss.js";
 import { Worker } from "../src/foreman/models/worker.js";
 import { Task } from "../src/foreman/models/task.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
+import { ForemanMessage } from "../src/foreman/models/foreman-message.js";
 import { setupInMemoryTasks } from "./helpers/task.js";
 import * as utils from "../src/utils.js";
 
@@ -358,5 +359,85 @@ describe("handleIdleHello — error handling", () => {
     expect(Worker.get("w1")).toBeUndefined();
     const ackCall = sendMsg.mock.calls.find(([, msg]) => (msg as { type: string }).type === "hello_ack");
     expect(ackCall).toBeUndefined();
+  });
+});
+
+
+// ── sendError persistence ──────────────────────────────────────────────────────
+
+describe("sendError — ForemanMessage.log() is called", () => {
+  it("persists foreman_error to activity log when handleIdleHello revert fails", async () => {
+    const task = addTask({
+      task_id: "10",
+      issue_number: 10,
+      worker_id: "w1",
+      assigned_at: new Date().toISOString(),
+    });
+    vi.mocked(task.revert).mockRejectedValueOnce(new Error("DB down"));
+
+    const logSpy = vi.spyOn(ForemanMessage, "log").mockResolvedValue(undefined);
+    vi.spyOn(utils, "log").mockImplementation(() => {});
+
+    const { wss } = makeWss(taskManager);
+    await wss.handleIdleHello("w1", fakeWs());
+
+    const errorLogCall = logSpy.mock.calls.find(([data]) => data.msgType === "foreman_error");
+    expect(errorLogCall).toBeDefined();
+    expect(errorLogCall![0].direction).toBe("sent");
+    expect(errorLogCall![0].workerId).toBe("w1");
+    expect(errorLogCall![0].taskId).toBe("10");
+    expect((errorLogCall![0].payload as { message?: string }).message).toContain("DB down");
+  });
+
+  it("persists foreman_error to activity log when handleBusyHello throws", async () => {
+    const task = addTask({
+      task_id: "10",
+      issue_number: 10,
+      worker_id: "w1",
+      assigned_at: new Date().toISOString(),
+    });
+    vi.mocked(task.assign).mockRejectedValueOnce(new Error("DB write failed"));
+
+    const logSpy = vi.spyOn(ForemanMessage, "log").mockResolvedValue(undefined);
+    vi.spyOn(utils, "log").mockImplementation(() => {});
+
+    const { wss } = makeWss(taskManager);
+    await wss.handleBusyHello("w1", "10", fakeWs());
+
+    const errorLogCall = logSpy.mock.calls.find(([data]) => data.msgType === "foreman_error");
+    expect(errorLogCall).toBeDefined();
+    expect(errorLogCall![0].direction).toBe("sent");
+    expect(errorLogCall![0].workerId).toBe("w1");
+    expect((errorLogCall![0].payload as { message?: string }).message).toContain("DB write failed");
+  });
+});
+
+// ── ForemanMessage.buildSummary — foreman_error ────────────────────────────────
+
+describe("ForemanMessage.buildSummary — foreman_error", () => {
+  it("includes the error message in the summary", () => {
+    const summary = ForemanMessage.buildSummary("sent", "foreman_error", null, {
+      message: "Internal error: something broke",
+      fatal: false,
+    });
+    expect(summary).toContain("foreman_error");
+    expect(summary).toContain("Internal error: something broke");
+  });
+
+  it("marks fatal errors in the summary", () => {
+    const summary = ForemanMessage.buildSummary("sent", "foreman_error", null, {
+      message: "Unrecoverable failure",
+      fatal: true,
+    });
+    expect(summary).toContain("fatal");
+    expect(summary).toContain("Unrecoverable failure");
+  });
+
+  it("non-fatal summary does not contain 'fatal'", () => {
+    const summary = ForemanMessage.buildSummary("sent", "foreman_error", null, {
+      message: "Soft error",
+      fatal: false,
+    });
+    expect(summary).not.toContain("fatal");
   });
 });

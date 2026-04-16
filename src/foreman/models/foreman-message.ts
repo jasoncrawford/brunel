@@ -88,7 +88,10 @@ export class ForemanMessage extends ActiveRecord {
     taskId: string | null,
     payload: Record<string, unknown>,
   ): string {
-    if (msgType === "worker_disconnected") {
+    if (msgType === "foreman_error") {
+      const fatalStr = payload.fatal ? " (fatal)" : "";
+      return `sent foreman_error${fatalStr}: ${payload.message ?? ""}`;
+    } else if (msgType === "worker_disconnected") {
       const reason = payload.reason ? `: ${payload.reason}` : "";
       return `disconnected (code ${payload.code}${reason})`;
     } else if (msgType === "worker_hello") {
