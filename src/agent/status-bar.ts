@@ -1,36 +1,7 @@
 import { EventEmitter } from "node:events";
-import { randomInt } from "node:crypto";
 import { shortWorkerId } from "../../shared/utils.js";
+import { verbose } from "./verbose.js";
 import type { EffortValue } from "./effort.js";
-
-// ── Agent ID generation ────────────────────────────────────────────────────────
-
-const WORKER_NAMES = [
-  "abner", "adelaide", "albert", "alden", "alfred", "amelia", "amity", "amos",
-  "andrew", "arthur", "asa", "augustus", "aurelia", "beatrice", "benjamin",
-  "boaz", "caleb", "calvin", "cassandra", "cassius", "cecilia", "charity",
-  "charlotte", "chauncey", "clara", "clarence", "clement", "constance",
-  "cornelius", "cressida", "daniel", "deliverance", "dinah", "ebenezer",
-  "edmund", "edwin", "eleanor", "elihu", "endeavour", "ephraim", "ernest",
-  "esther", "experience", "ezekiel", "faith", "felicity", "frances",
-  "franklin", "frederick", "gideon", "grace", "harold", "harriet", "henry",
-  "herbert", "hezekiah", "hiram", "honour", "hope", "horatio", "humility",
-  "ichabod", "increase", "jedediah", "jeremiah", "jethro", "josephine",
-  "justice", "lavinia", "lawrence", "lemuel", "levi", "lucius", "lydia",
-  "mabel", "martha", "matilda", "mercy", "micah", "miles", "naomi", "obadiah",
-  "oliver", "parthenia", "patience", "peregrine", "perseverance", "philip",
-  "phineas", "priscilla", "prosper", "prudence", "resolve", "rosalind",
-  "roscoe", "rufus", "rupert", "ruth", "silas", "simon", "susannah", "tabitha",
-  "temperance", "thaddeus", "thankful", "theodore", "theophilus", "titus",
-  "tobias", "verity", "victor", "violet", "warren", "zephaniah",
-];
-
-/** Generate a human-readable agent ID by prepending a random human name to a UUID.
- * E.g. "patience-a9bdda00-1234-5678-abcd-ef0123456789" */
-export function generateAgentId(): string {
-  const idx = randomInt(WORKER_NAMES.length);
-  return `${WORKER_NAMES[idx]}-${crypto.randomUUID()}`;
-}
 
 // ── Worker status types ────────────────────────────────────────────────────────
 
@@ -75,12 +46,6 @@ export class StatusBar extends EventEmitter {
   private _effort: EffortValue | undefined;
   private _countdownTimer: ReturnType<typeof setInterval> | null = null;
 
-  // ── Verbose flag ──────────────────────────────────────────────────────────
-  /** Whether verbose output mode is active (affects timestamps, detail level). */
-  verbose = false;
-
-  setVerbose(v: boolean): void { this.verbose = v; }
-
   // ── Primary (animated query-progress) bar ──────────────────────────────────
   /** Whether the primary animated status bar is currently active. */
   active = false;
@@ -106,9 +71,9 @@ export class StatusBar extends EventEmitter {
   // prompt area including any leading blank line (see issue #418).
   inputClear: (() => void) | null = null;
 
-  constructor({ agentId, ...initial }: { agentId?: string } & Omit<WorkerStatusPatch, "reconnectAt"> = {}) {
+  constructor({ agentId, ...initial }: { agentId: string } & Omit<WorkerStatusPatch, "reconnectAt">) {
     super();
-    this.agentId = agentId ?? generateAgentId();
+    this.agentId = agentId;
     if ("connectionStatus" in initial) this._connectionStatus = initial.connectionStatus!;
     if ("disconnectCode" in initial) this._disconnectCode = initial.disconnectCode;
     if ("taskNumber" in initial) this._taskNumber = initial.taskNumber;
@@ -174,7 +139,7 @@ export class StatusBar extends EventEmitter {
     const retryInSeconds = this._reconnectAt != null
       ? Math.max(0, Math.ceil((this._reconnectAt - Date.now()) / 1000))
       : undefined;
-    const codeStr = this.verbose && this._disconnectCode != null ? ` (${this._disconnectCode})` : "";
+    const codeStr = verbose && this._disconnectCode != null ? ` (${this._disconnectCode})` : "";
     const rightText =
       this._connectionStatus === "connected"    ? "Connected" :
       this._connectionStatus === "handshaking"  ? "Handshaking..." :
@@ -340,5 +305,12 @@ export class StatusBar extends EventEmitter {
   }
 }
 
-/** Shared singleton — use this in production code. */
-export const statusBar = new StatusBar();
+/**
+ * Shared singleton. Initialized with a plain UUID at module load; call
+ * initStatusBar() early in startup to replace it with one that has a
+ * human-readable agent ID.
+ */
+export let statusBar: StatusBar = new StatusBar({ agentId: crypto.randomUUID() });
+
+/** Replace the shared singleton (called once at startup from index.ts). */
+export function initStatusBar(sb: StatusBar): void { statusBar = sb; }

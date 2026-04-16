@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { StatusBar, statusBar } from "../src/agent/status-bar.js";
+import { setVerbose, verbose } from "../src/agent/verbose.js";
 
 // Strip ANSI codes for assertion
 function stripAnsi(s: string): string {
@@ -8,28 +9,28 @@ function stripAnsi(s: string): string {
 
 describe("StatusBar verbose flag", () => {
   afterEach(() => {
-    statusBar.setVerbose(false);
+    setVerbose(false);
   });
 
   it("defaults to false", () => {
-    expect(statusBar.verbose).toBe(false);
+    expect(verbose).toBe(false);
   });
 
   it("setVerbose(true) sets verbose to true", () => {
-    statusBar.setVerbose(true);
-    expect(statusBar.verbose).toBe(true);
+    setVerbose(true);
+    expect(verbose).toBe(true);
   });
 
   it("setVerbose(false) resets verbose", () => {
-    statusBar.setVerbose(true);
-    statusBar.setVerbose(false);
-    expect(statusBar.verbose).toBe(false);
+    setVerbose(true);
+    setVerbose(false);
+    expect(verbose).toBe(false);
   });
 });
 
 describe("StatusBar getStatusText", () => {
   afterEach(() => {
-    statusBar.setVerbose(false);
+    setVerbose(false);
   });
 
   it("shows worker id and no current task when idle", () => {
@@ -43,7 +44,7 @@ describe("StatusBar getStatusText", () => {
 
   it("shows disconnectCode in verbose mode", () => {
     const bar = new StatusBar({ agentId: "abc12345-0000-0000-0000-000000000000" });
-    bar.setVerbose(true);
+    setVerbose(true);
     bar.update({ connectionStatus: "disconnected", disconnectCode: 1006, reconnectAt: Date.now() + 2000 });
     const result = stripAnsi(bar.getStatusText());
     expect(result).toContain("Disconnected (1006)");
@@ -51,7 +52,7 @@ describe("StatusBar getStatusText", () => {
 
   it("omits disconnectCode in non-verbose mode", () => {
     const bar = new StatusBar({ agentId: "abc12345-0000-0000-0000-000000000000" });
-    bar.setVerbose(false);
+    setVerbose(false);
     bar.update({ connectionStatus: "disconnected", disconnectCode: 1006 });
     const result = stripAnsi(bar.getStatusText());
     expect(result).toContain("Disconnected");
@@ -80,7 +81,7 @@ describe("StatusBar class", () => {
   let stdoutWrite: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    bar = new StatusBar();
+    bar = new StatusBar({ agentId: "test-agent-id" });
     stdoutWrite = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
   });
 

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { setVerbose, verbose } from "../src/agent/verbose.js";
 import { stripAnsi } from "./helpers.js";
 import {
   print, fmtTime, s,
@@ -8,12 +9,12 @@ import { statusBar } from "../src/agent/status-bar.js";
 
 beforeEach(() => {
   statusBar.stop();
-  statusBar.setVerbose(false);
+  setVerbose(false);
 });
 
 afterEach(() => {
   statusBar.stop();
-  statusBar.setVerbose(false);
+  setVerbose(false);
   vi.restoreAllMocks();
 });
 
@@ -105,7 +106,7 @@ describe("print() via _inputPrintCallback path - verbose timestamp", () => {
   it("verbose=true: callback path still prepends HH:MM:SS timestamp", () => {
     const cb = vi.fn();
     statusBar.inputPrint = cb;
-    statusBar.setVerbose(true);
+    setVerbose(true);
     const output = captureOutput(() => print("hello"));
     statusBar.inputPrint = null;
 
@@ -118,7 +119,7 @@ describe("print() via _inputPrintCallback path - verbose timestamp", () => {
   it("verbose=false: callback path does not prepend timestamp", () => {
     const cb = vi.fn();
     statusBar.inputPrint = cb;
-    statusBar.setVerbose(false);
+    setVerbose(false);
     const output = captureOutput(() => print("world"));
     statusBar.inputPrint = null;
 
@@ -130,7 +131,7 @@ describe("print() via _inputPrintCallback path - verbose timestamp", () => {
   it("verbose=true: multi-line output in callback path gets timestamp on each line", () => {
     const cb = vi.fn();
     statusBar.inputPrint = cb;
-    statusBar.setVerbose(true);
+    setVerbose(true);
     const output = captureOutput(() => print("line one\nline two"));
     statusBar.inputPrint = null;
 

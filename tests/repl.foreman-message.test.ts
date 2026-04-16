@@ -3,6 +3,7 @@
  * This ensures no message arrives silently, even when the worker is busy running a query.
  */
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from "vitest";
+import { setVerbose, verbose } from "../src/agent/verbose.js";
 import { stripAnsi } from "./helpers.js";
 import { printForemanMessage } from "../src/agent/display.js";
 import { statusBar } from "../src/agent/status-bar.js";
@@ -20,12 +21,12 @@ function captureOutput(fn: () => void): string {
 
 beforeEach(() => {
   statusBar.stop();
-  statusBar.setVerbose(false);
+  setVerbose(false);
 });
 
 afterEach(() => {
   statusBar.stop();
-  statusBar.setVerbose(false);
+  setVerbose(false);
   vi.restoreAllMocks();
   vi.useRealTimers();
 });
@@ -41,7 +42,7 @@ describe("printForemanMessage", () => {
     const quietOutput = captureOutput(() => printForemanMessage(msg));
     expect(stripAnsi(quietOutput).trim()).toBe("");
 
-    statusBar.setVerbose(true);
+    setVerbose(true);
     const verboseOutput = captureOutput(() => printForemanMessage(msg));
     const plain = stripAnsi(verboseOutput);
     expect(plain).toContain("#42");
@@ -71,7 +72,7 @@ describe("printForemanMessage", () => {
   });
 
   it("event_notification, VERBOSE=true → prints event name", () => {
-    statusBar.setVerbose(true);
+    setVerbose(true);
     const msg: Wire.ForemanMessage = {
       type: "event_notification",
       taskId: "task-1",
@@ -82,7 +83,7 @@ describe("printForemanMessage", () => {
   });
 
   it("event_notification, VERBOSE=true → includes a timestamp in [HH:MM:SS] format", () => {
-    statusBar.setVerbose(true);
+    setVerbose(true);
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-17T14:05:03.000Z"));
     const msg: Wire.ForemanMessage = {
@@ -96,7 +97,7 @@ describe("printForemanMessage", () => {
   });
 
   it("event_notification, VERBOSE=true → includes check_run details", () => {
-    statusBar.setVerbose(true);
+    setVerbose(true);
     const msg: Wire.ForemanMessage = {
       type: "event_notification",
       taskId: "task-1",
@@ -113,7 +114,7 @@ describe("printForemanMessage", () => {
   });
 
   it("event_notification, VERBOSE=true → includes action in name/action format when payload has action", () => {
-    statusBar.setVerbose(true);
+    setVerbose(true);
     const msg: Wire.ForemanMessage = {
       type: "event_notification",
       taskId: "task-1",
@@ -125,7 +126,7 @@ describe("printForemanMessage", () => {
   });
 
   it("event_notification, VERBOSE=true → output is a single line (no embedded newlines in content)", () => {
-    statusBar.setVerbose(true);
+    setVerbose(true);
     const msg: Wire.ForemanMessage = {
       type: "event_notification",
       taskId: "task-1",
@@ -146,21 +147,21 @@ describe("printForemanMessage - hello_ack", () => {
   });
 
   it("hello_ack, VERBOSE=true → prints ack status", () => {
-    statusBar.setVerbose(true);
+    setVerbose(true);
     const msg: Wire.ForemanMessage = { type: "hello_ack", workerId: "w-1", status: "idle" };
     const output = captureOutput(() => printForemanMessage(msg));
     expect(stripAnsi(output)).toContain("idle");
   });
 
   it("hello_ack, VERBOSE=true → includes status for busy", () => {
-    statusBar.setVerbose(true);
+    setVerbose(true);
     const msg: Wire.ForemanMessage = { type: "hello_ack", workerId: "w-1", status: "busy" };
     const output = captureOutput(() => printForemanMessage(msg));
     expect(stripAnsi(output)).toContain("busy");
   });
 
   it("hello_ack, VERBOSE=true → includes status for cancelled", () => {
-    statusBar.setVerbose(true);
+    setVerbose(true);
     const msg: Wire.ForemanMessage = { type: "hello_ack", workerId: "w-1", status: "cancelled" };
     const output = captureOutput(() => printForemanMessage(msg));
     expect(stripAnsi(output)).toContain("cancelled");

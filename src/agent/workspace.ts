@@ -3,7 +3,7 @@ import path from "node:path";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
 import * as display from "./display.js";
-import { statusBar } from "./status-bar.js";
+import { verbose } from "./verbose.js";
 import { fmtError } from "../utils.js";
 import type { CommandRegistry } from "./command-registry.js";
 
@@ -156,7 +156,7 @@ export class Workspace {
       if (fs.existsSync(lockPath)) {
         const pid = parseInt(fs.readFileSync(lockPath, "utf8").trim(), 10);
         if (isProcessAlive(pid)) {
-          if (statusBar.verbose) display.print(display.c.sageGreen(`[workspace] Skipping active workspace ${dir} (pid ${pid})`));
+          if (verbose) display.print(display.c.sageGreen(`[workspace] Skipping active workspace ${dir} (pid ${pid})`));
           continue;
         }
       }

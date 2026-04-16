@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { generateAgentId } from "../src/agent/status-bar.js";
+import { generateAgentId } from "../src/agent/worker.js";
 import { shortWorkerId } from "../shared/utils.js";
 
 describe("generateAgentId", () => {

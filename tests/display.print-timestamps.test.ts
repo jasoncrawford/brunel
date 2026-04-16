@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { stripAnsi } from "./helpers.js";
 import { print } from "../src/agent/display.js";
 import { statusBar } from "../src/agent/status-bar.js";
+import { setVerbose, verbose } from "../src/agent/verbose.js";
 
 function captureOutput(fn: () => void): string {
   let output = "";
@@ -15,18 +16,18 @@ function captureOutput(fn: () => void): string {
 
 beforeEach(() => {
   statusBar.stop();
-  statusBar.setVerbose(false);
+  setVerbose(false);
 });
 
 afterEach(() => {
   statusBar.stop();
-  statusBar.setVerbose(false);
+  setVerbose(false);
   vi.restoreAllMocks();
 });
 
 describe("print() timestamps", () => {
   it("verbose=false: no timestamp prepended", () => {
-    statusBar.setVerbose(false);
+    setVerbose(false);
     const output = captureOutput(() => print("hello"));
     const plain = stripAnsi(output);
     expect(plain).toContain("hello");
@@ -35,7 +36,7 @@ describe("print() timestamps", () => {
   });
 
   it("verbose=true: prepends HH:MM:SS timestamp", () => {
-    statusBar.setVerbose(true);
+    setVerbose(true);
     const output = captureOutput(() => print("hello"));
     const plain = stripAnsi(output);
     expect(plain).toContain("hello");
@@ -43,7 +44,7 @@ describe("print() timestamps", () => {
   });
 
   it("verbose=true: timestamp appears before message content", () => {
-    statusBar.setVerbose(true);
+    setVerbose(true);
     const output = captureOutput(() => print("world"));
     const plain = stripAnsi(output);
     const tsMatch = plain.match(/\d{2}:\d{2}:\d{2}/);
@@ -54,7 +55,7 @@ describe("print() timestamps", () => {
   });
 
   it("verbose=true: timestamp uses darkGray opener and foreground-only reset", () => {
-    statusBar.setVerbose(true);
+    setVerbose(true);
     const raw = captureOutput(() => print("styled"));
     // darkGray opener
     expect(raw).toContain("\x1b[90m");
@@ -67,7 +68,7 @@ describe("print() timestamps", () => {
   });
 
   it("verbose=true: opening color is re-applied to continuation lines", () => {
-    statusBar.setVerbose(true);
+    setVerbose(true);
     // Simulate a color-wrapped multi-line block like c.gray() produces
     const coloredBlock = `\x1b[38;5;246m\nline one\nline two\x1b[0m`;
     const raw = captureOutput(() => print(coloredBlock));
@@ -78,7 +79,7 @@ describe("print() timestamps", () => {
   });
 
   it("verbose=true: each line of multi-line output gets a timestamp", () => {
-    statusBar.setVerbose(true);
+    setVerbose(true);
     const output = captureOutput(() => print("line one\nline two\nline three"));
     const plain = stripAnsi(output);
     const matches = plain.match(/\d{2}:\d{2}:\d{2}/g);
@@ -89,7 +90,7 @@ describe("print() timestamps", () => {
   });
 
   it("verbose=true: print(null) still no-ops", () => {
-    statusBar.setVerbose(true);
+    setVerbose(true);
     const output = captureOutput(() => print(null));
     expect(output).toBe("");
   });

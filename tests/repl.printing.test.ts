@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { setVerbose, verbose } from "../src/agent/verbose.js";
 import { stripAnsi } from "./helpers.js";
 import {
   printBlock,
@@ -32,13 +33,13 @@ async function captureOutputAsync(fn: () => Promise<void>): Promise<string> {
 beforeEach(() => {
   toolUseNames.clear();
   statusBar.stop();
-  statusBar.setVerbose(false);
+  setVerbose(false);
 });
 
 afterEach(() => {
   toolUseNames.clear();
   statusBar.stop();
-  statusBar.setVerbose(false);
+  setVerbose(false);
   vi.restoreAllMocks();
 });
 
@@ -227,7 +228,7 @@ describe("printMessage", () => {
   });
 
   it("system/init → routed to SYSTEM_FMT (quiet mode = null)", () => {
-    statusBar.setVerbose(false);
+    setVerbose(false);
     const output = captureOutput(() => {
       printMessage({ type: "system", subtype: "init", session_id: "abc" });
     });
@@ -302,7 +303,7 @@ describe("printMessage", () => {
   });
 
   it("rate_limit_event, quiet mode → null (nothing printed)", () => {
-    statusBar.setVerbose(false);
+    setVerbose(false);
     const output = captureOutput(() => {
       printMessage({ type: "rate_limit_event", rate_limit_info: { status: "allowed" } });
     });
@@ -310,7 +311,7 @@ describe("printMessage", () => {
   });
 
   it("rate_limit_event, verbose mode, status=allowed → null (silenced)", () => {
-    statusBar.setVerbose(true);
+    setVerbose(true);
     const output = captureOutput(() => {
       printMessage({ type: "rate_limit_event", rate_limit_info: { status: "allowed" } });
     });

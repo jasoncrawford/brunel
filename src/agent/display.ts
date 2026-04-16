@@ -1,5 +1,6 @@
 import * as Wire from "../../shared/wire.js";
 import { statusBar } from "./status-bar.js";
+import { verbose } from "./verbose.js";
 
 // ── Display width ─────────────────────────────────────────────────────────────
 
@@ -15,7 +16,7 @@ export const VERBOSE_PREFIX_LEN = 9;
  * process.stdout.columns is unavailable.
  */
 export function effectiveWidth(fallback = W): number {
-  return (process.stdout.columns ?? fallback) - (statusBar.verbose ? VERBOSE_PREFIX_LEN : 0);
+  return (process.stdout.columns ?? fallback) - (verbose ? VERBOSE_PREFIX_LEN : 0);
 }
 
 // ── Think-out-loud flag ───────────────────────────────────────────────────────
@@ -246,7 +247,7 @@ export function fmtEditResult(b: ToolResultBlock) {
 export function fmtBashOutput(text: string): string {
   const t = text.trim();
   if (!t || t === "(Bash completed with no output)") return "Success";
-  return statusBar.verbose ? t : trunc(t, 100);
+  return verbose ? t : trunc(t, 100);
 }
 
 export function fmtWriteOutput(b: ToolResultBlock & { _input?: Record<string, unknown> }): string {
@@ -554,7 +555,7 @@ export const TOOL_CALL_FMT: FmtTable = {
 };
 
 export const TOOL_RESULT_FMT: FmtTable = {
-  _default:   (b) => c.darkGray(`→ ${statusBar.verbose ? toolResultText(b) : trunc(toolResultText(b), 100)}`),
+  _default:   (b) => c.darkGray(`→ ${verbose ? toolResultText(b) : trunc(toolResultText(b), 100)}`),
   Read:       (b) => c.darkGray(`→ ${fmtCount(toolResultText(b).split("\n").length, "line")}`),
   Edit:       (b) => fmtEditResult(b),
   Skill:      (b) => c.darkGray(`→ Loaded skill`),
@@ -654,7 +655,7 @@ export const FOREMAN_MESSAGE_FMT: FmtTable = {
 // ── Printing engine ───────────────────────────────────────────────────────────
 
 function printLine(line: string): void {
-  if (statusBar.verbose) {
+  if (verbose) {
     const ts = `\x1b[90m${fmtTime()} \x1b[39m`;
     const parts = line.split("\n");
     const openColor = (line.match(/^(\x1b\[[0-9;]*m)+/) ?? [""])[0];
@@ -693,7 +694,7 @@ export function resolve(table: FmtTable, key: string, data: unknown): string | n
   const entry = table[key] ?? table._default;
   if (!entry) return null;
   if (typeof entry === "function") return entry(data);
-  const fmt = statusBar.verbose ? entry.verbose : entry.quiet;
+  const fmt = verbose ? entry.verbose : entry.quiet;
   return fmt ? fmt(data) : null;
 }
 

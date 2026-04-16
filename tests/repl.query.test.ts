@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { setVerbose, verbose } from "../src/agent/verbose.js";
 import { stripAnsi } from "./helpers.js";
 
 // Mock the SDK before importing runQuery
@@ -70,7 +71,7 @@ function captureConsole() {
 beforeEach(() => {
   toolUseNames.clear();
   statusBar.stop();
-  statusBar.setVerbose(false);
+  setVerbose(false);
   vi.clearAllMocks();
 });
 

@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { setVerbose, verbose } from "../src/agent/verbose.js";
 import { stripAnsi } from "./helpers.js";
 import { statusBar } from "../src/agent/status-bar.js";
 import {
@@ -25,7 +26,7 @@ function r(table: FmtTable, key: string, data: any): string | null {
 }
 
 describe("resolve()", () => {
-  afterEach(() => statusBar.setVerbose(false));
+  afterEach(() => setVerbose(false));
 
   it("key exists as Fmt function → calls it", () => {
     const table: FmtTable = { foo: (d) => `value:${d.x}` };
@@ -43,7 +44,7 @@ describe("resolve()", () => {
   });
 
   it("key as { quiet, verbose }, VERBOSE=false → calls quiet", () => {
-    statusBar.setVerbose(false);
+    setVerbose(false);
     const table: FmtTable = {
       foo: { quiet: () => "quiet", verbose: () => "verbose" },
     };
@@ -51,7 +52,7 @@ describe("resolve()", () => {
   });
 
   it("key as { quiet, verbose }, VERBOSE=true → calls verbose", () => {
-    statusBar.setVerbose(true);
+    setVerbose(true);
     const table: FmtTable = {
       foo: { quiet: () => "quiet", verbose: () => "verbose" },
     };
@@ -59,13 +60,13 @@ describe("resolve()", () => {
   });
 
   it("{ verbose: fn } with VERBOSE=false → returns null", () => {
-    statusBar.setVerbose(false);
+    setVerbose(false);
     const table: FmtTable = { foo: { verbose: () => "v" } };
     expect(resolve(table, "foo", {})).toBeNull();
   });
 
   it("{ verbose: fn } with VERBOSE=true → calls fn", () => {
-    statusBar.setVerbose(true);
+    setVerbose(true);
     const table: FmtTable = { foo: { verbose: () => "v" } };
     expect(r(table, "foo", {})).toBe("v");
   });
@@ -499,15 +500,15 @@ describe("TOOL_ERROR_FMT", () => {
 });
 
 describe("SYSTEM_FMT", () => {
-  afterEach(() => statusBar.setVerbose(false));
+  afterEach(() => setVerbose(false));
 
   it("init, VERBOSE=false → null", () => {
-    statusBar.setVerbose(false);
+    setVerbose(false);
     expect(resolve(SYSTEM_FMT, "init", { session_id: "abc" })).toBeNull();
   });
 
   it("init, VERBOSE=true → session: <session_id>", () => {
-    statusBar.setVerbose(true);
+    setVerbose(true);
     expect(r(SYSTEM_FMT, "init", { session_id: "abc" })).toBe("init: session abc");
   });
 
@@ -553,7 +554,7 @@ describe("SYSTEM_FMT", () => {
   });
 
   it("compact_boundary → always shown (not verbose-only)", () => {
-    statusBar.setVerbose(false);
+    setVerbose(false);
     const msg = {
       subtype: "compact_boundary",
       compact_metadata: { trigger: "auto", pre_tokens: 1000 },
@@ -563,7 +564,7 @@ describe("SYSTEM_FMT", () => {
 
   it("status/compacting → shows compacting notice (verbose and quiet)", () => {
     for (const v of [false, true]) {
-      statusBar.setVerbose(v);
+      setVerbose(v);
       const msg = { subtype: "status", status: "compacting" };
       const result = r(SYSTEM_FMT, "status", msg);
       expect(result).not.toBeNull();
@@ -577,41 +578,41 @@ describe("SYSTEM_FMT", () => {
   });
 
   it("hook_started, VERBOSE=false → null", () => {
-    statusBar.setVerbose(false);
+    setVerbose(false);
     expect(resolve(SYSTEM_FMT, "hook_started", { hook_name: "my-hook", hook_event: "PreToolUse" })).toBeNull();
   });
 
   it("hook_started, VERBOSE=true → hook: <hook_name> (<hook_event>)", () => {
-    statusBar.setVerbose(true);
+    setVerbose(true);
     expect(r(SYSTEM_FMT, "hook_started", { hook_name: "my-hook", hook_event: "PreToolUse" }))
       .toBe("hook: my-hook (PreToolUse)");
   });
 
   it("hook_response, VERBOSE=false → null", () => {
-    statusBar.setVerbose(false);
+    setVerbose(false);
     expect(resolve(SYSTEM_FMT, "hook_response", { hook_name: "my-hook", hook_event: "PreToolUse", outcome: "success" })).toBeNull();
   });
 
   it("hook_response, VERBOSE=true, success → hook: <hook_name> — success", () => {
-    statusBar.setVerbose(true);
+    setVerbose(true);
     expect(r(SYSTEM_FMT, "hook_response", { hook_name: "my-hook", hook_event: "PreToolUse", outcome: "success" }))
       .toBe("hook: my-hook — success");
   });
 
   it("hook_response, VERBOSE=true, error with exit code → includes [exit N]", () => {
-    statusBar.setVerbose(true);
+    setVerbose(true);
     expect(r(SYSTEM_FMT, "hook_response", { hook_name: "lint-hook", hook_event: "PostToolUse", outcome: "error", exit_code: 1 }))
       .toBe("hook: lint-hook — error [exit 1]");
   });
 
   it("hook_response, VERBOSE=true, exit_code=0 → no exit suffix", () => {
-    statusBar.setVerbose(true);
+    setVerbose(true);
     expect(r(SYSTEM_FMT, "hook_response", { hook_name: "my-hook", hook_event: "PreToolUse", outcome: "success", exit_code: 0 }))
       .toBe("hook: my-hook — success");
   });
 
   it("api_retry → shown in non-verbose mode (not verbose-only)", () => {
-    statusBar.setVerbose(false);
+    setVerbose(false);
     const msg = { subtype: "api_retry", attempt: 1, max_retries: 10, retry_delay_ms: 500 };
     expect(resolve(SYSTEM_FMT, "api_retry", msg)).not.toBeNull();
   });
@@ -654,18 +655,18 @@ describe("SYSTEM_FMT", () => {
   });
 
   it("_default, VERBOSE=false → null", () => {
-    statusBar.setVerbose(false);
+    setVerbose(false);
     expect(resolve(SYSTEM_FMT, "unknown_subtype", { subtype: "unknown_subtype" })).toBeNull();
   });
 
   it("_default, VERBOSE=true → system/<subtype>", () => {
-    statusBar.setVerbose(true);
+    setVerbose(true);
     expect(r(SYSTEM_FMT, "_default", { subtype: "whatever" })).toBe("system/whatever");
   });
 });
 
 describe("MESSAGE_FMT", () => {
-  afterEach(() => statusBar.setVerbose(false));
+  afterEach(() => setVerbose(false));
 
   it("_empty → [<type> — empty] in darkGray", () => {
     const raw = resolve(MESSAGE_FMT, "_empty", { type: "assistant" })!;
@@ -689,17 +690,17 @@ describe("MESSAGE_FMT", () => {
   });
 
   it("rate_limit_event, status=allowed, VERBOSE=false → null", () => {
-    statusBar.setVerbose(false);
+    setVerbose(false);
     expect(resolve(MESSAGE_FMT, "rate_limit_event", { rate_limit_info: { status: "allowed" } })).toBeNull();
   });
 
   it("rate_limit_event, status=allowed, VERBOSE=true → null (silenced)", () => {
-    statusBar.setVerbose(true);
+    setVerbose(true);
     expect(resolve(MESSAGE_FMT, "rate_limit_event", { rate_limit_info: { status: "allowed" } })).toBeNull();
   });
 
   it("rate_limit_event, status=allowed_warning, VERBOSE=false → shows warning (not verbose-only)", () => {
-    statusBar.setVerbose(false);
+    setVerbose(false);
     const result = r(MESSAGE_FMT, "rate_limit_event", {
       rate_limit_info: { status: "allowed_warning", rateLimitType: "seven_day", utilization: 0.85 },
     });
@@ -708,7 +709,7 @@ describe("MESSAGE_FMT", () => {
   });
 
   it("rate_limit_event, status=allowed_warning, VERBOSE=true → shows warning with details", () => {
-    statusBar.setVerbose(true);
+    setVerbose(true);
     const result = r(MESSAGE_FMT, "rate_limit_event", {
       rate_limit_info: { status: "allowed_warning", rateLimitType: "seven_day", utilization: 0.85 },
     });
@@ -717,7 +718,7 @@ describe("MESSAGE_FMT", () => {
   });
 
   it("rate_limit_event, status=allowed_warning, five_hour type → formats correctly", () => {
-    statusBar.setVerbose(false);
+    setVerbose(false);
     const result = r(MESSAGE_FMT, "rate_limit_event", {
       rate_limit_info: { status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.72 },
     });
@@ -725,7 +726,7 @@ describe("MESSAGE_FMT", () => {
   });
 
   it("rate_limit_event, status=allowed_warning, seven_day_sonnet type → formats correctly", () => {
-    statusBar.setVerbose(false);
+    setVerbose(false);
     const result = r(MESSAGE_FMT, "rate_limit_event", {
       rate_limit_info: { status: "allowed_warning", rateLimitType: "seven_day_sonnet", utilization: 0.9 },
     });
@@ -733,7 +734,7 @@ describe("MESSAGE_FMT", () => {
   });
 
   it("rate_limit_event, status=allowed_warning, no rateLimitType → omits limit type", () => {
-    statusBar.setVerbose(false);
+    setVerbose(false);
     const result = r(MESSAGE_FMT, "rate_limit_event", {
       rate_limit_info: { status: "allowed_warning", utilization: 0.82 },
     });
@@ -741,7 +742,7 @@ describe("MESSAGE_FMT", () => {
   });
 
   it("rate_limit_event, status=rejected, VERBOSE=false → shows rejection (not verbose-only)", () => {
-    statusBar.setVerbose(false);
+    setVerbose(false);
     const result = r(MESSAGE_FMT, "rate_limit_event", {
       rate_limit_info: { status: "rejected" },
     });
@@ -750,7 +751,7 @@ describe("MESSAGE_FMT", () => {
   });
 
   it("rate_limit_event, status=rejected, VERBOSE=true → shows rejection", () => {
-    statusBar.setVerbose(true);
+    setVerbose(true);
     const result = r(MESSAGE_FMT, "rate_limit_event", {
       rate_limit_info: { status: "rejected" },
     });
@@ -759,7 +760,7 @@ describe("MESSAGE_FMT", () => {
   });
 
   it("rate_limit_event, status=rejected, with rateLimitType → includes limit type", () => {
-    statusBar.setVerbose(false);
+    setVerbose(false);
     const result = r(MESSAGE_FMT, "rate_limit_event", {
       rate_limit_info: { status: "rejected", rateLimitType: "seven_day_opus" },
     });

@@ -7,10 +7,11 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { CanUseTool, PermissionMode, PermissionResult } from "@anthropic-ai/claude-agent-sdk";
 import * as display from "./display.js";
 import { setThinkOutLoud } from "./display.js";
-import { statusBar } from "./status-bar.js";
+import { StatusBar, statusBar, initStatusBar } from "./status-bar.js";
+import { setVerbose, verbose } from "./verbose.js";
 import { ask, pick, pickMultiple, pickQuestion } from "./input.js";
 import type { PickQuestionResult } from "./input.js";
-import { WorkerSession, registerWorkerCommands, startWorkerMode } from "./worker.js";
+import { WorkerSession, registerWorkerCommands, startWorkerMode, generateAgentId } from "./worker.js";
 import type { RunQuery, WorkerModeConfig } from "./worker.js";
 import { loadConfig } from "../config.js";
 import { Workspace, confirmIfUnsafe, registerWorkspaceCommands } from "./workspace.js";
@@ -244,7 +245,7 @@ export async function main(
   // Print the startup banner.
   display.print(display.c.sageGreen(display.hr("═")));
   display.print(display.c.skyBlue(display.s.bold("  Brunel Agent")));
-  display.print(display.c.lavender(`  Permissions: ${permConfig.permissionMode} | Model: ${statusBar.model ?? "default"} | Effort: ${statusBar.effort ?? "auto"} | Output: ${statusBar.verbose ? "verbose" : "quiet"} | Log: ${workerConfig?.logFile ?? LOG_FILE}`));
+  display.print(display.c.lavender(`  Permissions: ${permConfig.permissionMode} | Model: ${statusBar.model ?? "default"} | Effort: ${statusBar.effort ?? "auto"} | Output: ${verbose ? "verbose" : "quiet"} | Log: ${workerConfig?.logFile ?? LOG_FILE}`));
   display.print(display.c.sageGreen(display.hr("═")));
 
   process.stdout.write("\x1b[?2004h"); // enable bracketed paste mode
@@ -427,7 +428,8 @@ export async function main(
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const config = await loadConfig(process.argv);
-  statusBar.setVerbose(config.verbose);
+  initStatusBar(new StatusBar({ agentId: generateAgentId() }));
+  setVerbose(config.verbose);
   setThinkOutLoud(config.thinkOutLoud);
   const permConfig = {
     permissionMode: config.permissionMode,
