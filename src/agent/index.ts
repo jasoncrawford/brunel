@@ -233,6 +233,7 @@ export async function main(
 ): Promise<void> {
   const settings = new Settings({ model: initialModel, effort: initialEffort });
   statusBar.update({ model: initialModel, effort: initialEffort });
+  settings.on("change", () => statusBar.update({ model: settings.model, effort: settings.effort }));
 
   // Worker mode setup: create workspace, session, signal handlers.
   const workerCtx = workerConfig ? await startWorkerMode(workerConfig) : undefined;
@@ -309,7 +310,6 @@ export async function main(
         fetchModelsFn,
         display.print,
       );
-      statusBar.update({ model: settings.model });
     },
   });
   registry.register("effort", {
@@ -320,7 +320,6 @@ export async function main(
         (opts, idx) => pick(opts, { currentIdx: idx, escapable: true }),
         display.print,
       );
-      statusBar.update({ effort: settings.effort });
     },
   });
 

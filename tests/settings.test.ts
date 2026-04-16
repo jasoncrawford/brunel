@@ -35,6 +35,40 @@ describe("Settings", () => {
     expect(s.model).toBeUndefined();
     expect(s.effort).toBeUndefined();
   });
+
+  it("emits change when model is updated via pickModel", async () => {
+    setCachedModels(MODELS);
+    const s = new Settings();
+    const onChange = vi.fn();
+    s.on("change", onChange);
+    await s.pickModel("opus", noopPick, undefined, print);
+    expect(onChange).toHaveBeenCalledOnce();
+  });
+
+  it("emits change when effort is updated via pickEffort", async () => {
+    const s = new Settings();
+    const onChange = vi.fn();
+    s.on("change", onChange);
+    await s.pickEffort("high", noopPick, print);
+    expect(onChange).toHaveBeenCalledOnce();
+  });
+
+  it("does not emit change when pickModel is cancelled", async () => {
+    setCachedModels(MODELS);
+    const s = new Settings({ model: "opus" });
+    const onChange = vi.fn();
+    s.on("change", onChange);
+    await s.pickModel("", cancelPick, undefined, print);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("does not emit change when pickEffort is cancelled", async () => {
+    const s = new Settings({ effort: "max" });
+    const onChange = vi.fn();
+    s.on("change", onChange);
+    await s.pickEffort("", cancelPick, print);
+    expect(onChange).not.toHaveBeenCalled();
+  });
 });
 
 // ── pickEffort: direct set via argument ──────────────────────────────────────

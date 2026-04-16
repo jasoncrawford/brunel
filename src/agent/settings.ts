@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import * as display from "./display.js";
 import type { PickResult } from "./input.js";
 
@@ -44,18 +45,23 @@ export function findModel(models: ModelInfo[], input: string): ModelInfo | undef
 export type FetchModelsFn = () => Promise<ModelInfo[]>;
 type PickFn = (options: string[], currentIdx: number) => Promise<PickResult>;
 
-/** Owns the runtime-settable preferences (model and effort) and operations on them. */
-export class Settings {
+/** Owns the runtime-settable preferences (model and effort) and operations on them.
+ * Emits "change" whenever model or effort is updated. */
+export class Settings extends EventEmitter {
   private _model: string | undefined;
   private _effort: EffortValue | undefined;
 
   constructor(initial: { model?: string; effort?: EffortValue } = {}) {
+    super();
     this._model = initial.model;
     this._effort = initial.effort;
   }
 
   get model(): string | undefined { return this._model; }
   get effort(): EffortValue | undefined { return this._effort; }
+
+  private _setModel(v: string | undefined): void { this._model = v; this.emit("change"); }
+  private _setEffort(v: EffortValue | undefined): void { this._effort = v; this.emit("change"); }
 
   /** Handle the /model command: show a picker or set directly from an argument. */
   async pickModel(
@@ -78,26 +84,26 @@ export class Settings {
     if (args) {
       if (args === "default" || args === "sonnet") {
         print(display.c.darkGray("Model set to default."));
-        this._model = undefined;
+        this._setModel(undefined);
         return;
       }
       if (models) {
         const match = findModel(models, args);
         if (match) {
           print(display.c.darkGray(`Model set to ${match.displayName}.`));
-          this._model = match.value;
+          this._setModel(match.value);
           return;
         }
         // Unknown model — warn but accept (power-user escape hatch)
         const names = models.map(m => m.value).join(", ");
         print(display.c.amber(`Warning: "${args}" is not a known model. Known models: ${names}`));
         print(display.c.darkGray(`Model set to ${args}.`));
-        this._model = args;
+        this._setModel(args);
         return;
       }
       // No cache — accept as-is
       print(display.c.darkGray(`Model set to ${args}.`));
-      this._model = args;
+      this._setModel(args);
       return;
     }
 
@@ -130,11 +136,11 @@ export class Settings {
     // Selecting the first (default/recommended) entry resets to undefined
     if (result.index === 0) {
       print(display.c.darkGray(`Model set to ${chosen.displayName}.`));
-      this._model = undefined;
+      this._setModel(undefined);
       return;
     }
     print(display.c.darkGray(`Model set to ${chosen.displayName}.`));
-    this._model = chosen.value;
+    this._setModel(chosen.value);
   }
 
   /** Handle the /effort command: show a picker or set directly from an argument. */
@@ -147,13 +153,13 @@ export class Settings {
     if (args) {
       if (args === "auto") {
         print(display.c.darkGray("Effort set to auto (default)."));
-        this._effort = undefined;
+        this._setEffort(undefined);
         return;
       }
       const match = EFFORT_LEVELS.find(l => l.value === args);
       if (match && match.value !== "auto") {
         print(display.c.darkGray(`Effort set to ${match.value}.`));
-        this._effort = match.value as EffortValue;
+        this._setEffort(match.value as EffortValue);
         return;
       }
       // Unknown level — reject (unlike model, effort is a closed set)
@@ -181,10 +187,10 @@ export class Settings {
     if (chosen.value === "auto") {
       if (this._effort === undefined) return; // already auto, no-op
       print(display.c.darkGray(`Effort set to auto (default).`));
-      this._effort = undefined;
+      this._setEffort(undefined);
       return;
     }
     print(display.c.darkGray(`Effort set to ${chosen.value}.`));
-    this._effort = chosen.value as EffortValue;
+    this._setEffort(chosen.value as EffortValue);
   }
 }
