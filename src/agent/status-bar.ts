@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import { shortWorkerId } from "../../shared/utils.js";
-import { verbose } from "./display.js";
+import { getConfig } from "../config.js";
 import type { Settings } from "./settings.js";
 import type { EffortValue } from "./settings.js";
 
@@ -150,7 +150,7 @@ export class StatusBar extends EventEmitter {
     const retryInSeconds = this._reconnectAt != null
       ? Math.max(0, Math.ceil((this._reconnectAt - Date.now()) / 1000))
       : undefined;
-    const codeStr = verbose && this._disconnectCode != null ? ` (${this._disconnectCode})` : "";
+    const codeStr = getConfig().verbose && this._disconnectCode != null ? ` (${this._disconnectCode})` : "";
     const rightText =
       this._connectionStatus === "connected"    ? "Connected" :
       this._connectionStatus === "handshaking"  ? "Handshaking..." :

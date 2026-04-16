@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { StatusBar, statusBar } from "../src/agent/status-bar.js";
-import { setVerbose, verbose } from "../src/agent/display.js";
+import { setVerbose } from "../src/agent/display.js";
+import { getConfig } from "../src/config.js";
 
 // Strip ANSI codes for assertion
 function stripAnsi(s: string): string {
@@ -13,18 +14,18 @@ describe("StatusBar verbose flag", () => {
   });
 
   it("defaults to false", () => {
-    expect(verbose).toBe(false);
+    expect(getConfig().verbose).toBe(false);
   });
 
   it("setVerbose(true) sets verbose to true", () => {
     setVerbose(true);
-    expect(verbose).toBe(true);
+    expect(getConfig().verbose).toBe(true);
   });
 
   it("setVerbose(false) resets verbose", () => {
     setVerbose(true);
     setVerbose(false);
-    expect(verbose).toBe(false);
+    expect(getConfig().verbose).toBe(false);
   });
 });
 

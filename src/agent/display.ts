@@ -1,5 +1,6 @@
 import * as Wire from "../../shared/wire.js";
 import { statusBar } from "./status-bar.js";
+import { getConfig } from "../config.js";
 
 // ── Display width ─────────────────────────────────────────────────────────────
 
@@ -15,18 +16,13 @@ export const VERBOSE_PREFIX_LEN = 9;
  * process.stdout.columns is unavailable.
  */
 export function effectiveWidth(fallback = W): number {
-  return (process.stdout.columns ?? fallback) - (verbose ? VERBOSE_PREFIX_LEN : 0);
+  return (process.stdout.columns ?? fallback) - (getConfig().verbose ? VERBOSE_PREFIX_LEN : 0);
 }
 
-// ── Verbose flag ──────────────────────────────────────────────────────────────
+// ── Verbose / think-out-loud setters (update the config singleton) ─────────────
 
-export let verbose = false;
-export function setVerbose(v: boolean) { verbose = v; }
-
-// ── Think-out-loud flag ───────────────────────────────────────────────────────
-
-export let thinkOutLoud = false;
-export function setThinkOutLoud(v: boolean) { thinkOutLoud = v; }
+export function setVerbose(v: boolean) { getConfig().verbose = v; }
+export function setThinkOutLoud(v: boolean) { getConfig().thinkOutLoud = v; }
 
 // ── Colors ────────────────────────────────────────────────────────────────────
 
@@ -251,7 +247,7 @@ export function fmtEditResult(b: ToolResultBlock) {
 export function fmtBashOutput(text: string): string {
   const t = text.trim();
   if (!t || t === "(Bash completed with no output)") return "Success";
-  return verbose ? t : trunc(t, 100);
+  return getConfig().verbose ? t : trunc(t, 100);
 }
 
 export function fmtWriteOutput(b: ToolResultBlock & { _input?: Record<string, unknown> }): string {
@@ -533,7 +529,7 @@ export type FmtEntry = Fmt | { quiet?: Fmt; verbose?: Fmt };
 export type FmtTable = Record<string, FmtEntry>;
 
 export const ASSISTANT_BLOCK_FMT: FmtTable = {
-  thinking: (b) => c.gray("\n" + (thinkOutLoud ? renderMarkdown(b.thinking ?? "") : "Thinking...")),
+  thinking: (b) => c.gray("\n" + (getConfig().thinkOutLoud ? renderMarkdown(b.thinking ?? "") : "Thinking...")),
   text:     (b) => c.yellow(`\n${renderMarkdown(b.text ?? "")}`),
   _default: (b) => c.darkGray(`[assistant/${b.type}]`),
 };
@@ -559,7 +555,7 @@ export const TOOL_CALL_FMT: FmtTable = {
 };
 
 export const TOOL_RESULT_FMT: FmtTable = {
-  _default:   (b) => c.darkGray(`→ ${verbose ? toolResultText(b) : trunc(toolResultText(b), 100)}`),
+  _default:   (b) => c.darkGray(`→ ${getConfig().verbose ? toolResultText(b) : trunc(toolResultText(b), 100)}`),
   Read:       (b) => c.darkGray(`→ ${fmtCount(toolResultText(b).split("\n").length, "line")}`),
   Edit:       (b) => fmtEditResult(b),
   Skill:      (b) => c.darkGray(`→ Loaded skill`),
@@ -660,7 +656,7 @@ export const FOREMAN_MESSAGE_FMT: FmtTable = {
 // ── Printing engine ───────────────────────────────────────────────────────────
 
 function printLine(line: string): void {
-  if (verbose) {
+  if (getConfig().verbose) {
     const ts = `\x1b[90m${fmtTime()} \x1b[39m`;
     const parts = line.split("\n");
     const openColor = (line.match(/^(\x1b\[[0-9;]*m)+/) ?? [""])[0];
@@ -699,7 +695,7 @@ export function resolve(table: FmtTable, key: string, data: unknown): string | n
   const entry = table[key] ?? table._default;
   if (!entry) return null;
   if (typeof entry === "function") return entry(data);
-  const fmt = verbose ? entry.verbose : entry.quiet;
+  const fmt = getConfig().verbose ? entry.verbose : entry.quiet;
   return fmt ? fmt(data) : null;
 }
 

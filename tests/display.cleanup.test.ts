@@ -3,7 +3,7 @@ import { stripAnsi } from "./helpers.js";
 import {
   print, fmtTime, s,
   distributeWidths,
-  setVerbose, verbose,
+  setVerbose,
 } from "../src/agent/display.js";
 import { statusBar } from "../src/agent/status-bar.js";
 

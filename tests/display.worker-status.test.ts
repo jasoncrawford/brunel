@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { StatusBar, statusBar } from "../src/agent/status-bar.js";
-import { setVerbose, verbose } from "../src/agent/display.js";
+import { setVerbose } from "../src/agent/display.js";
 
 // Strip ANSI codes for assertion
 function stripAnsi(s: string): string {

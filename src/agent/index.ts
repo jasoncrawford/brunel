@@ -6,13 +6,12 @@ import { fileURLToPath } from "url";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { CanUseTool, PermissionMode, PermissionResult } from "@anthropic-ai/claude-agent-sdk";
 import * as display from "./display.js";
-import { setThinkOutLoud, setVerbose, verbose } from "./display.js";
 import { StatusBar, statusBar, initStatusBar } from "./status-bar.js";
 import { ask, pick, pickMultiple, pickQuestion } from "./input.js";
 import type { PickQuestionResult } from "./input.js";
 import { WorkerSession, registerWorkerCommands, startWorkerMode, generateAgentId } from "./worker.js";
-import type { RunQuery, WorkerModeConfig } from "./worker.js";
-import { loadConfig } from "../config.js";
+import type { RunQuery } from "./worker.js";
+import { loadConfig, getConfig } from "../config.js";
 import { Workspace, confirmIfUnsafe, registerWorkspaceCommands } from "./workspace.js";
 import { fmtError } from "../utils.js";
 import { Settings, setCachedModels } from "./settings.js";
@@ -226,7 +225,7 @@ function createFetchModelsFn(permConfig: { permissionMode: PermissionMode }): Fe
 export async function main(
   runQueryFn: RunQuery,
   permConfig: { permissionMode: PermissionMode; allowDangerouslySkipPermissions: boolean },
-  workerConfig?: WorkerModeConfig,
+  runWorkerMode?: boolean,
   workspaceCfg?: { workspaceDir: string; repoUrl: string },
   initialModel?: string,
   initialEffort?: EffortValue,
@@ -235,7 +234,7 @@ export async function main(
   initStatusBar(new StatusBar({ agentId: generateAgentId(), settings }));
 
   // Worker mode setup: create workspace, session, signal handlers.
-  const workerCtx = workerConfig ? await startWorkerMode(workerConfig) : undefined;
+  const workerCtx = runWorkerMode ? await startWorkerMode() : undefined;
   const session = workerCtx?.session;
 
   const fetchModelsFn = createFetchModelsFn(permConfig);
@@ -243,7 +242,7 @@ export async function main(
   // Print the startup banner.
   display.print(display.c.sageGreen(display.hr("═")));
   display.print(display.c.skyBlue(display.s.bold("  Brunel Agent")));
-  display.print(display.c.lavender(`  Permissions: ${permConfig.permissionMode} | Model: ${settings.model ?? "default"} | Effort: ${settings.effort ?? "auto"} | Output: ${verbose ? "verbose" : "quiet"} | Log: ${workerConfig?.logFile ?? LOG_FILE}`));
+  display.print(display.c.lavender(`  Permissions: ${permConfig.permissionMode} | Model: ${settings.model ?? "default"} | Effort: ${settings.effort ?? "auto"} | Output: ${getConfig().verbose ? "verbose" : "quiet"} | Log: ${LOG_FILE}`));
   display.print(display.c.sageGreen(display.hr("═")));
 
   process.stdout.write("\x1b[?2004h"); // enable bracketed paste mode
@@ -429,8 +428,6 @@ export async function main(
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const config = await loadConfig(process.argv);
-  setVerbose(config.verbose);
-  setThinkOutLoud(config.thinkOutLoud);
   const permConfig = {
     permissionMode: config.permissionMode,
     allowDangerouslySkipPermissions: config.allowDangerouslySkipPermissions,
@@ -446,20 +443,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       }
     : undefined;
 
-  const workerConfig: WorkerModeConfig | undefined = process.argv.includes("--worker-mode")
-    ? {
-        foremanUrl: config.foremanUrl,
-        workspaceDir: config.workspaceDir,
-        githubToken: config.githubToken,
-        githubRepo: config.githubRepo,
-        repoUrl: config.repoUrl,
-        verbose: config.verbose,
-        logFile: LOG_FILE,
-        model: config.model,
-        effort: config.effort,
-        pingIntervalMs: config.pingIntervalMs,
-      }
-    : undefined;
+  const runWorkerMode = process.argv.includes("--worker-mode");
 
-  await main(boundRunQuery, permConfig, workerConfig, workspaceCfg, config.model, config.effort);
+  await main(boundRunQuery, permConfig, runWorkerMode, workspaceCfg, config.model, config.effort);
 }

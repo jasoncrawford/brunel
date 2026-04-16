@@ -6,7 +6,7 @@ import {
   print,
   toolUseNames,
   setThinkOutLoud,
-  setVerbose, verbose,
+  setVerbose,
 } from "../src/agent/display.js";
 import { statusBar } from "../src/agent/status-bar.js";
 

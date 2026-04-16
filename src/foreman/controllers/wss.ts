@@ -49,19 +49,13 @@ type ForemanWssOptions = {
 export class ForemanWss {
   readonly wss: WebSocketServer;
   private readonly taskManager: TaskManager;
-  private readonly repo: string;
-  private readonly token: string;
-  private readonly githubApiUrl?: string;
-  private readonly taskLabel: string;
+  private readonly config: Pick<BrunelConfig, "taskLabel" | "githubRepo" | "githubToken" | "githubApiUrl" | "workerSecret" | "pingIntervalMs">;
   private readonly adminWss?: AdminWss;
   private nextBroadcastId = 1;
 
   constructor({ config, server, taskManager, adminWss }: ForemanWssOptions) {
     this.taskManager = taskManager;
-    this.repo = config.githubRepo;
-    this.token = config.githubToken;
-    this.githubApiUrl = config.githubApiUrl;
-    this.taskLabel = config.taskLabel;
+    this.config = config;
     this.adminWss = adminWss;
 
     const debouncedBroadcast = debounce(() => this.broadcastSnapshot(), 10);
@@ -519,21 +513,21 @@ export class ForemanWss {
     if (!task) {
       const labeledNow =
         action === "labeled" &&
-        (p.label as R | undefined)?.name === this.taskLabel;
+        (p.label as R | undefined)?.name === this.config.taskLabel;
       const openedWithLabel =
         action === "opened" &&
-        (issue.labels as Array<{ name: string }> | undefined)?.some((l) => l.name === this.taskLabel);
+        (issue.labels as Array<{ name: string }> | undefined)?.some((l) => l.name === this.config.taskLabel);
 
       if (labeledNow || openedWithLabel) {
         const labels = (issue.labels as Array<{ name: string }> | undefined)?.map((l) => l.name) ?? [];
         const enqueued = await this.taskManager.handleIssueLabeledEvent(
           issueNumber,
-          this.repo,
+          this.config.githubRepo,
           String(issue.title ?? ""),
           String(issue.body ?? ""),
           labels,
           String(issue.state ?? "open"),
-          { repo: this.repo, token: this.token, apiUrl: this.githubApiUrl },
+          { repo: this.config.githubRepo, token: this.config.githubToken, apiUrl: this.config.githubApiUrl },
         ).catch((err: unknown) => {
           log(`ERROR Failed to persist task #${issueNumber}: ${fmtError(err)}`);
           return null;
@@ -546,7 +540,7 @@ export class ForemanWss {
 
     if (
       action === "unlabeled" &&
-      (p.label as R | undefined)?.name === this.taskLabel
+      (p.label as R | undefined)?.name === this.config.taskLabel
     ) {
       try {
         await this.taskManager.dequeueIssue(issueNumber);
@@ -587,7 +581,7 @@ export class ForemanWss {
         this.taskManager.handleIssueBodyEditedEvent(
           issueNumber,
           String(issue.body ?? ""),
-          { repo: this.repo, token: this.token, apiUrl: this.githubApiUrl },
+          { repo: this.config.githubRepo, token: this.config.githubToken, apiUrl: this.config.githubApiUrl },
         );
       }
     }

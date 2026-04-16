@@ -4,7 +4,7 @@ import { statusBar } from "../src/agent/status-bar.js";
 import {
   resolve,
   setThinkOutLoud,
-  setVerbose, verbose,
+  setVerbose,
   ASSISTANT_BLOCK_FMT,
   USER_BLOCK_FMT,
   TOOL_CALL_FMT,
