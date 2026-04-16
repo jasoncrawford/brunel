@@ -254,11 +254,13 @@ export class ForemanWss {
 
   sendMsg(worker: Worker, msg: Wire.ForemanMessage, logTaskId?: string): void {
     const taskId = logTaskId ?? (("taskId" in msg ? msg.taskId : null) ?? null);
-    const workerId = worker.workerId;
     worker.send(msg);
-    const msgPayload = msg as unknown as Record<string, unknown>;
-    void ForemanMessage.log({ direction: "sent", workerId, taskId, msgType: msg.type, payload: msgPayload });
-    this.broadcastMessageEvent({ direction: "sent", workerId, taskId, msgType: msg.type, payload: msgPayload });
+    this.logAndBroadcastSent(worker.workerId, taskId, msg.type, msg as unknown as Record<string, unknown>);
+  }
+
+  private logAndBroadcastSent(workerId: string | null, taskId: string | null, msgType: string, payload: Record<string, unknown>): void {
+    void ForemanMessage.log({ direction: "sent", workerId, taskId, msgType, payload });
+    this.broadcastMessageEvent({ direction: "sent", workerId, taskId, msgType, payload });
   }
 
   private broadcastMessageEvent(data: { direction: string; workerId: string | null; taskId: string | null; msgType: string; payload?: Record<string, unknown> }): void {
@@ -297,9 +299,7 @@ export class ForemanWss {
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(payload));
     }
-    const msgPayload = payload as unknown as Record<string, unknown>;
-    void ForemanMessage.log({ direction: "sent", workerId, taskId, msgType: payload.type, payload: msgPayload });
-    this.broadcastMessageEvent({ direction: "sent", workerId, taskId, msgType: payload.type, payload: msgPayload });
+    this.logAndBroadcastSent(workerId, taskId, payload.type, payload as unknown as Record<string, unknown>);
   }
 
   // ── Hello handlers ───────────────────────────────────────────────────────────
