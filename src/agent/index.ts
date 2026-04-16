@@ -232,8 +232,7 @@ export async function main(
   initialEffort?: EffortValue,
 ): Promise<void> {
   const settings = new Settings({ model: initialModel, effort: initialEffort });
-  statusBar.update({ model: initialModel, effort: initialEffort });
-  settings.on("change", () => statusBar.update({ model: settings.model, effort: settings.effort }));
+  initStatusBar(new StatusBar({ agentId: generateAgentId(), settings }));
 
   // Worker mode setup: create workspace, session, signal handlers.
   const workerCtx = workerConfig ? await startWorkerMode(workerConfig) : undefined;
@@ -423,7 +422,6 @@ export async function main(
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const config = await loadConfig(process.argv);
-  initStatusBar(new StatusBar({ agentId: generateAgentId() }));
   setVerbose(config.verbose);
   setThinkOutLoud(config.thinkOutLoud);
   const permConfig = {
