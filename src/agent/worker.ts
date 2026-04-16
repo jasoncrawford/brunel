@@ -120,6 +120,42 @@ const WS_PROMPT = "__ws_prompt__";
 // Sentinel: a fatal foreman error was received; main() should drop back to interactive REPL
 const WS_FATAL = "__ws_fatal__";
 
+/** Task state needed to decide whether and how to prompt before quitting. */
+export type TaskQuitInfo = {
+  taskNumber: number;
+  workerId: string;
+  issueClosed: boolean;
+};
+
+/**
+ * Prompt the user before quitting with an active task.
+ *
+ * - Issue closed but not complete: asks whether to complete first (default yes).
+ * - Issue still open: warns about unassignment and asks to confirm quit (default no).
+ *
+ * Returns 'quit' to proceed without completing, 'complete-and-quit' to mark
+ * the task complete then quit, or 'cancel' to stay in the worker.
+ *
+ * An injectable pickFn is accepted so callers can supply a mock in tests.
+ */
+export async function confirmTaskQuit(
+  info: TaskQuitInfo,
+  pickFn: (options: string[]) => Promise<number> = pick,
+): Promise<"quit" | "complete-and-quit" | "cancel"> {
+  if (info.issueClosed) {
+    display.print(display.c.amber(`\nTask #${info.taskNumber} is closed but not complete. Complete it before exiting?`));
+    const idx = await pickFn(["Yes, complete before exiting", "No, just exit", "Don't exit"]);
+    if (idx === 0) return "complete-and-quit";
+    if (idx === 1) return "quit";
+    return "cancel";
+  } else {
+    display.print(display.c.amber(`\nTask #${info.taskNumber} is still open. Quitting now will unassign ${info.workerId}. Quit anyway?`));
+    const idx = await pickFn(["No, keep working", "Yes, quit anyway"]);
+    if (idx === 1) return "quit";
+    return "cancel";
+  }
+}
+
 /** A prompt queued by WorkerSession for main() to execute. */
 export type QueuedPrompt = { prompt: string; fresh: boolean };
 
@@ -147,6 +183,7 @@ export class WorkerSession {
   private _queryRunning = false;
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private prIsClosed = false;
+  private issueClosed = false;
   private _resetPromise: Promise<void> | null = null;
   private stopped = false;
   // Handshake lifecycle: "registered" = hello_ack received (or initial state);
@@ -262,6 +299,19 @@ export class WorkerSession {
   /** Returns the workspace for use with registerWorkspaceCommands(). */
   get workspace(): Workspace | undefined {
     return this.options.workspace;
+  }
+
+  /**
+   * Returns task quit info if a task is currently active, undefined otherwise.
+   * Used by the quit/exit handlers to decide whether to prompt the user.
+   */
+  getTaskQuitInfo(): TaskQuitInfo | undefined {
+    if (!this.currentTaskId || !this.currentIssue) return undefined;
+    return {
+      taskNumber: this.currentIssue.number,
+      workerId: this.agentId,
+      issueClosed: this.issueClosed,
+    };
   }
 
   /**
@@ -494,6 +544,7 @@ export class WorkerSession {
       this.currentTaskId = msg.taskId;
       this.currentIssue = msg.issue;
       this.prIsClosed = false;
+      this.issueClosed = false;
       this.statusBar.update({ taskNumber: msg.issue.number, prNumber: undefined });
       void this.refreshBranch();
       const initialPrompt = buildInitialPrompt(msg.issue, !!this.options.workspace);
@@ -525,6 +576,12 @@ export class WorkerSession {
         } else if (pr?.number != null) {
           this.statusBar.update({ prNumber: pr.number });
         }
+      }
+
+      if (event.name === "issues" && action === "closed") {
+        this.issueClosed = true;
+      } else if (event.name === "issues" && action === "reopened") {
+        this.issueClosed = false;
       }
 
       if (event.name === "pull_request" && action === "closed") {
@@ -665,6 +722,12 @@ export async function startWorkerMode(): Promise<{
   const shutdown = async () => {
     if (shuttingDown) return;
     shuttingDown = true;
+    const taskInfo = session.getTaskQuitInfo();
+    if (taskInfo) {
+      const choice = await confirmTaskQuit(taskInfo);
+      if (choice === "cancel") { shuttingDown = false; return; }
+      if (choice === "complete-and-quit") await session.completeCurrentTask();
+    }
     const ok = await confirmIfUnsafe(workspace, workspace.confirm);
     if (ok) await workspace.destroy();
     process.exit(0);
