@@ -8,7 +8,7 @@ import * as display from "./display.js";
 import { StatusBar, statusBar } from "./status-bar.js";
 import { setVerbose } from "./display.js";
 import { buildInitialPrompt, buildEventPrompt } from "./worker-prompts.js";
-import type { EffortValue } from "./effort.js";
+import type { EffortValue } from "./settings.js";
 import * as Wire from "../../shared/wire.js";
 import { Workspace, confirmIfUnsafe } from "./workspace.js";
 import { fmtError } from "../utils.js";

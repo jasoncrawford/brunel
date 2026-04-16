@@ -1,7 +1,8 @@
 import { EventEmitter } from "node:events";
 import { shortWorkerId } from "../../shared/utils.js";
 import { verbose } from "./display.js";
-import type { EffortValue } from "./effort.js";
+import type { Settings } from "./settings.js";
+import type { EffortValue } from "./settings.js";
 
 // ── Worker status types ────────────────────────────────────────────────────────
 
@@ -71,7 +72,7 @@ export class StatusBar extends EventEmitter {
   // prompt area including any leading blank line (see issue #418).
   inputClear: (() => void) | null = null;
 
-  constructor({ agentId, ...initial }: { agentId: string } & Omit<WorkerStatusPatch, "reconnectAt">) {
+  constructor({ agentId, settings, ...initial }: { agentId: string; settings?: Settings } & Omit<WorkerStatusPatch, "reconnectAt">) {
     super();
     this.agentId = agentId;
     if ("connectionStatus" in initial) this._connectionStatus = initial.connectionStatus!;
@@ -81,6 +82,16 @@ export class StatusBar extends EventEmitter {
     if ("branch" in initial) this._branch = initial.branch!;
     if ("model" in initial) this._model = initial.model;
     if ("effort" in initial) this._effort = initial.effort;
+    if (settings) {
+      this._model = settings.model;
+      this._effort = settings.effort;
+      settings.on("change", () => {
+        this._model = settings.model;
+        this._effort = settings.effort;
+        this.updatePersistent();
+        this.emit("change");
+      });
+    }
   }
 
   // ── Worker status getters ──────────────────────────────────────────────────
