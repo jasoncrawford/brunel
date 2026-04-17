@@ -538,6 +538,11 @@ export const USER_BLOCK_FMT: FmtTable = {
   _default: (b) => c.darkGray(`[user/${b.type}]`),
 };
 
+function fmtSubagentType(subagentType: string | null | undefined): string {
+  if (!subagentType || subagentType === "general-purpose") return "Subagent";
+  return subagentType;
+}
+
 export const TOOL_CALL_FMT: FmtTable = {
   Bash:       (b) => fmtToolCall(b, `$ ${b.input?.command ?? ""}`),
   Read:       (b) => fmtToolCall(b, `• Read(${toRelativePath(b.input?.file_path ?? "?")})`),
@@ -546,7 +551,7 @@ export const TOOL_CALL_FMT: FmtTable = {
   Glob:       (b) => fmtToolCall(b, `• Glob(${b.input?.pattern ?? "?"})`),
   Grep:       (b) => fmtToolCall(b, `• grep ${trunc(b.input?.pattern ?? "?", 30)} ${b.input?.path != null ? toRelativePath(b.input.path as string) : "."}`),
   Skill:      (b) => fmtToolCall(b, `• Skill(${b.input?.skill ?? "?"})`),
-  Agent:      (b) => fmtToolCall(b, `• ${b.input?.subagent_type ?? "Agent"}(${trunc(b.input?.prompt ?? "", 80)})`),
+  Agent:      (b) => fmtToolCall(b, `• ${fmtSubagentType(b.input?.subagent_type)}(${trunc(b.input?.prompt ?? "", 80)})`),
   ToolSearch: (b) => fmtToolCall(b, `• ToolSearch(${b.input?.query ?? "?"})`),
   TodoWrite:  (b) => fmtToolCall(b, `• TodoWrite(${fmtTodoWriteInput(b.input?.todos)})`),
   AskUserQuestion: (b) => fmtToolCall(b, `• AskUserQuestion(${fmtAskUserQuestionInput(b.input?.questions)})`),

@@ -170,6 +170,20 @@ describe("TOOL_CALL_FMT", () => {
     expect(result).toContain("• Explore(find files)");
   });
 
+  it("Agent: shows • Subagent(<prompt>) for general-purpose subagent type", () => {
+    const result = r(TOOL_CALL_FMT, "Agent", {
+      input: { subagent_type: "general-purpose", prompt: "research something" },
+    });
+    expect(result).toContain("• Subagent(research something)");
+  });
+
+  it("Agent: shows • Subagent(<prompt>) when subagent_type is missing", () => {
+    const result = r(TOOL_CALL_FMT, "Agent", {
+      input: { prompt: "research something" },
+    });
+    expect(result).toContain("• Subagent(research something)");
+  });
+
   it("AskUserQuestion: shows question text(s)", () => {
     const result = r(TOOL_CALL_FMT, "AskUserQuestion", {
       input: { questions: [{ question: "Which approach?", header: "Approach", options: [], multiSelect: false }] },
