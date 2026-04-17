@@ -27,7 +27,7 @@ vi.mock("../src/agent/views/input.js", async (importOriginal) => {
 import { PassThrough } from "stream";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { runQuery } from "../src/agent/index.js";
-import { getCachedModels, _resetCachedModels } from "../src/agent/models/settings.js";
+import { Settings } from "../src/agent/models/settings.js";
 import { ask, pick, pickMultiple, pickQuestion } from "../src/agent/views/input.js";
 import { Display } from "../src/agent/views/display.js";
 import { statusBar } from "../src/agent/views/status-bar.js";
@@ -646,7 +646,7 @@ describe("runQuery - interrupt via ^C on stdin", () => {
 });
 
 describe("runQuery - model option", () => {
-  beforeEach(() => _resetCachedModels());
+  beforeEach(() => Settings._resetCachedModels());
 
   it("passes model to SDK query options when provided", async () => {
     mockQueryMessages([
@@ -680,14 +680,14 @@ describe("runQuery - model option", () => {
     mockQueryMessages([
       { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } },
     ]);
-    expect(getCachedModels()).toBeNull();
+    expect(Settings.getCachedModels()).toBeNull();
     const cap = captureConsole();
     try {
       await runQuery(testDisplay, defaultPermConfig, "test", undefined);
     } finally {
       cap.restore();
     }
-    const models = getCachedModels();
+    const models = Settings.getCachedModels();
     expect(models).toEqual(FAKE_MODELS);
   });
 });

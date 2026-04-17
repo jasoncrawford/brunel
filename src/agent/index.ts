@@ -9,13 +9,13 @@ import { Display, c, hr, clearBreak, fmtArgs } from "./views/display.js";
 import { StatusBar, statusBar, initStatusBar } from "./views/status-bar.js";
 import { ask, pick, pickMultiple, pickQuestion } from "./views/input.js";
 import type { PickQuestionResult } from "./views/input.js";
-import { WorkerSession, registerWorkerCommands, startWorkerMode, generateAgentId, confirmTaskQuit } from "./controllers/worker-controller.js";
+import { WorkerSession, registerWorkerCommands, startWorkerMode, generateAgentId } from "./controllers/worker-controller.js";
 import type { RunQuery } from "./controllers/worker-controller.js";
 import { loadConfig, getConfig } from "../config.js";
 import { Workspace, confirmIfUnsafe } from "./models/workspace.js";
 import { registerWorkspaceCommands } from "./controllers/workspace-controller.js";
 import { fmtError } from "../utils.js";
-import { Settings, setCachedModels } from "./models/settings.js";
+import { Settings } from "./models/settings.js";
 import type { ModelInfo, FetchModelsFn, EffortValue } from "./models/settings.js";
 import { CommandController } from "./controllers/command-controller.js";
 import { SettingsController } from "./controllers/settings-controller.js";
@@ -149,7 +149,7 @@ export async function runQuery(
   type QueryWithModels = { supportedModels?: () => Promise<ModelInfo[]> };
   const qm = iterable as unknown as QueryWithModels;
   if (typeof qm.supportedModels === "function") {
-    qm.supportedModels().then(models => { setCachedModels(models); }).catch(() => {});
+    qm.supportedModels().then(models => { Settings.setCachedModels(models); }).catch(() => {});
   }
 
   // Register a temporary raw-stdin listener to catch ^C and abort the query.
@@ -298,7 +298,7 @@ export async function main(
       if (!session) { await doExit(); return "exit"; }
       const taskInfo = session.getTaskQuitInfo();
       if (taskInfo) {
-        const choice = await confirmTaskQuit(taskInfo, display);
+        const choice = await session.confirmTaskQuit(taskInfo);
         if (choice === "cancel") return undefined;
         if (choice === "complete-and-quit") await session.completeCurrentTask();
       }
@@ -370,7 +370,7 @@ export async function main(
       if (!session) { await doExit(); break; }
       const taskInfo = session.getTaskQuitInfo();
       if (taskInfo) {
-        const choice = await confirmTaskQuit(taskInfo, display);
+        const choice = await session.confirmTaskQuit(taskInfo);
         if (choice === "cancel") continue;
         if (choice === "complete-and-quit") await session.completeCurrentTask();
       }

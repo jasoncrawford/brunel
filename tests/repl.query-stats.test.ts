@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { QueryStats } from "../src/agent/models/query-stats.js";
-import * as queryStatsModule from "../src/agent/models/query-stats.js";
 import { stripAnsi } from "./helpers.js";
 
 afterEach(() => {
@@ -185,10 +184,11 @@ describe("QueryStats - elapsedSecs", () => {
 });
 
 describe("QueryStats - getStatusText", () => {
-  it("uses a verb from pickWorkingVerb", () => {
-    const verb = "Welding";
-    const stats = new QueryStats(undefined, () => verb);
-    expect(stripAnsi(stats.getStatusText())).toContain(verb);
+  it("includes a working verb in status text", () => {
+    const stats = new QueryStats();
+    const text = stripAnsi(stats.getStatusText());
+    // Status text format is "Verb… Xs"
+    expect(text).toMatch(/\w.*…/);
   });
 
   it("includes elapsed time", () => {

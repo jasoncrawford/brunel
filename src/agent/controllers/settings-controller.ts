@@ -1,15 +1,8 @@
 import { c } from "../views/display.js";
-import type { WorkerDisplay } from "../views/display.js";
+import type { WorkerDisplay } from "./worker-controller.js";
 import type { PickResult } from "../views/input.js";
-import {
-  Settings,
-  EFFORT_LEVELS,
-  findModel,
-  getCachedModels,
-  setCachedModels,
-  type FetchModelsFn,
-  type EffortValue,
-} from "../models/settings.js";
+import { Settings } from "../models/settings.js";
+import type { FetchModelsFn, EffortValue } from "../models/settings.js";
 
 type PickFn = (options: string[], currentIdx: number) => Promise<PickResult>;
 
@@ -30,11 +23,11 @@ export class SettingsController {
     fetchModelsFn: FetchModelsFn | undefined,
   ): Promise<void> {
     // Ensure models are loaded
-    let models = getCachedModels();
+    let models = Settings.getCachedModels();
     if (!models && fetchModelsFn) {
       try {
         models = await fetchModelsFn();
-        setCachedModels(models);
+        Settings.setCachedModels(models);
       } catch {
         // fall through with null cache
       }
@@ -48,7 +41,7 @@ export class SettingsController {
         return;
       }
       if (models) {
-        const match = findModel(models, args);
+        const match = Settings.findModel(models, args);
         if (match) {
           this.display.print(c.darkGray(`Model set to ${match.displayName}.`));
           this.settings._setModel(match.value);
@@ -115,14 +108,14 @@ export class SettingsController {
         this.settings._setEffort(undefined);
         return;
       }
-      const match = EFFORT_LEVELS.find(l => l.value === args);
+      const match = Settings.EFFORT_LEVELS.find(l => l.value === args);
       if (match && match.value !== "auto") {
         this.display.print(c.darkGray(`Effort set to ${match.value}.`));
         this.settings._setEffort(match.value as EffortValue);
         return;
       }
       // Unknown level — reject (unlike model, effort is a closed set)
-      const names = EFFORT_LEVELS.map(l => l.value).join(", ");
+      const names = Settings.EFFORT_LEVELS.map(l => l.value).join(", ");
       this.display.print(c.amber(`Unknown effort level "${args}". Valid levels: ${names}`));
       return;
     }
@@ -130,8 +123,8 @@ export class SettingsController {
     // Interactive picker
     const options: string[] = [];
     let currentIdx = 0;
-    for (let i = 0; i < EFFORT_LEVELS.length; i++) {
-      const l = EFFORT_LEVELS[i];
+    for (let i = 0; i < Settings.EFFORT_LEVELS.length; i++) {
+      const l = Settings.EFFORT_LEVELS[i];
       const desc = l.description ? ` · ${l.description}` : "";
       options.push(`${l.displayName}${desc}`);
       if (l.value === (this.settings.effort ?? "auto")) currentIdx = i;
@@ -142,7 +135,7 @@ export class SettingsController {
 
     if (result.type !== "selected") return;
 
-    const chosen = EFFORT_LEVELS[result.index];
+    const chosen = Settings.EFFORT_LEVELS[result.index];
     if (chosen.value === "auto") {
       if (this.settings.effort === undefined) return; // already auto, no-op
       this.display.print(c.darkGray(`Effort set to auto (default).`));

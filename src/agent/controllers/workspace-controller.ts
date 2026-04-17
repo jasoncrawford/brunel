@@ -1,5 +1,6 @@
-import { c, type WorkerDisplay } from "../views/display.js";
-import type { CommandController } from "./command-controller.js";
+import { c } from "../views/display.js";
+import type { CommandRegistry } from "./command-controller.js";
+import type { WorkerDisplay } from "./worker-controller.js";
 import { Workspace, confirmIfUnsafe } from "../models/workspace.js";
 
 /**
@@ -9,7 +10,7 @@ import { Workspace, confirmIfUnsafe } from "../models/workspace.js";
  * Pass `undefined` when no GitHub repo is configured — commands that require
  * a workspace will print an appropriate error message.
  */
-export function registerWorkspaceCommands(workspace: Workspace | undefined, registry: CommandController, display: WorkerDisplay): void {
+export function registerWorkspaceCommands(workspace: Workspace | undefined, registry: CommandRegistry, display: WorkerDisplay): void {
   registry.register("create", {
     description: "Create an isolated git checkout for this session",
     handler: async () => {

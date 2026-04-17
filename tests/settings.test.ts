@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { Settings, EFFORT_LEVELS, setCachedModels, _resetCachedModels, findModel } from "../src/agent/models/settings.js";
+import { Settings } from "../src/agent/models/settings.js";
 import { SettingsController } from "../src/agent/controllers/settings-controller.js";
 import type { PickResult } from "../src/agent/views/input.js";
 import { stripAnsi } from "./helpers.js";
@@ -21,7 +21,7 @@ function makeCtrl(s: Settings): SettingsController {
 }
 
 beforeEach(() => {
-  _resetCachedModels();
+  Settings._resetCachedModels();
   printed = [];
   cancelPick.mockResolvedValue({ type: "cancelled" });
 });
@@ -42,7 +42,7 @@ describe("Settings", () => {
   });
 
   it("emits change when model is updated via pickModel", async () => {
-    setCachedModels(MODELS);
+    Settings.setCachedModels(MODELS);
     const s = new Settings();
     const onChange = vi.fn();
     s.on("change", onChange);
@@ -59,7 +59,7 @@ describe("Settings", () => {
   });
 
   it("does not emit change when pickModel is cancelled", async () => {
-    setCachedModels(MODELS);
+    Settings.setCachedModels(MODELS);
     const s = new Settings({ model: "opus" });
     const onChange = vi.fn();
     s.on("change", onChange);
@@ -120,7 +120,7 @@ describe("pickEffort (interactive picker)", () => {
     const s = new Settings();
     await makeCtrl(s).pickEffort("", pickFn);
     const options = pickFn.mock.calls[0][0] as string[];
-    expect(options.length).toBe(EFFORT_LEVELS.length);
+    expect(options.length).toBe(Settings.EFFORT_LEVELS.length);
     expect(options[0]).toMatch(/auto/i);
   });
 
@@ -133,7 +133,7 @@ describe("pickEffort (interactive picker)", () => {
   });
 
   it("selecting a named level sets the effort", async () => {
-    // EFFORT_LEVELS: auto, low, medium, high, max — "low" is index 1
+    // Settings.EFFORT_LEVELS: auto, low, medium, high, max — "low" is index 1
     const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickResult>>()
       .mockResolvedValue({ type: "selected", index: 1 });
     const s = new Settings();
@@ -178,7 +178,7 @@ describe("pickEffort (interactive picker)", () => {
 
 describe("pickModel <arg> (direct set)", () => {
   it("sets model by known alias", async () => {
-    setCachedModels(MODELS);
+    Settings.setCachedModels(MODELS);
     const s = new Settings();
     await makeCtrl(s).pickModel("opus", noopPick, undefined);
     expect(s.model).toBe("opus");
@@ -186,7 +186,7 @@ describe("pickModel <arg> (direct set)", () => {
   });
 
   it("warns but accepts unknown model", async () => {
-    setCachedModels(MODELS);
+    Settings.setCachedModels(MODELS);
     const s = new Settings();
     await makeCtrl(s).pickModel("claude-sonnet-4-6-20250514", noopPick, undefined);
     expect(s.model).toBe("claude-sonnet-4-6-20250514");
@@ -203,7 +203,7 @@ describe("pickModel <arg> (direct set)", () => {
   });
 
   it("'sonnet' maps to default", async () => {
-    setCachedModels(MODELS);
+    Settings.setCachedModels(MODELS);
     const s = new Settings({ model: "opus" });
     await makeCtrl(s).pickModel("sonnet", noopPick, undefined);
     expect(s.model).toBeUndefined();
@@ -236,7 +236,7 @@ describe("pickModel (interactive picker)", () => {
   });
 
   it("selecting first entry resets to undefined (default)", async () => {
-    setCachedModels(MODELS);
+    Settings.setCachedModels(MODELS);
     const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickResult>>()
       .mockResolvedValue({ type: "selected", index: 0 });
     const s = new Settings({ model: "opus" });
@@ -245,7 +245,7 @@ describe("pickModel (interactive picker)", () => {
   });
 
   it("selecting a named model sets the model", async () => {
-    setCachedModels(MODELS);
+    Settings.setCachedModels(MODELS);
     const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickResult>>()
       .mockResolvedValue({ type: "selected", index: 1 });
     const s = new Settings();
@@ -255,7 +255,7 @@ describe("pickModel (interactive picker)", () => {
   });
 
   it("passes currentIdx matching the active model", async () => {
-    setCachedModels(MODELS);
+    Settings.setCachedModels(MODELS);
     const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickResult>>()
       .mockResolvedValue({ type: "cancelled" });
     const s = new Settings({ model: "opus" });
@@ -264,7 +264,7 @@ describe("pickModel (interactive picker)", () => {
   });
 
   it("passes currentIdx 0 when no model set (default)", async () => {
-    setCachedModels(MODELS);
+    Settings.setCachedModels(MODELS);
     const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickResult>>()
       .mockResolvedValue({ type: "cancelled" });
     const s = new Settings();
@@ -273,7 +273,7 @@ describe("pickModel (interactive picker)", () => {
   });
 
   it("shows model descriptions in options", async () => {
-    setCachedModels(MODELS);
+    Settings.setCachedModels(MODELS);
     const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickResult>>()
       .mockResolvedValue({ type: "cancelled" });
     const s = new Settings();
@@ -283,7 +283,7 @@ describe("pickModel (interactive picker)", () => {
   });
 
   it("does not include Other option", async () => {
-    setCachedModels(MODELS);
+    Settings.setCachedModels(MODELS);
     const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickResult>>()
       .mockResolvedValue({ type: "cancelled" });
     const s = new Settings();
@@ -294,14 +294,14 @@ describe("pickModel (interactive picker)", () => {
   });
 
   it("cancel preserves current model", async () => {
-    setCachedModels(MODELS);
+    Settings.setCachedModels(MODELS);
     const s = new Settings({ model: "opus" });
     await makeCtrl(s).pickModel("", cancelPick, undefined);
     expect(s.model).toBe("opus");
   });
 
   it("uses displayName from model info, not raw alias", async () => {
-    setCachedModels(MODELS);
+    Settings.setCachedModels(MODELS);
     const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickResult>>()
       .mockResolvedValue({ type: "cancelled" });
     const s = new Settings();
@@ -325,20 +325,20 @@ describe("findModel", () => {
   ];
 
   it("exact match on short alias", () => {
-    expect(findModel(SDK_MODELS, "default")?.displayName).toBe("Default (recommended)");
-    expect(findModel(SDK_MODELS, "opus")?.displayName).toBe("Opus");
-    expect(findModel(SDK_MODELS, "haiku")?.displayName).toBe("Haiku");
-    expect(findModel(SDK_MODELS, "opus[1m]")?.displayName).toBe("Opus (1M context)");
+    expect(Settings.findModel(SDK_MODELS, "default")?.displayName).toBe("Default (recommended)");
+    expect(Settings.findModel(SDK_MODELS, "opus")?.displayName).toBe("Opus");
+    expect(Settings.findModel(SDK_MODELS, "haiku")?.displayName).toBe("Haiku");
+    expect(Settings.findModel(SDK_MODELS, "opus[1m]")?.displayName).toBe("Opus (1M context)");
   });
 
   it("does not match full model IDs via substring", () => {
-    expect(findModel(SDK_MODELS, "claude-sonnet-4-6")).toBeUndefined();
-    expect(findModel(SDK_MODELS, "claude-opus-4-6")).toBeUndefined();
-    expect(findModel(SDK_MODELS, "claude-haiku-4-5")).toBeUndefined();
+    expect(Settings.findModel(SDK_MODELS, "claude-sonnet-4-6")).toBeUndefined();
+    expect(Settings.findModel(SDK_MODELS, "claude-opus-4-6")).toBeUndefined();
+    expect(Settings.findModel(SDK_MODELS, "claude-haiku-4-5")).toBeUndefined();
   });
 
   it("returns undefined for no match", () => {
-    expect(findModel(SDK_MODELS, "gpt-4")).toBeUndefined();
-    expect(findModel(SDK_MODELS, "nope")).toBeUndefined();
+    expect(Settings.findModel(SDK_MODELS, "gpt-4")).toBeUndefined();
+    expect(Settings.findModel(SDK_MODELS, "nope")).toBeUndefined();
   });
 });

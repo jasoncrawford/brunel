@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 
 // ── Working verbs ─────────────────────────────────────────────────────────────
 
-export const WORKING_VERBS = [
+const WORKING_VERBS = [
   "Building",
   "Constructing",
   "Surveying",
@@ -25,7 +25,7 @@ export const WORKING_VERBS = [
   "Bolting",
 ];
 
-export function pickWorkingVerb(): string {
+function pickWorkingVerb(): string {
   return WORKING_VERBS[Math.floor(Math.random() * WORKING_VERBS.length)];
 }
 
@@ -84,10 +84,10 @@ export class QueryStats extends EventEmitter {
   private readonly _startTime: number;
   private readonly _workingVerb: string;
 
-  constructor(startTime = Date.now(), pickVerb: () => string = pickWorkingVerb) {
+  constructor(startTime = Date.now()) {
     super();
     this._startTime = startTime;
-    this._workingVerb = pickVerb();
+    this._workingVerb = pickWorkingVerb();
   }
 
   get turns(): number { return this._turns; }

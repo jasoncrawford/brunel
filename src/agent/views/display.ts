@@ -652,18 +652,6 @@ export const FOREMAN_MESSAGE_FMT: FmtTable = {
   _default:           (m) => c.darkGray(`Unknown foreman message: ${m.type}`),
 };
 
-// ── WorkerDisplay interface ───────────────────────────────────────────────────
-
-/**
- * Minimal display interface required by controllers (WorkerSession,
- * SettingsController, workspace/worker command registrations).
- * Satisfied by the Display class; tests can pass lightweight stubs.
- */
-export interface WorkerDisplay {
-  print(line: string | null): void;
-  printForemanMessage(msg: Wire.ForemanMessage): void;
-}
-
 // ── Display class ─────────────────────────────────────────────────────────────
 
 /**

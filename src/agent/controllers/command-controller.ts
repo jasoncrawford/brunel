@@ -271,25 +271,25 @@ export function listSkillNames(
 }
 
 /**
- * Registry of slash commands.
+ * Base registry of slash commands. Supports registration and lookup only.
  *
  * Supports scoped sub-registries via scoped(prefix): the returned registry
  * shares the same underlying store as its root, so callers receive and work
- * with a plain CommandController regardless of whether it is scoped. For
+ * with a plain CommandRegistry regardless of whether it is scoped. For
  * example:
  *
  *   registry.scoped("workspace").register("create", opts)
  *   // → stores "workspace:create" in registry
  */
-export class CommandController {
+export class CommandRegistry {
   private readonly _entries: Map<string, CommandEntry> = new Map();
 
   constructor(
-    private readonly _parent?: CommandController,
+    private readonly _parent?: CommandRegistry,
     private readonly _prefix?: string,
   ) {}
 
-  private get _root(): CommandController {
+  private get _root(): CommandRegistry {
     return this._parent ?? this;
   }
 
@@ -332,10 +332,22 @@ export class CommandController {
    * e.g. registry.scoped("workspace").register("create", …) → "workspace:create".
    * Scoped registries can be nested: scoped("a").scoped("b") → prefix "a:b".
    */
-  scoped(prefix: string): CommandController {
-    return new CommandController(this._root, this._qualify(prefix));
+  scoped(prefix: string): CommandRegistry {
+    return new CommandRegistry(this._root, this._qualify(prefix));
   }
 
+  /** Reset the registry (for test isolation). */
+  _reset(): void {
+    this._root._entries.clear();
+  }
+}
+
+/**
+ * Full command controller: extends CommandRegistry with dispatch, parse, and
+ * list methods. Use this for the top-level registry; pass CommandRegistry to
+ * functions that only need to register commands.
+ */
+export class CommandController extends CommandRegistry {
   /**
    * Return all available command names: builtins (from the registry) plus any
    * .md files under ~/.claude/commands/ (recursively) and skill names.
@@ -382,7 +394,7 @@ export class CommandController {
     if (!input.startsWith("/")) return null;
     const command = input.slice(1).split(/\s+/)[0];
     if (!command) return null;
-    const entry = this._root._entries.get(command);
+    const entry = this.lookup(command);
     if (entry) return { type: "command", name: entry.name };
     return { type: "unknown_command", command };
   }
@@ -427,10 +439,5 @@ export class CommandController {
   ): CommandSuggestion[] {
     const all = this.listCommands(listDir, readFile);
     return filterCommands(query, all);
-  }
-
-  /** Reset the registry (for test isolation). */
-  _reset(): void {
-    this._root._entries.clear();
   }
 }

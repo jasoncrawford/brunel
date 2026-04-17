@@ -4,7 +4,7 @@ import { promisify } from "node:util";
 import path from "node:path";
 import os from "node:os";
 import { WebSocket } from "ws";
-import { c, type WorkerDisplay } from "../views/display.js";
+import { c } from "../views/display.js";
 import { StatusBar, statusBar } from "../views/status-bar.js";
 import { buildInitialPrompt, buildEventPrompt } from "../worker-prompts.js";
 import type { EffortValue } from "../models/settings.js";
@@ -12,10 +12,21 @@ import * as Wire from "../../../shared/wire.js";
 import { Workspace, confirmIfUnsafe } from "../models/workspace.js";
 import { fmtError } from "../../utils.js";
 import { getConfig } from "../../config.js";
-import type { CommandController } from "./command-controller.js";
+import type { CommandRegistry } from "./command-controller.js";
 import { pick } from "../views/input.js";
 
 const execAsync = promisify(exec);
+
+// ── WorkerDisplay interface ───────────────────────────────────────────────────
+
+/**
+ * Minimal display interface required by worker controllers.
+ * Satisfied structurally by Display; tests can pass lightweight stubs.
+ */
+export interface WorkerDisplay {
+  print(line: string | null): void;
+  printForemanMessage(msg: Wire.ForemanMessage): void;
+}
 
 // ── Agent ID generation ────────────────────────────────────────────────────────
 
@@ -122,36 +133,6 @@ export type TaskQuitInfo = {
   workerId: string;
   issueClosed: boolean;
 };
-
-/**
- * Prompt the user before quitting with an active task.
- *
- * - Issue closed but not complete: asks whether to complete first (default yes).
- * - Issue still open: warns about unassignment and asks to confirm quit (default no).
- *
- * Returns 'quit' to proceed without completing, 'complete-and-quit' to mark
- * the task complete then quit, or 'cancel' to stay in the worker.
- *
- * An injectable pickFn is accepted so callers can supply a mock in tests.
- */
-export async function confirmTaskQuit(
-  info: TaskQuitInfo,
-  display: WorkerDisplay,
-  pickFn: (options: string[]) => Promise<number> = pick,
-): Promise<"quit" | "complete-and-quit" | "cancel"> {
-  if (info.issueClosed) {
-    display.print(c.amber(`\nTask #${info.taskNumber} is closed but not complete. Complete it before exiting?`));
-    const idx = await pickFn(["Yes, complete before exiting", "No, just exit", "Don't exit"]);
-    if (idx === 0) return "complete-and-quit";
-    if (idx === 1) return "quit";
-    return "cancel";
-  } else {
-    display.print(c.amber(`\nTask #${info.taskNumber} is still open. Quitting now will unassign ${info.workerId}. Quit anyway?`));
-    const idx = await pickFn(["No, keep working", "Yes, quit anyway"]);
-    if (idx === 1) return "quit";
-    return "cancel";
-  }
-}
 
 /** A prompt queued by WorkerSession for main() to execute. */
 export type QueuedPrompt = { prompt: string; fresh: boolean };
@@ -309,6 +290,35 @@ export class WorkerSession {
       workerId: this.agentId,
       issueClosed: this.issueClosed,
     };
+  }
+
+  /**
+   * Prompt the user before quitting with an active task.
+   *
+   * - Issue closed but not complete: asks whether to complete first (default yes).
+   * - Issue still open: warns about unassignment and asks to confirm quit (default no).
+   *
+   * Returns 'quit' to proceed without completing, 'complete-and-quit' to mark
+   * the task complete then quit, or 'cancel' to stay in the worker.
+   *
+   * An injectable pickFn is accepted so callers can supply a mock in tests.
+   */
+  async confirmTaskQuit(
+    info: TaskQuitInfo,
+    pickFn: (options: string[]) => Promise<number> = pick,
+  ): Promise<"quit" | "complete-and-quit" | "cancel"> {
+    if (info.issueClosed) {
+      this.display.print(c.amber(`\nTask #${info.taskNumber} is closed but not complete. Complete it before exiting?`));
+      const idx = await pickFn(["Yes, complete before exiting", "No, just exit", "Don't exit"]);
+      if (idx === 0) return "complete-and-quit";
+      if (idx === 1) return "quit";
+      return "cancel";
+    } else {
+      this.display.print(c.amber(`\nTask #${info.taskNumber} is still open. Quitting now will unassign ${info.workerId}. Quit anyway?`));
+      const idx = await pickFn(["No, keep working", "Yes, quit anyway"]);
+      if (idx === 1) return "quit";
+      return "cancel";
+    }
   }
 
   /**
@@ -636,7 +646,7 @@ export class WorkerSession {
  * already be scoped, e.g. registry.scoped("worker")). Commands degrade
  * gracefully when not connected to a foreman.
  */
-export function registerWorkerCommands(session: WorkerSession | undefined, registry: CommandController, display: WorkerDisplay): void {
+export function registerWorkerCommands(session: WorkerSession | undefined, registry: CommandRegistry, display: WorkerDisplay): void {
   registry.register("complete", {
     description: "Mark the current task as done",
     handler: async () => {
@@ -738,7 +748,7 @@ export async function startWorkerMode(display: WorkerDisplay): Promise<{
     shuttingDown = true;
     const taskInfo = session.getTaskQuitInfo();
     if (taskInfo) {
-      const choice = await confirmTaskQuit(taskInfo, display);
+      const choice = await session.confirmTaskQuit(taskInfo);
       if (choice === "cancel") { shuttingDown = false; return; }
       if (choice === "complete-and-quit") await session.completeCurrentTask();
     }
