@@ -1,6 +1,7 @@
-import * as Wire from "../../shared/wire.js";
+import * as Wire from "../../../shared/wire.js";
 import { statusBar } from "./status-bar.js";
-import { getConfig } from "../config.js";
+import { getConfig } from "../../config.js";
+import type { BrunelConfig } from "../../config.js";
 
 // ── Display width ─────────────────────────────────────────────────────────────
 
@@ -14,6 +15,9 @@ export const VERBOSE_PREFIX_LEN = 9;
  * Returns the usable terminal width, accounting for the verbose timestamp
  * prefix when verbose mode is active. Pass a fallback used when
  * process.stdout.columns is unavailable.
+ *
+ * Standalone version — uses getConfig(). The Display class has an equivalent
+ * instance method that uses injected config.
  */
 export function effectiveWidth(fallback = W): number {
   return (process.stdout.columns ?? fallback) - (getConfig().verbose ? VERBOSE_PREFIX_LEN : 0);
@@ -648,106 +652,181 @@ export const FOREMAN_MESSAGE_FMT: FmtTable = {
   _default:           (m) => c.darkGray(`Unknown foreman message: ${m.type}`),
 };
 
-// ── Printing engine ───────────────────────────────────────────────────────────
+// ── Module-level state ────────────────────────────────────────────────────────
 
-function printLine(line: string): void {
-  if (getConfig().verbose) {
-    const ts = `\x1b[90m${fmtTime()} \x1b[39m`;
-    const parts = line.split("\n");
-    const openColor = (line.match(/^(\x1b\[[0-9;]*m)+/) ?? [""])[0];
-    console.log(parts.map((p, i) => ts + (i > 0 ? openColor : "") + p).join("\n"));
-  } else {
-    console.log(line);
+export const toolUseNames = new Map<string, string>();
+export const toolUseInputs = new Map<string, Record<string, unknown>>();
+
+// ── Display class ─────────────────────────────────────────────────────────────
+
+/**
+ * View class for terminal rendering. Receives config in its constructor so
+ * config is injected rather than globally accessed. The singleton `display`
+ * is initialized at startup via initDisplay() and used throughout the app.
+ *
+ * Use `display.print(line)`, `display.printMessage(msg)`, etc. for output.
+ * Use the module-level `c`, `s`, and formatting functions for pure utilities.
+ */
+export class Display {
+  /** The color object, exposed as an instance property for convenience. */
+  readonly c = c;
+  /** The style object, exposed as an instance property for convenience. */
+  readonly s = s;
+
+  constructor(readonly config: BrunelConfig) {}
+
+  /** Returns the usable terminal width, adjusted for verbose timestamp prefix. */
+  effectiveWidth(fallback = W): number {
+    return (process.stdout.columns ?? fallback) - (this.config.verbose ? VERBOSE_PREFIX_LEN : 0);
   }
-}
 
-export function print(line: string | null) {
-  if (line === null) return;
-  const inputPrint = statusBar.inputPrint;
-  if (inputPrint) {
-    // ask() is active: erase from current cursor position to end of screen
-    // (clears the prompt, suggestion row, and status bars), write the new
-    // content line, then let drawFresh redraw the prompt + status bars below.
-    // If the prompt has a leading \n prefix (blank line above the prompt),
-    // inputClear goes up to also erase that blank line first so it
-    // is not orphaned above the printed message (issue #418).
-    const inputClear = statusBar.inputClear;
-    if (inputClear) {
-      inputClear();
+  /**
+   * Resolve a format table entry for the given key.
+   * Uses this.config.verbose to select between verbose/quiet variants.
+   */
+  resolve(table: FmtTable, key: string, data: unknown): string | null {
+    const entry = table[key] ?? table._default;
+    if (!entry) return null;
+    if (typeof entry === "function") return entry(data);
+    const fmt = this.config.verbose ? entry.verbose : entry.quiet;
+    return fmt ? fmt(data) : null;
+  }
+
+  private _printLine(line: string): void {
+    if (this.config.verbose) {
+      const ts = `\x1b[90m${fmtTime()} \x1b[39m`;
+      const parts = line.split("\n");
+      const openColor = (line.match(/^(\x1b\[[0-9;]*m)+/) ?? [""])[0];
+      console.log(parts.map((p, i) => ts + (i > 0 ? openColor : "") + p).join("\n"));
     } else {
-      process.stdout.write("\r\x1b[J");
+      console.log(line);
     }
-    printLine(line);
-    inputPrint();
-    return;
   }
-  statusBar.clear();
-  printLine(line);
-  statusBar.draw();
+
+  /** Print a line to stdout, routing through the status-bar-aware renderer. */
+  print(line: string | null): void {
+    if (line === null) return;
+    const inputPrint = statusBar.inputPrint;
+    if (inputPrint) {
+      // ask() is active: erase from current cursor position to end of screen
+      // (clears the prompt, suggestion row, and status bars), write the new
+      // content line, then let drawFresh redraw the prompt + status bars below.
+      const inputClear = statusBar.inputClear;
+      if (inputClear) {
+        inputClear();
+      } else {
+        process.stdout.write("\r\x1b[J");
+      }
+      this._printLine(line);
+      inputPrint();
+      return;
+    }
+    statusBar.clear();
+    this._printLine(line);
+    statusBar.draw();
+  }
+
+  /** Print a single content block from an assistant/user message. */
+  printBlock(b: ContentBlock, role: "assistant" | "user", msg?: Record<string, unknown>): void {
+    if (b.type === "tool_use") {
+      // Safe cast: we checked b.type === "tool_use" at runtime
+      const tu = b as ToolUseBlock;
+      toolUseNames.set(tu.id, tu.name);
+      toolUseInputs.set(tu.id, tu.input);
+      this.print(this.resolve(TOOL_CALL_FMT, tu.name, tu));
+      return;
+    }
+    if (b.type === "tool_result") {
+      // Safe cast: we checked b.type === "tool_result" at runtime
+      const tr = b as ToolResultBlock;
+      const name = toolUseNames.get(tr.tool_use_id) ?? "";
+      const _input = toolUseInputs.get(tr.tool_use_id);
+      this.print(this.resolve(tr.is_error ? TOOL_ERROR_FMT : TOOL_RESULT_FMT, name, { ...tr, _msg: msg, _input }));
+      // Fire after the tool result is printed — tool has just finished running.
+      statusBar.fireOnToolResult(name);
+      return;
+    }
+    const blockFmt = role === "assistant" ? ASSISTANT_BLOCK_FMT : USER_BLOCK_FMT;
+    this.print(this.resolve(blockFmt, b.type, { ...b, _isSynthetic: msg?.isSynthetic ?? false }));
+  }
+
+  /** Print a full SDK message (system, assistant, user, result, etc.). */
+  printMessage(msg: unknown): void {
+    if (msg === null || typeof msg !== "object") return;
+    const m = msg as Record<string, unknown>;
+
+    if (m.parent_tool_use_id != null) return;
+
+    if (m.type === "system") {
+      const subtype = typeof m.subtype === "string" ? m.subtype : "_default";
+      this.print(this.resolve(SYSTEM_FMT, subtype, m));
+      return;
+    }
+
+    if (m.type === "assistant" || m.type === "user") {
+      const role = m.type as "assistant" | "user";
+      const message = m.message as { content?: ContentBlock[] } | undefined;
+      const content = message?.content ?? [];
+      if (!content.length) { this.print(this.resolve(MESSAGE_FMT, "_empty", m)); return; }
+      for (const b of content) this.printBlock(b, role, m);
+      return;
+    }
+
+    const type = typeof m.type === "string" ? m.type : "_default";
+    this.print(this.resolve(MESSAGE_FMT, type, m));
+  }
+
+  /** Print a foreman→worker wire message. */
+  printForemanMessage(msg: Wire.ForemanMessage): void {
+    this.print(this.resolve(FOREMAN_MESSAGE_FMT, msg.type, msg));
+  }
 }
 
+// ── Singleton ─────────────────────────────────────────────────────────────────
+
+/** Shared singleton. Call initDisplay() at startup before first use. */
+export let display: Display = undefined!;
+
+/** Replace the shared singleton (called once at startup from index.ts). */
+export function initDisplay(d: Display): void { display = d; }
+
+// ── Standalone printing delegates ─────────────────────────────────────────────
+//
+// These delegate to the singleton Display instance. They exist so that callers
+// (including tests) can import and call print/printMessage/etc. directly without
+// needing to import the singleton. The Display must be initialized via
+// initDisplay() before these are called.
+
+/** @see Display.print */
+export function print(line: string | null): void { display.print(line); }
+
+/** @see Display.printBlock */
+export function printBlock(b: ContentBlock, role: "assistant" | "user", msg?: Record<string, unknown>): void {
+  display.printBlock(b, role, msg);
+}
+
+/** @see Display.printMessage */
+export function printMessage(msg: unknown): void { display.printMessage(msg); }
+
+/** @see Display.printForemanMessage */
+export function printForemanMessage(msg: Wire.ForemanMessage): void { display.printForemanMessage(msg); }
+
+// ── Standalone resolve delegate ───────────────────────────────────────────────
+//
+// The standalone resolve() function uses getConfig().verbose directly (rather
+// than the injected config) and is kept for use by utility functions and tests
+// that import it directly. Class methods use this.resolve() instead.
+
+/**
+ * Resolve a format table entry. Uses getConfig().verbose for verbose/quiet dispatch.
+ * @see Display.resolve for the config-injected version
+ */
 export function resolve(table: FmtTable, key: string, data: unknown): string | null {
   const entry = table[key] ?? table._default;
   if (!entry) return null;
   if (typeof entry === "function") return entry(data);
   const fmt = getConfig().verbose ? entry.verbose : entry.quiet;
   return fmt ? fmt(data) : null;
-}
-
-export const toolUseNames = new Map<string, string>();
-export const toolUseInputs = new Map<string, Record<string, unknown>>();
-
-export function printBlock(b: ContentBlock, role: "assistant" | "user", msg?: Record<string, unknown>) {
-  if (b.type === "tool_use") {
-    // Safe cast: we checked b.type === "tool_use" at runtime
-    const tu = b as ToolUseBlock;
-    toolUseNames.set(tu.id, tu.name);
-    toolUseInputs.set(tu.id, tu.input);
-    print(resolve(TOOL_CALL_FMT, tu.name, tu));
-    return;
-  }
-  if (b.type === "tool_result") {
-    // Safe cast: we checked b.type === "tool_result" at runtime
-    const tr = b as ToolResultBlock;
-    const name = toolUseNames.get(tr.tool_use_id) ?? "";
-    const _input = toolUseInputs.get(tr.tool_use_id);
-    print(resolve(tr.is_error ? TOOL_ERROR_FMT : TOOL_RESULT_FMT, name, { ...tr, _msg: msg, _input }));
-    // Fire after the tool result is printed — tool has just finished running.
-    statusBar.fireOnToolResult(name);
-    return;
-  }
-  const blockFmt = role === "assistant" ? ASSISTANT_BLOCK_FMT : USER_BLOCK_FMT;
-  print(resolve(blockFmt, b.type, { ...b, _isSynthetic: msg?.isSynthetic ?? false }));
-}
-
-export function printMessage(msg: unknown) {
-  if (msg === null || typeof msg !== "object") return;
-  const m = msg as Record<string, unknown>;
-
-  if (m.parent_tool_use_id != null) return;
-
-  if (m.type === "system") {
-    const subtype = typeof m.subtype === "string" ? m.subtype : "_default";
-    print(resolve(SYSTEM_FMT, subtype, m));
-    return;
-  }
-
-  if (m.type === "assistant" || m.type === "user") {
-    const role = m.type as "assistant" | "user";
-    const message = m.message as { content?: ContentBlock[] } | undefined;
-    const content = message?.content ?? [];
-    if (!content.length) { print(resolve(MESSAGE_FMT, "_empty", m)); return; }
-    for (const b of content) printBlock(b, role, m);
-    return;
-  }
-
-  const type = typeof m.type === "string" ? m.type : "_default";
-  print(resolve(MESSAGE_FMT, type, m));
-}
-
-
-export function printForemanMessage(msg: Wire.ForemanMessage) {
-  print(resolve(FOREMAN_MESSAGE_FMT, msg.type, msg));
 }
 
 // ── Working verb ───────────────────────────────────────────────────────────────

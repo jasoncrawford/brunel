@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import * as display from "./display.js";
+import { pickWorkingVerb, fmtStats } from "../views/display.js";
 
 // Structural type for stream events carrying token usage data.
 // BetaRawMessageStreamEvent is a discriminated union; we access fields structurally.
@@ -30,7 +30,7 @@ export class QueryStats extends EventEmitter {
   constructor(startTime = Date.now()) {
     super();
     this._startTime = startTime;
-    this._workingVerb = display.pickWorkingVerb();
+    this._workingVerb = pickWorkingVerb();
   }
 
   get turns(): number { return this._turns; }
@@ -61,6 +61,6 @@ export class QueryStats extends EventEmitter {
   getStatusText(): string {
     const secs = this.elapsedSecs;
     const outTokens = this.outputTokens;
-    return `${this._workingVerb}… ${display.fmtStats(secs, this._turns || undefined, outTokens || undefined, this._inputTokens || undefined)}`;
+    return `${this._workingVerb}… ${fmtStats(secs, this._turns || undefined, outTokens || undefined, this._inputTokens || undefined)}`;
   }
 }

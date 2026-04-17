@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
-import * as display from "./display.js";
-import type { PickResult } from "./input.js";
+import { c } from "../views/display.js";
+import type { PickResult } from "../views/input.js";
 
 // ── Effort levels ────────────────────────────────────────────────────────────
 
@@ -83,33 +83,33 @@ export class Settings extends EventEmitter {
     // Direct set: /model <alias-or-id>
     if (args) {
       if (args === "default" || args === "sonnet") {
-        print(display.c.darkGray("Model set to default."));
+        print(c.darkGray("Model set to default."));
         this._setModel(undefined);
         return;
       }
       if (models) {
         const match = findModel(models, args);
         if (match) {
-          print(display.c.darkGray(`Model set to ${match.displayName}.`));
+          print(c.darkGray(`Model set to ${match.displayName}.`));
           this._setModel(match.value);
           return;
         }
         // Unknown model — warn but accept (power-user escape hatch)
         const names = models.map(m => m.value).join(", ");
-        print(display.c.amber(`Warning: "${args}" is not a known model. Known models: ${names}`));
-        print(display.c.darkGray(`Model set to ${args}.`));
+        print(c.amber(`Warning: "${args}" is not a known model. Known models: ${names}`));
+        print(c.darkGray(`Model set to ${args}.`));
         this._setModel(args);
         return;
       }
       // No cache — accept as-is
-      print(display.c.darkGray(`Model set to ${args}.`));
+      print(c.darkGray(`Model set to ${args}.`));
       this._setModel(args);
       return;
     }
 
     // Interactive picker
     if (!models || models.length === 0) {
-      print(display.c.amber("No model list available yet. Run a query first, or use /model <name>."));
+      print(c.amber("No model list available yet. Run a query first, or use /model <name>."));
       return;
     }
 
@@ -125,7 +125,7 @@ export class Settings extends EventEmitter {
     // If model is undefined (default), mark the first entry as current
     if (this._model === undefined) currentIdx = 0;
 
-    print(display.c.yellow("\nSelect model:"));
+    print(c.yellow("\nSelect model:"));
     const result = await pickFn(options, currentIdx);
 
     if (result.type !== "selected") return;
@@ -135,11 +135,11 @@ export class Settings extends EventEmitter {
     if (result.index === 0 && this._model === undefined) return; // already on default, no-op
     // Selecting the first (default/recommended) entry resets to undefined
     if (result.index === 0) {
-      print(display.c.darkGray(`Model set to ${chosen.displayName}.`));
+      print(c.darkGray(`Model set to ${chosen.displayName}.`));
       this._setModel(undefined);
       return;
     }
-    print(display.c.darkGray(`Model set to ${chosen.displayName}.`));
+    print(c.darkGray(`Model set to ${chosen.displayName}.`));
     this._setModel(chosen.value);
   }
 
@@ -152,19 +152,19 @@ export class Settings extends EventEmitter {
     // Direct set: /effort <level>
     if (args) {
       if (args === "auto") {
-        print(display.c.darkGray("Effort set to auto (default)."));
+        print(c.darkGray("Effort set to auto (default)."));
         this._setEffort(undefined);
         return;
       }
       const match = EFFORT_LEVELS.find(l => l.value === args);
       if (match && match.value !== "auto") {
-        print(display.c.darkGray(`Effort set to ${match.value}.`));
+        print(c.darkGray(`Effort set to ${match.value}.`));
         this._setEffort(match.value as EffortValue);
         return;
       }
       // Unknown level — reject (unlike model, effort is a closed set)
       const names = EFFORT_LEVELS.map(l => l.value).join(", ");
-      print(display.c.amber(`Unknown effort level "${args}". Valid levels: ${names}`));
+      print(c.amber(`Unknown effort level "${args}". Valid levels: ${names}`));
       return;
     }
 
@@ -178,7 +178,7 @@ export class Settings extends EventEmitter {
       if (l.value === (this._effort ?? "auto")) currentIdx = i;
     }
 
-    print(display.c.yellow("\nSelect effort level:"));
+    print(c.yellow("\nSelect effort level:"));
     const result = await pickFn(options, currentIdx);
 
     if (result.type !== "selected") return;
@@ -186,11 +186,11 @@ export class Settings extends EventEmitter {
     const chosen = EFFORT_LEVELS[result.index];
     if (chosen.value === "auto") {
       if (this._effort === undefined) return; // already auto, no-op
-      print(display.c.darkGray(`Effort set to auto (default).`));
+      print(c.darkGray(`Effort set to auto (default).`));
       this._setEffort(undefined);
       return;
     }
-    print(display.c.darkGray(`Effort set to ${chosen.value}.`));
+    print(c.darkGray(`Effort set to ${chosen.value}.`));
     this._setEffort(chosen.value as EffortValue);
   }
 }

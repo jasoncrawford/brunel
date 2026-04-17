@@ -5,19 +5,21 @@ import fs from "fs";
 import { fileURLToPath } from "url";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { CanUseTool, PermissionMode, PermissionResult } from "@anthropic-ai/claude-agent-sdk";
-import * as display from "./display.js";
-import { StatusBar, statusBar, initStatusBar } from "./status-bar.js";
-import { ask, pick, pickMultiple, pickQuestion } from "./input.js";
-import type { PickQuestionResult } from "./input.js";
-import { WorkerSession, registerWorkerCommands, startWorkerMode, generateAgentId, confirmTaskQuit } from "./worker.js";
-import type { RunQuery } from "./worker.js";
+import * as display from "./views/display.js";
+import { Display, initDisplay } from "./views/display.js";
+import { StatusBar, statusBar, initStatusBar } from "./views/status-bar.js";
+import { ask, pick, pickMultiple, pickQuestion } from "./views/input.js";
+import type { PickQuestionResult } from "./views/input.js";
+import { WorkerSession, registerWorkerCommands, startWorkerMode, generateAgentId, confirmTaskQuit } from "./controllers/worker.js";
+import type { RunQuery } from "./controllers/worker.js";
 import { loadConfig, getConfig } from "../config.js";
-import { Workspace, confirmIfUnsafe, registerWorkspaceCommands } from "./workspace.js";
+import { Workspace, confirmIfUnsafe } from "./models/workspace.js";
+import { registerWorkspaceCommands } from "./controllers/workspace-commands.js";
 import { fmtError } from "../utils.js";
-import { Settings, setCachedModels } from "./settings.js";
-import type { ModelInfo, FetchModelsFn, EffortValue } from "./settings.js";
-import { CommandRegistry } from "./command-registry.js";
-import { QueryStats } from "./query-stats.js";
+import { Settings, setCachedModels } from "./models/settings.js";
+import type { ModelInfo, FetchModelsFn, EffortValue } from "./models/settings.js";
+import { CommandRegistry } from "./controllers/command-registry.js";
+import { QueryStats } from "./models/query-stats.js";
 // ── Log file ──────────────────────────────────────────────────────────────────
 
 const LOG_FILE = "repl.log";
@@ -440,6 +442,7 @@ export async function main(
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const config = await loadConfig(process.argv);
+  initDisplay(new Display(config));
   const permConfig = {
     permissionMode: config.permissionMode,
     allowDangerouslySkipPermissions: config.allowDangerouslySkipPermissions,

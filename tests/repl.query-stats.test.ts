@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { QueryStats } from "../src/agent/query-stats.js";
-import * as display from "../src/agent/display.js";
+import { QueryStats } from "../src/agent/models/query-stats.js";
+import * as display from "../src/agent/views/display.js";
 import { stripAnsi } from "./helpers.js";
 
 afterEach(() => {

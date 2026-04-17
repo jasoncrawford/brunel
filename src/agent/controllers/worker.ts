@@ -4,16 +4,16 @@ import { promisify } from "node:util";
 import path from "node:path";
 import os from "node:os";
 import { WebSocket } from "ws";
-import * as display from "./display.js";
-import { StatusBar, statusBar } from "./status-bar.js";
-import { buildInitialPrompt, buildEventPrompt } from "./worker-prompts.js";
-import type { EffortValue } from "./settings.js";
-import * as Wire from "../../shared/wire.js";
-import { Workspace, confirmIfUnsafe } from "./workspace.js";
-import { fmtError } from "../utils.js";
-import { getConfig } from "../config.js";
+import { c, print, printForemanMessage } from "../views/display.js";
+import { StatusBar, statusBar } from "../views/status-bar.js";
+import { buildInitialPrompt, buildEventPrompt } from "../worker-prompts.js";
+import type { EffortValue } from "../models/settings.js";
+import * as Wire from "../../../shared/wire.js";
+import { Workspace, confirmIfUnsafe } from "../models/workspace.js";
+import { fmtError } from "../../utils.js";
+import { getConfig } from "../../config.js";
 import type { CommandRegistry } from "./command-registry.js";
-import { pick } from "./input.js";
+import { pick } from "../views/input.js";
 
 const execAsync = promisify(exec);
 
@@ -143,13 +143,13 @@ export async function confirmTaskQuit(
   pickFn: (options: string[]) => Promise<number> = pick,
 ): Promise<"quit" | "complete-and-quit" | "cancel"> {
   if (info.issueClosed) {
-    display.print(display.c.amber(`\nTask #${info.taskNumber} is closed but not complete. Complete it before exiting?`));
+    print(c.amber(`\nTask #${info.taskNumber} is closed but not complete. Complete it before exiting?`));
     const idx = await pickFn(["Yes, complete before exiting", "No, just exit", "Don't exit"]);
     if (idx === 0) return "complete-and-quit";
     if (idx === 1) return "quit";
     return "cancel";
   } else {
-    display.print(display.c.amber(`\nTask #${info.taskNumber} is still open. Quitting now will unassign ${info.workerId}. Quit anyway?`));
+    print(c.amber(`\nTask #${info.taskNumber} is still open. Quitting now will unassign ${info.workerId}. Quit anyway?`));
     const idx = await pickFn(["No, keep working", "Yes, quit anyway"]);
     if (idx === 1) return "quit";
     return "cancel";
@@ -281,7 +281,7 @@ export class WorkerSession {
       try { await this.options.afterTask(); } catch (err) {
         // Log but don't abort — the task IS complete even if workspace cleanup fails.
         // Returning early here would leave the task stuck on the foreman forever.
-        this.display.print(display.c.amber(`afterTask failed: ${fmtError(err)}`));
+        this.display.print(c.amber(`afterTask failed: ${fmtError(err)}`));
       }
     }
     this.sendTaskMessage({
@@ -292,7 +292,7 @@ export class WorkerSession {
     this.currentTaskId = undefined;
     this.currentIssue = undefined;
     this.statusBar.update({ taskNumber: undefined, prNumber: undefined, branch: "" });
-    this.display.print(display.c.sageGreen("Task complete. Waiting for next task..."));
+    this.display.print(c.sageGreen("Task complete. Waiting for next task..."));
     return "task-complete";
   }
 
@@ -480,7 +480,7 @@ export class WorkerSession {
 
     ws.on("error", (err: Error) => {
       if (ws !== this.ws) return; // stale error from a previous connection
-      this.display.print(display.c.amber(`WebSocket error: ${err.message}`));
+      this.display.print(c.amber(`WebSocket error: ${err.message}`));
       // Ensure close fires even for errors that don't automatically close the socket
       // (e.g. some TLS negotiation failures on older Node.js / ws versions).
       ws.terminate();
@@ -518,15 +518,15 @@ export class WorkerSession {
           prNumber: undefined,
           branch: "",
         });
-        this.display.print(display.c.amber("Task cancelled (reassigned to another worker)."));
+        this.display.print(c.amber("Task cancelled (reassigned to another worker)."));
         const workspace = this.options.workspace;
         if (workspace?.isCreated) {
           // Track the reset promise so that task_assigned prompts are deferred until
           // the workspace is clean — preventing a new task from running in a dirty state.
           this._resetPromise = workspace.reset().then(() => {
-            this.display.print(display.c.amber("Workspace reset."));
+            this.display.print(c.amber("Workspace reset."));
           }).catch((err: unknown) => {
-            this.display.print(display.c.boldRed(`Workspace reset failed: ${err instanceof Error ? err.message : String(err)}`));
+            this.display.print(c.boldRed(`Workspace reset failed: ${err instanceof Error ? err.message : String(err)}`));
           }).finally(() => {
             this._resetPromise = null;
           });
@@ -548,7 +548,7 @@ export class WorkerSession {
       this.statusBar.update({ taskNumber: msg.issue.number, prNumber: undefined });
       void this.refreshBranch();
       const initialPrompt = buildInitialPrompt(msg.issue, !!this.options.workspace);
-      this.display.print(display.c.sageGreen(initialPrompt));
+      this.display.print(c.sageGreen(initialPrompt));
       // If a workspace reset is in progress (from a cancelled hello_ack), defer the
       // prompt until the reset finishes — otherwise the task could run in a dirty workspace.
       const enqueue = () => this.enqueuePrompt(initialPrompt, true);
@@ -560,7 +560,7 @@ export class WorkerSession {
     } else if (msg.type === "event_notification") {
       // Ignore stale events forwarded for tasks we're no longer working on.
       if (msg.taskId !== this.currentTaskId) {
-        this.display.print(display.c.darkGray(`[worker] ignoring event_notification for task ${msg.taskId} (current: ${this.currentTaskId ?? "none"})`));
+        this.display.print(c.darkGray(`[worker] ignoring event_notification for task ${msg.taskId} (current: ${this.currentTaskId ?? "none"})`));
         return;
       }
 
@@ -626,7 +626,7 @@ export class WorkerSession {
 
   private buildAndLogEventPrompt(events: Wire.WebhookEvent[]): string {
     const prompt = buildEventPrompt(events);
-    this.display.print(display.c.sageGreen(prompt));
+    this.display.print(c.sageGreen(prompt));
     return prompt;
   }
 
@@ -644,7 +644,7 @@ export function registerWorkerCommands(session: WorkerSession | undefined, regis
     description: "Mark the current task as done",
     handler: async () => {
       if (!session) {
-        display.print(display.c.boldRed("Not connected to a foreman."));
+        print(c.boldRed("Not connected to a foreman."));
         return undefined;
       }
       return session.completeCurrentTask();
@@ -668,25 +668,47 @@ export async function startWorkerMode(): Promise<{
   const repoUrl = config.repoUrl ?? `https://${config.githubToken}@github.com/${config.githubRepo}.git`;
 
   const confirm = async (msg: string): Promise<boolean> => {
-    display.print(display.c.amber(`\n⚠ Potential data loss:\n${msg}`));
+    print(c.amber(`\n⚠ Potential data loss:\n${msg}`));
     const idx = await pick(["Yes, proceed", "No, cancel"]);
     return idx === 0;
   };
 
   const workspace = new Workspace(workspaceDir, statusBar.agentId, repoUrl, originalCwd, confirm);
+
+  // Subscribe to workspace events to display progress messages.
+  workspace.on("clone-start", ({ repoUrl: url, dir }: { repoUrl: string; dir: string }) => {
+    print(c.sageGreen(`[workspace] Cloning ${url} → ${dir}`));
+  });
+  workspace.on("npm-install", ({ dir }: { dir: string }) => {
+    print(c.sageGreen(`[workspace] Installing dependencies in ${dir}`));
+  });
+  workspace.on("reset-start", ({ dir }: { dir: string }) => {
+    print(c.sageGreen(`[workspace] Resetting ${dir}`));
+  });
+  workspace.on("reset-retry", ({ error }: { dir: string; error: string }) => {
+    print(c.amber(`[workspace] Reset failed, retrying: ${error}`));
+  });
+  workspace.on("reset-reclone", ({ repoUrl: url, dir, error }: { dir: string; error: string; repoUrl: string }) => {
+    print(c.amber(`[workspace] Reset failed again, re-cloning: ${error}`));
+    print(c.sageGreen(`[workspace] Re-cloning ${url} → ${dir}`));
+  });
+  workspace.on("destroy", ({ dir }: { dir: string }) => {
+    print(c.sageGreen(`[workspace] Destroying ${dir}`));
+  });
+
   await workspace.create();
   process.chdir(workspace.dir);
 
   const afterTask = async () => {
     const ok = await confirmIfUnsafe(workspace, workspace.confirm);
     if (!ok) {
-      display.print(display.c.amber("Workspace reset cancelled. Task not marked complete."));
+      print(c.amber("Workspace reset cancelled. Task not marked complete."));
       throw new Error("cancelled");
     }
     try {
       await workspace.reset();
     } catch (err) {
-      display.print(display.c.boldRed(`Workspace reset failed: ${fmtError(err)}. Task not marked complete.`));
+      print(c.boldRed(`Workspace reset failed: ${fmtError(err)}. Task not marked complete.`));
       throw err;
     }
   };
@@ -707,8 +729,8 @@ export async function startWorkerMode(): Promise<{
   };
 
   const workerDisplay: WorkerDisplay = {
-    print: display.print,
-    printForemanMessage: display.printForemanMessage,
+    print,
+    printForemanMessage,
   };
 
   statusBar.update({ model: getConfig().model, effort: getConfig().effort });

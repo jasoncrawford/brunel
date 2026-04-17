@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { Settings, EFFORT_LEVELS, setCachedModels, _resetCachedModels, findModel } from "../src/agent/settings.js";
-import type { PickResult } from "../src/agent/input.js";
+import { Settings, EFFORT_LEVELS, setCachedModels, _resetCachedModels, findModel } from "../src/agent/models/settings.js";
+import type { PickResult } from "../src/agent/views/input.js";
 import { stripAnsi } from "./helpers.js";
 
 const MODELS = [

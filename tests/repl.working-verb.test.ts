@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { WORKING_VERBS, pickWorkingVerb } from "../src/agent/display.js";
+import { WORKING_VERBS, pickWorkingVerb } from "../src/agent/views/display.js";
 
 describe("WORKING_VERBS", () => {
   it("is a non-empty array", () => {

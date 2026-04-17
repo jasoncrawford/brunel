@@ -5,14 +5,15 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => ({ query: vi.fn() }));
 // Prevent repl.ts from writing log entries to disk
 vi.mock("fs", () => ({ default: { appendFileSync: vi.fn() } }));
 // Mock display.print so workspace handlers don't write to stdout in tests
-vi.mock("../src/agent/display.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../src/agent/display.js")>();
+vi.mock("../src/agent/views/display.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/agent/views/display.js")>();
   return { ...actual, print: vi.fn() };
 });
 
-import { Workspace, registerWorkspaceCommands } from "../src/agent/workspace.js";
-import * as display from "../src/agent/display.js";
-import { CommandRegistry } from "../src/agent/command-registry.js";
+import { Workspace } from "../src/agent/models/workspace.js";
+import { registerWorkspaceCommands } from "../src/agent/controllers/workspace-commands.js";
+import * as display from "../src/agent/views/display.js";
+import { CommandRegistry } from "../src/agent/controllers/command-registry.js";
 import { stripAnsi } from "./helpers.js";
 
 const WORKSPACE_DIR = "/base";

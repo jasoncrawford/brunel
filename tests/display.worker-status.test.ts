@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { StatusBar, statusBar } from "../src/agent/status-bar.js";
+import { StatusBar, statusBar } from "../src/agent/views/status-bar.js";
 import { getConfig } from "../src/config.js";
 
 // Strip ANSI codes for assertion

@@ -28,6 +28,7 @@ const fakeWorkspace = vi.hoisted(() => {
     checkSafety: ReturnType<typeof vi.fn>;
     reset: ReturnType<typeof vi.fn>;
     create: ReturnType<typeof vi.fn>;
+    on: ReturnType<typeof vi.fn>;
   } = {
     dir: "/fake/workers/test-worker",
     workspaceDir: "/fake/workers",
@@ -43,12 +44,13 @@ const fakeWorkspace = vi.hoisted(() => {
     }),
     reset: vi.fn().mockResolvedValue(undefined),
     create: vi.fn().mockImplementation(async () => { ws.isCreated = true; }),
+    on: vi.fn(),
   };
   return ws;
 });
 
-vi.mock("../src/agent/workspace.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../src/agent/workspace.js")>();
+vi.mock("../src/agent/models/workspace.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/agent/models/workspace.js")>();
   // Use a regular function (not arrow) so it can be called with `new`.
   // A constructor that returns an object explicitly uses that object (JS spec).
   // eslint-disable-next-line prefer-arrow-callback
@@ -62,8 +64,8 @@ vi.mock("../src/agent/workspace.js", async (importOriginal) => {
   };
 });
 
-vi.mock("../src/agent/input.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../src/agent/input.js")>();
+vi.mock("../src/agent/views/input.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/agent/views/input.js")>();
   return {
     ...actual,
     ask: vi.fn().mockResolvedValue("__eof__"),
@@ -72,9 +74,9 @@ vi.mock("../src/agent/input.js", async (importOriginal) => {
 });
 
 import { main } from "../src/agent/index.js";
-import { confirmIfUnsafe } from "../src/agent/workspace.js";
-import * as inputModule from "../src/agent/input.js";
-import * as displayModule from "../src/agent/display.js";
+import { confirmIfUnsafe } from "../src/agent/models/workspace.js";
+import * as inputModule from "../src/agent/views/input.js";
+import * as displayModule from "../src/agent/views/display.js";
 import { getConfig } from "../src/config.js";
 import { stripAnsi } from "./helpers.js";
 

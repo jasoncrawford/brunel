@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "events";
-import { WorkerSession, classifyEvent, debounceMs } from "../src/agent/worker.js";
-import { StatusBar } from "../src/agent/status-bar.js";
+import { WorkerSession, classifyEvent, debounceMs } from "../src/agent/controllers/worker.js";
+import { StatusBar } from "../src/agent/views/status-bar.js";
 import * as Wire from "../shared/wire.js";
 import { stripAnsi } from "./helpers.js";
-import * as displayModule from "../src/agent/display.js";
+import * as displayModule from "../src/agent/views/display.js";
 
 // ── Fake WebSocket ─────────────────────────────────────────────────────────────
 
@@ -721,7 +721,7 @@ describe("hello_ack handshake — buffering", () => {
         reset: vi.fn().mockResolvedValue(undefined),
         destroy: vi.fn().mockResolvedValue(undefined),
         checkSafety: vi.fn().mockResolvedValue({ uncommittedFiles: [], unpushedCommits: [], noUpstream: false }),
-      } as unknown as import("../src/agent/workspace.js").Workspace;
+      } as unknown as import("../src/agent/models/workspace.js").Workspace;
 
       const wsA = new FakeWs();
       const wsB = new FakeWs();
@@ -766,7 +766,7 @@ describe("hello_ack handshake — buffering", () => {
         reset: vi.fn().mockReturnValue(resetPromise),
         destroy: vi.fn().mockResolvedValue(undefined),
         checkSafety: vi.fn().mockResolvedValue({ uncommittedFiles: [], unpushedCommits: [], noUpstream: false }),
-      } as unknown as import("../src/agent/workspace.js").Workspace;
+      } as unknown as import("../src/agent/models/workspace.js").Workspace;
 
       const wsA = new FakeWs();
       const wsB = new FakeWs();
@@ -1359,10 +1359,11 @@ describe("prIsClosed guard", () => {
   });
 });
 
-import { Workspace, registerWorkspaceCommands } from "../src/agent/workspace.js";
-import { CommandRegistry } from "../src/agent/command-registry.js";
-import { confirmTaskQuit } from "../src/agent/worker.js";
-import type { TaskQuitInfo } from "../src/agent/worker.js";
+import { Workspace } from "../src/agent/models/workspace.js";
+import { registerWorkspaceCommands } from "../src/agent/controllers/workspace-commands.js";
+import { CommandRegistry } from "../src/agent/controllers/command-registry.js";
+import { confirmTaskQuit } from "../src/agent/controllers/worker.js";
+import type { TaskQuitInfo } from "../src/agent/controllers/worker.js";
 // ── foreman_error ─────────────────────────────────────────────────────────────
 
 describe("foreman_error", () => {

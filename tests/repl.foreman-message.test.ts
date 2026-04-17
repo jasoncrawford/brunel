@@ -4,9 +4,9 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from "vitest";
 import { getConfig } from "../src/config.js";
-import { printForemanMessage } from "../src/agent/display.js";
+import { printForemanMessage } from "../src/agent/views/display.js";
 import { stripAnsi } from "./helpers.js";
-import { statusBar } from "../src/agent/status-bar.js";
+import { statusBar } from "../src/agent/views/status-bar.js";
 import * as Wire from "../shared/wire.js";
 
 function captureOutput(fn: () => void): string {

@@ -6,8 +6,8 @@ import {
   printMessage,
   print,
   toolUseNames,
-} from "../src/agent/display.js";
-import { statusBar } from "../src/agent/status-bar.js";
+} from "../src/agent/views/display.js";
+import { statusBar } from "../src/agent/views/status-bar.js";
 
 function captureOutput(fn: () => void): string {
   let output = "";

@@ -13,9 +13,11 @@
 
 import { initDb } from "../src/foreman/clients/db-client.js";
 import { createMemoryTaskDb } from "./helpers/memory-db.js";
-import { StatusBar, initStatusBar } from "../src/agent/status-bar.js";
-import { loadDefaultConfig } from "../src/config.js";
+import { StatusBar, initStatusBar } from "../src/agent/views/status-bar.js";
+import { Display, initDisplay } from "../src/agent/views/display.js";
+import { loadDefaultConfig, getConfig } from "../src/config.js";
 
 await loadDefaultConfig();
 initDb(createMemoryTaskDb());
 initStatusBar(new StatusBar({ agentId: "test-agent" }));
+initDisplay(new Display(getConfig()));

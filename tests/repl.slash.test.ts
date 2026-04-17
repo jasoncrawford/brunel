@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { resolveCommandFilePath, resolveContent, type CommandRegistry } from "../src/agent/command-registry.js";
+import { resolveCommandFilePath, resolveContent, type CommandRegistry } from "../src/agent/controllers/command-registry.js";
 import { registerTestCommands } from "./helpers.js";
 
 let registry: CommandRegistry;

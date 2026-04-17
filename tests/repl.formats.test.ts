@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { stripAnsi } from "./helpers.js";
-import { statusBar } from "../src/agent/status-bar.js";
+import { statusBar } from "../src/agent/views/status-bar.js";
 import { getConfig } from "../src/config.js";
 import {
   resolve,
@@ -16,7 +16,7 @@ import {
   fmtToolSearchOutput,
   fmtTodoWriteOutput,
   type FmtTable,
-} from "../src/agent/display.js";
+} from "../src/agent/views/display.js";
 
 // Helper to call resolve and strip ANSI
 function r(table: FmtTable, key: string, data: any): string | null {

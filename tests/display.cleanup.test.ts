@@ -4,8 +4,8 @@ import { getConfig } from "../src/config.js";
 import {
   print, fmtTime, s,
   distributeWidths,
-} from "../src/agent/display.js";
-import { statusBar } from "../src/agent/status-bar.js";
+} from "../src/agent/views/display.js";
+import { statusBar } from "../src/agent/views/status-bar.js";
 
 beforeEach(() => {
   statusBar.stop();

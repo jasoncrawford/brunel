@@ -1,7 +1,7 @@
-import * as display from "./display.js";
+import { c, s, print } from "./display.js";
 import { statusBar } from "./status-bar.js";
-import { filterCommands } from "./command-registry.js";
-import type { CommandSuggestion } from "./command-registry.js";
+import { filterCommands } from "../controllers/command-registry.js";
+import type { CommandSuggestion } from "../controllers/command-registry.js";
 
 // ── Stash ─────────────────────────────────────────────────────────────────────
 
@@ -96,7 +96,7 @@ export function ask(
         } else {
           desc = "";
         }
-        return isSelected ? prefix + desc : display.c.darkGray(prefix + desc);
+        return isSelected ? prefix + desc : c.darkGray(prefix + desc);
       });
     }
 
@@ -150,7 +150,7 @@ export function ask(
 
     // ── Fresh redraw after external output ───────────────────────────────────
     //
-    // Called when display.print() writes output while ask() is running (e.g.
+    // Called when print() writes output while ask() is running (e.g.
     // a WebSocket message arriving in worker mode).  The terminal cursor is
     // now at an unknown position below the old prompt, so we start a fresh
     // prompt on a new line rather than trying to navigate back.
@@ -159,7 +159,7 @@ export function ask(
       if (done) return;
       totalDrawnRows = 0; // reset: we're drawing from a new position
       const displayStr = buffer.replace(/\n/g, "\r\n    ");
-      // display.print() already moved the cursor to a new line via console.log's
+      // print() already moved the cursor to a new line via console.log's
       // trailing \n; \r ensures we're at column 0 without adding an extra blank line.
       process.stdout.write("\r" + promptLine + displayStr);
 
@@ -193,7 +193,7 @@ export function ask(
 
     // ── Pre-clear callback ────────────────────────────────────────────────────
     //
-    // Called by display.print() BEFORE console.log to clear the prompt area.
+    // Called by print() BEFORE console.log to clear the prompt area.
     // When the prompt has a leading \n (blank line prefix), we must also clear
     // that blank line — otherwise it is orphaned above the printed message.
 
@@ -213,7 +213,7 @@ export function ask(
 
     // Called when the status bar changes while ask() is waiting for input.
     // Unlike drawFresh (which assumes cursor is at a fresh new line after
-    // display.print()), this is called while the cursor is at the current
+    // print()), this is called while the cursor is at the current
     // buffer position.  Navigate back to the prompt line using the known
     // cursor row, then call fullRedraw so status bars land in the right place.
     function redrawFromCurrent() {
@@ -222,7 +222,7 @@ export function ask(
       fullRedraw(curRow, computeMatches());
     }
 
-    // Register the fresh-redraw hook so display.print() can notify us.
+    // Register the fresh-redraw hook so print() can notify us.
     // Only register when there is a visible prompt to redraw — an empty prompt
     // string means the caller doesn't want any prompt shown (e.g. worker
     // standby mode), so no redraw is needed and no line-clear should fire.
@@ -421,7 +421,7 @@ export function ask(
       const { row: curRow } = screenPosOf(cursor);
       if (curRow > 0) process.stdout.write(`\x1b[${curRow}A`);
       process.stdout.write("\r\x1b[J");
-      process.stdout.write(display.c.darkGray("✦ Prompt stashed — will be restored on next submit\r\n"));
+      process.stdout.write(c.darkGray("✦ Prompt stashed — will be restored on next submit\r\n"));
       buffer = "";
       cursor = 0;
       totalDrawnRows = 0;
@@ -556,7 +556,7 @@ export function ask(
 function pickerLine(text: string, isSelected: boolean, marker?: string): string {
   const prefix = isSelected ? "▶ " : (marker ?? "  ");
   const full = prefix + text;
-  return isSelected ? full : display.s.dim(full);
+  return isSelected ? full : s.dim(full);
 }
 
 export type PickConfig = {
@@ -824,11 +824,11 @@ export async function pickQuestion(
         // Selected: bold label, normal weight description — no dim
         let text: string;
         if (i === otherIdx && textMode) {
-          text = `${display.s.bold("Other:")} ${textBuf}`;
+          text = `${s.bold("Other:")} ${textBuf}`;
         } else if (opt.description) {
-          text = `${display.s.bold(opt.label)}. ${opt.description}`;
+          text = `${s.bold(opt.label)}. ${opt.description}`;
         } else {
-          text = display.s.bold(opt.label);
+          text = s.bold(opt.label);
         }
         return pickerLine(`${numStr}. ${text}`, true);
       } else {
@@ -932,4 +932,3 @@ export async function pickQuestion(
     process.stdin.on("data", onData);
   });
 }
-

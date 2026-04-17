@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { stripAnsi } from "./helpers.js";
 import { getConfig } from "../src/config.js";
-import { print } from "../src/agent/display.js";
-import { statusBar } from "../src/agent/status-bar.js";
+import { print } from "../src/agent/views/display.js";
+import { statusBar } from "../src/agent/views/status-bar.js";
 
 function captureOutput(fn: () => void): string {
   let output = "";
