@@ -28,6 +28,7 @@ const fakeWorkspace = vi.hoisted(() => {
     checkSafety: ReturnType<typeof vi.fn>;
     reset: ReturnType<typeof vi.fn>;
     create: ReturnType<typeof vi.fn>;
+    on: ReturnType<typeof vi.fn>;
   } = {
     dir: "/fake/workers/test-worker",
     workspaceDir: "/fake/workers",
@@ -43,12 +44,13 @@ const fakeWorkspace = vi.hoisted(() => {
     }),
     reset: vi.fn().mockResolvedValue(undefined),
     create: vi.fn().mockImplementation(async () => { ws.isCreated = true; }),
+    on: vi.fn(),
   };
   return ws;
 });
 
-vi.mock("../src/agent/workspace.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../src/agent/workspace.js")>();
+vi.mock("../src/agent/models/workspace.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/agent/models/workspace.js")>();
   // Use a regular function (not arrow) so it can be called with `new`.
   // A constructor that returns an object explicitly uses that object (JS spec).
   // eslint-disable-next-line prefer-arrow-callback
@@ -62,8 +64,8 @@ vi.mock("../src/agent/workspace.js", async (importOriginal) => {
   };
 });
 
-vi.mock("../src/agent/input.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../src/agent/input.js")>();
+vi.mock("../src/agent/views/input.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/agent/views/input.js")>();
   return {
     ...actual,
     ask: vi.fn().mockResolvedValue("__eof__"),
@@ -72,9 +74,9 @@ vi.mock("../src/agent/input.js", async (importOriginal) => {
 });
 
 import { main } from "../src/agent/index.js";
-import { confirmIfUnsafe } from "../src/agent/workspace.js";
-import * as inputModule from "../src/agent/input.js";
-import * as displayModule from "../src/agent/display.js";
+import { confirmIfUnsafe } from "../src/agent/models/workspace.js";
+import * as inputModule from "../src/agent/views/input.js";
+import { Display } from "../src/agent/views/display.js";
 import { getConfig } from "../src/config.js";
 import { stripAnsi } from "./helpers.js";
 
@@ -92,8 +94,9 @@ async function runWorkerMain(runQueryFn = vi.fn().mockResolvedValue(undefined)):
     throw new Error("__process_exit__");
   }) as unknown as ReturnType<typeof vi.spyOn>;
 
+  const testDisplay = new Display(getConfig());
   try {
-    await main(runQueryFn, permConfig, true /* runWorkerMode */);
+    await main(runQueryFn, permConfig, testDisplay, true /* runWorkerMode */);
     return { exitCalled: false, exitCode: undefined };
   } catch (err) {
     if (err instanceof Error && err.message === "__process_exit__") {
@@ -109,11 +112,9 @@ async function runWorkerMain(runQueryFn = vi.fn().mockResolvedValue(undefined)):
 
 describe("workerMain startup banner", () => {
   let chdirSpy: ReturnType<typeof vi.spyOn>;
-  let printSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     chdirSpy = vi.spyOn(process, "chdir").mockImplementation(() => {});
-    printSpy = vi.spyOn(displayModule, "print").mockImplementation(() => {});
     vi.mocked(inputModule.ask).mockResolvedValue("__eof__");
     vi.mocked(confirmIfUnsafe).mockResolvedValue(true);
     getConfig().verbose = true;
@@ -122,12 +123,22 @@ describe("workerMain startup banner", () => {
   afterEach(() => {
     getConfig().verbose = false;
     chdirSpy.mockRestore();
-    printSpy.mockRestore();
     vi.clearAllMocks();
   });
 
   it("includes permissions, output mode, and logfile in the startup banner", async () => {
-    await runWorkerMain();
+    const testDisplay = new Display(getConfig());
+    const printSpy = vi.spyOn(testDisplay, "print").mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation((code?: number | string) => {
+      throw new Error("__process_exit__");
+    }) as unknown as ReturnType<typeof vi.spyOn>;
+    try {
+      await main(vi.fn().mockResolvedValue(undefined), permConfig, testDisplay, true /* runWorkerMode */);
+    } catch (err) {
+      if (!(err instanceof Error && err.message === "__process_exit__")) throw err;
+    } finally {
+      exitSpy.mockRestore();
+    }
     const printed = printSpy.mock.calls.map(([s]: [unknown]) => stripAnsi(String(s))).join("\n");
     expect(printed).toContain("Permissions: bypassPermissions");
     expect(printed).toContain("Output: verbose");
@@ -196,7 +207,7 @@ describe("workerMain exit behavior", () => {
     }) as unknown as ReturnType<typeof vi.spyOn>;
 
     let workerDone = false;
-    const workerPromise = main(runQueryFn, permConfig, true /* runWorkerMode */).then(
+    const workerPromise = main(runQueryFn, permConfig, new Display(getConfig()), true /* runWorkerMode */).then(
       () => { workerDone = true; },
       () => { workerDone = true; },
     );
@@ -230,7 +241,7 @@ describe("workerMain exit behavior", () => {
     }) as unknown as ReturnType<typeof vi.spyOn>;
 
     try {
-      await main(vi.fn().mockResolvedValue(undefined), permConfig, true /* runWorkerMode */);
+      await main(vi.fn().mockResolvedValue(undefined), permConfig, new Display(getConfig()), true /* runWorkerMode */);
     } catch (err) {
       if (!(err instanceof Error && err.message === "__process_exit__")) throw err;
     } finally {

@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PassThrough } from "stream";
-import { ask, pick, pickMultiple, promptLine, pickQuestion, _resetStash } from "../src/agent/input.js";
-import type { PickQuestionResult } from "../src/agent/input.js";
-import * as display from "../src/agent/display.js";
+import { ask, pick, pickMultiple, promptLine, pickQuestion, _resetStash } from "../src/agent/views/input.js";
+import type { PickQuestionResult } from "../src/agent/views/input.js";
+import { Display } from "../src/agent/views/display.js";
+import { getConfig } from "../src/config.js";
 
 function makeStdin() {
   const stream = new PassThrough();
@@ -22,7 +23,10 @@ function withFakeStdin(fn: (stdin: PassThrough) => Promise<void>): Promise<void>
   });
 }
 
+let testDisplay: Display;
+
 beforeEach(() => {
+  testDisplay = new Display(getConfig());
   origStdin = process.stdin;
   vi.spyOn(process.stdout, "write").mockImplementation(() => true);
 });
@@ -496,8 +500,8 @@ describe("ask() - drawFresh after print()", () => {
     await withFakeStdin(async (stdin) => {
       const p = ask("> ", () => []);
 
-      // Simulate display.print() being called (e.g., an event notification arriving)
-      display.print("Event received: some_event");
+      // Simulate testDisplay.print() being called (e.g., an event notification arriving)
+      testDisplay.print("Event received: some_event");
 
       // The drawFresh callback redraws the prompt. Collect all write calls made
       // during/after the print.
@@ -558,7 +562,7 @@ describe("ask() - blank line suppression with \\n prefix prompt", () => {
   });
 
   it("print() while ask() with \\n prefix is running goes up before clearing (cursor-up + erase-to-end)", async () => {
-    // When display.print() fires while the prompt is visible, the clearForPrint
+    // When testDisplay.print() fires while the prompt is visible, the clearForPrint
     // callback must go up prefixRows rows before erasing to end of screen so
     // the blank prefix line is cleared along with the prompt.  Without this,
     // the blank line is orphaned above the printed message (issue #418).
@@ -572,7 +576,7 @@ describe("ask() - blank line suppression with \\n prefix prompt", () => {
       const p = ask("\n> ", () => []);
       writeSpy.mockClear();
 
-      display.print("notification");
+      testDisplay.print("notification");
 
       const writes = writeSpy.mock.calls.map((c) => String(c[0]));
       // clearForPrint() writes \x1b[1A\r\x1b[J as a single call — check for both
@@ -594,7 +598,7 @@ describe("ask() - blank line suppression with \\n prefix prompt", () => {
       const p = ask("> ", () => []);
       writeSpy.mockClear();
 
-      display.print("notification");
+      testDisplay.print("notification");
 
       const writes = writeSpy.mock.calls.map((c) => String(c[0]));
       // Should NOT have cursor-up combined with \x1b[J in any single write

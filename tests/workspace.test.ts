@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import os from "node:os";
 import fs from "node:fs";
 import path from "node:path";
-import { Workspace, confirmIfUnsafe } from "../src/agent/workspace.js";
+import { Workspace, confirmIfUnsafe } from "../src/agent/models/workspace.js";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -304,43 +304,52 @@ describe("confirmIfUnsafe", () => {
 
 // ── prune ──────────────────────────────────────────────────────────────────
 
+function makeWorkspaceForPrune(workspaceDir: string): Workspace {
+  return new Workspace(workspaceDir, WORKER_ID, REPO_URL, "/cwd", async () => true);
+}
+
 describe("Workspace.prune", () => {
   it("returns empty array when baseDir does not exist", async () => {
-    const result = await Workspace.prune(path.join(BASE_DIR, "nonexistent"));
+    const ws = makeWorkspaceForPrune(path.join(BASE_DIR, "nonexistent"));
+    const result = await ws.prune();
     expect(result).toEqual([]);
   });
 
   it("removes directories with no lockfile", async () => {
+    const ws = makeWorkspaceForPrune(BASE_DIR);
     const orphanDir = path.join(BASE_DIR, "orphan-no-lock");
     fs.mkdirSync(orphanDir);
-    const removed = await Workspace.prune(BASE_DIR);
+    const removed = await ws.prune();
     expect(removed).toContain(orphanDir);
     expect(fs.existsSync(orphanDir)).toBe(false);
   });
 
   it("removes directories whose lockfile has a dead PID", async () => {
+    const ws = makeWorkspaceForPrune(BASE_DIR);
     const orphanDir = path.join(BASE_DIR, "orphan-dead-pid");
     fs.mkdirSync(orphanDir);
     // PID 2147483647 is the max int32 — almost certainly not running
     fs.writeFileSync(path.join(orphanDir, ".brunel.lock"), "2147483647");
-    const removed = await Workspace.prune(BASE_DIR);
+    const removed = await ws.prune();
     expect(removed).toContain(orphanDir);
     expect(fs.existsSync(orphanDir)).toBe(false);
   });
 
   it("keeps directories whose lockfile has a live PID", async () => {
+    const ws = makeWorkspaceForPrune(BASE_DIR);
     const activeDir = path.join(BASE_DIR, "active-worker");
     fs.mkdirSync(activeDir);
     // Current process PID is definitely alive
     fs.writeFileSync(path.join(activeDir, ".brunel.lock"), String(process.pid));
-    const removed = await Workspace.prune(BASE_DIR);
+    const removed = await ws.prune();
     expect(removed).not.toContain(activeDir);
     expect(fs.existsSync(activeDir)).toBe(true);
   });
 
   it("ignores non-directory entries", async () => {
+    const ws = makeWorkspaceForPrune(BASE_DIR);
     fs.writeFileSync(path.join(BASE_DIR, "somefile.txt"), "content");
-    const removed = await Workspace.prune(BASE_DIR);
+    const removed = await ws.prune();
     expect(fs.existsSync(path.join(BASE_DIR, "somefile.txt"))).toBe(true);
     expect(removed).toHaveLength(0);
   });

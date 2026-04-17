@@ -2,10 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
-import * as display from "./display.js";
-import { getConfig } from "../config.js";
-import { fmtError } from "../utils.js";
-import type { CommandRegistry } from "./command-registry.js";
+import { EventEmitter } from "node:events";
+import { fmtError } from "../../utils.js";
 
 const execFileAsync = promisify(execFileCb);
 
@@ -31,7 +29,7 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
-export class Workspace {
+export class Workspace extends EventEmitter {
   readonly dir: string;
   readonly workspaceDir: string;
   isCreated = false;
@@ -45,6 +43,7 @@ export class Workspace {
     private readonly exec: GitExec = defaultGitExec,
     private readonly npm: NpmExec = defaultNpmExec,
   ) {
+    super();
     this.workspaceDir = workspaceDir;
     this.dir = path.join(workspaceDir, sessionId);
   }
@@ -58,7 +57,7 @@ export class Workspace {
     fs.mkdirSync(path.dirname(this.dir), { recursive: true });
     if (!fs.existsSync(path.join(this.dir, ".git"))) {
       if (fs.existsSync(this.dir)) fs.rmSync(this.dir, { recursive: true, force: true });
-      display.print(display.c.sageGreen(`[workspace] Cloning ${this.repoUrl} → ${this.dir}`));
+      this.emit("clone-start", { repoUrl: this.repoUrl, dir: this.dir });
       await this.exec(["clone", this.repoUrl, this.dir], undefined);
       await this._npmInstall();
     }
@@ -72,21 +71,21 @@ export class Workspace {
    * then retries one final time.
    */
   async reset(): Promise<void> {
-    display.print(display.c.sageGreen(`[workspace] Resetting ${this.dir}`));
+    this.emit("reset-start", { dir: this.dir });
     try {
       await this._doReset();
       return;
     } catch (err) {
-      display.print(display.c.amber(`[workspace] Reset failed, retrying: ${fmtError(err)}`));
+      this.emit("reset-retry", { dir: this.dir, error: fmtError(err) });
     }
     try {
       await this._doReset();
       return;
     } catch (err) {
-      display.print(display.c.amber(`[workspace] Reset failed again, re-cloning: ${fmtError(err)}`));
+      this.emit("reset-reclone", { dir: this.dir, error: fmtError(err), repoUrl: this.repoUrl });
       fs.rmSync(this.dir, { recursive: true, force: true });
       fs.mkdirSync(path.dirname(this.dir), { recursive: true });
-      display.print(display.c.sageGreen(`[workspace] Re-cloning ${this.repoUrl} → ${this.dir}`));
+      this.emit("clone-start", { repoUrl: this.repoUrl, dir: this.dir });
       await this.exec(["clone", this.repoUrl, this.dir], undefined);
       fs.writeFileSync(path.join(this.dir, ".brunel.lock"), String(process.pid));
       await this._doReset(); // throws if still broken — propagates to caller
@@ -104,7 +103,7 @@ export class Workspace {
   /** Run npm install if a package.json is present. */
   private async _npmInstall(): Promise<void> {
     if (!fs.existsSync(path.join(this.dir, "package.json"))) return;
-    display.print(display.c.sageGreen(`[workspace] Installing dependencies in ${this.dir}`));
+    this.emit("npm-install", { dir: this.dir });
     await this.npm(["install"], this.dir);
   }
 
@@ -146,23 +145,23 @@ export class Workspace {
    * Active workers (live PID) are skipped.
    * Returns the list of directories removed.
    */
-  static async prune(workspaceDir: string): Promise<string[]> {
-    if (!fs.existsSync(workspaceDir)) return [];
-    display.print(display.c.sageGreen(`[workspace] Pruning orphaned workspaces in ${workspaceDir}`));
-    const entries = fs.readdirSync(workspaceDir, { withFileTypes: true });
+  async prune(): Promise<string[]> {
+    this.emit("prune-start", { workspaceDir: this.workspaceDir });
+    if (!fs.existsSync(this.workspaceDir)) return [];
+    const entries = fs.readdirSync(this.workspaceDir, { withFileTypes: true });
     const removed: string[] = [];
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
-      const dir = path.join(workspaceDir, entry.name);
+      const dir = path.join(this.workspaceDir, entry.name);
       const lockPath = path.join(dir, ".brunel.lock");
       if (fs.existsSync(lockPath)) {
         const pid = parseInt(fs.readFileSync(lockPath, "utf8").trim(), 10);
         if (isProcessAlive(pid)) {
-          if (getConfig().verbose) display.print(display.c.sageGreen(`[workspace] Skipping active workspace ${dir} (pid ${pid})`));
+          this.emit("prune-skip", { dir, pid });
           continue;
         }
       }
-      display.print(display.c.sageGreen(`[workspace] Removing orphaned workspace ${dir}`));
+      this.emit("prune-remove", { dir });
       fs.rmSync(dir, { recursive: true, force: true });
       removed.push(dir);
     }
@@ -171,84 +170,10 @@ export class Workspace {
 
   /** Remove the entire checkout directory. */
   async destroy(): Promise<void> {
-    display.print(display.c.sageGreen(`[workspace] Destroying ${this.dir}`));
+    this.emit("destroy", { dir: this.dir });
     fs.rmSync(this.dir, { recursive: true, force: true });
     this.isCreated = false;
   }
-}
-
-// ── Workspace command registration ────────────────────────────────────────────
-
-/**
- * Register workspace commands into the given registry (which should already be
- * scoped, e.g. registry.scoped("workspace")). Call this once at startup.
- *
- * Pass `undefined` when no GitHub repo is configured — commands that require
- * a workspace will print an appropriate error message.
- */
-export function registerWorkspaceCommands(workspace: Workspace | undefined, registry: CommandRegistry): void {
-  registry.register("create", {
-    description: "Create an isolated git checkout for this session",
-    handler: async () => {
-      if (!workspace) {
-        display.print(display.c.boldRed("Cannot create workspace: no GitHub repo configured."));
-        return;
-      }
-      if (workspace.isCreated) {
-        display.print(display.c.amber(`Workspace already exists: ${workspace.dir}`));
-        return;
-      }
-      await workspace.create();
-      process.chdir(workspace.dir);
-      display.print(display.c.sageGreen(`Workspace created: ${workspace.dir}`));
-    },
-  });
-
-  registry.register("reset", {
-    description: "Reset workspace to clean main branch",
-    handler: async () => {
-      if (!workspace?.isCreated) {
-        display.print(display.c.boldRed("No workspace. Use /workspace:create first."));
-        return;
-      }
-      const ok = await confirmIfUnsafe(workspace, workspace.confirm);
-      if (!ok) return;
-      await workspace.reset();
-      display.print(display.c.sageGreen("Workspace reset to main."));
-    },
-  });
-
-  registry.register("remove", {
-    description: "Remove the workspace checkout for this session",
-    handler: async () => {
-      if (!workspace?.isCreated) {
-        display.print(display.c.boldRed("No workspace in this session."));
-        return;
-      }
-      const ok = await confirmIfUnsafe(workspace, workspace.confirm);
-      if (!ok) return;
-      await workspace.destroy();
-      process.chdir(workspace.originalCwd);
-      display.print(display.c.sageGreen(`Workspace removed. Now in: ${workspace.originalCwd}`));
-    },
-  });
-
-  registry.register("prune", {
-    description: "Remove orphaned worker workspace directories",
-    handler: async () => {
-      if (!workspace) {
-        display.print(display.c.boldRed("Cannot prune: no workspace directory configured."));
-        return;
-      }
-      const removed = await Workspace.prune(workspace.workspaceDir);
-      if (removed.length === 0) {
-        display.print(display.c.sageGreen("Nothing to prune."));
-      } else {
-        for (const dir of removed) display.print(display.c.darkGray(`  Removed: ${dir}`));
-        display.print(display.c.sageGreen(`Pruned ${removed.length} orphaned workspace(s).`));
-      }
-    },
-  });
 }
 
 /**

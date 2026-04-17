@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { stripAnsi } from "./helpers.js";
 import { getConfig } from "../src/config.js";
-import { print } from "../src/agent/display.js";
-import { statusBar } from "../src/agent/status-bar.js";
+import { Display } from "../src/agent/views/display.js";
+import { statusBar } from "../src/agent/views/status-bar.js";
+
+let testDisplay: Display;
 
 function captureOutput(fn: () => void): string {
   let output = "";
@@ -15,6 +17,7 @@ function captureOutput(fn: () => void): string {
 }
 
 beforeEach(() => {
+  testDisplay = new Display(getConfig());
   statusBar.stop();
   getConfig().verbose = false;
 });
@@ -28,7 +31,7 @@ afterEach(() => {
 describe("print() timestamps", () => {
   it("verbose=false: no timestamp prepended", () => {
     getConfig().verbose = false;
-    const output = captureOutput(() => print("hello"));
+    const output = captureOutput(() => testDisplay.print("hello"));
     const plain = stripAnsi(output);
     expect(plain).toContain("hello");
     // HH:MM:SS pattern should NOT appear
@@ -37,7 +40,7 @@ describe("print() timestamps", () => {
 
   it("verbose=true: prepends HH:MM:SS timestamp", () => {
     getConfig().verbose = true;
-    const output = captureOutput(() => print("hello"));
+    const output = captureOutput(() => testDisplay.print("hello"));
     const plain = stripAnsi(output);
     expect(plain).toContain("hello");
     expect(plain).toMatch(/\d{2}:\d{2}:\d{2}/);
@@ -45,7 +48,7 @@ describe("print() timestamps", () => {
 
   it("verbose=true: timestamp appears before message content", () => {
     getConfig().verbose = true;
-    const output = captureOutput(() => print("world"));
+    const output = captureOutput(() => testDisplay.print("world"));
     const plain = stripAnsi(output);
     const tsMatch = plain.match(/\d{2}:\d{2}:\d{2}/);
     expect(tsMatch).not.toBeNull();
@@ -56,7 +59,7 @@ describe("print() timestamps", () => {
 
   it("verbose=true: timestamp uses darkGray opener and foreground-only reset", () => {
     getConfig().verbose = true;
-    const raw = captureOutput(() => print("styled"));
+    const raw = captureOutput(() => testDisplay.print("styled"));
     // darkGray opener
     expect(raw).toContain("\x1b[90m");
     // ends with \x1b[39m (pop foreground only), not a full \x1b[0m reset
@@ -71,7 +74,7 @@ describe("print() timestamps", () => {
     getConfig().verbose = true;
     // Simulate a color-wrapped multi-line block like c.gray() produces
     const coloredBlock = `\x1b[38;5;246m\nline one\nline two\x1b[0m`;
-    const raw = captureOutput(() => print(coloredBlock));
+    const raw = captureOutput(() => testDisplay.print(coloredBlock));
     // The opening color code \x1b[38;5;246m should appear on every split line
     const occurrences = (raw.match(/\x1b\[38;5;246m/g) ?? []).length;
     // First part is the opener line itself; continuation lines get it re-applied
@@ -80,7 +83,7 @@ describe("print() timestamps", () => {
 
   it("verbose=true: each line of multi-line output gets a timestamp", () => {
     getConfig().verbose = true;
-    const output = captureOutput(() => print("line one\nline two\nline three"));
+    const output = captureOutput(() => testDisplay.print("line one\nline two\nline three"));
     const plain = stripAnsi(output);
     const matches = plain.match(/\d{2}:\d{2}:\d{2}/g);
     expect(matches).toHaveLength(3);
@@ -91,7 +94,7 @@ describe("print() timestamps", () => {
 
   it("verbose=true: print(null) still no-ops", () => {
     getConfig().verbose = true;
-    const output = captureOutput(() => print(null));
+    const output = captureOutput(() => testDisplay.print(null));
     expect(output).toBe("");
   });
 });

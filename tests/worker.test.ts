@@ -1,10 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "events";
-import { WorkerSession, classifyEvent, debounceMs } from "../src/agent/worker.js";
-import { StatusBar } from "../src/agent/status-bar.js";
+import { WorkerSession, classifyEvent, debounceMs } from "../src/agent/controllers/worker-controller.js";
+import { StatusBar } from "../src/agent/views/status-bar.js";
 import * as Wire from "../shared/wire.js";
 import { stripAnsi } from "./helpers.js";
-import * as displayModule from "../src/agent/display.js";
 
 // ── Fake WebSocket ─────────────────────────────────────────────────────────────
 
@@ -721,7 +720,7 @@ describe("hello_ack handshake — buffering", () => {
         reset: vi.fn().mockResolvedValue(undefined),
         destroy: vi.fn().mockResolvedValue(undefined),
         checkSafety: vi.fn().mockResolvedValue({ uncommittedFiles: [], unpushedCommits: [], noUpstream: false }),
-      } as unknown as import("../src/agent/workspace.js").Workspace;
+      } as unknown as import("../src/agent/models/workspace.js").Workspace;
 
       const wsA = new FakeWs();
       const wsB = new FakeWs();
@@ -766,7 +765,7 @@ describe("hello_ack handshake — buffering", () => {
         reset: vi.fn().mockReturnValue(resetPromise),
         destroy: vi.fn().mockResolvedValue(undefined),
         checkSafety: vi.fn().mockResolvedValue({ uncommittedFiles: [], unpushedCommits: [], noUpstream: false }),
-      } as unknown as import("../src/agent/workspace.js").Workspace;
+      } as unknown as import("../src/agent/models/workspace.js").Workspace;
 
       const wsA = new FakeWs();
       const wsB = new FakeWs();
@@ -1359,10 +1358,10 @@ describe("prIsClosed guard", () => {
   });
 });
 
-import { Workspace, registerWorkspaceCommands } from "../src/agent/workspace.js";
-import { CommandRegistry } from "../src/agent/command-registry.js";
-import { confirmTaskQuit } from "../src/agent/worker.js";
-import type { TaskQuitInfo } from "../src/agent/worker.js";
+import { Workspace } from "../src/agent/models/workspace.js";
+import { registerWorkspaceCommands } from "../src/agent/controllers/workspace-controller.js";
+import { CommandRegistry } from "../src/agent/controllers/command-controller.js";
+import type { TaskQuitInfo } from "../src/agent/controllers/worker-controller.js";
 // ── foreman_error ─────────────────────────────────────────────────────────────
 
 describe("foreman_error", () => {
@@ -1457,7 +1456,7 @@ describe("workspace slash commands in WorkerSession", () => {
     const sessionWs = new WorkerSession(new StatusBar({ agentId: AGENT_ID }), wsFactory, display, { workspace });
     sessionWs.start();
     const wsReg1 = new CommandRegistry();
-    registerWorkspaceCommands(sessionWs.workspace, wsReg1.scoped("workspace"));
+    registerWorkspaceCommands(sessionWs.workspace, wsReg1.scoped("workspace"), display);
     await wsReg1.execute("workspace:reset", "");
     expect(workspace.reset).toHaveBeenCalledOnce();
   });
@@ -1471,7 +1470,7 @@ describe("workspace slash commands in WorkerSession", () => {
     const sessionWs = new WorkerSession(new StatusBar({ agentId: AGENT_ID }), wsFactory, display, { workspace });
     sessionWs.start();
     const wsReg2 = new CommandRegistry();
-    registerWorkspaceCommands(sessionWs.workspace, wsReg2.scoped("workspace"));
+    registerWorkspaceCommands(sessionWs.workspace, wsReg2.scoped("workspace"), display);
     await wsReg2.execute("workspace:reset", "");
     expect(workspace.reset).not.toHaveBeenCalled();
   });
@@ -1483,7 +1482,7 @@ describe("workspace slash commands in WorkerSession", () => {
       const sessionWs = new WorkerSession(new StatusBar({ agentId: AGENT_ID }), wsFactory, display, { workspace });
       sessionWs.start();
       const wsReg3 = new CommandRegistry();
-      registerWorkspaceCommands(sessionWs.workspace, wsReg3.scoped("workspace"));
+      registerWorkspaceCommands(sessionWs.workspace, wsReg3.scoped("workspace"), display);
       await wsReg3.execute("workspace:remove", "");
       expect(workspace.destroy).toHaveBeenCalledOnce();
     } finally {
@@ -1492,19 +1491,15 @@ describe("workspace slash commands in WorkerSession", () => {
   });
 
   it("/workspace:create prints 'already exists' when workspace is pre-created", async () => {
-    const printSpy = vi.spyOn(displayModule, "print").mockImplementation(() => {});
-    try {
-      const workspace = makeWorkspace();
-      const sessionWs = new WorkerSession(new StatusBar({ agentId: AGENT_ID }), wsFactory, display, { workspace });
-      sessionWs.start();
-      const wsReg4 = new CommandRegistry();
-      registerWorkspaceCommands(sessionWs.workspace, wsReg4.scoped("workspace"));
-      await wsReg4.execute("workspace:create", "");
-      const printed = printSpy.mock.calls.map(([s]) => stripAnsi(s as string)).join("\n");
-      expect(printed).toContain("Workspace already exists");
-    } finally {
-      printSpy.mockRestore();
-    }
+    const localDisplay = { print: vi.fn(), printForemanMessage: vi.fn() };
+    const workspace = makeWorkspace();
+    const sessionWs = new WorkerSession(new StatusBar({ agentId: AGENT_ID }), wsFactory, display, { workspace });
+    sessionWs.start();
+    const wsReg4 = new CommandRegistry();
+    registerWorkspaceCommands(sessionWs.workspace, wsReg4.scoped("workspace"), localDisplay);
+    await wsReg4.execute("workspace:create", "");
+    const printed = localDisplay.print.mock.calls.map(([s]: [unknown]) => stripAnsi(String(s))).join("\n");
+    expect(printed).toContain("Workspace already exists");
   });
 });
 
@@ -1794,65 +1789,68 @@ describe("getTaskQuitInfo", () => {
 describe("confirmTaskQuit", () => {
   const openTask: TaskQuitInfo = { taskNumber: 42, workerId: "test-worker", issueClosed: false };
   const closedTask: TaskQuitInfo = { taskNumber: 42, workerId: "test-worker", issueClosed: true };
+  const noopDisplay = { print: vi.fn(), printForemanMessage: vi.fn() };
+
+  beforeEach(() => { noopDisplay.print.mockReset(); noopDisplay.printForemanMessage.mockReset(); });
 
   it("open issue: returns 'cancel' when user picks 'No, keep working' (index 0)", async () => {
     const mockPick = vi.fn().mockResolvedValue(0);
-    const result = await confirmTaskQuit(openTask, mockPick);
+    const sess = new WorkerSession(new StatusBar({ agentId: "test" }), vi.fn(), noopDisplay);
+    const result = await sess.confirmTaskQuit(openTask, mockPick);
     expect(result).toBe("cancel");
   });
 
   it("open issue: returns 'quit' when user picks 'Yes, quit anyway' (index 1)", async () => {
     const mockPick = vi.fn().mockResolvedValue(1);
-    const result = await confirmTaskQuit(openTask, mockPick);
+    const sess = new WorkerSession(new StatusBar({ agentId: "test" }), vi.fn(), noopDisplay);
+    const result = await sess.confirmTaskQuit(openTask, mockPick);
     expect(result).toBe("quit");
   });
 
   it("open issue: prompt mentions task number and worker id", async () => {
-    const printSpy = vi.spyOn(displayModule, "print").mockImplementation(() => {});
-    try {
-      const mockPick = vi.fn().mockResolvedValue(0);
-      await confirmTaskQuit(openTask, mockPick);
-      const printed = printSpy.mock.calls.map(([s]) => stripAnsi(s as string)).join("\n");
-      expect(printed).toContain("#42");
-      expect(printed).toContain("test-worker");
-    } finally {
-      printSpy.mockRestore();
-    }
+    const printDisplay = { print: vi.fn(), printForemanMessage: vi.fn() };
+    const mockPick = vi.fn().mockResolvedValue(0);
+    const sess = new WorkerSession(new StatusBar({ agentId: "test" }), vi.fn(), printDisplay);
+    await sess.confirmTaskQuit(openTask, mockPick);
+    const printed = printDisplay.print.mock.calls.map(([s]: [unknown]) => stripAnsi(String(s))).join("\n");
+    expect(printed).toContain("#42");
+    expect(printed).toContain("test-worker");
   });
 
   it("closed issue: returns 'complete-and-quit' when user picks index 0 (yes, complete)", async () => {
     const mockPick = vi.fn().mockResolvedValue(0);
-    const result = await confirmTaskQuit(closedTask, mockPick);
+    const sess = new WorkerSession(new StatusBar({ agentId: "test" }), vi.fn(), noopDisplay);
+    const result = await sess.confirmTaskQuit(closedTask, mockPick);
     expect(result).toBe("complete-and-quit");
   });
 
   it("closed issue: returns 'quit' when user picks index 1 (no, just exit)", async () => {
     const mockPick = vi.fn().mockResolvedValue(1);
-    const result = await confirmTaskQuit(closedTask, mockPick);
+    const sess = new WorkerSession(new StatusBar({ agentId: "test" }), vi.fn(), noopDisplay);
+    const result = await sess.confirmTaskQuit(closedTask, mockPick);
     expect(result).toBe("quit");
   });
 
   it("closed issue: returns 'cancel' when user picks index 2 (don't exit)", async () => {
     const mockPick = vi.fn().mockResolvedValue(2);
-    const result = await confirmTaskQuit(closedTask, mockPick);
+    const sess = new WorkerSession(new StatusBar({ agentId: "test" }), vi.fn(), noopDisplay);
+    const result = await sess.confirmTaskQuit(closedTask, mockPick);
     expect(result).toBe("cancel");
   });
 
   it("closed issue: prompt mentions task number", async () => {
-    const printSpy = vi.spyOn(displayModule, "print").mockImplementation(() => {});
-    try {
-      const mockPick = vi.fn().mockResolvedValue(0);
-      await confirmTaskQuit(closedTask, mockPick);
-      const printed = printSpy.mock.calls.map(([s]) => stripAnsi(s as string)).join("\n");
-      expect(printed).toContain("#42");
-    } finally {
-      printSpy.mockRestore();
-    }
+    const printDisplay = { print: vi.fn(), printForemanMessage: vi.fn() };
+    const mockPick = vi.fn().mockResolvedValue(0);
+    const sess = new WorkerSession(new StatusBar({ agentId: "test" }), vi.fn(), printDisplay);
+    await sess.confirmTaskQuit(closedTask, mockPick);
+    const printed = printDisplay.print.mock.calls.map(([s]: [unknown]) => stripAnsi(String(s))).join("\n");
+    expect(printed).toContain("#42");
   });
 
   it("open issue: pick is called with two options (No first, Yes second)", async () => {
     const mockPick = vi.fn().mockResolvedValue(0);
-    await confirmTaskQuit(openTask, mockPick);
+    const sess = new WorkerSession(new StatusBar({ agentId: "test" }), vi.fn(), noopDisplay);
+    await sess.confirmTaskQuit(openTask, mockPick);
     expect(mockPick).toHaveBeenCalledOnce();
     const options = mockPick.mock.calls[0][0] as string[];
     expect(options).toHaveLength(2);
@@ -1862,7 +1860,8 @@ describe("confirmTaskQuit", () => {
 
   it("closed issue: pick is called with three options", async () => {
     const mockPick = vi.fn().mockResolvedValue(0);
-    await confirmTaskQuit(closedTask, mockPick);
+    const sess = new WorkerSession(new StatusBar({ agentId: "test" }), vi.fn(), noopDisplay);
+    await sess.confirmTaskQuit(closedTask, mockPick);
     expect(mockPick).toHaveBeenCalledOnce();
     const options = mockPick.mock.calls[0][0] as string[];
     expect(options).toHaveLength(3);

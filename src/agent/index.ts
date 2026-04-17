@@ -5,19 +5,21 @@ import fs from "fs";
 import { fileURLToPath } from "url";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { CanUseTool, PermissionMode, PermissionResult } from "@anthropic-ai/claude-agent-sdk";
-import * as display from "./display.js";
-import { StatusBar, statusBar, initStatusBar } from "./status-bar.js";
-import { ask, pick, pickMultiple, pickQuestion } from "./input.js";
-import type { PickQuestionResult } from "./input.js";
-import { WorkerSession, registerWorkerCommands, startWorkerMode, generateAgentId, confirmTaskQuit } from "./worker.js";
-import type { RunQuery } from "./worker.js";
+import { Display, c, hr } from "./views/display.js";
+import { StatusBar, statusBar, initStatusBar } from "./views/status-bar.js";
+import { ask, pick, pickMultiple, pickQuestion } from "./views/input.js";
+import type { PickQuestionResult } from "./views/input.js";
+import { WorkerSession, registerWorkerCommands, startWorkerMode, generateAgentId } from "./controllers/worker-controller.js";
+import type { RunQuery } from "./controllers/worker-controller.js";
 import { loadConfig, getConfig } from "../config.js";
-import { Workspace, confirmIfUnsafe, registerWorkspaceCommands } from "./workspace.js";
+import { Workspace, confirmIfUnsafe } from "./models/workspace.js";
+import { registerWorkspaceCommands } from "./controllers/workspace-controller.js";
 import { fmtError } from "../utils.js";
-import { Settings, setCachedModels } from "./settings.js";
-import type { ModelInfo, FetchModelsFn, EffortValue } from "./settings.js";
-import { CommandRegistry } from "./command-registry.js";
-import { QueryStats } from "./query-stats.js";
+import { Settings } from "./models/settings.js";
+import type { ModelInfo, FetchModelsFn, EffortValue } from "./models/settings.js";
+import { CommandRegistry, CommandController } from "./controllers/command-controller.js";
+import { SettingsController } from "./controllers/settings-controller.js";
+import { QueryStats } from "./models/query-stats.js";
 // ── Log file ──────────────────────────────────────────────────────────────────
 
 const LOG_FILE = "repl.log";
@@ -40,13 +42,14 @@ type Question = { question: string; header: string; options: QuestionOption[]; m
 export async function handleAskUserQuestion(
   input: Record<string, unknown>,
   getStatusText: () => string,
+  display: Display,
 ): Promise<PermissionResult> {
   statusBar.stop();
   const questions = (input.questions as Question[]) ?? [];
   const answers: Record<string, string> = {};
 
   for (const q of questions) {
-    display.print(display.c.yellow(`\n? ${q.question}`));
+    display.print(c.yellow(`\n? ${q.question}`));
     if (q.multiSelect) {
       const lines = q.options.map(o => o.description ? `${o.label} — ${o.description}` : o.label);
       const idxs = await pickMultiple(lines);
@@ -69,9 +72,10 @@ export async function handleToolPermission(
   toolName: string,
   input: Record<string, unknown>,
   getStatusText: () => string,
+  display: Display,
 ): Promise<PermissionResult> {
   statusBar.stop();
-  display.print(display.c.amber(`\n⚠ ${toolName}(${display.fmtArgs(input)})`));
+  display.print(c.amber(`\n⚠ ${toolName}(${display.fmtArgs(input)})`));
   const idx = await pick(["Allow", "Deny"]);
   statusBar.start(getStatusText);
   if (idx === 0) return { behavior: "allow", updatedInput: input };
@@ -79,6 +83,7 @@ export async function handleToolPermission(
 }
 
 export async function runQuery(
+  display: Display,
   permConfig: { permissionMode: PermissionMode; allowDangerouslySkipPermissions: boolean },
   prompt: string,
   sessionId: string | undefined,
@@ -107,15 +112,15 @@ export async function runQuery(
   }
 
   const stats = new QueryStats();
-  const getStatusText = () => display.c.darkGray(stats.getStatusText());
+  const getStatusText = () => c.darkGray(stats.getStatusText());
   statusBar.start(getStatusText);
 
   const canUseTool: CanUseTool = async (toolName, input) => {
     if (toolName === "AskUserQuestion") {
-      return handleAskUserQuestion(input, getStatusText);
+      return handleAskUserQuestion(input, getStatusText, display);
     }
     if (permConfig.allowDangerouslySkipPermissions) return { behavior: "allow", updatedInput: input };
-    return handleToolPermission(toolName, input, getStatusText);
+    return handleToolPermission(toolName, input, getStatusText, display);
   };
 
   // Use caller-provided AbortController (worker mode) or create our own (REPL mode).
@@ -144,7 +149,7 @@ export async function runQuery(
   type QueryWithModels = { supportedModels?: () => Promise<ModelInfo[]> };
   const qm = iterable as unknown as QueryWithModels;
   if (typeof qm.supportedModels === "function") {
-    qm.supportedModels().then(models => { setCachedModels(models); }).catch(() => {});
+    qm.supportedModels().then(models => { Settings.setCachedModels(models); }).catch(() => {});
   }
 
   // Register a temporary raw-stdin listener to catch ^C and abort the query.
@@ -197,7 +202,7 @@ export async function runQuery(
   statusBar.stop(); // no-op if result message already stopped it
 
   if (!resultReceived) {
-    display.print(display.c.darkGray("\nInterrupted. What should the agent do instead?"));
+    display.print(c.darkGray("\nInterrupted. What should the agent do instead?"));
   }
 
   // Restore the callbacks and redraw the prompt. In worker mode this redraws
@@ -225,6 +230,7 @@ function createFetchModelsFn(permConfig: { permissionMode: PermissionMode }): Fe
 export async function main(
   runQueryFn: RunQuery,
   permConfig: { permissionMode: PermissionMode; allowDangerouslySkipPermissions: boolean },
+  display: Display,
   runWorkerMode?: boolean,
   workspaceCfg?: { workspaceDir: string; repoUrl: string },
   initialModel?: string,
@@ -234,16 +240,17 @@ export async function main(
   initStatusBar(new StatusBar({ agentId: generateAgentId(), settings }));
 
   // Worker mode setup: create workspace, session, signal handlers.
-  const workerCtx = runWorkerMode ? await startWorkerMode() : undefined;
+  const workerCtx = runWorkerMode ? await startWorkerMode(display) : undefined;
   const session = workerCtx?.session;
 
   const fetchModelsFn = createFetchModelsFn(permConfig);
+  const settingsController = new SettingsController(settings, display);
 
   // Print the startup banner.
-  display.print(display.c.sageGreen(display.hr("═")));
-  display.print(display.c.skyBlue(display.s.bold("  Brunel Agent")));
-  display.print(display.c.lavender(`  Permissions: ${permConfig.permissionMode} | Model: ${settings.model ?? "default"} | Effort: ${settings.effort ?? "auto"} | Output: ${getConfig().verbose ? "verbose" : "quiet"} | Log: ${LOG_FILE}`));
-  display.print(display.c.sageGreen(display.hr("═")));
+  display.print(c.sageGreen(hr("═")));
+  display.print(c.skyBlue(display.s.bold("  Brunel Agent")));
+  display.print(c.lavender(`  Permissions: ${permConfig.permissionMode} | Model: ${settings.model ?? "default"} | Effort: ${settings.effort ?? "auto"} | Output: ${getConfig().verbose ? "verbose" : "quiet"} | Log: ${LOG_FILE}`));
+  display.print(c.sageGreen(hr("═")));
 
   process.stdout.write("\x1b[?2004h"); // enable bracketed paste mode
   process.stdin.setRawMode?.(true);
@@ -255,7 +262,7 @@ export async function main(
 
   const confirm = async (msg: string): Promise<boolean> => {
     statusBar.stop();
-    display.print(display.c.amber(`\n⚠ Potential data loss:\n${msg}`));
+    display.print(c.amber(`\n⚠ Potential data loss:\n${msg}`));
     const idx = await pick(["Yes, proceed", "No, cancel"]);
     return idx === 0;
   };
@@ -283,15 +290,16 @@ export async function main(
   // Register all commands. All commands are present in both REPL and worker
   // modes; commands that require a foreman connection degrade gracefully.
   const registry = new CommandRegistry();
-  registerWorkspaceCommands(workspace, registry.scoped("workspace"));
-  registerWorkerCommands(session, registry.scoped("worker"));
+  const controller = new CommandController(registry);
+  registerWorkspaceCommands(workspace, registry.scoped("workspace"), display);
+  registerWorkerCommands(session, registry.scoped("worker"), display);
   registry.register("exit", {
     description: "Exit",
     handler: async () => {
       if (!session) { await doExit(); return "exit"; }
       const taskInfo = session.getTaskQuitInfo();
       if (taskInfo) {
-        const choice = await confirmTaskQuit(taskInfo);
+        const choice = await session.confirmTaskQuit(taskInfo);
         if (choice === "cancel") return undefined;
         if (choice === "complete-and-quit") await session.completeCurrentTask();
       }
@@ -308,21 +316,19 @@ export async function main(
   registry.register("model", {
     description: "Select the Claude model to use",
     handler: async (args) => {
-      await settings.pickModel(
+      await settingsController.pickModel(
         args,
         (opts, idx) => pick(opts, { currentIdx: idx, escapable: true }),
         fetchModelsFn,
-        display.print,
       );
     },
   });
   registry.register("effort", {
     description: "Set the effort level for Claude's thinking",
     handler: async (args) => {
-      await settings.pickEffort(
+      await settingsController.pickEffort(
         args,
         (opts, idx) => pick(opts, { currentIdx: idx, escapable: true }),
-        display.print,
       );
     },
   });
@@ -340,7 +346,7 @@ export async function main(
       sessionId = await runQueryFn(prompt, sessionId, ac, settings.model, settings.effort) ?? sessionId;
       return !ac.signal.aborted;
     } catch (err) {
-      console.error(display.c.boldRed(`\nERROR: ${fmtError(err)}`));
+      console.error(c.boldRed(`\nERROR: ${fmtError(err)}`));
       logFull("ERROR", err instanceof Error ? { message: err.message, stack: err.stack } : err);
       return false;
     } finally {
@@ -358,14 +364,14 @@ export async function main(
     // empty promptLine suppresses the drawFresh callback so incoming messages
     // are printed cleanly without a prompt preceding or following them.
     const promptStr = session ? (showPrompt ? "\n[agent] > " : "") : "\n> ";
-    const input = await ask(promptStr, () => registry.listCommands(), wsAbort);
+    const input = await ask(promptStr, () => controller.listCommands(), wsAbort);
 
     // ^D / ^C on empty buffer — treat as exit.
     if (input === "__eof__") {
       if (!session) { await doExit(); break; }
       const taskInfo = session.getTaskQuitInfo();
       if (taskInfo) {
-        const choice = await confirmTaskQuit(taskInfo);
+        const choice = await session.confirmTaskQuit(taskInfo);
         if (choice === "cancel") continue;
         if (choice === "complete-and-quit") await session.completeCurrentTask();
       }
@@ -398,12 +404,12 @@ export async function main(
       continue;
     }
 
-    const action = await registry.dispatch(input);
+    const action = await controller.dispatch(input);
 
     if (action.type === "skip") continue;
 
     if (action.type === "unknown_command") {
-      display.print(display.c.boldRed(`Unknown command: /${action.command}`));
+      display.print(c.boldRed(`Unknown command: /${action.command}`));
       continue;
     }
 
@@ -440,13 +446,14 @@ export async function main(
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const config = await loadConfig(process.argv);
+  const display = new Display(config);
   const permConfig = {
     permissionMode: config.permissionMode,
     allowDangerouslySkipPermissions: config.allowDangerouslySkipPermissions,
   };
 
   const boundRunQuery: RunQuery = (prompt, sessionId, ac, model, effort) =>
-    runQuery(permConfig, prompt, sessionId, ac, model, effort);
+    runQuery(display, permConfig, prompt, sessionId, ac, model, effort);
 
   const workspaceCfg = (config.githubRepo && config.githubToken)
     ? {
@@ -457,5 +464,5 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 
   const runWorkerMode = process.argv.includes("--worker-mode");
 
-  await main(boundRunQuery, permConfig, runWorkerMode, workspaceCfg, config.model, config.effort);
+  await main(boundRunQuery, permConfig, display, runWorkerMode, workspaceCfg, config.model, config.effort);
 }

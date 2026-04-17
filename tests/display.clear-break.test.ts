@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { clearBreak, W } from "../src/agent/display.js";
+import { clearBreak, W } from "../src/agent/views/display.js";
 
 // Strip ANSI escape codes to get the visible text
 function strip(s: string) {

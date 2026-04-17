@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { stripAnsi } from "./helpers.js";
-import { statusBar } from "../src/agent/status-bar.js";
+import { statusBar } from "../src/agent/views/status-bar.js";
 import { getConfig } from "../src/config.js";
 import {
   effectiveWidth,
@@ -9,7 +9,7 @@ import {
   renderTable,
   fmtHunk,
   W,
-} from "../src/agent/display.js";
+} from "../src/agent/views/display.js";
 
 beforeEach(() => getConfig().verbose = false);
 afterEach(() => getConfig().verbose = false);

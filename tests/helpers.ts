@@ -1,4 +1,5 @@
-import type { CommandRegistry } from "../src/agent/command-registry.js";
+import type { CommandController } from "../src/agent/controllers/command-controller.js";
+import type { WorkerDisplay } from "../src/agent/controllers/worker-controller.js";
 
 export function stripAnsi(s: string): string {
   return s.replace(/\x1b\[[0-9;]*m/g, "");
@@ -14,14 +15,16 @@ export async function waitUntil(predicate: () => boolean): Promise<void> {
 /**
  * Register all standard built-in commands with minimal stubs.
  * Workspace commands use the real registerWorkspaceCommands (real descriptions, real handler logic).
- * Returns the populated CommandRegistry for use in tests.
+ * Returns the populated CommandController for use in tests.
  * Call this in beforeEach for tests that query the command registry.
  */
-export async function registerTestCommands(): Promise<CommandRegistry> {
-  const { CommandRegistry } = await import("../src/agent/command-registry.js");
-  const { registerWorkspaceCommands } = await import("../src/agent/workspace.js");
+export async function registerTestCommands(): Promise<CommandController> {
+  const { CommandRegistry, CommandController } = await import("../src/agent/controllers/command-controller.js");
+  const { registerWorkspaceCommands } = await import("../src/agent/controllers/workspace-controller.js");
   const registry = new CommandRegistry();
-  registerWorkspaceCommands(undefined, registry.scoped("workspace"));
+  const controller = new CommandController(registry);
+  const noopDisplay = { print: () => {}, printForemanMessage: () => {} } as WorkerDisplay;
+  registerWorkspaceCommands(undefined, registry.scoped("workspace"), noopDisplay);
   const noop = async () => {};
   registry.register("exit",   { description: "Exit", handler: noop });
   registry.register("clear",  { description: "Clear the conversation", handler: noop });
@@ -31,5 +34,5 @@ export async function registerTestCommands(): Promise<CommandRegistry> {
     description: "Mark the current task as done",
     handler: async () => "task-complete",
   });
-  return registry;
+  return controller;
 }

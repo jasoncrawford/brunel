@@ -4,10 +4,12 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from "vitest";
 import { getConfig } from "../src/config.js";
-import { printForemanMessage } from "../src/agent/display.js";
+import { Display } from "../src/agent/views/display.js";
 import { stripAnsi } from "./helpers.js";
-import { statusBar } from "../src/agent/status-bar.js";
+import { statusBar } from "../src/agent/views/status-bar.js";
 import * as Wire from "../shared/wire.js";
+
+let testDisplay: Display;
 
 function captureOutput(fn: () => void): string {
   let output = "";
@@ -20,6 +22,7 @@ function captureOutput(fn: () => void): string {
 }
 
 beforeEach(() => {
+  testDisplay = new Display(getConfig());
   statusBar.stop();
   getConfig().verbose = false;
 });
@@ -39,11 +42,11 @@ describe("printForemanMessage", () => {
       issue: { number: 42, title: "Fix the bug", body: "", labels: [], repoUrl: "https://github.com/owner/repo" },
     };
     // task_assigned is verbose-only — silent in default mode
-    const quietOutput = captureOutput(() => printForemanMessage(msg));
+    const quietOutput = captureOutput(() => testDisplay.printForemanMessage(msg));
     expect(stripAnsi(quietOutput).trim()).toBe("");
 
     getConfig().verbose = true;
-    const verboseOutput = captureOutput(() => printForemanMessage(msg));
+    const verboseOutput = captureOutput(() => testDisplay.printForemanMessage(msg));
     const plain = stripAnsi(verboseOutput);
     expect(plain).toContain("#42");
     expect(plain).toContain("Fix the bug");
@@ -55,7 +58,7 @@ describe("printForemanMessage", () => {
       taskId: "task-1",
       issue: { number: 7, title: "Multi word title", body: "", labels: [], repoUrl: "https://github.com/owner/repo" },
     };
-    const output = captureOutput(() => printForemanMessage(msg));
+    const output = captureOutput(() => testDisplay.printForemanMessage(msg));
     // Strip trailing newline from console.log and check no embedded newlines
     const trimmed = stripAnsi(output).trim();
     expect(trimmed).not.toContain("\n");
@@ -67,7 +70,7 @@ describe("printForemanMessage", () => {
       taskId: "task-1",
       event: { id: "evt-1", name: "issue_comment", payload: {} },
     };
-    const output = captureOutput(() => printForemanMessage(msg));
+    const output = captureOutput(() => testDisplay.printForemanMessage(msg));
     expect(stripAnsi(output).trim()).toBe("");
   });
 
@@ -78,7 +81,7 @@ describe("printForemanMessage", () => {
       taskId: "task-1",
       event: { id: "evt-1", name: "issue_comment", payload: {} },
     };
-    const output = captureOutput(() => printForemanMessage(msg));
+    const output = captureOutput(() => testDisplay.printForemanMessage(msg));
     expect(stripAnsi(output)).toContain("issue_comment");
   });
 
@@ -91,7 +94,7 @@ describe("printForemanMessage", () => {
       taskId: "task-1",
       event: { id: "evt-1", name: "issue_comment", payload: {} },
     };
-    const output = captureOutput(() => printForemanMessage(msg));
+    const output = captureOutput(() => testDisplay.printForemanMessage(msg));
     const plain = stripAnsi(output);
     expect(plain).toMatch(/\[\d{2}:\d{2}:\d{2}\]/);
   });
@@ -107,7 +110,7 @@ describe("printForemanMessage", () => {
         payload: { action: "completed", check_run: { name: "CI / build", conclusion: "failure" } },
       },
     };
-    const output = captureOutput(() => printForemanMessage(msg));
+    const output = captureOutput(() => testDisplay.printForemanMessage(msg));
     const plain = stripAnsi(output);
     expect(plain).toContain("CI / build");
     expect(plain).toContain("failure");
@@ -120,7 +123,7 @@ describe("printForemanMessage", () => {
       taskId: "task-1",
       event: { id: "evt-1", name: "check_suite", payload: { action: "completed" } },
     };
-    const output = captureOutput(() => printForemanMessage(msg));
+    const output = captureOutput(() => testDisplay.printForemanMessage(msg));
     const plain = stripAnsi(output);
     expect(plain).toContain("check_suite/completed");
   });
@@ -132,7 +135,7 @@ describe("printForemanMessage", () => {
       taskId: "task-1",
       event: { id: "evt-2", name: "pull_request", payload: {} },
     };
-    const output = captureOutput(() => printForemanMessage(msg));
+    const output = captureOutput(() => testDisplay.printForemanMessage(msg));
     const trimmed = stripAnsi(output).trim();
     expect(trimmed).not.toContain("\n");
   });
@@ -142,28 +145,28 @@ describe("printForemanMessage", () => {
 describe("printForemanMessage - hello_ack", () => {
   it("hello_ack, VERBOSE=false → silent", () => {
     const msg: Wire.ForemanMessage = { type: "hello_ack", workerId: "w-1", status: "idle" };
-    const output = captureOutput(() => printForemanMessage(msg));
+    const output = captureOutput(() => testDisplay.printForemanMessage(msg));
     expect(stripAnsi(output).trim()).toBe("");
   });
 
   it("hello_ack, VERBOSE=true → prints ack status", () => {
     getConfig().verbose = true;
     const msg: Wire.ForemanMessage = { type: "hello_ack", workerId: "w-1", status: "idle" };
-    const output = captureOutput(() => printForemanMessage(msg));
+    const output = captureOutput(() => testDisplay.printForemanMessage(msg));
     expect(stripAnsi(output)).toContain("idle");
   });
 
   it("hello_ack, VERBOSE=true → includes status for busy", () => {
     getConfig().verbose = true;
     const msg: Wire.ForemanMessage = { type: "hello_ack", workerId: "w-1", status: "busy" };
-    const output = captureOutput(() => printForemanMessage(msg));
+    const output = captureOutput(() => testDisplay.printForemanMessage(msg));
     expect(stripAnsi(output)).toContain("busy");
   });
 
   it("hello_ack, VERBOSE=true → includes status for cancelled", () => {
     getConfig().verbose = true;
     const msg: Wire.ForemanMessage = { type: "hello_ack", workerId: "w-1", status: "cancelled" };
-    const output = captureOutput(() => printForemanMessage(msg));
+    const output = captureOutput(() => testDisplay.printForemanMessage(msg));
     expect(stripAnsi(output)).toContain("cancelled");
   });
 });
@@ -171,34 +174,34 @@ describe("printForemanMessage - hello_ack", () => {
 describe("printForemanMessage - foreman_error", () => {
   it("foreman_error always prints the message (not verbose-only)", () => {
     const msg: Wire.ForemanMessage = { type: "foreman_error", message: "DB connection lost", fatal: false };
-    const output = captureOutput(() => printForemanMessage(msg));
+    const output = captureOutput(() => testDisplay.printForemanMessage(msg));
     expect(stripAnsi(output)).toContain("DB connection lost");
   });
 
   it("foreman_error fatal=true also prints the message", () => {
     const msg: Wire.ForemanMessage = { type: "foreman_error", message: "Catastrophic failure", fatal: true };
-    const output = captureOutput(() => printForemanMessage(msg));
+    const output = captureOutput(() => testDisplay.printForemanMessage(msg));
     expect(stripAnsi(output)).toContain("Catastrophic failure");
   });
 
   it("foreman_error prints even when verbose=false", () => {
     getConfig().verbose = false;
     const msg: Wire.ForemanMessage = { type: "foreman_error", message: "Visible error", fatal: false };
-    const output = captureOutput(() => printForemanMessage(msg));
+    const output = captureOutput(() => testDisplay.printForemanMessage(msg));
     expect(stripAnsi(output.trim())).not.toBe("");
     expect(stripAnsi(output)).toContain("Visible error");
   });
 
   it("foreman_error output contains error prefix", () => {
     const msg: Wire.ForemanMessage = { type: "foreman_error", message: "Something broke", fatal: false };
-    const output = captureOutput(() => printForemanMessage(msg));
+    const output = captureOutput(() => testDisplay.printForemanMessage(msg));
     expect(stripAnsi(output)).toContain("[foreman error]");
   });
 });
 
 describe("printForemanMessage - _default", () => {
   it("unknown type prints <type>", () => {
-    const output = captureOutput(() => printForemanMessage({ type: "unknown_future_type" } as any));
+    const output = captureOutput(() => testDisplay.printForemanMessage({ type: "unknown_future_type" } as any));
     expect(stripAnsi(output)).toContain("unknown_future_type");
   });
 });

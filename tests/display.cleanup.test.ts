@@ -2,12 +2,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { stripAnsi } from "./helpers.js";
 import { getConfig } from "../src/config.js";
 import {
-  print, fmtTime, s,
-  distributeWidths,
-} from "../src/agent/display.js";
-import { statusBar } from "../src/agent/status-bar.js";
+  fmtTime, s, distributeWidths, Display,
+} from "../src/agent/views/display.js";
+import { statusBar } from "../src/agent/views/status-bar.js";
+
+let testDisplay: Display;
 
 beforeEach(() => {
+  testDisplay = new Display(getConfig());
   statusBar.stop();
   getConfig().verbose = false;
 });
@@ -107,7 +109,7 @@ describe("print() via _inputPrintCallback path - verbose timestamp", () => {
     const cb = vi.fn();
     statusBar.inputPrint = cb;
     getConfig().verbose = true;
-    const output = captureOutput(() => print("hello"));
+    const output = captureOutput(() => testDisplay.print("hello"));
     statusBar.inputPrint = null;
 
     const plain = stripAnsi(output);
@@ -120,7 +122,7 @@ describe("print() via _inputPrintCallback path - verbose timestamp", () => {
     const cb = vi.fn();
     statusBar.inputPrint = cb;
     getConfig().verbose = false;
-    const output = captureOutput(() => print("world"));
+    const output = captureOutput(() => testDisplay.print("world"));
     statusBar.inputPrint = null;
 
     const plain = stripAnsi(output);
@@ -132,7 +134,7 @@ describe("print() via _inputPrintCallback path - verbose timestamp", () => {
     const cb = vi.fn();
     statusBar.inputPrint = cb;
     getConfig().verbose = true;
-    const output = captureOutput(() => print("line one\nline two"));
+    const output = captureOutput(() => testDisplay.print("line one\nline two"));
     statusBar.inputPrint = null;
 
     const plain = stripAnsi(output);

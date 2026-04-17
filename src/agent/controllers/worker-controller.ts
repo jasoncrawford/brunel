@@ -4,18 +4,29 @@ import { promisify } from "node:util";
 import path from "node:path";
 import os from "node:os";
 import { WebSocket } from "ws";
-import * as display from "./display.js";
-import { StatusBar, statusBar } from "./status-bar.js";
-import { buildInitialPrompt, buildEventPrompt } from "./worker-prompts.js";
-import type { EffortValue } from "./settings.js";
-import * as Wire from "../../shared/wire.js";
-import { Workspace, confirmIfUnsafe } from "./workspace.js";
-import { fmtError } from "../utils.js";
-import { getConfig } from "../config.js";
-import type { CommandRegistry } from "./command-registry.js";
-import { pick } from "./input.js";
+import { c } from "../views/display.js";
+import { StatusBar, statusBar } from "../views/status-bar.js";
+import { buildInitialPrompt, buildEventPrompt } from "../worker-prompts.js";
+import type { EffortValue } from "../models/settings.js";
+import * as Wire from "../../../shared/wire.js";
+import { Workspace, confirmIfUnsafe } from "../models/workspace.js";
+import { fmtError } from "../../utils.js";
+import { getConfig } from "../../config.js";
+import type { CommandRegistry } from "./command-controller.js";
+import { pick } from "../views/input.js";
 
 const execAsync = promisify(exec);
+
+// ── WorkerDisplay interface ───────────────────────────────────────────────────
+
+/**
+ * Minimal display interface required by worker controllers.
+ * Satisfied structurally by Display; tests can pass lightweight stubs.
+ */
+export interface WorkerDisplay {
+  print(line: string | null): void;
+  printForemanMessage(msg: Wire.ForemanMessage): void;
+}
 
 // ── Agent ID generation ────────────────────────────────────────────────────────
 
@@ -102,10 +113,6 @@ export function debounceMs(events: Wire.WebhookEvent[]): number {
 
 export type WsFactory = (agentId: string, taskId?: string) => WebSocket;
 export type RunQuery = (prompt: string, sessionId: string | undefined, abortController?: AbortController, model?: string, effort?: EffortValue) => Promise<string | undefined>;
-export type WorkerDisplay = {
-  print: (line: string | null) => void;
-  printForemanMessage: (msg: Wire.ForemanMessage) => void;
-};
 
 export type WorkerSessionOptions = {
   afterTask?: () => Promise<void>;
@@ -126,35 +133,6 @@ export type TaskQuitInfo = {
   workerId: string;
   issueClosed: boolean;
 };
-
-/**
- * Prompt the user before quitting with an active task.
- *
- * - Issue closed but not complete: asks whether to complete first (default yes).
- * - Issue still open: warns about unassignment and asks to confirm quit (default no).
- *
- * Returns 'quit' to proceed without completing, 'complete-and-quit' to mark
- * the task complete then quit, or 'cancel' to stay in the worker.
- *
- * An injectable pickFn is accepted so callers can supply a mock in tests.
- */
-export async function confirmTaskQuit(
-  info: TaskQuitInfo,
-  pickFn: (options: string[]) => Promise<number> = pick,
-): Promise<"quit" | "complete-and-quit" | "cancel"> {
-  if (info.issueClosed) {
-    display.print(display.c.amber(`\nTask #${info.taskNumber} is closed but not complete. Complete it before exiting?`));
-    const idx = await pickFn(["Yes, complete before exiting", "No, just exit", "Don't exit"]);
-    if (idx === 0) return "complete-and-quit";
-    if (idx === 1) return "quit";
-    return "cancel";
-  } else {
-    display.print(display.c.amber(`\nTask #${info.taskNumber} is still open. Quitting now will unassign ${info.workerId}. Quit anyway?`));
-    const idx = await pickFn(["No, keep working", "Yes, quit anyway"]);
-    if (idx === 1) return "quit";
-    return "cancel";
-  }
-}
 
 /** A prompt queued by WorkerSession for main() to execute. */
 export type QueuedPrompt = { prompt: string; fresh: boolean };
@@ -281,7 +259,7 @@ export class WorkerSession {
       try { await this.options.afterTask(); } catch (err) {
         // Log but don't abort — the task IS complete even if workspace cleanup fails.
         // Returning early here would leave the task stuck on the foreman forever.
-        this.display.print(display.c.amber(`afterTask failed: ${fmtError(err)}`));
+        this.display.print(c.amber(`afterTask failed: ${fmtError(err)}`));
       }
     }
     this.sendTaskMessage({
@@ -292,7 +270,7 @@ export class WorkerSession {
     this.currentTaskId = undefined;
     this.currentIssue = undefined;
     this.statusBar.update({ taskNumber: undefined, prNumber: undefined, branch: "" });
-    this.display.print(display.c.sageGreen("Task complete. Waiting for next task..."));
+    this.display.print(c.sageGreen("Task complete. Waiting for next task..."));
     return "task-complete";
   }
 
@@ -312,6 +290,35 @@ export class WorkerSession {
       workerId: this.agentId,
       issueClosed: this.issueClosed,
     };
+  }
+
+  /**
+   * Prompt the user before quitting with an active task.
+   *
+   * - Issue closed but not complete: asks whether to complete first (default yes).
+   * - Issue still open: warns about unassignment and asks to confirm quit (default no).
+   *
+   * Returns 'quit' to proceed without completing, 'complete-and-quit' to mark
+   * the task complete then quit, or 'cancel' to stay in the worker.
+   *
+   * An injectable pickFn is accepted so callers can supply a mock in tests.
+   */
+  async confirmTaskQuit(
+    info: TaskQuitInfo,
+    pickFn: (options: string[]) => Promise<number> = pick,
+  ): Promise<"quit" | "complete-and-quit" | "cancel"> {
+    if (info.issueClosed) {
+      this.display.print(c.amber(`\nTask #${info.taskNumber} is closed but not complete. Complete it before exiting?`));
+      const idx = await pickFn(["Yes, complete before exiting", "No, just exit", "Don't exit"]);
+      if (idx === 0) return "complete-and-quit";
+      if (idx === 1) return "quit";
+      return "cancel";
+    } else {
+      this.display.print(c.amber(`\nTask #${info.taskNumber} is still open. Quitting now will unassign ${info.workerId}. Quit anyway?`));
+      const idx = await pickFn(["No, keep working", "Yes, quit anyway"]);
+      if (idx === 1) return "quit";
+      return "cancel";
+    }
   }
 
   /**
@@ -480,7 +487,7 @@ export class WorkerSession {
 
     ws.on("error", (err: Error) => {
       if (ws !== this.ws) return; // stale error from a previous connection
-      this.display.print(display.c.amber(`WebSocket error: ${err.message}`));
+      this.display.print(c.amber(`WebSocket error: ${err.message}`));
       // Ensure close fires even for errors that don't automatically close the socket
       // (e.g. some TLS negotiation failures on older Node.js / ws versions).
       ws.terminate();
@@ -518,15 +525,15 @@ export class WorkerSession {
           prNumber: undefined,
           branch: "",
         });
-        this.display.print(display.c.amber("Task cancelled (reassigned to another worker)."));
+        this.display.print(c.amber("Task cancelled (reassigned to another worker)."));
         const workspace = this.options.workspace;
         if (workspace?.isCreated) {
           // Track the reset promise so that task_assigned prompts are deferred until
           // the workspace is clean — preventing a new task from running in a dirty state.
           this._resetPromise = workspace.reset().then(() => {
-            this.display.print(display.c.amber("Workspace reset."));
+            this.display.print(c.amber("Workspace reset."));
           }).catch((err: unknown) => {
-            this.display.print(display.c.boldRed(`Workspace reset failed: ${err instanceof Error ? err.message : String(err)}`));
+            this.display.print(c.boldRed(`Workspace reset failed: ${err instanceof Error ? err.message : String(err)}`));
           }).finally(() => {
             this._resetPromise = null;
           });
@@ -548,7 +555,7 @@ export class WorkerSession {
       this.statusBar.update({ taskNumber: msg.issue.number, prNumber: undefined });
       void this.refreshBranch();
       const initialPrompt = buildInitialPrompt(msg.issue, !!this.options.workspace);
-      this.display.print(display.c.sageGreen(initialPrompt));
+      this.display.print(c.sageGreen(initialPrompt));
       // If a workspace reset is in progress (from a cancelled hello_ack), defer the
       // prompt until the reset finishes — otherwise the task could run in a dirty workspace.
       const enqueue = () => this.enqueuePrompt(initialPrompt, true);
@@ -560,7 +567,7 @@ export class WorkerSession {
     } else if (msg.type === "event_notification") {
       // Ignore stale events forwarded for tasks we're no longer working on.
       if (msg.taskId !== this.currentTaskId) {
-        this.display.print(display.c.darkGray(`[worker] ignoring event_notification for task ${msg.taskId} (current: ${this.currentTaskId ?? "none"})`));
+        this.display.print(c.darkGray(`[worker] ignoring event_notification for task ${msg.taskId} (current: ${this.currentTaskId ?? "none"})`));
         return;
       }
 
@@ -626,7 +633,7 @@ export class WorkerSession {
 
   private buildAndLogEventPrompt(events: Wire.WebhookEvent[]): string {
     const prompt = buildEventPrompt(events);
-    this.display.print(display.c.sageGreen(prompt));
+    this.display.print(c.sageGreen(prompt));
     return prompt;
   }
 
@@ -639,12 +646,12 @@ export class WorkerSession {
  * already be scoped, e.g. registry.scoped("worker")). Commands degrade
  * gracefully when not connected to a foreman.
  */
-export function registerWorkerCommands(session: WorkerSession | undefined, registry: CommandRegistry): void {
+export function registerWorkerCommands(session: WorkerSession | undefined, registry: CommandRegistry, display: WorkerDisplay): void {
   registry.register("complete", {
     description: "Mark the current task as done",
     handler: async () => {
       if (!session) {
-        display.print(display.c.boldRed("Not connected to a foreman."));
+        display.print(c.boldRed("Not connected to a foreman."));
         return undefined;
       }
       return session.completeCurrentTask();
@@ -658,7 +665,7 @@ export function registerWorkerCommands(session: WorkerSession | undefined, regis
  * a cleanup function — does NOT call main(). The caller (main itself) owns
  * the query loop and calls cleanup() after the loop exits.
  */
-export async function startWorkerMode(): Promise<{
+export async function startWorkerMode(display: WorkerDisplay): Promise<{
   session: WorkerSession;
   cleanup: () => Promise<void>;
 }> {
@@ -668,25 +675,53 @@ export async function startWorkerMode(): Promise<{
   const repoUrl = config.repoUrl ?? `https://${config.githubToken}@github.com/${config.githubRepo}.git`;
 
   const confirm = async (msg: string): Promise<boolean> => {
-    display.print(display.c.amber(`\n⚠ Potential data loss:\n${msg}`));
+    display.print(c.amber(`\n⚠ Potential data loss:\n${msg}`));
     const idx = await pick(["Yes, proceed", "No, cancel"]);
     return idx === 0;
   };
 
   const workspace = new Workspace(workspaceDir, statusBar.agentId, repoUrl, originalCwd, confirm);
+
+  // Subscribe to workspace events to display progress messages.
+  workspace.on("clone-start", ({ repoUrl: url, dir }: { repoUrl: string; dir: string }) => {
+    display.print(c.sageGreen(`[workspace] Cloning ${url} → ${dir}`));
+  });
+  workspace.on("npm-install", ({ dir }: { dir: string }) => {
+    display.print(c.sageGreen(`[workspace] Installing dependencies in ${dir}`));
+  });
+  workspace.on("reset-start", ({ dir }: { dir: string }) => {
+    display.print(c.sageGreen(`[workspace] Resetting ${dir}`));
+  });
+  workspace.on("reset-retry", ({ error }: { dir: string; error: string }) => {
+    display.print(c.amber(`[workspace] Reset failed, retrying: ${error}`));
+  });
+  workspace.on("reset-reclone", ({ repoUrl: url, dir, error }: { dir: string; error: string; repoUrl: string }) => {
+    display.print(c.amber(`[workspace] Reset failed again, re-cloning: ${error}`));
+    display.print(c.sageGreen(`[workspace] Re-cloning ${url} → ${dir}`));
+  });
+  workspace.on("destroy", ({ dir }: { dir: string }) => {
+    display.print(c.sageGreen(`[workspace] Destroying ${dir}`));
+  });
+  workspace.on("prune-start", ({ workspaceDir: dir }: { workspaceDir: string }) => {
+    display.print(c.sageGreen(`[workspace] Pruning orphaned workspaces in ${dir}`));
+  });
+  workspace.on("prune-remove", ({ dir }: { dir: string }) => {
+    display.print(c.sageGreen(`[workspace] Removing orphaned workspace ${dir}`));
+  });
+
   await workspace.create();
   process.chdir(workspace.dir);
 
   const afterTask = async () => {
     const ok = await confirmIfUnsafe(workspace, workspace.confirm);
     if (!ok) {
-      display.print(display.c.amber("Workspace reset cancelled. Task not marked complete."));
+      display.print(c.amber("Workspace reset cancelled. Task not marked complete."));
       throw new Error("cancelled");
     }
     try {
       await workspace.reset();
     } catch (err) {
-      display.print(display.c.boldRed(`Workspace reset failed: ${fmtError(err)}. Task not marked complete.`));
+      display.print(c.boldRed(`Workspace reset failed: ${fmtError(err)}. Task not marked complete.`));
       throw err;
     }
   };
@@ -706,14 +741,9 @@ export async function startWorkerMode(): Promise<{
     return ws;
   };
 
-  const workerDisplay: WorkerDisplay = {
-    print: display.print,
-    printForemanMessage: display.printForemanMessage,
-  };
-
   statusBar.update({ model: getConfig().model, effort: getConfig().effort });
 
-  const session = new WorkerSession(statusBar, wsFactory, workerDisplay, {
+  const session = new WorkerSession(statusBar, wsFactory, display, {
     afterTask,
     workspace,
     pingIntervalMs: getConfig().pingIntervalMs,
@@ -724,7 +754,7 @@ export async function startWorkerMode(): Promise<{
     shuttingDown = true;
     const taskInfo = session.getTaskQuitInfo();
     if (taskInfo) {
-      const choice = await confirmTaskQuit(taskInfo);
+      const choice = await session.confirmTaskQuit(taskInfo);
       if (choice === "cancel") { shuttingDown = false; return; }
       if (choice === "complete-and-quit") await session.completeCurrentTask();
     }

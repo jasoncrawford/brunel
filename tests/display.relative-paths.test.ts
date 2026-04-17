@@ -4,7 +4,7 @@
 import path from "path";
 import { describe, it, expect } from "vitest";
 import { stripAnsi } from "./helpers.js";
-import { toRelativePath, resolve, TOOL_CALL_FMT, type FmtTable } from "../src/agent/display.js";
+import { toRelativePath, resolve, TOOL_CALL_FMT, type FmtTable } from "../src/agent/views/display.js";
 
 function r(table: FmtTable, key: string, data: any): string | null {
   const result = resolve(table, key, data);

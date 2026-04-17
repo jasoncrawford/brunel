@@ -1,8 +1,8 @@
 import { EventEmitter } from "node:events";
-import { shortWorkerId } from "../../shared/utils.js";
-import { getConfig } from "../config.js";
-import type { Settings } from "./settings.js";
-import type { EffortValue } from "./settings.js";
+import { shortWorkerId } from "../../../shared/utils.js";
+import { getConfig } from "../../config.js";
+import type { Settings } from "../models/settings.js";
+import type { EffortValue } from "../models/settings.js";
 
 // ── Worker status types ────────────────────────────────────────────────────────
 

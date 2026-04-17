@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PassThrough } from "stream";
-import { ask } from "../src/agent/input.js";
-import * as display from "../src/agent/display.js";
-import { statusBar } from "../src/agent/status-bar.js";
+import { ask } from "../src/agent/views/input.js";
+import { Display } from "../src/agent/views/display.js";
+import { getConfig } from "../src/config.js";
+import { statusBar } from "../src/agent/views/status-bar.js";
 
 function makeStdin() {
   const stream = new PassThrough();
@@ -30,7 +31,10 @@ function collectOutput(spy: ReturnType<typeof vi.spyOn>): string {
   return spy.mock.calls.map(c => String(c[0])).join("");
 }
 
+let testDisplay: Display;
+
 beforeEach(() => {
+  testDisplay = new Display(getConfig());
   origStdin = process.stdin;
   origColumns = process.stdout.columns;
   vi.spyOn(process.stdout, "write").mockImplementation(() => true);
@@ -256,7 +260,7 @@ describe("ask() - up/down arrow navigation", () => {
 // When the persistent status bar changes while ask() has a multiline buffer
 // displayed (e.g. from a large paste), the old code called drawFresh() via
 // _inputPrintCallback.  drawFresh() assumes the cursor is at a fresh new line
-// (after display.print()); when called with the cursor in the buffer area it
+// (after testDisplay.print()); when called with the cursor in the buffer area it
 // writes the prompt at the wrong row, leaving status-bar text interleaved with
 // the buffer content.
 //
@@ -336,13 +340,13 @@ describe("ask() - status update during multiline input (issue #486)", () => {
 
 // ── Print callback (worker mode cursor fix) ────────────────────────────────────
 
-describe("display.print() callback for ask() redraw", () => {
-  it("setInputPrintCallback registers a callback called on display.print()", () => {
+describe("testDisplay.print() callback for ask() redraw", () => {
+  it("setInputPrintCallback registers a callback called on testDisplay.print()", () => {
     const callback = vi.fn();
     statusBar.inputPrint = callback;
     // Spy on console.log to prevent actual output
     vi.spyOn(console, "log").mockImplementation(() => {});
-    display.print("test message");
+    testDisplay.print("test message");
     expect(callback).toHaveBeenCalled();
     statusBar.inputPrint = null;
   });
@@ -352,11 +356,11 @@ describe("display.print() callback for ask() redraw", () => {
     statusBar.inputPrint = callback;
     statusBar.inputPrint = null;
     vi.spyOn(console, "log").mockImplementation(() => {});
-    display.print("test message");
+    testDisplay.print("test message");
     expect(callback).not.toHaveBeenCalled();
   });
 
-  it("ask() redraws prompt after display.print() during input", async () => {
+  it("ask() redraws prompt after testDisplay.print() during input", async () => {
     setColumns(80);
     const writeSpy = vi.mocked(process.stdout.write);
     vi.spyOn(console, "log").mockImplementation(() => {});
@@ -366,8 +370,8 @@ describe("display.print() callback for ask() redraw", () => {
       stdin.push("hello");
       writeSpy.mockClear();
 
-      // Simulate display.print() being called while ask() is running
-      display.print("  Connected to foreman.");
+      // Simulate testDisplay.print() being called while ask() is running
+      testDisplay.print("  Connected to foreman.");
 
       // The prompt should be redrawn after print, starting with \r (not \r\n —
       // console.log already moved to a new line, so no extra blank line needed)
