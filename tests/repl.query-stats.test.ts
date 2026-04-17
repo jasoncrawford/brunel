@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { QueryStats } from "../src/agent/models/query-stats.js";
-import * as display from "../src/agent/views/display.js";
+import * as queryStatsModule from "../src/agent/models/query-stats.js";
 import { stripAnsi } from "./helpers.js";
 
 afterEach(() => {
@@ -187,8 +187,7 @@ describe("QueryStats - elapsedSecs", () => {
 describe("QueryStats - getStatusText", () => {
   it("uses a verb from pickWorkingVerb", () => {
     const verb = "Welding";
-    vi.spyOn(display, "pickWorkingVerb").mockReturnValueOnce(verb);
-    const stats = new QueryStats();
+    const stats = new QueryStats(undefined, () => verb);
     expect(stripAnsi(stats.getStatusText())).toContain(verb);
   });
 

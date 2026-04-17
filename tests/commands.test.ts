@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { CommandRegistry } from "../src/agent/controllers/command-registry.js";
+import { CommandController } from "../src/agent/controllers/command-controller.js";
 import { registerTestCommands } from "./helpers.js";
 
-let registry: CommandRegistry;
+let registry: CommandController;
 
 beforeEach(() => {
-  registry = new CommandRegistry();
+  registry = new CommandController();
 });
 
 // ── lookup ────────────────────────────────────────────────────────────────────

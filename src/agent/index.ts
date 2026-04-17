@@ -5,20 +5,20 @@ import fs from "fs";
 import { fileURLToPath } from "url";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { CanUseTool, PermissionMode, PermissionResult } from "@anthropic-ai/claude-agent-sdk";
-import * as display from "./views/display.js";
-import { Display, initDisplay } from "./views/display.js";
+import { Display, c, hr, clearBreak, fmtArgs } from "./views/display.js";
 import { StatusBar, statusBar, initStatusBar } from "./views/status-bar.js";
 import { ask, pick, pickMultiple, pickQuestion } from "./views/input.js";
 import type { PickQuestionResult } from "./views/input.js";
-import { WorkerSession, registerWorkerCommands, startWorkerMode, generateAgentId, confirmTaskQuit } from "./controllers/worker.js";
-import type { RunQuery } from "./controllers/worker.js";
+import { WorkerSession, registerWorkerCommands, startWorkerMode, generateAgentId, confirmTaskQuit } from "./controllers/worker-controller.js";
+import type { RunQuery } from "./controllers/worker-controller.js";
 import { loadConfig, getConfig } from "../config.js";
 import { Workspace, confirmIfUnsafe } from "./models/workspace.js";
-import { registerWorkspaceCommands } from "./controllers/workspace-commands.js";
+import { registerWorkspaceCommands } from "./controllers/workspace-controller.js";
 import { fmtError } from "../utils.js";
 import { Settings, setCachedModels } from "./models/settings.js";
 import type { ModelInfo, FetchModelsFn, EffortValue } from "./models/settings.js";
-import { CommandRegistry } from "./controllers/command-registry.js";
+import { CommandController } from "./controllers/command-controller.js";
+import { SettingsController } from "./controllers/settings-controller.js";
 import { QueryStats } from "./models/query-stats.js";
 // ── Log file ──────────────────────────────────────────────────────────────────
 
@@ -42,13 +42,14 @@ type Question = { question: string; header: string; options: QuestionOption[]; m
 export async function handleAskUserQuestion(
   input: Record<string, unknown>,
   getStatusText: () => string,
+  display: Display,
 ): Promise<PermissionResult> {
   statusBar.stop();
   const questions = (input.questions as Question[]) ?? [];
   const answers: Record<string, string> = {};
 
   for (const q of questions) {
-    display.print(display.c.yellow(`\n? ${q.question}`));
+    display.print(c.yellow(`\n? ${q.question}`));
     if (q.multiSelect) {
       const lines = q.options.map(o => o.description ? `${o.label} — ${o.description}` : o.label);
       const idxs = await pickMultiple(lines);
@@ -71,9 +72,10 @@ export async function handleToolPermission(
   toolName: string,
   input: Record<string, unknown>,
   getStatusText: () => string,
+  display: Display,
 ): Promise<PermissionResult> {
   statusBar.stop();
-  display.print(display.c.amber(`\n⚠ ${toolName}(${display.fmtArgs(input)})`));
+  display.print(c.amber(`\n⚠ ${toolName}(${fmtArgs(input)})`));
   const idx = await pick(["Allow", "Deny"]);
   statusBar.start(getStatusText);
   if (idx === 0) return { behavior: "allow", updatedInput: input };
@@ -81,6 +83,7 @@ export async function handleToolPermission(
 }
 
 export async function runQuery(
+  display: Display,
   permConfig: { permissionMode: PermissionMode; allowDangerouslySkipPermissions: boolean },
   prompt: string,
   sessionId: string | undefined,
@@ -109,15 +112,15 @@ export async function runQuery(
   }
 
   const stats = new QueryStats();
-  const getStatusText = () => display.c.darkGray(stats.getStatusText());
+  const getStatusText = () => c.darkGray(stats.getStatusText());
   statusBar.start(getStatusText);
 
   const canUseTool: CanUseTool = async (toolName, input) => {
     if (toolName === "AskUserQuestion") {
-      return handleAskUserQuestion(input, getStatusText);
+      return handleAskUserQuestion(input, getStatusText, display);
     }
     if (permConfig.allowDangerouslySkipPermissions) return { behavior: "allow", updatedInput: input };
-    return handleToolPermission(toolName, input, getStatusText);
+    return handleToolPermission(toolName, input, getStatusText, display);
   };
 
   // Use caller-provided AbortController (worker mode) or create our own (REPL mode).
@@ -199,7 +202,7 @@ export async function runQuery(
   statusBar.stop(); // no-op if result message already stopped it
 
   if (!resultReceived) {
-    display.print(display.c.darkGray("\nInterrupted. What should the agent do instead?"));
+    display.print(c.darkGray("\nInterrupted. What should the agent do instead?"));
   }
 
   // Restore the callbacks and redraw the prompt. In worker mode this redraws
@@ -227,6 +230,7 @@ function createFetchModelsFn(permConfig: { permissionMode: PermissionMode }): Fe
 export async function main(
   runQueryFn: RunQuery,
   permConfig: { permissionMode: PermissionMode; allowDangerouslySkipPermissions: boolean },
+  display: Display,
   runWorkerMode?: boolean,
   workspaceCfg?: { workspaceDir: string; repoUrl: string },
   initialModel?: string,
@@ -236,16 +240,17 @@ export async function main(
   initStatusBar(new StatusBar({ agentId: generateAgentId(), settings }));
 
   // Worker mode setup: create workspace, session, signal handlers.
-  const workerCtx = runWorkerMode ? await startWorkerMode() : undefined;
+  const workerCtx = runWorkerMode ? await startWorkerMode(display) : undefined;
   const session = workerCtx?.session;
 
   const fetchModelsFn = createFetchModelsFn(permConfig);
+  const settingsCtrl = new SettingsController(settings, display);
 
   // Print the startup banner.
-  display.print(display.c.sageGreen(display.hr("═")));
-  display.print(display.c.skyBlue(display.s.bold("  Brunel Agent")));
-  display.print(display.c.lavender(`  Permissions: ${permConfig.permissionMode} | Model: ${settings.model ?? "default"} | Effort: ${settings.effort ?? "auto"} | Output: ${getConfig().verbose ? "verbose" : "quiet"} | Log: ${LOG_FILE}`));
-  display.print(display.c.sageGreen(display.hr("═")));
+  display.print(c.sageGreen(hr("═")));
+  display.print(c.skyBlue(display.s.bold("  Brunel Agent")));
+  display.print(c.lavender(`  Permissions: ${permConfig.permissionMode} | Model: ${settings.model ?? "default"} | Effort: ${settings.effort ?? "auto"} | Output: ${getConfig().verbose ? "verbose" : "quiet"} | Log: ${LOG_FILE}`));
+  display.print(c.sageGreen(hr("═")));
 
   process.stdout.write("\x1b[?2004h"); // enable bracketed paste mode
   process.stdin.setRawMode?.(true);
@@ -257,7 +262,7 @@ export async function main(
 
   const confirm = async (msg: string): Promise<boolean> => {
     statusBar.stop();
-    display.print(display.c.amber(`\n⚠ Potential data loss:\n${msg}`));
+    display.print(c.amber(`\n⚠ Potential data loss:\n${msg}`));
     const idx = await pick(["Yes, proceed", "No, cancel"]);
     return idx === 0;
   };
@@ -284,16 +289,16 @@ export async function main(
 
   // Register all commands. All commands are present in both REPL and worker
   // modes; commands that require a foreman connection degrade gracefully.
-  const registry = new CommandRegistry();
-  registerWorkspaceCommands(workspace, registry.scoped("workspace"));
-  registerWorkerCommands(session, registry.scoped("worker"));
+  const registry = new CommandController();
+  registerWorkspaceCommands(workspace, registry.scoped("workspace"), display);
+  registerWorkerCommands(session, registry.scoped("worker"), display);
   registry.register("exit", {
     description: "Exit",
     handler: async () => {
       if (!session) { await doExit(); return "exit"; }
       const taskInfo = session.getTaskQuitInfo();
       if (taskInfo) {
-        const choice = await confirmTaskQuit(taskInfo);
+        const choice = await confirmTaskQuit(taskInfo, display);
         if (choice === "cancel") return undefined;
         if (choice === "complete-and-quit") await session.completeCurrentTask();
       }
@@ -304,27 +309,25 @@ export async function main(
     description: "Clear the conversation",
     handler: async () => {
       sessionId = undefined;
-      display.print(display.clearBreak());
+      display.print(clearBreak());
     },
   });
   registry.register("model", {
     description: "Select the Claude model to use",
     handler: async (args) => {
-      await settings.pickModel(
+      await settingsCtrl.pickModel(
         args,
         (opts, idx) => pick(opts, { currentIdx: idx, escapable: true }),
         fetchModelsFn,
-        display.print,
       );
     },
   });
   registry.register("effort", {
     description: "Set the effort level for Claude's thinking",
     handler: async (args) => {
-      await settings.pickEffort(
+      await settingsCtrl.pickEffort(
         args,
         (opts, idx) => pick(opts, { currentIdx: idx, escapable: true }),
-        display.print,
       );
     },
   });
@@ -342,7 +345,7 @@ export async function main(
       sessionId = await runQueryFn(prompt, sessionId, ac, settings.model, settings.effort) ?? sessionId;
       return !ac.signal.aborted;
     } catch (err) {
-      console.error(display.c.boldRed(`\nERROR: ${fmtError(err)}`));
+      console.error(c.boldRed(`\nERROR: ${fmtError(err)}`));
       logFull("ERROR", err instanceof Error ? { message: err.message, stack: err.stack } : err);
       return false;
     } finally {
@@ -367,7 +370,7 @@ export async function main(
       if (!session) { await doExit(); break; }
       const taskInfo = session.getTaskQuitInfo();
       if (taskInfo) {
-        const choice = await confirmTaskQuit(taskInfo);
+        const choice = await confirmTaskQuit(taskInfo, display);
         if (choice === "cancel") continue;
         if (choice === "complete-and-quit") await session.completeCurrentTask();
       }
@@ -405,7 +408,7 @@ export async function main(
     if (action.type === "skip") continue;
 
     if (action.type === "unknown_command") {
-      display.print(display.c.boldRed(`Unknown command: /${action.command}`));
+      display.print(c.boldRed(`Unknown command: /${action.command}`));
       continue;
     }
 
@@ -442,14 +445,14 @@ export async function main(
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const config = await loadConfig(process.argv);
-  initDisplay(new Display(config));
+  const display = new Display(config);
   const permConfig = {
     permissionMode: config.permissionMode,
     allowDangerouslySkipPermissions: config.allowDangerouslySkipPermissions,
   };
 
   const boundRunQuery: RunQuery = (prompt, sessionId, ac, model, effort) =>
-    runQuery(permConfig, prompt, sessionId, ac, model, effort);
+    runQuery(display, permConfig, prompt, sessionId, ac, model, effort);
 
   const workspaceCfg = (config.githubRepo && config.githubToken)
     ? {
@@ -460,5 +463,5 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 
   const runWorkerMode = process.argv.includes("--worker-mode");
 
-  await main(boundRunQuery, permConfig, runWorkerMode, workspaceCfg, config.model, config.effort);
+  await main(boundRunQuery, permConfig, display, runWorkerMode, workspaceCfg, config.model, config.effort);
 }

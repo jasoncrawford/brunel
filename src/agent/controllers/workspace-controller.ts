@@ -1,5 +1,5 @@
-import { print, c } from "../views/display.js";
-import type { CommandRegistry } from "./command-registry.js";
+import { c, type WorkerDisplay } from "../views/display.js";
+import type { CommandController } from "./command-controller.js";
 import { Workspace, confirmIfUnsafe } from "../models/workspace.js";
 
 /**
@@ -9,21 +9,21 @@ import { Workspace, confirmIfUnsafe } from "../models/workspace.js";
  * Pass `undefined` when no GitHub repo is configured — commands that require
  * a workspace will print an appropriate error message.
  */
-export function registerWorkspaceCommands(workspace: Workspace | undefined, registry: CommandRegistry): void {
+export function registerWorkspaceCommands(workspace: Workspace | undefined, registry: CommandController, display: WorkerDisplay): void {
   registry.register("create", {
     description: "Create an isolated git checkout for this session",
     handler: async () => {
       if (!workspace) {
-        print(c.boldRed("Cannot create workspace: no GitHub repo configured."));
+        display.print(c.boldRed("Cannot create workspace: no GitHub repo configured."));
         return;
       }
       if (workspace.isCreated) {
-        print(c.amber(`Workspace already exists: ${workspace.dir}`));
+        display.print(c.amber(`Workspace already exists: ${workspace.dir}`));
         return;
       }
       await workspace.create();
       process.chdir(workspace.dir);
-      print(c.sageGreen(`Workspace created: ${workspace.dir}`));
+      display.print(c.sageGreen(`Workspace created: ${workspace.dir}`));
     },
   });
 
@@ -31,13 +31,13 @@ export function registerWorkspaceCommands(workspace: Workspace | undefined, regi
     description: "Reset workspace to clean main branch",
     handler: async () => {
       if (!workspace?.isCreated) {
-        print(c.boldRed("No workspace. Use /workspace:create first."));
+        display.print(c.boldRed("No workspace. Use /workspace:create first."));
         return;
       }
       const ok = await confirmIfUnsafe(workspace, workspace.confirm);
       if (!ok) return;
       await workspace.reset();
-      print(c.sageGreen("Workspace reset to main."));
+      display.print(c.sageGreen("Workspace reset to main."));
     },
   });
 
@@ -45,14 +45,14 @@ export function registerWorkspaceCommands(workspace: Workspace | undefined, regi
     description: "Remove the workspace checkout for this session",
     handler: async () => {
       if (!workspace?.isCreated) {
-        print(c.boldRed("No workspace in this session."));
+        display.print(c.boldRed("No workspace in this session."));
         return;
       }
       const ok = await confirmIfUnsafe(workspace, workspace.confirm);
       if (!ok) return;
       await workspace.destroy();
       process.chdir(workspace.originalCwd);
-      print(c.sageGreen(`Workspace removed. Now in: ${workspace.originalCwd}`));
+      display.print(c.sageGreen(`Workspace removed. Now in: ${workspace.originalCwd}`));
     },
   });
 
@@ -60,15 +60,15 @@ export function registerWorkspaceCommands(workspace: Workspace | undefined, regi
     description: "Remove orphaned worker workspace directories",
     handler: async () => {
       if (!workspace) {
-        print(c.boldRed("Cannot prune: no workspace directory configured."));
+        display.print(c.boldRed("Cannot prune: no workspace directory configured."));
         return;
       }
       const removed = await Workspace.prune(workspace.workspaceDir);
       if (removed.length === 0) {
-        print(c.sageGreen("Nothing to prune."));
+        display.print(c.sageGreen("Nothing to prune."));
       } else {
-        for (const dir of removed) print(c.darkGray(`  Removed: ${dir}`));
-        print(c.sageGreen(`Pruned ${removed.length} orphaned workspace(s).`));
+        for (const dir of removed) display.print(c.darkGray(`  Removed: ${dir}`));
+        display.print(c.sageGreen(`Pruned ${removed.length} orphaned workspace(s).`));
       }
     },
   });

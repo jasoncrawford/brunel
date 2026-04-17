@@ -1,4 +1,4 @@
-import type { CommandRegistry } from "../src/agent/controllers/command-registry.js";
+import type { CommandController } from "../src/agent/controllers/command-controller.js";
 
 export function stripAnsi(s: string): string {
   return s.replace(/\x1b\[[0-9;]*m/g, "");
@@ -14,14 +14,15 @@ export async function waitUntil(predicate: () => boolean): Promise<void> {
 /**
  * Register all standard built-in commands with minimal stubs.
  * Workspace commands use the real registerWorkspaceCommands (real descriptions, real handler logic).
- * Returns the populated CommandRegistry for use in tests.
+ * Returns the populated CommandController for use in tests.
  * Call this in beforeEach for tests that query the command registry.
  */
-export async function registerTestCommands(): Promise<CommandRegistry> {
-  const { CommandRegistry } = await import("../src/agent/controllers/command-registry.js");
-  const { registerWorkspaceCommands } = await import("../src/agent/controllers/workspace-commands.js");
-  const registry = new CommandRegistry();
-  registerWorkspaceCommands(undefined, registry.scoped("workspace"));
+export async function registerTestCommands(): Promise<CommandController> {
+  const { CommandController } = await import("../src/agent/controllers/command-controller.js");
+  const { registerWorkspaceCommands } = await import("../src/agent/controllers/workspace-controller.js");
+  const registry = new CommandController();
+  const noopDisplay = { print: () => {}, printForemanMessage: () => {} };
+  registerWorkspaceCommands(undefined, registry.scoped("workspace"), noopDisplay);
   const noop = async () => {};
   registry.register("exit",   { description: "Exit", handler: noop });
   registry.register("clear",  { description: "Clear the conversation", handler: noop });

@@ -652,17 +652,23 @@ export const FOREMAN_MESSAGE_FMT: FmtTable = {
   _default:           (m) => c.darkGray(`Unknown foreman message: ${m.type}`),
 };
 
-// ── Module-level state ────────────────────────────────────────────────────────
+// ── WorkerDisplay interface ───────────────────────────────────────────────────
 
-export const toolUseNames = new Map<string, string>();
-export const toolUseInputs = new Map<string, Record<string, unknown>>();
+/**
+ * Minimal display interface required by controllers (WorkerSession,
+ * SettingsController, workspace/worker command registrations).
+ * Satisfied by the Display class; tests can pass lightweight stubs.
+ */
+export interface WorkerDisplay {
+  print(line: string | null): void;
+  printForemanMessage(msg: Wire.ForemanMessage): void;
+}
 
 // ── Display class ─────────────────────────────────────────────────────────────
 
 /**
  * View class for terminal rendering. Receives config in its constructor so
- * config is injected rather than globally accessed. The singleton `display`
- * is initialized at startup via initDisplay() and used throughout the app.
+ * config is injected rather than globally accessed.
  *
  * Use `display.print(line)`, `display.printMessage(msg)`, etc. for output.
  * Use the module-level `c`, `s`, and formatting functions for pure utilities.
@@ -673,7 +679,13 @@ export class Display {
   /** The style object, exposed as an instance property for convenience. */
   readonly s = s;
 
+  private readonly _toolUseNames = new Map<string, string>();
+  private readonly _toolUseInputs = new Map<string, Record<string, unknown>>();
+
   constructor(readonly config: BrunelConfig) {}
+
+  /** Public accessor for tests to clear tool-use state between tests. */
+  get toolUseNames(): Map<string, string> { return this._toolUseNames; }
 
   /** Returns the usable terminal width, adjusted for verbose timestamp prefix. */
   effectiveWidth(fallback = W): number {
@@ -731,16 +743,16 @@ export class Display {
     if (b.type === "tool_use") {
       // Safe cast: we checked b.type === "tool_use" at runtime
       const tu = b as ToolUseBlock;
-      toolUseNames.set(tu.id, tu.name);
-      toolUseInputs.set(tu.id, tu.input);
+      this._toolUseNames.set(tu.id, tu.name);
+      this._toolUseInputs.set(tu.id, tu.input);
       this.print(this.resolve(TOOL_CALL_FMT, tu.name, tu));
       return;
     }
     if (b.type === "tool_result") {
       // Safe cast: we checked b.type === "tool_result" at runtime
       const tr = b as ToolResultBlock;
-      const name = toolUseNames.get(tr.tool_use_id) ?? "";
-      const _input = toolUseInputs.get(tr.tool_use_id);
+      const name = this._toolUseNames.get(tr.tool_use_id) ?? "";
+      const _input = this._toolUseInputs.get(tr.tool_use_id);
       this.print(this.resolve(tr.is_error ? TOOL_ERROR_FMT : TOOL_RESULT_FMT, name, { ...tr, _msg: msg, _input }));
       // Fire after the tool result is printed — tool has just finished running.
       statusBar.fireOnToolResult(name);
@@ -782,35 +794,6 @@ export class Display {
   }
 }
 
-// ── Singleton ─────────────────────────────────────────────────────────────────
-
-/** Shared singleton. Call initDisplay() at startup before first use. */
-export let display: Display = undefined!;
-
-/** Replace the shared singleton (called once at startup from index.ts). */
-export function initDisplay(d: Display): void { display = d; }
-
-// ── Standalone printing delegates ─────────────────────────────────────────────
-//
-// These delegate to the singleton Display instance. They exist so that callers
-// (including tests) can import and call print/printMessage/etc. directly without
-// needing to import the singleton. The Display must be initialized via
-// initDisplay() before these are called.
-
-/** @see Display.print */
-export function print(line: string | null): void { display.print(line); }
-
-/** @see Display.printBlock */
-export function printBlock(b: ContentBlock, role: "assistant" | "user", msg?: Record<string, unknown>): void {
-  display.printBlock(b, role, msg);
-}
-
-/** @see Display.printMessage */
-export function printMessage(msg: unknown): void { display.printMessage(msg); }
-
-/** @see Display.printForemanMessage */
-export function printForemanMessage(msg: Wire.ForemanMessage): void { display.printForemanMessage(msg); }
-
 // ── Standalone resolve delegate ───────────────────────────────────────────────
 //
 // The standalone resolve() function uses getConfig().verbose directly (rather
@@ -827,33 +810,4 @@ export function resolve(table: FmtTable, key: string, data: unknown): string | n
   if (typeof entry === "function") return entry(data);
   const fmt = getConfig().verbose ? entry.verbose : entry.quiet;
   return fmt ? fmt(data) : null;
-}
-
-// ── Working verb ───────────────────────────────────────────────────────────────
-
-export const WORKING_VERBS = [
-  "Building",
-  "Constructing",
-  "Surveying",
-  "Drafting",
-  "Engineering",
-  "Excavating",
-  "Framing",
-  "Grading",
-  "Laying foundations",
-  "Paving",
-  "Scaffolding",
-  "Welding",
-  "Wiring",
-  "Plumbing",
-  "Blueprinting",
-  "Pouring concrete",
-  "Raising beams",
-  "Riveting",
-  "Hoisting",
-  "Bolting",
-];
-
-export function pickWorkingVerb(): string {
-  return WORKING_VERBS[Math.floor(Math.random() * WORKING_VERBS.length)];
 }

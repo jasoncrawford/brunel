@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { resolveCommandFilePath, resolveContent, type CommandRegistry } from "../src/agent/controllers/command-registry.js";
+import { resolveCommandFilePath, resolveContent, type CommandController } from "../src/agent/controllers/command-controller.js";
 import { registerTestCommands } from "./helpers.js";
 
-let registry: CommandRegistry;
+let registry: CommandController;
 
 beforeEach(async () => { registry = await registerTestCommands(); });
 

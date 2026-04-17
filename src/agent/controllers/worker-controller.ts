@@ -4,7 +4,7 @@ import { promisify } from "node:util";
 import path from "node:path";
 import os from "node:os";
 import { WebSocket } from "ws";
-import { c, print, printForemanMessage } from "../views/display.js";
+import { c, type WorkerDisplay } from "../views/display.js";
 import { StatusBar, statusBar } from "../views/status-bar.js";
 import { buildInitialPrompt, buildEventPrompt } from "../worker-prompts.js";
 import type { EffortValue } from "../models/settings.js";
@@ -12,7 +12,7 @@ import * as Wire from "../../../shared/wire.js";
 import { Workspace, confirmIfUnsafe } from "../models/workspace.js";
 import { fmtError } from "../../utils.js";
 import { getConfig } from "../../config.js";
-import type { CommandRegistry } from "./command-registry.js";
+import type { CommandController } from "./command-controller.js";
 import { pick } from "../views/input.js";
 
 const execAsync = promisify(exec);
@@ -102,10 +102,6 @@ export function debounceMs(events: Wire.WebhookEvent[]): number {
 
 export type WsFactory = (agentId: string, taskId?: string) => WebSocket;
 export type RunQuery = (prompt: string, sessionId: string | undefined, abortController?: AbortController, model?: string, effort?: EffortValue) => Promise<string | undefined>;
-export type WorkerDisplay = {
-  print: (line: string | null) => void;
-  printForemanMessage: (msg: Wire.ForemanMessage) => void;
-};
 
 export type WorkerSessionOptions = {
   afterTask?: () => Promise<void>;
@@ -140,16 +136,17 @@ export type TaskQuitInfo = {
  */
 export async function confirmTaskQuit(
   info: TaskQuitInfo,
+  display: WorkerDisplay,
   pickFn: (options: string[]) => Promise<number> = pick,
 ): Promise<"quit" | "complete-and-quit" | "cancel"> {
   if (info.issueClosed) {
-    print(c.amber(`\nTask #${info.taskNumber} is closed but not complete. Complete it before exiting?`));
+    display.print(c.amber(`\nTask #${info.taskNumber} is closed but not complete. Complete it before exiting?`));
     const idx = await pickFn(["Yes, complete before exiting", "No, just exit", "Don't exit"]);
     if (idx === 0) return "complete-and-quit";
     if (idx === 1) return "quit";
     return "cancel";
   } else {
-    print(c.amber(`\nTask #${info.taskNumber} is still open. Quitting now will unassign ${info.workerId}. Quit anyway?`));
+    display.print(c.amber(`\nTask #${info.taskNumber} is still open. Quitting now will unassign ${info.workerId}. Quit anyway?`));
     const idx = await pickFn(["No, keep working", "Yes, quit anyway"]);
     if (idx === 1) return "quit";
     return "cancel";
@@ -639,12 +636,12 @@ export class WorkerSession {
  * already be scoped, e.g. registry.scoped("worker")). Commands degrade
  * gracefully when not connected to a foreman.
  */
-export function registerWorkerCommands(session: WorkerSession | undefined, registry: CommandRegistry): void {
+export function registerWorkerCommands(session: WorkerSession | undefined, registry: CommandController, display: WorkerDisplay): void {
   registry.register("complete", {
     description: "Mark the current task as done",
     handler: async () => {
       if (!session) {
-        print(c.boldRed("Not connected to a foreman."));
+        display.print(c.boldRed("Not connected to a foreman."));
         return undefined;
       }
       return session.completeCurrentTask();
@@ -658,7 +655,7 @@ export function registerWorkerCommands(session: WorkerSession | undefined, regis
  * a cleanup function — does NOT call main(). The caller (main itself) owns
  * the query loop and calls cleanup() after the loop exits.
  */
-export async function startWorkerMode(): Promise<{
+export async function startWorkerMode(display: WorkerDisplay): Promise<{
   session: WorkerSession;
   cleanup: () => Promise<void>;
 }> {
@@ -668,7 +665,7 @@ export async function startWorkerMode(): Promise<{
   const repoUrl = config.repoUrl ?? `https://${config.githubToken}@github.com/${config.githubRepo}.git`;
 
   const confirm = async (msg: string): Promise<boolean> => {
-    print(c.amber(`\n⚠ Potential data loss:\n${msg}`));
+    display.print(c.amber(`\n⚠ Potential data loss:\n${msg}`));
     const idx = await pick(["Yes, proceed", "No, cancel"]);
     return idx === 0;
   };
@@ -677,23 +674,23 @@ export async function startWorkerMode(): Promise<{
 
   // Subscribe to workspace events to display progress messages.
   workspace.on("clone-start", ({ repoUrl: url, dir }: { repoUrl: string; dir: string }) => {
-    print(c.sageGreen(`[workspace] Cloning ${url} → ${dir}`));
+    display.print(c.sageGreen(`[workspace] Cloning ${url} → ${dir}`));
   });
   workspace.on("npm-install", ({ dir }: { dir: string }) => {
-    print(c.sageGreen(`[workspace] Installing dependencies in ${dir}`));
+    display.print(c.sageGreen(`[workspace] Installing dependencies in ${dir}`));
   });
   workspace.on("reset-start", ({ dir }: { dir: string }) => {
-    print(c.sageGreen(`[workspace] Resetting ${dir}`));
+    display.print(c.sageGreen(`[workspace] Resetting ${dir}`));
   });
   workspace.on("reset-retry", ({ error }: { dir: string; error: string }) => {
-    print(c.amber(`[workspace] Reset failed, retrying: ${error}`));
+    display.print(c.amber(`[workspace] Reset failed, retrying: ${error}`));
   });
   workspace.on("reset-reclone", ({ repoUrl: url, dir, error }: { dir: string; error: string; repoUrl: string }) => {
-    print(c.amber(`[workspace] Reset failed again, re-cloning: ${error}`));
-    print(c.sageGreen(`[workspace] Re-cloning ${url} → ${dir}`));
+    display.print(c.amber(`[workspace] Reset failed again, re-cloning: ${error}`));
+    display.print(c.sageGreen(`[workspace] Re-cloning ${url} → ${dir}`));
   });
   workspace.on("destroy", ({ dir }: { dir: string }) => {
-    print(c.sageGreen(`[workspace] Destroying ${dir}`));
+    display.print(c.sageGreen(`[workspace] Destroying ${dir}`));
   });
 
   await workspace.create();
@@ -702,13 +699,13 @@ export async function startWorkerMode(): Promise<{
   const afterTask = async () => {
     const ok = await confirmIfUnsafe(workspace, workspace.confirm);
     if (!ok) {
-      print(c.amber("Workspace reset cancelled. Task not marked complete."));
+      display.print(c.amber("Workspace reset cancelled. Task not marked complete."));
       throw new Error("cancelled");
     }
     try {
       await workspace.reset();
     } catch (err) {
-      print(c.boldRed(`Workspace reset failed: ${fmtError(err)}. Task not marked complete.`));
+      display.print(c.boldRed(`Workspace reset failed: ${fmtError(err)}. Task not marked complete.`));
       throw err;
     }
   };
@@ -728,14 +725,9 @@ export async function startWorkerMode(): Promise<{
     return ws;
   };
 
-  const workerDisplay: WorkerDisplay = {
-    print,
-    printForemanMessage,
-  };
-
   statusBar.update({ model: getConfig().model, effort: getConfig().effort });
 
-  const session = new WorkerSession(statusBar, wsFactory, workerDisplay, {
+  const session = new WorkerSession(statusBar, wsFactory, display, {
     afterTask,
     workspace,
     pingIntervalMs: getConfig().pingIntervalMs,
@@ -746,7 +738,7 @@ export async function startWorkerMode(): Promise<{
     shuttingDown = true;
     const taskInfo = session.getTaskQuitInfo();
     if (taskInfo) {
-      const choice = await confirmTaskQuit(taskInfo);
+      const choice = await confirmTaskQuit(taskInfo, display);
       if (choice === "cancel") { shuttingDown = false; return; }
       if (choice === "complete-and-quit") await session.completeCurrentTask();
     }

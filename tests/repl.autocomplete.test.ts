@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PassThrough } from "stream";
 import { ask } from "../src/agent/views/input.js";
-import { CommandRegistry, parseFrontmatter, listSkillNames, matchCommands, filterCommands, type ListDir, type CommandSuggestion } from "../src/agent/controllers/command-registry.js";
+import { CommandController, parseFrontmatter, listSkillNames, matchCommands, filterCommands, type ListDir, type CommandSuggestion } from "../src/agent/controllers/command-controller.js";
 import { registerTestCommands } from "./helpers.js";
 
 // ── Test harness for ask() integration tests ──────────────────────────────────
@@ -14,7 +14,7 @@ function makeStdin() {
 }
 
 let origStdin: NodeJS.ReadStream;
-let registry: CommandRegistry;
+let registry: CommandController;
 
 function withFakeStdin(fn: (stdin: PassThrough) => Promise<void>): Promise<void> {
   const stdin = makeStdin();
@@ -27,7 +27,7 @@ function withFakeStdin(fn: (stdin: PassThrough) => Promise<void>): Promise<void>
 beforeEach(() => {
   origStdin = process.stdin;
   vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-  registry = new CommandRegistry();
+  registry = new CommandController();
 });
 
 afterEach(() => {

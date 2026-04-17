@@ -29,8 +29,10 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import { runQuery } from "../src/agent/index.js";
 import { getCachedModels, _resetCachedModels } from "../src/agent/models/settings.js";
 import { ask, pick, pickMultiple, pickQuestion } from "../src/agent/views/input.js";
-import { toolUseNames } from "../src/agent/views/display.js";
+import { Display } from "../src/agent/views/display.js";
 import { statusBar } from "../src/agent/views/status-bar.js";
+
+let testDisplay: Display;
 
 const defaultPermConfig = {
   permissionMode: "default" as const,
@@ -69,7 +71,8 @@ function captureConsole() {
 }
 
 beforeEach(() => {
-  toolUseNames.clear();
+  testDisplay = new Display(getConfig());
+  testDisplay.toolUseNames.clear();
   statusBar.stop();
   getConfig().verbose = false;
   vi.clearAllMocks();
@@ -88,7 +91,7 @@ describe("runQuery - session ID", () => {
     ]);
     const cap = captureConsole();
     try {
-      const sid = await runQuery(defaultPermConfig, "hello", undefined);
+      const sid = await runQuery(testDisplay, defaultPermConfig, "hello", undefined);
       expect(sid).toBe("abc-123");
     } finally {
       cap.restore();
@@ -101,7 +104,7 @@ describe("runQuery - session ID", () => {
     ]);
     const cap = captureConsole();
     try {
-      const sid = await runQuery(defaultPermConfig, "hello", undefined);
+      const sid = await runQuery(testDisplay, defaultPermConfig, "hello", undefined);
       expect(sid).toBeUndefined();
     } finally {
       cap.restore();
@@ -114,7 +117,7 @@ describe("runQuery - session ID", () => {
     ]);
     const cap = captureConsole();
     try {
-      await runQuery(defaultPermConfig, "hello", "existing-session-id");
+      await runQuery(testDisplay, defaultPermConfig, "hello", "existing-session-id");
     } finally {
       cap.restore();
     }
@@ -128,7 +131,7 @@ describe("runQuery - session ID", () => {
     ]);
     const cap = captureConsole();
     try {
-      await runQuery(defaultPermConfig, "hello", undefined);
+      await runQuery(testDisplay, defaultPermConfig, "hello", undefined);
     } finally {
       cap.restore();
     }
@@ -151,7 +154,7 @@ describe("runQuery - stream event stat accumulation", () => {
 
     const cap = captureConsole();
     try {
-      await runQuery(defaultPermConfig, "test", undefined);
+      await runQuery(testDisplay, defaultPermConfig, "test", undefined);
     } finally {
       cap.restore();
     }
@@ -170,7 +173,7 @@ describe("runQuery - stream event stat accumulation", () => {
     ]);
     const cap = captureConsole();
     try {
-      await runQuery(defaultPermConfig, "test", undefined);
+      await runQuery(testDisplay, defaultPermConfig, "test", undefined);
     } finally {
       cap.restore();
     }
@@ -188,7 +191,7 @@ describe("runQuery - message processing", () => {
     ]);
     const cap = captureConsole();
     try {
-      await runQuery(defaultPermConfig, "test", undefined);
+      await runQuery(testDisplay, defaultPermConfig, "test", undefined);
     } finally {
       cap.restore();
     }
@@ -205,7 +208,7 @@ describe("runQuery - message processing", () => {
     ]);
     const cap = captureConsole();
     try {
-      await runQuery(defaultPermConfig, "test", undefined);
+      await runQuery(testDisplay, defaultPermConfig, "test", undefined);
     } finally {
       cap.restore();
     }
@@ -223,7 +226,7 @@ describe("runQuery - logFull behavior", () => {
     ]);
     const cap = captureConsole();
     try {
-      await runQuery(defaultPermConfig, "test", undefined);
+      await runQuery(testDisplay, defaultPermConfig, "test", undefined);
     } finally {
       cap.restore();
     }
@@ -243,7 +246,7 @@ describe("runQuery - logFull behavior", () => {
     ]);
     const cap = captureConsole();
     try {
-      await runQuery(defaultPermConfig, "test", undefined);
+      await runQuery(testDisplay, defaultPermConfig, "test", undefined);
     } finally {
       cap.restore();
     }
@@ -263,7 +266,7 @@ describe("runQuery - error handling", () => {
     const cap = captureConsole();
     let thrown: unknown;
     try {
-      await runQuery(defaultPermConfig, "test", undefined);
+      await runQuery(testDisplay, defaultPermConfig, "test", undefined);
     } catch (err) {
       thrown = err;
     } finally {
@@ -281,7 +284,7 @@ describe("runQuery - canUseTool callback registration", () => {
     ]);
     const cap = captureConsole();
     try {
-      await runQuery(defaultPermConfig, "test", undefined);
+      await runQuery(testDisplay, defaultPermConfig, "test", undefined);
     } finally {
       cap.restore();
     }
@@ -313,7 +316,7 @@ describe("runQuery - AskUserQuestion handling", () => {
     const cap = captureConsole();
     let canUseTool: Function;
     try {
-      await runQuery(defaultPermConfig, "test", undefined);
+      await runQuery(testDisplay, defaultPermConfig, "test", undefined);
       canUseTool = (query as any).mock.calls[0][0].options.canUseTool;
     } finally {
       cap.restore();
@@ -332,7 +335,7 @@ describe("runQuery - AskUserQuestion handling", () => {
     const cap = captureConsole();
     let canUseTool: Function;
     try {
-      await runQuery(defaultPermConfig, "test", undefined);
+      await runQuery(testDisplay, defaultPermConfig, "test", undefined);
       canUseTool = (query as any).mock.calls[0][0].options.canUseTool;
     } finally {
       cap.restore();
@@ -350,7 +353,7 @@ describe("runQuery - AskUserQuestion handling", () => {
     const cap = captureConsole();
     let canUseTool: Function;
     try {
-      await runQuery(defaultPermConfig, "test", undefined);
+      await runQuery(testDisplay, defaultPermConfig, "test", undefined);
       canUseTool = (query as any).mock.calls[0][0].options.canUseTool;
     } finally {
       cap.restore();
@@ -369,7 +372,7 @@ describe("runQuery - AskUserQuestion handling", () => {
     const cap = captureConsole();
     let canUseTool: Function;
     try {
-      await runQuery(defaultPermConfig, "test", undefined);
+      await runQuery(testDisplay, defaultPermConfig, "test", undefined);
       canUseTool = (query as any).mock.calls[0][0].options.canUseTool;
     } finally {
       cap.restore();
@@ -400,7 +403,7 @@ describe("runQuery - AskUserQuestion handling", () => {
     const cap = captureConsole();
     let canUseTool: Function;
     try {
-      await runQuery(defaultPermConfig, "test", undefined);
+      await runQuery(testDisplay, defaultPermConfig, "test", undefined);
       canUseTool = (query as any).mock.calls[0][0].options.canUseTool;
     } finally {
       cap.restore();
@@ -423,7 +426,7 @@ describe("runQuery - tool permission handling (non-bypass mode)", () => {
     const cap = captureConsole();
     let canUseTool: Function;
     try {
-      await runQuery(defaultPermConfig, "test", undefined);
+      await runQuery(testDisplay, defaultPermConfig, "test", undefined);
       canUseTool = (query as any).mock.calls[0][0].options.canUseTool;
     } finally {
       cap.restore();
@@ -443,7 +446,7 @@ describe("runQuery - tool permission handling (non-bypass mode)", () => {
     const cap = captureConsole();
     let canUseTool: Function;
     try {
-      await runQuery(defaultPermConfig, "test", undefined);
+      await runQuery(testDisplay, defaultPermConfig, "test", undefined);
       canUseTool = (query as any).mock.calls[0][0].options.canUseTool;
     } finally {
       cap.restore();
@@ -463,7 +466,7 @@ describe("runQuery - interrupt support", () => {
     const cap = captureConsole();
     const ac = new AbortController();
     try {
-      await runQuery(defaultPermConfig, "test", undefined, ac);
+      await runQuery(testDisplay, defaultPermConfig, "test", undefined, ac);
     } finally {
       cap.restore();
     }
@@ -489,7 +492,7 @@ describe("runQuery - interrupt support", () => {
     try {
       // Abort after a short delay
       setTimeout(() => ac.abort(), 5);
-      await runQuery(defaultPermConfig, "test", "sess-1", ac);
+      await runQuery(testDisplay, defaultPermConfig, "test", "sess-1", ac);
     } catch (err) {
       thrown = err;
     } finally {
@@ -516,7 +519,7 @@ describe("runQuery - interrupt support", () => {
     let sessionId: string | undefined;
     try {
       setTimeout(() => ac.abort(), 5);
-      sessionId = await runQuery(defaultPermConfig, "test", undefined, ac);
+      sessionId = await runQuery(testDisplay, defaultPermConfig, "test", undefined, ac);
     } finally {
       cap.restore();
     }
@@ -529,7 +532,7 @@ describe("runQuery - interrupt support", () => {
     ]);
     const cap = captureConsole();
     try {
-      await runQuery(defaultPermConfig, "test", undefined);
+      await runQuery(testDisplay, defaultPermConfig, "test", undefined);
     } finally {
       cap.restore();
     }
@@ -544,7 +547,7 @@ describe("runQuery - interrupt support", () => {
     const before = process.stdin.listenerCount("data");
     const cap = captureConsole();
     try {
-      await runQuery(defaultPermConfig, "test", undefined);
+      await runQuery(testDisplay, defaultPermConfig, "test", undefined);
     } finally {
       cap.restore();
     }
@@ -579,7 +582,7 @@ describe("runQuery - interrupt via ^C on stdin", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
 
     try {
-      const queryPromise = runQuery(defaultPermConfig, "test", undefined);
+      const queryPromise = runQuery(testDisplay, defaultPermConfig, "test", undefined);
       await new Promise((r) => setTimeout(r, 5));
       fakeStdin.push("\x03");
       await queryPromise;
@@ -606,7 +609,7 @@ describe("runQuery - interrupt via ^C on stdin", () => {
     const cap = captureConsole();
     let thrown: unknown;
     try {
-      await runQuery(defaultPermConfig, "test", "sess-1");
+      await runQuery(testDisplay, defaultPermConfig, "test", "sess-1");
     } catch (err) {
       thrown = err;
     } finally {
@@ -630,7 +633,7 @@ describe("runQuery - interrupt via ^C on stdin", () => {
     const cap = captureConsole();
     let thrown: unknown;
     try {
-      await runQuery(defaultPermConfig, "test", undefined);
+      await runQuery(testDisplay, defaultPermConfig, "test", undefined);
     } catch (err) {
       thrown = err;
     } finally {
@@ -651,7 +654,7 @@ describe("runQuery - model option", () => {
     ]);
     const cap = captureConsole();
     try {
-      await runQuery(defaultPermConfig, "test", undefined, undefined, "opus");
+      await runQuery(testDisplay, defaultPermConfig, "test", undefined, undefined, "opus");
     } finally {
       cap.restore();
     }
@@ -665,7 +668,7 @@ describe("runQuery - model option", () => {
     ]);
     const cap = captureConsole();
     try {
-      await runQuery(defaultPermConfig, "test", undefined);
+      await runQuery(testDisplay, defaultPermConfig, "test", undefined);
     } finally {
       cap.restore();
     }
@@ -680,7 +683,7 @@ describe("runQuery - model option", () => {
     expect(getCachedModels()).toBeNull();
     const cap = captureConsole();
     try {
-      await runQuery(defaultPermConfig, "test", undefined);
+      await runQuery(testDisplay, defaultPermConfig, "test", undefined);
     } finally {
       cap.restore();
     }
@@ -715,7 +718,7 @@ describe("runQuery - prompt redraw after query (worker mode integration)", () =>
       const askPromise = ask("[worker] > ", () => []);
 
       // Run the query to completion — drawFresh should be called once afterward
-      await runQuery(defaultPermConfig, "test", undefined);
+      await runQuery(testDisplay, defaultPermConfig, "test", undefined);
 
       const promptIdx = written.findIndex(s => s.includes("[worker] > "));
       const assistantIdx = written.findIndex(s => stripAnsi(s).includes("assistant output"));
@@ -758,7 +761,7 @@ describe("runQuery - prompt redraw after query (worker mode integration)", () =>
       // ask() registers all three display callbacks (print, status, clear)
       const askPromise = ask("\n[worker] > ", () => []);
 
-      await runQuery(defaultPermConfig, "test", undefined);
+      await runQuery(testDisplay, defaultPermConfig, "test", undefined);
 
       const allOutput = written.join("");
       const firstIdx  = allOutput.indexOf("First line");

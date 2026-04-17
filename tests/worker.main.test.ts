@@ -76,7 +76,7 @@ vi.mock("../src/agent/views/input.js", async (importOriginal) => {
 import { main } from "../src/agent/index.js";
 import { confirmIfUnsafe } from "../src/agent/models/workspace.js";
 import * as inputModule from "../src/agent/views/input.js";
-import * as displayModule from "../src/agent/views/display.js";
+import { Display } from "../src/agent/views/display.js";
 import { getConfig } from "../src/config.js";
 import { stripAnsi } from "./helpers.js";
 
@@ -94,8 +94,9 @@ async function runWorkerMain(runQueryFn = vi.fn().mockResolvedValue(undefined)):
     throw new Error("__process_exit__");
   }) as unknown as ReturnType<typeof vi.spyOn>;
 
+  const testDisplay = new Display(getConfig());
   try {
-    await main(runQueryFn, permConfig, true /* runWorkerMode */);
+    await main(runQueryFn, permConfig, testDisplay, true /* runWorkerMode */);
     return { exitCalled: false, exitCode: undefined };
   } catch (err) {
     if (err instanceof Error && err.message === "__process_exit__") {
@@ -111,11 +112,9 @@ async function runWorkerMain(runQueryFn = vi.fn().mockResolvedValue(undefined)):
 
 describe("workerMain startup banner", () => {
   let chdirSpy: ReturnType<typeof vi.spyOn>;
-  let printSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     chdirSpy = vi.spyOn(process, "chdir").mockImplementation(() => {});
-    printSpy = vi.spyOn(displayModule, "print").mockImplementation(() => {});
     vi.mocked(inputModule.ask).mockResolvedValue("__eof__");
     vi.mocked(confirmIfUnsafe).mockResolvedValue(true);
     getConfig().verbose = true;
@@ -124,12 +123,22 @@ describe("workerMain startup banner", () => {
   afterEach(() => {
     getConfig().verbose = false;
     chdirSpy.mockRestore();
-    printSpy.mockRestore();
     vi.clearAllMocks();
   });
 
   it("includes permissions, output mode, and logfile in the startup banner", async () => {
-    await runWorkerMain();
+    const testDisplay = new Display(getConfig());
+    const printSpy = vi.spyOn(testDisplay, "print").mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation((code?: number | string) => {
+      throw new Error("__process_exit__");
+    }) as unknown as ReturnType<typeof vi.spyOn>;
+    try {
+      await main(vi.fn().mockResolvedValue(undefined), permConfig, testDisplay, true /* runWorkerMode */);
+    } catch (err) {
+      if (!(err instanceof Error && err.message === "__process_exit__")) throw err;
+    } finally {
+      exitSpy.mockRestore();
+    }
     const printed = printSpy.mock.calls.map(([s]: [unknown]) => stripAnsi(String(s))).join("\n");
     expect(printed).toContain("Permissions: bypassPermissions");
     expect(printed).toContain("Output: verbose");
@@ -198,7 +207,7 @@ describe("workerMain exit behavior", () => {
     }) as unknown as ReturnType<typeof vi.spyOn>;
 
     let workerDone = false;
-    const workerPromise = main(runQueryFn, permConfig, true /* runWorkerMode */).then(
+    const workerPromise = main(runQueryFn, permConfig, new Display(getConfig()), true /* runWorkerMode */).then(
       () => { workerDone = true; },
       () => { workerDone = true; },
     );
@@ -232,7 +241,7 @@ describe("workerMain exit behavior", () => {
     }) as unknown as ReturnType<typeof vi.spyOn>;
 
     try {
-      await main(vi.fn().mockResolvedValue(undefined), permConfig, true /* runWorkerMode */);
+      await main(vi.fn().mockResolvedValue(undefined), permConfig, new Display(getConfig()), true /* runWorkerMode */);
     } catch (err) {
       if (!(err instanceof Error && err.message === "__process_exit__")) throw err;
     } finally {

@@ -1,7 +1,7 @@
-import { c, s, print } from "./display.js";
+import { c, s } from "./display.js";
 import { statusBar } from "./status-bar.js";
-import { filterCommands } from "../controllers/command-registry.js";
-import type { CommandSuggestion } from "../controllers/command-registry.js";
+import { filterCommands } from "../controllers/command-controller.js";
+import type { CommandSuggestion } from "../controllers/command-controller.js";
 
 // ── Stash ─────────────────────────────────────────────────────────────────────
 

@@ -275,21 +275,21 @@ export function listSkillNames(
  *
  * Supports scoped sub-registries via scoped(prefix): the returned registry
  * shares the same underlying store as its root, so callers receive and work
- * with a plain CommandRegistry regardless of whether it is scoped. For
+ * with a plain CommandController regardless of whether it is scoped. For
  * example:
  *
  *   registry.scoped("workspace").register("create", opts)
  *   // → stores "workspace:create" in registry
  */
-export class CommandRegistry {
+export class CommandController {
   private readonly _entries: Map<string, CommandEntry> = new Map();
 
   constructor(
-    private readonly _parent?: CommandRegistry,
+    private readonly _parent?: CommandController,
     private readonly _prefix?: string,
   ) {}
 
-  private get _root(): CommandRegistry {
+  private get _root(): CommandController {
     return this._parent ?? this;
   }
 
@@ -332,8 +332,8 @@ export class CommandRegistry {
    * e.g. registry.scoped("workspace").register("create", …) → "workspace:create".
    * Scoped registries can be nested: scoped("a").scoped("b") → prefix "a:b".
    */
-  scoped(prefix: string): CommandRegistry {
-    return new CommandRegistry(this._root, this._qualify(prefix));
+  scoped(prefix: string): CommandController {
+    return new CommandController(this._root, this._qualify(prefix));
   }
 
   /**
