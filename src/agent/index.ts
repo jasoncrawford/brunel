@@ -5,7 +5,7 @@ import fs from "fs";
 import { fileURLToPath } from "url";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { CanUseTool, PermissionMode, PermissionResult } from "@anthropic-ai/claude-agent-sdk";
-import { Display, c, hr, clearBreak, fmtArgs } from "./views/display.js";
+import { Display, c, hr } from "./views/display.js";
 import { StatusBar, statusBar, initStatusBar } from "./views/status-bar.js";
 import { ask, pick, pickMultiple, pickQuestion } from "./views/input.js";
 import type { PickQuestionResult } from "./views/input.js";
@@ -17,7 +17,7 @@ import { registerWorkspaceCommands } from "./controllers/workspace-controller.js
 import { fmtError } from "../utils.js";
 import { Settings } from "./models/settings.js";
 import type { ModelInfo, FetchModelsFn, EffortValue } from "./models/settings.js";
-import { CommandController } from "./controllers/command-controller.js";
+import { CommandRegistry, CommandController } from "./controllers/command-controller.js";
 import { SettingsController } from "./controllers/settings-controller.js";
 import { QueryStats } from "./models/query-stats.js";
 // ── Log file ──────────────────────────────────────────────────────────────────
@@ -75,7 +75,7 @@ export async function handleToolPermission(
   display: Display,
 ): Promise<PermissionResult> {
   statusBar.stop();
-  display.print(c.amber(`\n⚠ ${toolName}(${fmtArgs(input)})`));
+  display.print(c.amber(`\n⚠ ${toolName}(${display.fmtArgs(input)})`));
   const idx = await pick(["Allow", "Deny"]);
   statusBar.start(getStatusText);
   if (idx === 0) return { behavior: "allow", updatedInput: input };
@@ -244,7 +244,7 @@ export async function main(
   const session = workerCtx?.session;
 
   const fetchModelsFn = createFetchModelsFn(permConfig);
-  const settingsCtrl = new SettingsController(settings, display);
+  const settingsController = new SettingsController(settings, display);
 
   // Print the startup banner.
   display.print(c.sageGreen(hr("═")));
@@ -289,7 +289,8 @@ export async function main(
 
   // Register all commands. All commands are present in both REPL and worker
   // modes; commands that require a foreman connection degrade gracefully.
-  const registry = new CommandController();
+  const registry = new CommandRegistry();
+  const controller = new CommandController(registry);
   registerWorkspaceCommands(workspace, registry.scoped("workspace"), display);
   registerWorkerCommands(session, registry.scoped("worker"), display);
   registry.register("exit", {
@@ -309,13 +310,13 @@ export async function main(
     description: "Clear the conversation",
     handler: async () => {
       sessionId = undefined;
-      display.print(clearBreak());
+      display.print(display.clearBreak());
     },
   });
   registry.register("model", {
     description: "Select the Claude model to use",
     handler: async (args) => {
-      await settingsCtrl.pickModel(
+      await settingsController.pickModel(
         args,
         (opts, idx) => pick(opts, { currentIdx: idx, escapable: true }),
         fetchModelsFn,
@@ -325,7 +326,7 @@ export async function main(
   registry.register("effort", {
     description: "Set the effort level for Claude's thinking",
     handler: async (args) => {
-      await settingsCtrl.pickEffort(
+      await settingsController.pickEffort(
         args,
         (opts, idx) => pick(opts, { currentIdx: idx, escapable: true }),
       );
@@ -363,7 +364,7 @@ export async function main(
     // empty promptLine suppresses the drawFresh callback so incoming messages
     // are printed cleanly without a prompt preceding or following them.
     const promptStr = session ? (showPrompt ? "\n[agent] > " : "") : "\n> ";
-    const input = await ask(promptStr, () => registry.listCommands(), wsAbort);
+    const input = await ask(promptStr, () => controller.listCommands(), wsAbort);
 
     // ^D / ^C on empty buffer — treat as exit.
     if (input === "__eof__") {
@@ -403,7 +404,7 @@ export async function main(
       continue;
     }
 
-    const action = await registry.dispatch(input);
+    const action = await controller.dispatch(input);
 
     if (action.type === "skip") continue;
 

@@ -1,7 +1,8 @@
 import { c } from "../views/display.js";
 import type { CommandRegistry } from "./command-controller.js";
 import type { WorkerDisplay } from "./worker-controller.js";
-import { Workspace, confirmIfUnsafe } from "../models/workspace.js";
+import { confirmIfUnsafe } from "../models/workspace.js";
+import type { Workspace } from "../models/workspace.js";
 
 /**
  * Register workspace commands into the given registry (which should already be
@@ -64,7 +65,7 @@ export function registerWorkspaceCommands(workspace: Workspace | undefined, regi
         display.print(c.boldRed("Cannot prune: no workspace directory configured."));
         return;
       }
-      const removed = await Workspace.prune(workspace.workspaceDir);
+      const removed = await workspace.prune();
       if (removed.length === 0) {
         display.print(c.sageGreen("Nothing to prune."));
       } else {

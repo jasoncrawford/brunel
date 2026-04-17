@@ -666,6 +666,10 @@ export class Display {
   readonly c = c;
   /** The style object, exposed as an instance property for convenience. */
   readonly s = s;
+  /** Returns the ANSI escape to clear the terminal and reset scroll. */
+  readonly clearBreak = clearBreak;
+  /** Format tool call arguments for display, truncating long values. */
+  readonly fmtArgs = fmtArgs;
 
   private readonly _toolUseNames = new Map<string, string>();
   private readonly _toolUseInputs = new Map<string, Record<string, unknown>>();

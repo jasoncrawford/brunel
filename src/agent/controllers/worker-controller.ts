@@ -702,6 +702,12 @@ export async function startWorkerMode(display: WorkerDisplay): Promise<{
   workspace.on("destroy", ({ dir }: { dir: string }) => {
     display.print(c.sageGreen(`[workspace] Destroying ${dir}`));
   });
+  workspace.on("prune-start", ({ workspaceDir: dir }: { workspaceDir: string }) => {
+    display.print(c.sageGreen(`[workspace] Pruning orphaned workspaces in ${dir}`));
+  });
+  workspace.on("prune-remove", ({ dir }: { dir: string }) => {
+    display.print(c.sageGreen(`[workspace] Removing orphaned workspace ${dir}`));
+  });
 
   await workspace.create();
   process.chdir(workspace.dir);

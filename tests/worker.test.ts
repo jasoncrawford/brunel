@@ -1360,7 +1360,7 @@ describe("prIsClosed guard", () => {
 
 import { Workspace } from "../src/agent/models/workspace.js";
 import { registerWorkspaceCommands } from "../src/agent/controllers/workspace-controller.js";
-import { CommandController } from "../src/agent/controllers/command-controller.js";
+import { CommandRegistry } from "../src/agent/controllers/command-controller.js";
 import type { TaskQuitInfo } from "../src/agent/controllers/worker-controller.js";
 // ── foreman_error ─────────────────────────────────────────────────────────────
 
@@ -1455,7 +1455,7 @@ describe("workspace slash commands in WorkerSession", () => {
     const workspace = makeWorkspace();
     const sessionWs = new WorkerSession(new StatusBar({ agentId: AGENT_ID }), wsFactory, display, { workspace });
     sessionWs.start();
-    const wsReg1 = new CommandController();
+    const wsReg1 = new CommandRegistry();
     registerWorkspaceCommands(sessionWs.workspace, wsReg1.scoped("workspace"), display);
     await wsReg1.execute("workspace:reset", "");
     expect(workspace.reset).toHaveBeenCalledOnce();
@@ -1469,7 +1469,7 @@ describe("workspace slash commands in WorkerSession", () => {
     (workspace.confirm as ReturnType<typeof vi.fn>).mockResolvedValue(false);
     const sessionWs = new WorkerSession(new StatusBar({ agentId: AGENT_ID }), wsFactory, display, { workspace });
     sessionWs.start();
-    const wsReg2 = new CommandController();
+    const wsReg2 = new CommandRegistry();
     registerWorkspaceCommands(sessionWs.workspace, wsReg2.scoped("workspace"), display);
     await wsReg2.execute("workspace:reset", "");
     expect(workspace.reset).not.toHaveBeenCalled();
@@ -1481,7 +1481,7 @@ describe("workspace slash commands in WorkerSession", () => {
       const workspace = makeWorkspace();
       const sessionWs = new WorkerSession(new StatusBar({ agentId: AGENT_ID }), wsFactory, display, { workspace });
       sessionWs.start();
-      const wsReg3 = new CommandController();
+      const wsReg3 = new CommandRegistry();
       registerWorkspaceCommands(sessionWs.workspace, wsReg3.scoped("workspace"), display);
       await wsReg3.execute("workspace:remove", "");
       expect(workspace.destroy).toHaveBeenCalledOnce();
@@ -1495,7 +1495,7 @@ describe("workspace slash commands in WorkerSession", () => {
     const workspace = makeWorkspace();
     const sessionWs = new WorkerSession(new StatusBar({ agentId: AGENT_ID }), wsFactory, display, { workspace });
     sessionWs.start();
-    const wsReg4 = new CommandController();
+    const wsReg4 = new CommandRegistry();
     registerWorkspaceCommands(sessionWs.workspace, wsReg4.scoped("workspace"), localDisplay);
     await wsReg4.execute("workspace:create", "");
     const printed = localDisplay.print.mock.calls.map(([s]: [unknown]) => stripAnsi(String(s))).join("\n");

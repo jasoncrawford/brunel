@@ -1,4 +1,5 @@
 import type { CommandController } from "../src/agent/controllers/command-controller.js";
+import type { WorkerDisplay } from "../src/agent/controllers/worker-controller.js";
 
 export function stripAnsi(s: string): string {
   return s.replace(/\x1b\[[0-9;]*m/g, "");
@@ -18,10 +19,11 @@ export async function waitUntil(predicate: () => boolean): Promise<void> {
  * Call this in beforeEach for tests that query the command registry.
  */
 export async function registerTestCommands(): Promise<CommandController> {
-  const { CommandController } = await import("../src/agent/controllers/command-controller.js");
+  const { CommandRegistry, CommandController } = await import("../src/agent/controllers/command-controller.js");
   const { registerWorkspaceCommands } = await import("../src/agent/controllers/workspace-controller.js");
-  const registry = new CommandController();
-  const noopDisplay = { print: () => {}, printForemanMessage: () => {} };
+  const registry = new CommandRegistry();
+  const controller = new CommandController(registry);
+  const noopDisplay = { print: () => {}, printForemanMessage: () => {} } as WorkerDisplay;
   registerWorkspaceCommands(undefined, registry.scoped("workspace"), noopDisplay);
   const noop = async () => {};
   registry.register("exit",   { description: "Exit", handler: noop });
@@ -32,5 +34,5 @@ export async function registerTestCommands(): Promise<CommandController> {
     description: "Mark the current task as done",
     handler: async () => "task-complete",
   });
-  return registry;
+  return controller;
 }

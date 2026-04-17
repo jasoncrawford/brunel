@@ -145,20 +145,23 @@ export class Workspace extends EventEmitter {
    * Active workers (live PID) are skipped.
    * Returns the list of directories removed.
    */
-  static async prune(workspaceDir: string): Promise<string[]> {
-    if (!fs.existsSync(workspaceDir)) return [];
-    const entries = fs.readdirSync(workspaceDir, { withFileTypes: true });
+  async prune(): Promise<string[]> {
+    this.emit("prune-start", { workspaceDir: this.workspaceDir });
+    if (!fs.existsSync(this.workspaceDir)) return [];
+    const entries = fs.readdirSync(this.workspaceDir, { withFileTypes: true });
     const removed: string[] = [];
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
-      const dir = path.join(workspaceDir, entry.name);
+      const dir = path.join(this.workspaceDir, entry.name);
       const lockPath = path.join(dir, ".brunel.lock");
       if (fs.existsSync(lockPath)) {
         const pid = parseInt(fs.readFileSync(lockPath, "utf8").trim(), 10);
         if (isProcessAlive(pid)) {
+          this.emit("prune-skip", { dir, pid });
           continue;
         }
       }
+      this.emit("prune-remove", { dir });
       fs.rmSync(dir, { recursive: true, force: true });
       removed.push(dir);
     }

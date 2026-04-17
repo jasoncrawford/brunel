@@ -343,11 +343,16 @@ export class CommandRegistry {
 }
 
 /**
- * Full command controller: extends CommandRegistry with dispatch, parse, and
- * list methods. Use this for the top-level registry; pass CommandRegistry to
+ * Full command controller: wraps a CommandRegistry with dispatch, parse, and
+ * list methods. Use this for top-level dispatch; pass CommandRegistry to
  * functions that only need to register commands.
  */
-export class CommandController extends CommandRegistry {
+export class CommandController {
+  constructor(private readonly _registry: CommandRegistry) {}
+
+  /** Expose the underlying registry for registration in tests/callers. */
+  get registry(): CommandRegistry { return this._registry; }
+
   /**
    * Return all available command names: builtins (from the registry) plus any
    * .md files under ~/.claude/commands/ (recursively) and skill names.
@@ -358,7 +363,7 @@ export class CommandController extends CommandRegistry {
     listDir: ListDir = defaultListDir,
     readFile: (path: string) => string | null = defaultReadFile,
   ): string[] {
-    const builtins = this.listAll().map(e => e.name);
+    const builtins = this._registry.listAll().map(e => e.name);
     const home = process.env.HOME ?? process.env.USERPROFILE ?? ""; // "" → walks "/.claude/commands" which will silently return null
     const commandsDir = `${home}/.claude/commands`;
     const fileCommands = walkDir(commandsDir, "", listDir);
@@ -377,7 +382,7 @@ export class CommandController extends CommandRegistry {
   ): CommandSuggestion[] {
     const names = this.listCommandNames(listDir, readFile);
     return names.map(name => {
-      const entry = this.lookup(name);
+      const entry = this._registry.lookup(name);
       if (entry) return { name, description: entry.description };
       const content = resolveContent(name, readFile);
       return { name, description: content ? extractDescription(content) : "" };
@@ -394,7 +399,7 @@ export class CommandController extends CommandRegistry {
     if (!input.startsWith("/")) return null;
     const command = input.slice(1).split(/\s+/)[0];
     if (!command) return null;
-    const entry = this.lookup(command);
+    const entry = this._registry.lookup(command);
     if (entry) return { type: "command", name: entry.name };
     return { type: "unknown_command", command };
   }
