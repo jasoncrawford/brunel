@@ -73,7 +73,7 @@ vi.mock("../src/agent/views/input.js", async (importOriginal) => {
   };
 });
 
-import { main } from "../src/agent/index.js";
+import { AgentController } from "../src/agent/controllers/agent-controller.js";
 import { confirmIfUnsafe } from "../src/agent/models/workspace.js";
 import * as inputModule from "../src/agent/views/input.js";
 import { Display } from "../src/agent/views/display.js";
@@ -93,7 +93,7 @@ const permConfig = {
   allowDangerouslySkipPermissions: false,
 };
 
-async function runWorkerMain(runQueryFn = vi.fn().mockResolvedValue(undefined)): Promise<{ exitCalled: boolean; exitCode: number | undefined }> {
+async function runWorkerMain(mockRunQuery = vi.fn().mockResolvedValue(undefined)): Promise<{ exitCalled: boolean; exitCode: number | undefined }> {
   let exitCode: number | undefined;
   const exitSpy = vi.spyOn(process, "exit").mockImplementation((code?: number | string) => {
     exitCode = typeof code === "number" ? code : 0;
@@ -101,8 +101,10 @@ async function runWorkerMain(runQueryFn = vi.fn().mockResolvedValue(undefined)):
   }) as unknown as ReturnType<typeof vi.spyOn>;
 
   const testDisplay = makeTestDisplay();
+  const controller = new AgentController(testDisplay, permConfig, new Settings({}));
+  vi.spyOn(controller, "runQuery").mockImplementation(mockRunQuery);
   try {
-    await main(runQueryFn, permConfig, testDisplay, new Settings({}), true /* runWorkerMode */);
+    await controller.start(true /* runWorkerMode */);
     return { exitCalled: false, exitCode: undefined };
   } catch (err) {
     if (err instanceof Error && err.message === "__process_exit__") {
@@ -135,11 +137,13 @@ describe("workerMain startup banner", () => {
   it("includes permissions, output mode, and logfile in the startup banner", async () => {
     const testDisplay = makeTestDisplay();
     const printSpy = vi.spyOn(testDisplay, "print").mockImplementation(() => {});
+    const controller = new AgentController(testDisplay, permConfig, new Settings({}));
+    vi.spyOn(controller, "runQuery").mockResolvedValue(undefined);
     const exitSpy = vi.spyOn(process, "exit").mockImplementation((code?: number | string) => {
       throw new Error("__process_exit__");
     }) as unknown as ReturnType<typeof vi.spyOn>;
     try {
-      await main(vi.fn().mockResolvedValue(undefined), permConfig, testDisplay, new Settings({}), true /* runWorkerMode */);
+      await controller.start(true /* runWorkerMode */);
     } catch (err) {
       if (!(err instanceof Error && err.message === "__process_exit__")) throw err;
     } finally {
@@ -195,7 +199,7 @@ describe("workerMain exit behavior", () => {
   it("does not call workspace.destroy when SIGINT fires while a query is running", async () => {
     // runQuery blocks until resolved — simulates a running query
     let resolveQuery!: (value: string | undefined) => void;
-    const runQueryFn = vi.fn().mockImplementation(
+    const mockRunQuery = vi.fn().mockImplementation(
       () => new Promise<string | undefined>((resolve) => { resolveQuery = resolve; }),
     );
 
@@ -212,14 +216,18 @@ describe("workerMain exit behavior", () => {
       throw new Error("__process_exit__");
     }) as unknown as ReturnType<typeof vi.spyOn>;
 
+    const testDisplay = makeTestDisplay();
+    const controller = new AgentController(testDisplay, permConfig, new Settings({}));
+    vi.spyOn(controller, "runQuery").mockImplementation(mockRunQuery);
+
     let workerDone = false;
-    const workerPromise = main(runQueryFn, permConfig, makeTestDisplay(), new Settings({}), true /* runWorkerMode */).then(
+    const workerPromise = controller.start(true /* runWorkerMode */).then(
       () => { workerDone = true; },
       () => { workerDone = true; },
     );
 
     // Wait for runQuery to be called (query is now running)
-    await vi.waitFor(() => expect(runQueryFn).toHaveBeenCalled());
+    await vi.waitFor(() => expect(mockRunQuery).toHaveBeenCalled());
 
     // Emit SIGINT while query is running — should NOT destroy workspace
     process.emit("SIGINT");
@@ -238,16 +246,16 @@ describe("workerMain exit behavior", () => {
   });
 
   it("does not call workspace.destroy a second time if SIGINT fires after loop exits", async () => {
-    // Simulate: user types /exit, cleanup runs, process tries to exit.
-    // Before process.exit completes (in our mock it throws), emit SIGINT.
     const exitSpy = vi.spyOn(process, "exit").mockImplementation((code?: number | string) => {
-      // Fire SIGINT to simulate user pressing ^C during or after cleanup
       process.emit("SIGINT");
       throw new Error("__process_exit__");
     }) as unknown as ReturnType<typeof vi.spyOn>;
 
+    const testDisplay = makeTestDisplay();
+    const controller = new AgentController(testDisplay, permConfig, new Settings({}));
+    vi.spyOn(controller, "runQuery").mockResolvedValue(undefined);
     try {
-      await main(vi.fn().mockResolvedValue(undefined), permConfig, makeTestDisplay(), new Settings({}), true /* runWorkerMode */);
+      await controller.start(true /* runWorkerMode */);
     } catch (err) {
       if (!(err instanceof Error && err.message === "__process_exit__")) throw err;
     } finally {
