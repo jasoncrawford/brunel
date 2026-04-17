@@ -31,8 +31,7 @@ const W = 70;
  * terminal status bar rows (animated query-progress and persistent worker
  * status). Call update() to change state — it re-renders automatically.
  *
- * Use the shared `statusBar` singleton for normal production use. Instantiate
- * directly in tests that need an isolated instance.
+ * Construct in the entry point and inject into Display and WorkerSession.
  */
 export class StatusBar extends EventEmitter {
   // ── Worker status state ────────────────────────────────────────────────────
@@ -338,8 +337,3 @@ export class StatusBar extends EventEmitter {
   }
 }
 
-/** Shared singleton. Call initStatusBar() at startup before first use. */
-export let statusBar: StatusBar = undefined!;
-
-/** Replace the shared singleton (called once at startup from index.ts). */
-export function initStatusBar(sb: StatusBar): void { statusBar = sb; }

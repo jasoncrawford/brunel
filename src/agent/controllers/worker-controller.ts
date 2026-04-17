@@ -5,7 +5,7 @@ import path from "node:path";
 import os from "node:os";
 import { WebSocket } from "ws";
 import { c } from "../views/display.js";
-import { StatusBar, statusBar } from "../views/status-bar.js";
+import { StatusBar } from "../views/status-bar.js";
 import { buildInitialPrompt, buildEventPrompt } from "../worker-prompts.js";
 import type { EffortValue } from "../models/settings.js";
 import * as Wire from "../../../shared/wire.js";
@@ -665,7 +665,7 @@ export function registerWorkerCommands(session: WorkerSession | undefined, regis
  * a cleanup function — does NOT call main(). The caller (main itself) owns
  * the query loop and calls cleanup() after the loop exits.
  */
-export async function startWorkerMode(display: WorkerDisplay): Promise<{
+export async function startWorkerMode(display: WorkerDisplay, statusBar: StatusBar): Promise<{
   session: WorkerSession;
   cleanup: () => Promise<void>;
 }> {

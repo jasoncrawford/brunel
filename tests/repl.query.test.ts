@@ -30,7 +30,7 @@ import { runQuery } from "../src/agent/index.js";
 import { Settings } from "../src/agent/models/settings.js";
 import { ask, pick, pickMultiple, pickQuestion } from "../src/agent/views/input.js";
 import { Display } from "../src/agent/views/display.js";
-import { statusBar } from "../src/agent/views/status-bar.js";
+import { StatusBar } from "../src/agent/views/status-bar.js";
 
 let testDisplay: Display;
 
@@ -71,15 +71,15 @@ function captureConsole() {
 }
 
 beforeEach(() => {
-  testDisplay = new Display(getConfig());
+  testDisplay = new Display(getConfig(), new StatusBar({ agentId: "test-agent" }));
   testDisplay.toolUseNames.clear();
-  statusBar.stop();
+  testDisplay.statusBar.stop();
   getConfig().verbose = false;
   vi.clearAllMocks();
 });
 
 afterEach(() => {
-  statusBar.stop();
+  testDisplay.statusBar.stop();
   vi.restoreAllMocks();
 });
 
@@ -715,7 +715,7 @@ describe("runQuery - prompt redraw after query (worker mode integration)", () =>
 
     try {
       // Start ask() — writes the prompt and registers drawFresh as the callback
-      const askPromise = ask("[worker] > ", () => []);
+      const askPromise = ask(testDisplay.statusBar, "[worker] > ", () => []);
 
       // Run the query to completion — drawFresh should be called once afterward
       await runQuery(testDisplay, defaultPermConfig, "test", undefined);
@@ -759,7 +759,7 @@ describe("runQuery - prompt redraw after query (worker mode integration)", () =>
 
     try {
       // ask() registers all three display callbacks (print, status, clear)
-      const askPromise = ask("\n[worker] > ", () => []);
+      const askPromise = ask(testDisplay.statusBar, "\n[worker] > ", () => []);
 
       await runQuery(testDisplay, defaultPermConfig, "test", undefined);
 

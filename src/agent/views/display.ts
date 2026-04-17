@@ -1,5 +1,5 @@
 import * as Wire from "../../../shared/wire.js";
-import { statusBar } from "./status-bar.js";
+import type { StatusBar } from "./status-bar.js";
 import { getConfig } from "../../config.js";
 import type { BrunelConfig } from "../../config.js";
 
@@ -679,7 +679,7 @@ export class Display {
   private readonly _toolUseNames = new Map<string, string>();
   private readonly _toolUseInputs = new Map<string, Record<string, unknown>>();
 
-  constructor(readonly config: BrunelConfig) {}
+  constructor(readonly config: BrunelConfig, readonly statusBar: StatusBar) {}
 
   /** Public accessor for tests to clear tool-use state between tests. */
   get toolUseNames(): Map<string, string> { return this._toolUseNames; }
@@ -715,12 +715,12 @@ export class Display {
   /** Print a line to stdout, routing through the status-bar-aware renderer. */
   print(line: string | null): void {
     if (line === null) return;
-    const inputPrint = statusBar.inputPrint;
+    const inputPrint = this.statusBar.inputPrint;
     if (inputPrint) {
       // ask() is active: erase from current cursor position to end of screen
       // (clears the prompt, suggestion row, and status bars), write the new
       // content line, then let drawFresh redraw the prompt + status bars below.
-      const inputClear = statusBar.inputClear;
+      const inputClear = this.statusBar.inputClear;
       if (inputClear) {
         inputClear();
       } else {
@@ -730,9 +730,9 @@ export class Display {
       inputPrint();
       return;
     }
-    statusBar.clear();
+    this.statusBar.clear();
     this._printLine(line);
-    statusBar.draw();
+    this.statusBar.draw();
   }
 
   /** Print a single content block from an assistant/user message. */
@@ -752,7 +752,7 @@ export class Display {
       const _input = this._toolUseInputs.get(tr.tool_use_id);
       this.print(this.resolve(tr.is_error ? TOOL_ERROR_FMT : TOOL_RESULT_FMT, name, { ...tr, _msg: msg, _input }));
       // Fire after the tool result is printed — tool has just finished running.
-      statusBar.fireOnToolResult(name);
+      this.statusBar.fireOnToolResult(name);
       return;
     }
     const blockFmt = role === "assistant" ? ASSISTANT_BLOCK_FMT : USER_BLOCK_FMT;

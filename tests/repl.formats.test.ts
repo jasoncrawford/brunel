@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { stripAnsi } from "./helpers.js";
-import { statusBar } from "../src/agent/views/status-bar.js";
 import { getConfig } from "../src/config.js";
 import {
   resolve,
