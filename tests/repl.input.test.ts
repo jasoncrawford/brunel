@@ -3,6 +3,7 @@ import { PassThrough } from "stream";
 import { ask, pick, pickMultiple, promptLine, pickQuestion, _resetStash } from "../src/agent/views/input.js";
 import type { PickQuestionResult } from "../src/agent/views/input.js";
 import { Display } from "../src/agent/views/display.js";
+import { StatusBar } from "../src/agent/views/status-bar.js";
 import { getConfig } from "../src/config.js";
 
 function makeStdin() {
@@ -26,7 +27,7 @@ function withFakeStdin(fn: (stdin: PassThrough) => Promise<void>): Promise<void>
 let testDisplay: Display;
 
 beforeEach(() => {
-  testDisplay = new Display(getConfig());
+  testDisplay = new Display(getConfig(), new StatusBar({ agentId: "test-agent" }));
   origStdin = process.stdin;
   vi.spyOn(process.stdout, "write").mockImplementation(() => true);
 });
@@ -39,7 +40,7 @@ afterEach(() => {
 describe("ask() - basic input", () => {
   it("type hello then \\r → resolves to 'hello'", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask("> ", () => []);
+      const p = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("hello");
       stdin.push("\r");
       const result = await p;
@@ -49,7 +50,7 @@ describe("ask() - basic input", () => {
 
   it("leading/trailing whitespace trimmed", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask("> ", () => []);
+      const p = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("  hi  ");
       stdin.push("\r");
       const result = await p;
@@ -59,7 +60,7 @@ describe("ask() - basic input", () => {
 
   it("empty Enter → resolves to ''", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask("> ", () => []);
+      const p = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("\r");
       const result = await p;
       expect(result).toBe("");
@@ -70,7 +71,7 @@ describe("ask() - basic input", () => {
 describe("ask() - cursor movement", () => {
   it("^A moves cursor to 0", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask("> ", () => []);
+      const p = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("hello");
       stdin.push("\x01"); // ^A
       stdin.push("\r");
@@ -81,7 +82,7 @@ describe("ask() - cursor movement", () => {
 
   it("^E moves cursor to end", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask("> ", () => []);
+      const p = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("hello");
       stdin.push("\x01"); // ^A → go to start
       stdin.push("\x05"); // ^E → go to end
@@ -93,7 +94,7 @@ describe("ask() - cursor movement", () => {
 
   it("left arrow moves cursor left", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask("> ", () => []);
+      const p = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("ab");
       stdin.push("\x1b[D"); // left arrow
       stdin.push("X");
@@ -105,7 +106,7 @@ describe("ask() - cursor movement", () => {
 
   it("right arrow moves cursor right", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask("> ", () => []);
+      const p = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("ab");
       stdin.push("\x1b[D"); // left
       stdin.push("\x1b[C"); // right → back to end
@@ -118,7 +119,7 @@ describe("ask() - cursor movement", () => {
 
   it("left arrow at start: no crash, cursor stays at 0", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask("> ", () => []);
+      const p = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("\x1b[D"); // left at start
       stdin.push("\r");
       const result = await p;
@@ -128,7 +129,7 @@ describe("ask() - cursor movement", () => {
 
   it("right arrow at end: no crash", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask("> ", () => []);
+      const p = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("hi");
       stdin.push("\x1b[C"); // right at end
       stdin.push("\r");
@@ -139,7 +140,7 @@ describe("ask() - cursor movement", () => {
 
   it("iTerm2 option+left: word jump left", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask("> ", () => []);
+      const p = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("foo bar");
       stdin.push("\x1b[1;3D"); // iTerm2 option+left
       stdin.push("X");
@@ -151,7 +152,7 @@ describe("ask() - cursor movement", () => {
 
   it("iTerm2 option+right: word jump right", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask("> ", () => []);
+      const p = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("foo bar");
       stdin.push("\x1b[1;3D"); // option+left → before "bar"
       stdin.push("\x1b[1;3D"); // option+left → before "foo"
@@ -165,7 +166,7 @@ describe("ask() - cursor movement", () => {
 
   it("Terminal.app option+left: word jump left", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask("> ", () => []);
+      const p = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("foo bar");
       stdin.push("\x1bb"); // Terminal.app option+left
       stdin.push("X");
@@ -177,7 +178,7 @@ describe("ask() - cursor movement", () => {
 
   it("Terminal.app option+right: word jump right", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask("> ", () => []);
+      const p = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("foo bar");
       stdin.push("\x1bb"); // option+left → before "bar"
       stdin.push("\x1bb"); // option+left → before "foo"
@@ -193,7 +194,7 @@ describe("ask() - cursor movement", () => {
 describe("ask() - kill / delete", () => {
   it("backspace at non-zero cursor deletes char before cursor", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask("> ", () => []);
+      const p = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("hello");
       stdin.push("\x7f"); // backspace
       stdin.push("\r");
@@ -204,7 +205,7 @@ describe("ask() - kill / delete", () => {
 
   it("backspace at cursor=0: no crash, no change", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask("> ", () => []);
+      const p = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("\x7f"); // backspace at start
       stdin.push("\r");
       const result = await p;
@@ -214,7 +215,7 @@ describe("ask() - kill / delete", () => {
 
   it("^K kills from cursor to end", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask("> ", () => []);
+      const p = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("hello world");
       stdin.push("\x01"); // ^A → start
       stdin.push("\x1b[C"); // right → after 'h'
@@ -227,7 +228,7 @@ describe("ask() - kill / delete", () => {
 
   it("^U kills from start to cursor", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask("> ", () => []);
+      const p = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("hello");
       stdin.push("\x15"); // ^U → kill all
       stdin.push("\r");
@@ -238,7 +239,7 @@ describe("ask() - kill / delete", () => {
 
   it("^W deletes word before cursor", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask("> ", () => []);
+      const p = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("foo bar");
       stdin.push("\x17"); // ^W → deletes "bar"
       stdin.push("\r");
@@ -249,7 +250,7 @@ describe("ask() - kill / delete", () => {
 
   it("^D in middle of buffer deletes character under cursor, cursor stays", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask("> ", () => []);
+      const p = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("abcd");
       stdin.push("\x01"); // ^A → go to start
       stdin.push("\x1b[C"); // right → cursor after 'a', before 'b'
@@ -262,7 +263,7 @@ describe("ask() - kill / delete", () => {
 
   it("^D at start of buffer deletes first character", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask("> ", () => []);
+      const p = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("hello");
       stdin.push("\x01"); // ^A → go to start (cursor=0)
       stdin.push("\x04"); // ^D → deletes 'h'
@@ -274,7 +275,7 @@ describe("ask() - kill / delete", () => {
 
   it("^D at end of buffer is a no-op", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask("> ", () => []);
+      const p = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("hello");
       // cursor is already at end after typing
       stdin.push("\x04"); // ^D at end → no-op
@@ -288,7 +289,7 @@ describe("ask() - kill / delete", () => {
 describe("ask() - character insertion", () => {
   it("printable chars inserted at cursor position", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask("> ", () => []);
+      const p = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("ac");
       stdin.push("\x1b[D"); // left → between a and c
       stdin.push("b");
@@ -300,7 +301,7 @@ describe("ask() - character insertion", () => {
 
   it("non-printable control chars ignored", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask("> ", () => []);
+      const p = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("hi");
       stdin.push("\x02"); // ^B — not handled, should be ignored
       stdin.push("\r");
@@ -313,7 +314,7 @@ describe("ask() - character insertion", () => {
 describe("ask() - exit conditions", () => {
   it("^D with cursor at end of buffer → no-op (does not exit)", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask("> ", () => []);
+      const p = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("hello");
       stdin.push("\x04"); // ^D at end → no-op (nothing to delete forward)
       stdin.push("\r");
@@ -325,7 +326,7 @@ describe("ask() - exit conditions", () => {
   it("^C with empty buffer → resolves with '__eof__' (does not call process.exit)", async () => {
     const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => {}) as any);
     await withFakeStdin(async (stdin) => {
-      const p = ask("> ", () => []);
+      const p = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("\x03"); // ^C with empty buffer
       const result = await p;
       expect(result).toBe("__eof__");
@@ -337,7 +338,7 @@ describe("ask() - exit conditions", () => {
   it("^C with non-empty buffer → clears buffer, does not exit", async () => {
     const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => {}) as any);
     await withFakeStdin(async (stdin) => {
-      const p = ask("> ", () => []);
+      const p = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("hello");
       stdin.push("\x03"); // ^C with text in buffer — should clear, not exit
       await new Promise(r => setTimeout(r, 10));
@@ -353,7 +354,7 @@ describe("ask() - exit conditions", () => {
   it("^D on empty buffer → resolves with '__eof__' (does not call process.exit)", async () => {
     const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => {}) as any);
     await withFakeStdin(async (stdin) => {
-      const p = ask("> ", () => []);
+      const p = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("\x04"); // ^D on empty
       const result = await p;
       expect(result).toBe("__eof__");
@@ -366,7 +367,7 @@ describe("ask() - exit conditions", () => {
 describe("ask() - bracketed paste", () => {
   it("complete paste sequence in one chunk → inserts content", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask("> ", () => []);
+      const p = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("\x1b[200~hello world\x1b[201~");
       stdin.push("\r");
       const result = await p;
@@ -376,7 +377,7 @@ describe("ask() - bracketed paste", () => {
 
   it("paste start/end split across chunks", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask("> ", () => []);
+      const p = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("\x1b[200~hello ");
       stdin.push("world\x1b[201~");
       stdin.push("\r");
@@ -387,7 +388,7 @@ describe("ask() - bracketed paste", () => {
 
   it("\\r\\n inside paste normalized to \\n", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask("> ", () => []);
+      const p = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("\x1b[200~line1\r\nline2\x1b[201~");
       stdin.push("\r");
       const result = await p;
@@ -397,7 +398,7 @@ describe("ask() - bracketed paste", () => {
 
   it("paste inserted at cursor (not at end)", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask("> ", () => []);
+      const p = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("ab");
       stdin.push("\x1b[D"); // left → between a and b
       stdin.push("\x1b[200~X\x1b[201~");
@@ -409,7 +410,7 @@ describe("ask() - bracketed paste", () => {
 
   it("paste mode: newlines within paste don't auto-submit", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask("> ", () => []);
+      const p = ask(testDisplay.statusBar, "> ", () => []);
       // Paste with embedded newline — should not submit mid-paste
       stdin.push("\x1b[200~line1\nline2\x1b[201~");
       stdin.push("\r");
@@ -424,7 +425,7 @@ describe("ask() - abort parameter", () => {
     await withFakeStdin(async () => {
       let resolveAbort!: (v: string) => void;
       const abort = new Promise<string>((r) => { resolveAbort = r; });
-      const result = ask("> ", undefined, abort);
+      const result = ask(testDisplay.statusBar, "> ", undefined, abort);
       // Fire abort before any stdin input
       resolveAbort("__abort__");
       expect(await result).toBe("__abort__");
@@ -435,7 +436,7 @@ describe("ask() - abort parameter", () => {
 describe("ask() - word movement detail", () => {
   it("moveWordLeft: 'foo bar|' → 'foo |bar'", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask("> ", () => []);
+      const p = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("foo bar");
       stdin.push("\x1bb"); // option+left → before "bar"
       stdin.push("X");
@@ -447,7 +448,7 @@ describe("ask() - word movement detail", () => {
 
   it("moveWordLeft with trailing spaces: skips spaces then word", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask("> ", () => []);
+      const p = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("foo bar  "); // cursor at end (after spaces)
       stdin.push("\x1bb"); // option+left → before "bar"
       stdin.push("X");
@@ -459,7 +460,7 @@ describe("ask() - word movement detail", () => {
 
   it("moveWordRight: '|foo bar' → 'foo| bar'", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask("> ", () => []);
+      const p = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("foo bar");
       stdin.push("\x01"); // ^A → start
       stdin.push("\x1bf"); // option+right → after "foo"
@@ -479,7 +480,7 @@ describe("ask() - submit output", () => {
     const writeSpy = vi.mocked(process.stdout.write);
 
     await withFakeStdin(async (stdin) => {
-      const p = ask("> ", () => []);
+      const p = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("hello");
       writeSpy.mockClear(); // ignore prompt/redraw writes from typing
       stdin.push("\r");
@@ -498,7 +499,7 @@ describe("ask() - drawFresh after print()", () => {
     vi.spyOn(console, "log").mockImplementation(() => {});
 
     await withFakeStdin(async (stdin) => {
-      const p = ask("> ", () => []);
+      const p = ask(testDisplay.statusBar, "> ", () => []);
 
       // Simulate testDisplay.print() being called (e.g., an event notification arriving)
       testDisplay.print("Event received: some_event");
@@ -530,7 +531,7 @@ describe("ask() - blank line suppression with \\n prefix prompt", () => {
     const abortP = new Promise<string>((res) => { resolveAbort = res; });
 
     await withFakeStdin(async (_stdin) => {
-      const p = ask("\n> ", () => [], abortP);
+      const p = ask(testDisplay.statusBar, "\n> ", () => [], abortP);
       writeSpy.mockClear();
       resolveAbort("WS_EVENT");
       await p;
@@ -550,7 +551,7 @@ describe("ask() - blank line suppression with \\n prefix prompt", () => {
     const abortP = new Promise<string>((res) => { resolveAbort = res; });
 
     await withFakeStdin(async (_stdin) => {
-      const p = ask("\n> ", () => [], abortP);
+      const p = ask(testDisplay.statusBar, "\n> ", () => [], abortP);
       writeSpy.mockClear();
       resolveAbort("WS_EVENT");
       await p;
@@ -573,7 +574,7 @@ describe("ask() - blank line suppression with \\n prefix prompt", () => {
     const writeSpy = vi.mocked(process.stdout.write);
 
     await withFakeStdin(async (stdin) => {
-      const p = ask("\n> ", () => []);
+      const p = ask(testDisplay.statusBar, "\n> ", () => []);
       writeSpy.mockClear();
 
       testDisplay.print("notification");
@@ -595,7 +596,7 @@ describe("ask() - blank line suppression with \\n prefix prompt", () => {
     const writeSpy = vi.mocked(process.stdout.write);
 
     await withFakeStdin(async (stdin) => {
-      const p = ask("> ", () => []);
+      const p = ask(testDisplay.statusBar, "> ", () => []);
       writeSpy.mockClear();
 
       testDisplay.print("notification");
@@ -873,7 +874,7 @@ describe("ask() - stash (^S)", () => {
 
   it("^S with non-empty buffer clears buffer so ask resolves to ''", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask("> ", () => []);
+      const p = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("hello world");
       stdin.push("\x13"); // ^S — stash
       stdin.push("\r");   // submit now-empty buffer
@@ -885,14 +886,14 @@ describe("ask() - stash (^S)", () => {
   it("next ask() after stash is pre-populated with stashed text", async () => {
     await withFakeStdin(async (stdin) => {
       // First ask: stash then submit empty
-      const p1 = ask("> ", () => []);
+      const p1 = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("hello world");
       stdin.push("\x13");
       stdin.push("\r");
       await p1;
 
       // Second ask: pre-populated with stash; Enter immediately resolves to stash
-      const p2 = ask("> ", () => []);
+      const p2 = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("\r");
       const result = await p2;
       expect(result).toBe("hello world");
@@ -901,18 +902,18 @@ describe("ask() - stash (^S)", () => {
 
   it("stash is consumed after one ask() call — third ask starts empty", async () => {
     await withFakeStdin(async (stdin) => {
-      const p1 = ask("> ", () => []);
+      const p1 = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("saved");
       stdin.push("\x13");
       stdin.push("\r");
       await p1;
 
-      const p2 = ask("> ", () => []);
+      const p2 = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("\r");
       const r2 = await p2;
       expect(r2).toBe("saved");
 
-      const p3 = ask("> ", () => []);
+      const p3 = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("\r");
       const r3 = await p3;
       expect(r3).toBe(""); // stash was consumed
@@ -921,7 +922,7 @@ describe("ask() - stash (^S)", () => {
 
   it("^S with empty buffer is a no-op — nothing stashed", async () => {
     await withFakeStdin(async (stdin) => {
-      const p1 = ask("> ", () => []);
+      const p1 = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("\x13"); // ^S with empty buffer
       stdin.push("hi");
       stdin.push("\r");
@@ -929,7 +930,7 @@ describe("ask() - stash (^S)", () => {
       expect(r1).toBe("hi");
 
       // No stash was set
-      const p2 = ask("> ", () => []);
+      const p2 = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("\r");
       const r2 = await p2;
       expect(r2).toBe(""); // starts empty
@@ -944,7 +945,7 @@ describe("ask() - stash (^S)", () => {
     });
 
     await withFakeStdin(async (stdin) => {
-      const p = ask("> ", () => []);
+      const p = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("test");
       stdin.push("\x13");
       stdin.push("\r");
@@ -957,7 +958,7 @@ describe("ask() - stash (^S)", () => {
 
   it("pressing ^S twice: second stash overwrites first", async () => {
     await withFakeStdin(async (stdin) => {
-      const p1 = ask("> ", () => []);
+      const p1 = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("first");
       stdin.push("\x13"); // stash "first"
       stdin.push("second");
@@ -965,7 +966,7 @@ describe("ask() - stash (^S)", () => {
       stdin.push("\r");
       await p1;
 
-      const p2 = ask("> ", () => []);
+      const p2 = ask(testDisplay.statusBar, "> ", () => []);
       stdin.push("\r");
       const r2 = await p2;
       expect(r2).toBe("second");

@@ -5,8 +5,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from "vitest";
 import { getConfig } from "../src/config.js";
 import { Display } from "../src/agent/views/display.js";
+import { StatusBar } from "../src/agent/views/status-bar.js";
 import { stripAnsi } from "./helpers.js";
-import { statusBar } from "../src/agent/views/status-bar.js";
 import * as Wire from "../shared/wire.js";
 
 let testDisplay: Display;
@@ -22,13 +22,13 @@ function captureOutput(fn: () => void): string {
 }
 
 beforeEach(() => {
-  testDisplay = new Display(getConfig());
-  statusBar.stop();
+  testDisplay = new Display(getConfig(), new StatusBar({ agentId: "test-agent" }));
+  testDisplay.statusBar.stop();
   getConfig().verbose = false;
 });
 
 afterEach(() => {
-  statusBar.stop();
+  testDisplay.statusBar.stop();
   getConfig().verbose = false;
   vi.restoreAllMocks();
   vi.useRealTimers();

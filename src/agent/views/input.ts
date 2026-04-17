@@ -1,5 +1,5 @@
 import { c, s } from "./display.js";
-import { statusBar } from "./status-bar.js";
+import type { StatusBar } from "./status-bar.js";
 import { filterCommands } from "../controllers/command-controller.js";
 import type { CommandSuggestion } from "../controllers/command-controller.js";
 
@@ -18,6 +18,7 @@ export function _resetStash(): void { stash = null; }
 // rather than having each newline submit a separate prompt.
 
 export function ask(
+  statusBar: StatusBar,
   promptStr: string,
   getCommands: () => CommandSuggestion[] = () => [],
   abort?: Promise<string>,

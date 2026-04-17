@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { StatusBar, statusBar } from "../src/agent/views/status-bar.js";
+import { StatusBar } from "../src/agent/views/status-bar.js";
 import { getConfig } from "../src/config.js";
 
 // Strip ANSI codes for assertion
@@ -273,8 +273,10 @@ describe("StatusBar status text", () => {
 
 describe("persistent status bar", () => {
   let stdoutWrite: ReturnType<typeof vi.spyOn>;
+  let statusBar: StatusBar;
 
   beforeEach(() => {
+    statusBar = new StatusBar({ agentId: "test-agent" });
     stdoutWrite = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     // Ensure clean state
     statusBar.stop();

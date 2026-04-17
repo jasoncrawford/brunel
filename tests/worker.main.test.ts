@@ -77,8 +77,14 @@ import { main } from "../src/agent/index.js";
 import { confirmIfUnsafe } from "../src/agent/models/workspace.js";
 import * as inputModule from "../src/agent/views/input.js";
 import { Display } from "../src/agent/views/display.js";
+import { StatusBar } from "../src/agent/views/status-bar.js";
+import { Settings } from "../src/agent/models/settings.js";
 import { getConfig } from "../src/config.js";
 import { stripAnsi } from "./helpers.js";
+
+function makeTestDisplay(): Display {
+  return new Display(getConfig(), new StatusBar({ agentId: "test-agent" }));
+}
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -94,9 +100,9 @@ async function runWorkerMain(runQueryFn = vi.fn().mockResolvedValue(undefined)):
     throw new Error("__process_exit__");
   }) as unknown as ReturnType<typeof vi.spyOn>;
 
-  const testDisplay = new Display(getConfig());
+  const testDisplay = makeTestDisplay();
   try {
-    await main(runQueryFn, permConfig, testDisplay, true /* runWorkerMode */);
+    await main(runQueryFn, permConfig, testDisplay, new Settings({}), true /* runWorkerMode */);
     return { exitCalled: false, exitCode: undefined };
   } catch (err) {
     if (err instanceof Error && err.message === "__process_exit__") {
@@ -127,13 +133,13 @@ describe("workerMain startup banner", () => {
   });
 
   it("includes permissions, output mode, and logfile in the startup banner", async () => {
-    const testDisplay = new Display(getConfig());
+    const testDisplay = makeTestDisplay();
     const printSpy = vi.spyOn(testDisplay, "print").mockImplementation(() => {});
     const exitSpy = vi.spyOn(process, "exit").mockImplementation((code?: number | string) => {
       throw new Error("__process_exit__");
     }) as unknown as ReturnType<typeof vi.spyOn>;
     try {
-      await main(vi.fn().mockResolvedValue(undefined), permConfig, testDisplay, true /* runWorkerMode */);
+      await main(vi.fn().mockResolvedValue(undefined), permConfig, testDisplay, new Settings({}), true /* runWorkerMode */);
     } catch (err) {
       if (!(err instanceof Error && err.message === "__process_exit__")) throw err;
     } finally {
@@ -207,7 +213,7 @@ describe("workerMain exit behavior", () => {
     }) as unknown as ReturnType<typeof vi.spyOn>;
 
     let workerDone = false;
-    const workerPromise = main(runQueryFn, permConfig, new Display(getConfig()), true /* runWorkerMode */).then(
+    const workerPromise = main(runQueryFn, permConfig, makeTestDisplay(), new Settings({}), true /* runWorkerMode */).then(
       () => { workerDone = true; },
       () => { workerDone = true; },
     );
@@ -241,7 +247,7 @@ describe("workerMain exit behavior", () => {
     }) as unknown as ReturnType<typeof vi.spyOn>;
 
     try {
-      await main(vi.fn().mockResolvedValue(undefined), permConfig, new Display(getConfig()), true /* runWorkerMode */);
+      await main(vi.fn().mockResolvedValue(undefined), permConfig, makeTestDisplay(), new Settings({}), true /* runWorkerMode */);
     } catch (err) {
       if (!(err instanceof Error && err.message === "__process_exit__")) throw err;
     } finally {

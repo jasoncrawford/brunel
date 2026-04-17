@@ -6,7 +6,7 @@ import { fileURLToPath } from "url";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { CanUseTool, PermissionMode, PermissionResult } from "@anthropic-ai/claude-agent-sdk";
 import { Display, c, hr } from "./views/display.js";
-import { StatusBar, statusBar, initStatusBar } from "./views/status-bar.js";
+import { StatusBar } from "./views/status-bar.js";
 import { ask, pick, pickMultiple, pickQuestion } from "./views/input.js";
 import type { PickQuestionResult } from "./views/input.js";
 import { WorkerSession, registerWorkerCommands, startWorkerMode, generateAgentId } from "./controllers/worker-controller.js";
@@ -44,7 +44,7 @@ export async function handleAskUserQuestion(
   getStatusText: () => string,
   display: Display,
 ): Promise<PermissionResult> {
-  statusBar.stop();
+  display.statusBar.stop();
   const questions = (input.questions as Question[]) ?? [];
   const answers: Record<string, string> = {};
 
@@ -57,14 +57,14 @@ export async function handleAskUserQuestion(
     } else {
       const result: PickQuestionResult = await pickQuestion(q.options);
       if (result.type === "discuss") {
-        statusBar.start(getStatusText);
+        display.statusBar.start(getStatusText);
         return { behavior: "deny", message: "The user would like to discuss more before answering. Prompt them to begin the discussion." };
       }
       answers[q.question] = result.type === "answer" ? result.value : result.text;
     }
   }
 
-  statusBar.start(getStatusText);
+  display.statusBar.start(getStatusText);
   return { behavior: "allow", updatedInput: { ...input, answers } };
 }
 
@@ -74,10 +74,10 @@ export async function handleToolPermission(
   getStatusText: () => string,
   display: Display,
 ): Promise<PermissionResult> {
-  statusBar.stop();
+  display.statusBar.stop();
   display.print(c.amber(`\n⚠ ${toolName}(${display.fmtArgs(input)})`));
   const idx = await pick(["Allow", "Deny"]);
-  statusBar.start(getStatusText);
+  display.statusBar.start(getStatusText);
   if (idx === 0) return { behavior: "allow", updatedInput: input };
   return { behavior: "deny", message: "User denied tool request" };
 }
@@ -92,6 +92,7 @@ export async function runQuery(
   effort?: EffortValue,
 ): Promise<string | undefined> {
   logFull("QUERY", { prompt, sessionId });
+  const statusBar = display.statusBar;
   // Save and clear the input print callback while the query runs. In worker
   // mode, ask() registers drawFresh() as the callback so the prompt redraws
   // after background WebSocket messages — but during a query run the callback
@@ -231,16 +232,14 @@ export async function main(
   runQueryFn: RunQuery,
   permConfig: { permissionMode: PermissionMode; allowDangerouslySkipPermissions: boolean },
   display: Display,
+  settings: Settings,
   runWorkerMode?: boolean,
   workspaceCfg?: { workspaceDir: string; repoUrl: string },
-  initialModel?: string,
-  initialEffort?: EffortValue,
 ): Promise<void> {
-  const settings = new Settings({ model: initialModel, effort: initialEffort });
-  initStatusBar(new StatusBar({ agentId: generateAgentId(), settings }));
+  const statusBar = display.statusBar;
 
   // Worker mode setup: create workspace, session, signal handlers.
-  const workerCtx = runWorkerMode ? await startWorkerMode(display) : undefined;
+  const workerCtx = runWorkerMode ? await startWorkerMode(display, statusBar) : undefined;
   const session = workerCtx?.session;
 
   const fetchModelsFn = createFetchModelsFn(permConfig);
@@ -364,7 +363,7 @@ export async function main(
     // empty promptLine suppresses the drawFresh callback so incoming messages
     // are printed cleanly without a prompt preceding or following them.
     const promptStr = session ? (showPrompt ? "\n[agent] > " : "") : "\n> ";
-    const input = await ask(promptStr, () => controller.listCommands(), wsAbort);
+    const input = await ask(statusBar, promptStr, () => controller.listCommands(), wsAbort);
 
     // ^D / ^C on empty buffer — treat as exit.
     if (input === "__eof__") {
@@ -446,7 +445,9 @@ export async function main(
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const config = await loadConfig(process.argv);
-  const display = new Display(config);
+  const settings = new Settings({ model: config.model, effort: config.effort });
+  const statusBar = new StatusBar({ agentId: generateAgentId(), settings });
+  const display = new Display(config, statusBar);
   const permConfig = {
     permissionMode: config.permissionMode,
     allowDangerouslySkipPermissions: config.allowDangerouslySkipPermissions,
@@ -464,5 +465,5 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 
   const runWorkerMode = process.argv.includes("--worker-mode");
 
-  await main(boundRunQuery, permConfig, display, runWorkerMode, workspaceCfg, config.model, config.effort);
+  await main(boundRunQuery, permConfig, display, settings, runWorkerMode, workspaceCfg);
 }
