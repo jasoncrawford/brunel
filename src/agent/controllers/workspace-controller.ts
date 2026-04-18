@@ -5,9 +5,9 @@ import { Workspace, confirmIfUnsafe } from "../models/workspace.js";
 import { fmtError } from "../../utils.js";
 
 /**
- * WorkspaceController owns workspace lifecycle (creation, reset between tasks)
- * and registers the /workspace:* slash commands. Constructed in index.ts or
- * startWorkerMode and injected into WorkerSession as the afterTask callback.
+ * WorkspaceController owns workspace lifecycle (creation, reset between tasks,
+ * and destruction on exit) and registers the /workspace:* slash commands.
+ * Constructed once in index.ts and injected into startWorkerMode.
  *
  * Pass `undefined` workspace when no GitHub repo is configured — commands that
  * require a workspace will print an appropriate error message, and lifecycle
@@ -153,8 +153,8 @@ export class WorkspaceController {
   }
 
   /**
-   * Confirm if unsafe, then destroy the workspace. Used on graceful shutdown.
-   * No-op if no workspace is configured or it hasn't been created yet.
+   * Confirm if unsafe, then destroy the workspace. Used during clean shutdown
+   * (^D, /exit, SIGINT). No-op if no workspace is configured or not yet created.
    */
   async onDestroy(): Promise<void> {
     const { workspace } = this;
@@ -164,8 +164,9 @@ export class WorkspaceController {
   }
 
   /**
-   * Destroy the workspace immediately without prompting. Used on SIGTERM.
-   * No-op if no workspace is configured or it hasn't been created yet.
+   * Destroy the workspace immediately without prompting. Used on SIGTERM
+   * (system/orchestrator shutdown). No-op if no workspace is configured
+   * or not yet created.
    */
   async onForceDestroy(): Promise<void> {
     const { workspace } = this;

@@ -1,15 +1,12 @@
 import { exec } from "node:child_process";
 import { randomInt } from "node:crypto";
 import { promisify } from "node:util";
-import path from "node:path";
-import os from "node:os";
 import { WebSocket } from "ws";
 import { c } from "../views/display.js";
 import { StatusBar } from "../views/status-bar.js";
 import { buildInitialPrompt, buildEventPrompt } from "../worker-prompts.js";
 import type { EffortValue } from "../models/settings.js";
 import * as Wire from "../../../shared/wire.js";
-import { Workspace } from "../models/workspace.js";
 import { fmtError } from "../../utils.js";
 import { getConfig } from "../../config.js";
 import type { CommandRegistry } from "./command-controller.js";
@@ -268,11 +265,6 @@ export class WorkerSession {
     this.statusBar.update({ taskNumber: undefined, prNumber: undefined, branch: "" });
     this.display.print(c.sageGreen("Task complete. Waiting for next task..."));
     return "task-complete";
-  }
-
-  /** Returns the workspace, delegating to the injected workspaceController. */
-  get workspace(): Workspace | undefined {
-    return this.options.workspaceController?.workspace;
   }
 
   /**
@@ -663,32 +655,24 @@ export function registerWorkerCommands(session: WorkerSession | undefined, regis
 }
 
 /**
- * Set up worker mode: create the workspace, configure the WorkerSession,
- * install signal handlers, and start the session. Returns the session and
- * a cleanup function — does NOT call main(). The caller (main itself) owns
- * the query loop and calls cleanup() after the loop exits.
+ * Set up worker mode: configure the WorkerSession, install signal handlers,
+ * and start the session. Receives a WorkspaceController (constructed in
+ * index.ts) and delegates all workspace lifecycle operations to it.
+ * Returns the session and a cleanup function — does NOT call main(). The
+ * caller (main itself) owns the query loop and calls cleanup() after it exits.
  */
-export async function startWorkerMode(display: WorkerDisplay, statusBar: StatusBar, picker: Picker): Promise<{
+export async function startWorkerMode(
+  display: WorkerDisplay,
+  statusBar: StatusBar,
+  picker: Picker,
+  workspaceController: WorkspaceController | undefined,
+): Promise<{
   session: WorkerSession;
   cleanup: () => Promise<void>;
 }> {
-  const config = getConfig();
-  const originalCwd = process.cwd();
-  const workspaceDir = config.workspaceDir ?? path.join(os.homedir(), ".brunel", "workers");
-  const repoUrl = config.repoUrl ?? `https://${config.githubToken}@github.com/${config.githubRepo}.git`;
+  await workspaceController?.onCreate();
 
-  const confirm = async (msg: string): Promise<boolean> => {
-    display.print(c.amber(`\n⚠ Potential data loss:\n${msg}`));
-    const idx = await picker.pick(["Yes, proceed", "No, cancel"]);
-    return idx === 0;
-  };
-
-  const workspace = new Workspace(workspaceDir, statusBar.agentId, repoUrl, originalCwd, confirm);
-  const workspaceController = new WorkspaceController(workspace, display);
-
-  await workspaceController.onCreate();
-
-  const afterTask = () => workspaceController.onReset();
+  const afterTask = workspaceController ? () => workspaceController.onReset() : undefined;
 
   let shuttingDown = false;
 
@@ -723,7 +707,7 @@ export async function startWorkerMode(display: WorkerDisplay, statusBar: StatusB
       if (choice === "cancel") { shuttingDown = false; return; }
       if (choice === "complete-and-quit") await session.completeCurrentTask();
     }
-    await workspaceController.onDestroy();
+    await workspaceController?.onDestroy();
     process.exit(0);
   };
 
@@ -738,7 +722,11 @@ export async function startWorkerMode(display: WorkerDisplay, statusBar: StatusB
   // SIGTERM is a system/orchestrator signal: send goodbye then force-destroy without prompting.
   process.on("SIGTERM", () => {
     session.sendGoodbye();
-    void workspaceController.onForceDestroy().then(() => process.exit(0));
+    if (workspaceController) {
+      void workspaceController.onForceDestroy().then(() => process.exit(0));
+    } else {
+      process.exit(0);
+    }
   });
 
   session.start();
@@ -746,7 +734,7 @@ export async function startWorkerMode(display: WorkerDisplay, statusBar: StatusB
   const cleanup = async () => {
     session.sendGoodbye();
     shuttingDown = true;
-    await workspaceController.onDestroy();
+    await workspaceController?.onDestroy();
     process.stdout.write("\x1b[?2004l\r\n");
     if (process.stdin.isTTY) process.stdin.setRawMode(false);
     process.stdin.pause();
