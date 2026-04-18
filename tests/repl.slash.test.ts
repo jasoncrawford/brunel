@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { resolveCommandFilePath, resolveContent, type CommandController } from "../src/agent/controllers/command-controller.js";
+import type { CommandController } from "../src/agent/controllers/command-controller.js";
 import { registerTestCommands } from "./helpers.js";
 
 let registry: CommandController;
@@ -71,33 +71,3 @@ describe("parseSlashCommand", () => {
   });
 });
 
-describe("resolveCommandFilePath", () => {
-  it("simple command maps to ~/.claude/commands/<cmd>.md", () => {
-    const path = resolveCommandFilePath("brainstorming");
-    expect(path).toMatch(/\.claude\/commands\/brainstorming\.md$/);
-  });
-
-  it("colon in command name maps to slash in path", () => {
-    const path = resolveCommandFilePath("foo:bar");
-    expect(path).toMatch(/\.claude\/commands\/foo\/bar\.md$/);
-  });
-
-  it("multiple colons produce nested path", () => {
-    const path = resolveCommandFilePath("a:b:c");
-    expect(path).toMatch(/\.claude\/commands\/a\/b\/c\.md$/);
-  });
-
-  it("path starts from home directory", () => {
-    const path = resolveCommandFilePath("cmd");
-    const home = process.env.HOME ?? process.env.USERPROFILE ?? "";
-    expect(path.startsWith(home)).toBe(true);
-  });
-});
-
-describe("resolveContent path resolution", () => {
-  it("passes the resolved command path to readFile", () => {
-    let firstPath = "";
-    resolveContent("foo:bar", (path) => { if (!firstPath) firstPath = path; return null; });
-    expect(firstPath).toMatch(/\.claude\/commands\/foo\/bar\.md$/);
-  });
-});

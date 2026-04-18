@@ -13,7 +13,7 @@ export type CommandHandler = (args: string) => Promise<HandlerResult>;
  * Otherwise, if args is non-empty, appends "\nARGUMENTS: <args>".
  * Otherwise returns content unchanged.
  */
-export function applyArguments(content: string, args: string): string {
+function applyArguments(content: string, args: string): string {
   if (content.includes("$ARGUMENTS")) {
     return content.replaceAll("$ARGUMENTS", args);
   }
@@ -38,25 +38,12 @@ export type DispatchResult =
 // ── Command filtering ─────────────────────────────────────────────────────────
 
 /**
- * Filter commands by substring. Case-insensitive. Empty query returns all.
- * Prefix matches come before non-prefix substring matches. Preserves relative
- * input order within each group.
- */
-export function matchCommands(query: string, commands: string[]): string[] {
-  if (query === "") return commands;
-  const q = query.toLowerCase();
-  const prefix = commands.filter(cmd => cmd.toLowerCase().startsWith(q));
-  const nonPrefix = commands.filter(cmd => !cmd.toLowerCase().startsWith(q) && cmd.toLowerCase().includes(q));
-  return [...prefix, ...nonPrefix];
-}
-
-/**
  * Filter CommandSuggestion objects by substring of name or description.
  * Case-insensitive. Empty query returns all commands.
  * Sort order: prefix matches of name, then non-prefix name substring matches,
  * then description-only matches.
  */
-export function filterCommands(query: string, commands: CommandSuggestion[]): CommandSuggestion[] {
+function filterCommands(query: string, commands: CommandSuggestion[]): CommandSuggestion[] {
   if (query === "") return commands;
   const q = query.toLowerCase();
   const prefixName = commands.filter(c => c.name.toLowerCase().startsWith(q));
@@ -88,7 +75,7 @@ export type ListDir = (dir: string) => Array<{ name: string; isDir: boolean }> |
  * Returns key/value pairs as strings. Non-matching lines are silently skipped.
  * Returns {} if no frontmatter block is present.
  */
-export function parseFrontmatter(content: string): Record<string, string> {
+function parseFrontmatter(content: string): Record<string, string> {
   const match = content.match(/^---\n([\s\S]*?)\n---/);
   if (!match) return {};
   const result: Record<string, string> = {};
@@ -150,7 +137,7 @@ function extractDescription(content: string): string {
  * Convert a slash command name to its file path under ~/.claude/commands/.
  * Colons become path separators: "foo:bar" → ~/.claude/commands/foo/bar.md
  */
-export function resolveCommandFilePath(command: string): string {
+function resolveCommandFilePath(command: string): string {
   const home = process.env.HOME ?? process.env.USERPROFILE ?? "";
   const rel = command.replace(/:/g, "/");
   return `${home}/.claude/commands/${rel}.md`;
@@ -164,7 +151,7 @@ export function resolveCommandFilePath(command: string): string {
  * Returns raw file content, or null if not found.
  * Does NOT apply arguments — that is left to the caller.
  */
-export function resolveContent(
+function resolveContent(
   command: string,
   readFile: (path: string) => string | null = defaultReadFile,
 ): string | null {
@@ -218,7 +205,7 @@ export function resolveContent(
  * Plugin skills are named "<plugin>:<skill>".
  * Both listDir and readFile are injectable for testing.
  */
-export function listSkillNames(
+function listSkillNames(
   listDir: ListDir = defaultListDir,
   readFile: (path: string) => string | null = defaultReadFile,
 ): string[] {

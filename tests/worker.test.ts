@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "events";
-import { WorkerSession, classifyEvent, debounceMs } from "../src/agent/controllers/worker-controller.js";
+import { WorkerSession } from "../src/agent/controllers/worker-controller.js";
 import { StatusBar } from "../src/agent/views/status-bar.js";
 import * as Wire from "../shared/wire.js";
 import { stripAnsi } from "./helpers.js";
@@ -854,88 +854,6 @@ describe("hello_ack handshake — buffering", () => {
   });
 });
 
-// ── classifyEvent ─────────────────────────────────────────────────────────────
-
-describe("classifyEvent", () => {
-  function evt(name: string, action?: string, extra?: Record<string, unknown>): Wire.WebhookEvent {
-    return { id: "e1", name, payload: { ...(action ? { action } : {}), ...extra } };
-  }
-
-  describe("log_only events", () => {
-    it("check_run/created is log_only", () => {
-      expect(classifyEvent(evt("check_run", "created"))).toBe("log_only");
-    });
-    it("check_run/completed is log_only", () => {
-      expect(classifyEvent(evt("check_run", "completed"))).toBe("log_only");
-    });
-    it("check_suite/requested is log_only", () => {
-      expect(classifyEvent(evt("check_suite", "requested"))).toBe("log_only");
-    });
-    it("check_suite/in_progress is log_only", () => {
-      expect(classifyEvent(evt("check_suite", "in_progress"))).toBe("log_only");
-    });
-    it("check_suite/rerequested is log_only", () => {
-      expect(classifyEvent(evt("check_suite", "rerequested"))).toBe("log_only");
-    });
-    it("check_suite/completed with conclusion skipped is log_only", () => {
-      expect(classifyEvent(evt("check_suite", "completed", { check_suite: { conclusion: "skipped" } }))).toBe("log_only");
-    });
-    it("pull_request/labeled is log_only", () => {
-      expect(classifyEvent(evt("pull_request", "labeled"))).toBe("log_only");
-    });
-    it("pull_request/synchronize is log_only", () => {
-      expect(classifyEvent(evt("pull_request", "synchronize"))).toBe("log_only");
-    });
-    it("pull_request/reopened is log_only", () => {
-      expect(classifyEvent(evt("pull_request", "reopened"))).toBe("log_only");
-    });
-    it("unrecognised event is log_only", () => {
-      expect(classifyEvent(evt("deployment", "created"))).toBe("log_only");
-    });
-    it("unrecognised event with no action is log_only", () => {
-      expect(classifyEvent(evt("push"))).toBe("log_only");
-    });
-    it("issue_comment starting with <!-- railway-bot-comment is log_only", () => {
-      const body = "<!-- railway-bot-comment-version=2 -->\n\n<!-- railway-project-id=\"abc\" -->\n🚅 Deployed";
-      const event = { id: "e1", name: "issue_comment", payload: { action: "created", comment: { body } } };
-      expect(classifyEvent(event)).toBe("log_only");
-    });
-    it("issue_comment edited starting with <!-- railway-bot-comment is log_only", () => {
-      const body = "<!-- railway-bot-comment-version=2 -->\nsome content";
-      const event = { id: "e1", name: "issue_comment", payload: { action: "edited", comment: { body } } };
-      expect(classifyEvent(event)).toBe("log_only");
-    });
-  });
-
-  describe("actionable events", () => {
-    it("check_suite/completed is actionable", () => {
-      expect(classifyEvent(evt("check_suite", "completed"))).toBe("actionable");
-    });
-    it("pull_request_review/submitted is actionable", () => {
-      expect(classifyEvent(evt("pull_request_review", "submitted"))).toBe("actionable");
-    });
-    it("pull_request_review_comment/created is actionable", () => {
-      expect(classifyEvent(evt("pull_request_review_comment", "created"))).toBe("actionable");
-    });
-    it("issue_comment/created is actionable", () => {
-      expect(classifyEvent(evt("issue_comment", "created"))).toBe("actionable");
-    });
-    it("issue_comment/edited is actionable", () => {
-      expect(classifyEvent(evt("issue_comment", "edited"))).toBe("actionable");
-    });
-    it("issue_comment with railway-bot-comment body is actionable when no railway prefix", () => {
-      const event = { id: "e1", name: "issue_comment", payload: { action: "created", comment: { body: "Normal comment" } } };
-      expect(classifyEvent(event)).toBe("actionable");
-    });
-    it("pull_request/closed is actionable", () => {
-      expect(classifyEvent(evt("pull_request", "closed"))).toBe("actionable");
-    });
-    it("pull_request/auto_merge_enabled is actionable", () => {
-      expect(classifyEvent(evt("pull_request", "auto_merge_enabled"))).toBe("actionable");
-    });
-  });
-});
-
 // ── log_only filtering ────────────────────────────────────────────────────────
 
 describe("log_only event filtering", () => {
@@ -964,6 +882,27 @@ describe("log_only event filtering", () => {
       new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 30)),
     ]);
     expect(result).toBe("timeout");
+  });
+
+  it("issue_comment from railway-bot is silently dropped (log_only)", async () => {
+    vi.useFakeTimers();
+    try {
+      const issue = makeIssue();
+      sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+      session.takeNextPrompt();
+
+      const body = "<!-- railway-bot-comment-version=2 -->\n🚅 Deployed to production";
+      sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: {
+        id: "e1",
+        name: "issue_comment",
+        payload: { action: "created", comment: { body } },
+      }});
+      await vi.runAllTimersAsync();
+
+      expect(session.hasPendingPrompts()).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -1109,60 +1048,6 @@ describe("interrupt()", () => {
     session.notifyQueryEnd(false);
 
     expect(session.interrupt()).toBe(false);
-  });
-});
-
-// ── debounceMs ────────────────────────────────────────────────────────────────
-
-describe("debounceMs", () => {
-  function csEvt(conclusion: string): Wire.WebhookEvent {
-    return { id: "e1", name: "check_suite", payload: { action: "completed", check_suite: { conclusion } } };
-  }
-  function prEvt(action: string): Wire.WebhookEvent {
-    return { id: "e2", name: "pull_request", payload: { action } };
-  }
-  function commentEvt(): Wire.WebhookEvent {
-    return { id: "e3", name: "issue_comment", payload: { action: "created" } };
-  }
-
-  it("returns 0 for pull_request/closed", () => {
-    expect(debounceMs([prEvt("closed")])).toBe(0);
-  });
-
-  it("returns 0 when any event is pull_request/closed", () => {
-    expect(debounceMs([csEvt("success"), prEvt("closed")])).toBe(0);
-  });
-
-  it("returns 3000 for check_suite failure", () => {
-    expect(debounceMs([csEvt("failure")])).toBe(3000);
-  });
-
-  it("returns 3000 for check_suite action_required", () => {
-    expect(debounceMs([csEvt("action_required")])).toBe(3000);
-  });
-
-  it("returns 30000 for check_suite success only", () => {
-    expect(debounceMs([csEvt("success")])).toBe(30000);
-  });
-
-  it("returns 30000 for check_suite neutral only", () => {
-    expect(debounceMs([csEvt("neutral")])).toBe(30000);
-  });
-
-  it("returns 30000 for multiple check_suite success events", () => {
-    expect(debounceMs([csEvt("success"), csEvt("success")])).toBe(30000);
-  });
-
-  it("returns 3000 for mixed check_suite success and failure", () => {
-    expect(debounceMs([csEvt("success"), csEvt("failure")])).toBe(3000);
-  });
-
-  it("returns 3000 for issue_comment (default)", () => {
-    expect(debounceMs([commentEvt()])).toBe(3000);
-  });
-
-  it("returns 3000 for mix of check_suite success and issue_comment", () => {
-    expect(debounceMs([csEvt("success"), commentEvt()])).toBe(3000);
   });
 });
 

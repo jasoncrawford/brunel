@@ -50,16 +50,9 @@ const WORKER_NAMES = [
   "tobias", "verity", "victor", "violet", "warren", "zephaniah",
 ];
 
-/** Generate a human-readable agent ID by prepending a random human name to a UUID.
- * E.g. "patience-a9bdda00-1234-5678-abcd-ef0123456789" */
-export function generateAgentId(): string {
-  const idx = randomInt(WORKER_NAMES.length);
-  return `${WORKER_NAMES[idx]}-${crypto.randomUUID()}`;
-}
-
 // ── Event classification ───────────────────────────────────────────────────────
 
-export function classifyEvent(event: Wire.WebhookEvent): "actionable" | "log_only" {
+function classifyEvent(event: Wire.WebhookEvent): "actionable" | "log_only" {
   const action = event.payload["action"] as string | undefined;
 
   switch (event.name) {
@@ -92,7 +85,7 @@ export function classifyEvent(event: Wire.WebhookEvent): "actionable" | "log_onl
 
 // ── Debounce duration ──────────────────────────────────────────────────────────
 
-export function debounceMs(events: Wire.WebhookEvent[]): number {
+function debounceMs(events: Wire.WebhookEvent[]): number {
   if (events.some(e => e.name === "pull_request" && e.payload["action"] === "closed")) {
     return 0;
   }
@@ -382,6 +375,13 @@ export class WorkerSession {
    */
   static isFatalSignal(input: string): boolean {
     return input === WS_FATAL;
+  }
+
+  /** Generate a human-readable agent ID by prepending a random human name to a UUID.
+   * E.g. "patience-a9bdda00-1234-5678-abcd-ef0123456789" */
+  static generateAgentId(): string {
+    const idx = randomInt(WORKER_NAMES.length);
+    return `${WORKER_NAMES[idx]}-${crypto.randomUUID()}`;
   }
 
   // ── Private ───────────────────────────────────────────────────────────────

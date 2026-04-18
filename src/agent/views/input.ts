@@ -1,7 +1,19 @@
 import { c, s } from "./display.js";
 import type { Display } from "./display.js";
-import { filterCommands } from "../controllers/command-controller.js";
 import type { CommandSuggestion } from "../controllers/command-controller.js";
+
+function filterCommands(query: string, commands: CommandSuggestion[]): CommandSuggestion[] {
+  if (query === "") return commands;
+  const q = query.toLowerCase();
+  const prefixName = commands.filter(c => c.name.toLowerCase().startsWith(q));
+  const substringName = commands.filter(
+    c => !c.name.toLowerCase().startsWith(q) && c.name.toLowerCase().includes(q),
+  );
+  const descOnly = commands.filter(
+    c => !c.name.toLowerCase().includes(q) && c.description.toLowerCase().includes(q),
+  );
+  return [...prefixName, ...substringName, ...descOnly];
+}
 
 // ── Stash ─────────────────────────────────────────────────────────────────────
 
