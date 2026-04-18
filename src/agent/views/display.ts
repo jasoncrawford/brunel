@@ -9,7 +9,7 @@ export const W = 70;
 export const hr = (ch = "─") => ch.repeat(W);
 
 /** Visible width of the verbose timestamp prefix "HH:mm:ss " */
-export const VERBOSE_PREFIX_LEN = 9;
+const VERBOSE_PREFIX_LEN = 9;
 
 /**
  * Returns the usable terminal width, accounting for the verbose timestamp
@@ -96,10 +96,6 @@ export function trunc(str: string, n = 80) {
 export function fmtCount(count: number, singular_noun: string, plural_noun?: string) {
   const noun = (count === 1) ? singular_noun : (plural_noun ?? `${singular_noun}s`);
   return `${count} ${noun}`;
-}
-
-export function fmtTimestamp(): string {
-  return new Date().toISOString();
 }
 
 export function fmtTime(): string {
@@ -220,13 +216,13 @@ export function fmtArgs(input: Record<string, unknown>, maxVal = 50): string {
     .join(", ");
 }
 
-export function fmtToolCall(b: ToolUseBlock, fmt: string) {
+function fmtToolCall(b: ToolUseBlock, fmt: string) {
   fmt = c.skyBlue(`\n${fmt}`);
   if (b.input?.description) fmt += c.gray(` # ${b.input.description}`);
   return fmt;
 }
 
-export function fmtHunk(hunk: Hunk): string {
+function fmtHunk(hunk: Hunk): string {
   const header = c.darkGray(`@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`);
   const width = effectiveWidth(80);
   const lines = hunk.lines.map(line => {
@@ -237,19 +233,19 @@ export function fmtHunk(hunk: Hunk): string {
   return [header, ...lines].join("\n");
 }
 
-export function fmtEditResult(b: ToolResultBlock) {
+function fmtEditResult(b: ToolResultBlock) {
   const patch = b._msg?.tool_use_result?.structuredPatch;
   if (patch && patch.length > 0) return patch.map(fmtHunk).join("\n");
   return c.darkGray(`→ ${trunc(toolResultText(b), 100)}`);
 }
 
-export function fmtBashOutput(text: string): string {
+function fmtBashOutput(text: string): string {
   const t = text.trim();
   if (!t || t === "(Bash completed with no output)") return "Success";
   return getConfig().verbose ? t : trunc(t, 100);
 }
 
-export function fmtWriteOutput(b: ToolResultBlock & { _input?: Record<string, unknown> }): string {
+function fmtWriteOutput(b: ToolResultBlock & { _input?: Record<string, unknown> }): string {
   const content = b._input?.content as string | undefined;
   if (content == null) return trunc(toolResultText(b), 100);
   const lines = content.split("\n").length;
@@ -257,17 +253,17 @@ export function fmtWriteOutput(b: ToolResultBlock & { _input?: Record<string, un
   return `${verb} ${fmtCount(lines, "line")}`;
 }
 
-export function fmtTodoWriteInput(todos: unknown): string {
+function fmtTodoWriteInput(todos: unknown): string {
   const items = Array.isArray(todos) ? todos : [];
   return fmtCount(items.length, "todo");
 }
 
-export function fmtAskUserQuestionInput(questions: unknown): string {
+function fmtAskUserQuestionInput(questions: unknown): string {
   const items = Array.isArray(questions) ? questions as Array<{question: string}> : [];
   return items.map((q) => `"${q.question}"`).join(", ");
 }
 
-export function fmtToolSearchOutput(content: unknown): string {
+function fmtToolSearchOutput(content: unknown): string {
   const items = Array.isArray(content) ? content : [];
   const names = items
     .filter((x): x is { type: string; tool_name?: string } =>
@@ -278,7 +274,7 @@ export function fmtToolSearchOutput(content: unknown): string {
   return `loaded: ${names || "?"}`;
 }
 
-export function fmtTodoWriteOutput(b: ToolResultBlock): string {
+function fmtTodoWriteOutput(b: ToolResultBlock): string {
   const newTodos = (b._msg?.tool_use_result as Record<string, unknown> | undefined)?.newTodos;
   const todos = Array.isArray(newTodos) ? newTodos : null;
   if (!todos) return trunc(toolResultText(b), 100);
@@ -292,7 +288,7 @@ export function fmtTodoWriteOutput(b: ToolResultBlock): string {
   }).join("\n");
 }
 
-export function toolResultText(b: { content: unknown }): string {
+function toolResultText(b: { content: unknown }): string {
   const raw = b.content;
   if (typeof raw === "string") return raw;
   const items = Array.isArray(raw) ? raw : [raw];
@@ -311,7 +307,7 @@ export function toolResultText(b: { content: unknown }): string {
 
 // ── Markdown renderer ─────────────────────────────────────────────────────────
 
-export function mdInline(text: string): string {
+function mdInline(text: string): string {
   text = text.replace(/\*\*(.+?)\*\*/gs,  (_, t) => s.bold(t));
   text = text.replace(/__(.+?)__/gs,      (_, t) => s.bold(t));
   text = text.replace(/`([^`]+)`/g,       (_, t) => s.bold(s.underline(t)));
@@ -401,7 +397,7 @@ function wrapTextAnsi(text: string, width: number): string[] {
   return lines.length > 0 ? lines : [""];
 }
 
-export function distributeWidths(naturalWidths: number[], available: number): number[] {
+function distributeWidths(naturalWidths: number[], available: number): number[] {
   const N = naturalWidths.length;
   if (N === 0) return [];
   const total = naturalWidths.reduce((a, b) => a + b, 0);
@@ -429,7 +425,7 @@ export function distributeWidths(naturalWidths: number[], available: number): nu
   return allocated;
 }
 
-export function renderTable(tableLines: string[], maxWidth?: number): string {
+function renderTable(tableLines: string[], maxWidth?: number): string {
   const termWidth = maxWidth ?? effectiveWidth();
   const rows = tableLines.map(line =>
     line.split("|").slice(1, -1).map(cell => cell.trim())
@@ -470,7 +466,7 @@ export function renderTable(tableLines: string[], maxWidth?: number): string {
   return out.join("\n");
 }
 
-export function renderMarkdown(text: string): string {
+function renderMarkdown(text: string): string {
   const lines = text.split("\n");
   const out: string[] = [];
   let inCode = false;
@@ -527,13 +523,13 @@ export type Fmt = (data: any) => string | null;
 export type FmtEntry = Fmt | { quiet?: Fmt; verbose?: Fmt };
 export type FmtTable = Record<string, FmtEntry>;
 
-export const ASSISTANT_BLOCK_FMT: FmtTable = {
+const ASSISTANT_BLOCK_FMT: FmtTable = {
   thinking: (b) => c.gray("\n" + (getConfig().thinkOutLoud ? renderMarkdown(b.thinking ?? "") : "Thinking...")),
   text:     (b) => c.yellow(`\n${renderMarkdown(b.text ?? "")}`),
   _default: (b) => c.darkGray(`[assistant/${b.type}]`),
 };
 
-export const USER_BLOCK_FMT: FmtTable = {
+const USER_BLOCK_FMT: FmtTable = {
   text:     (b) => b._isSynthetic ? null : `\n${b.text ?? ""}`,
   _default: (b) => c.darkGray(`[user/${b.type}]`),
 };
@@ -543,7 +539,7 @@ function fmtSubagentType(subagentType: string | null | undefined): string {
   return subagentType;
 }
 
-export const TOOL_CALL_FMT: FmtTable = {
+const TOOL_CALL_FMT: FmtTable = {
   Bash:       (b) => fmtToolCall(b, `$ ${b.input?.command ?? ""}`),
   Read:       (b) => fmtToolCall(b, `• Read(${toRelativePath(b.input?.file_path ?? "?")})`),
   Write:      (b) => fmtToolCall(b, `• Write(${toRelativePath(b.input?.file_path ?? "?")})`),
@@ -558,7 +554,7 @@ export const TOOL_CALL_FMT: FmtTable = {
   _default:   (b) => fmtToolCall(b, `• ${b.name}(${fmtArgs(b.input)})`),
 };
 
-export const TOOL_RESULT_FMT: FmtTable = {
+const TOOL_RESULT_FMT: FmtTable = {
   _default:   (b) => c.darkGray(`→ ${getConfig().verbose ? toolResultText(b) : trunc(toolResultText(b), 100)}`),
   Read:       (b) => c.darkGray(`→ ${fmtCount(toolResultText(b).split("\n").length, "line")}`),
   Edit:       (b) => fmtEditResult(b),
@@ -569,7 +565,7 @@ export const TOOL_RESULT_FMT: FmtTable = {
   TodoWrite:  (b) => c.darkGray(`→ ${fmtTodoWriteOutput(b)}`),
 };
 
-export const TOOL_ERROR_FMT: FmtTable = {
+const TOOL_ERROR_FMT: FmtTable = {
   AskUserQuestion: (b) => c.darkGray(`→ ${toolResultText(b)}`),
   _default:        (b) => c.salmon(`! ${toolResultText(b)}`),
 };
@@ -625,7 +621,7 @@ function fmtApiRetryDetail(m: { error_status?: number | null; error?: string }):
   return "";
 }
 
-export const SYSTEM_FMT: FmtTable = {
+const SYSTEM_FMT: FmtTable = {
   init:              { verbose: (m) => c.darkGray(`init: session ${m.session_id}`) },
   task_started:      (m) => c.lavender(`  ▶ agent started: ${m.description}`),
   task_progress:     (m) => c.lavender(`  • ${m.description}`),
@@ -638,7 +634,7 @@ export const SYSTEM_FMT: FmtTable = {
   _default:          { verbose: (m) => c.darkGray(`system/${m.subtype}`) },
 };
 
-export const MESSAGE_FMT: FmtTable = {
+const MESSAGE_FMT: FmtTable = {
   _empty:           (m) => c.darkGray(`[${m.type} — empty]`),
   result:           (m) => c.darkGray(`\n${fmtStats(Math.round(m.duration_ms / 1000), m.num_turns, m.usage.output_tokens, m.usage.input_tokens)}`),
   rate_limit_event: (m) => {
@@ -649,7 +645,7 @@ export const MESSAGE_FMT: FmtTable = {
   _default:         (m) => c.darkGray(`msg: ${m.type}`),
 };
 
-export const FOREMAN_MESSAGE_FMT: FmtTable = {
+const FOREMAN_MESSAGE_FMT: FmtTable = {
   task_assigned:      { verbose: (m) => c.darkGray(`Task assigned: #${m.issue.number}, ${m.issue.title}`) },
   event_notification: { verbose: (m) => c.darkGray(`Event received [${fmtTime()}]: ${fmtEvent(m.event as Wire.WebhookEvent)}`) },
   hello_ack:          { verbose: (m) => c.darkGray(`hello_ack: ${m.status}`) },
@@ -664,7 +660,7 @@ export const FOREMAN_MESSAGE_FMT: FmtTable = {
  * config is injected rather than globally accessed.
  *
  * Use `display.print(line)`, `display.printMessage(msg)`, etc. for output.
- * Use the module-level `c`, `s`, and formatting functions for pure utilities.
+ * Use the module-level `c`, `s`, `fmtCount`, `fmtStats`, etc. for pure utilities.
  */
 export class Display {
   /** The color object, exposed as an instance property for convenience. */
@@ -794,8 +790,9 @@ export class Display {
 // ── Standalone resolve delegate ───────────────────────────────────────────────
 //
 // The standalone resolve() function uses getConfig().verbose directly (rather
-// than the injected config) and is kept for use by utility functions and tests
-// that import it directly. Class methods use this.resolve() instead.
+// than the injected config) and is exported for use by tests that want to test
+// the dispatch mechanism with custom FmtTable objects. Class methods use
+// this.resolve() instead.
 
 /**
  * Resolve a format table entry. Uses getConfig().verbose for verbose/quiet dispatch.

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { stripAnsi } from "./helpers.js";
 import { getConfig } from "../src/config.js";
 import {
-  fmtTime, s, distributeWidths, Display,
+  fmtTime, s, Display,
 } from "../src/agent/views/display.js";
 import { StatusBar } from "../src/agent/views/status-bar.js";
 
@@ -37,57 +37,6 @@ describe("fmtTime() - no variable shadowing", () => {
     const result = s.bold("test");
     expect(result).toContain("\x1b[1m");
     expect(stripAnsi(result)).toBe("test");
-  });
-});
-
-// ── Bug #2: distributeWidths() rounding loss ──────────────────────────────────
-// When distributing available width across columns, the old Math.floor
-// discarded the remainder. The fix gives +1 to the first `remainder` columns
-// so the total allocated always equals `available`.
-
-describe("distributeWidths - fills available space without rounding loss", () => {
-  it("allocates all available space when remainder is 0", () => {
-    // 3 columns, available=6: 6/3=2 exactly, no remainder
-    const widths = distributeWidths([10, 10, 10], 6);
-    expect(widths.reduce((a, b) => a + b, 0)).toBe(6);
-    expect(widths).toEqual([2, 2, 2]);
-  });
-
-  it("allocates all available space with remainder of 1", () => {
-    // 3 equal-wide columns, available=7: 7/3=2 rem 1 → one column gets 3
-    const widths = distributeWidths([10, 10, 10], 7);
-    expect(widths.reduce((a, b) => a + b, 0)).toBe(7);
-    expect(widths.every(w => w === 2 || w === 3)).toBe(true);
-    expect(widths.filter(w => w === 3)).toHaveLength(1);
-    expect(widths.filter(w => w === 2)).toHaveLength(2);
-  });
-
-  it("allocates all available space with remainder of 2", () => {
-    // 3 equal-wide columns, available=8: 8/3=2 rem 2 → two columns get 3
-    const widths = distributeWidths([10, 10, 10], 8);
-    expect(widths.reduce((a, b) => a + b, 0)).toBe(8);
-    expect(widths.filter(w => w === 3)).toHaveLength(2);
-    expect(widths.filter(w => w === 2)).toHaveLength(1);
-  });
-
-  it("uses natural width for narrow columns and distributes remainder to wide ones", () => {
-    // Column 0: natural=1 (fits its fair share), columns 1-2: natural=10 (don't fit)
-    // available=5: k=0, fairShare=floor(5/3)=1, col0 takes 1, remaining=4
-    //             k=1, fairShare=floor(4/2)=2, cols 1&2 each get 2 (no remainder)
-    const widths = distributeWidths([1, 10, 10], 5);
-    expect(widths.reduce((a, b) => a + b, 0)).toBe(5);
-    expect(widths[0]).toBe(1);
-    expect(widths[1]).toBe(2);
-    expect(widths[2]).toBe(2);
-  });
-
-  it("natural widths returned as-is when total fits in available", () => {
-    const widths = distributeWidths([3, 5, 2], 20);
-    expect(widths).toEqual([3, 5, 2]);
-  });
-
-  it("returns empty array for empty input", () => {
-    expect(distributeWidths([], 100)).toEqual([]);
   });
 });
 

@@ -357,6 +357,119 @@ describe("print()", () => {
   });
 });
 
+describe("printBlock - toolResultText content extraction", () => {
+  it("string content shown directly via _default", () => {
+    testDisplay.toolUseNames.set("id1", "UnknownTool");
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_result", tool_use_id: "id1", is_error: false, content: "hello" }, "user");
+    });
+    expect(stripAnsi(output)).toContain("→ hello");
+  });
+
+  it("array with text block extracted as plain text", () => {
+    testDisplay.toolUseNames.set("id1", "UnknownTool");
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_result", tool_use_id: "id1", is_error: false, content: [{ type: "text", text: "hi" }] }, "user");
+    });
+    expect(stripAnsi(output)).toContain("→ hi");
+  });
+
+  it("array with tool_reference shown as [tool:Name]", () => {
+    testDisplay.toolUseNames.set("id1", "UnknownTool");
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_result", tool_use_id: "id1", is_error: false, content: [{ type: "tool_reference", tool_name: "Write" }] }, "user");
+    });
+    expect(stripAnsi(output)).toContain("→ [tool:Write]");
+  });
+
+  it("mixed array: text + tool_reference joined with space", () => {
+    testDisplay.toolUseNames.set("id1", "UnknownTool");
+    const output = captureOutput(() => {
+      testDisplay.printBlock({
+        type: "tool_result", tool_use_id: "id1", is_error: false,
+        content: [{ type: "text", text: "done" }, { type: "tool_reference", tool_name: "Read" }],
+      }, "user");
+    });
+    expect(stripAnsi(output)).toContain("done [tool:Read]");
+  });
+
+  it("unknown content type shown as [type]", () => {
+    testDisplay.toolUseNames.set("id1", "UnknownTool");
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_result", tool_use_id: "id1", is_error: false, content: [{ type: "image" }] }, "user");
+    });
+    expect(stripAnsi(output)).toContain("→ [image]");
+  });
+});
+
+describe("printBlock - Edit diff styling", () => {
+  it("+ lines have bgGreen applied", () => {
+    testDisplay.toolUseNames.set("id1", "Edit");
+    const hunk = { oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: ["+added line", "-removed", " ctx"] };
+    let raw = "";
+    vi.spyOn(console, "log").mockImplementation((s: any) => { raw += String(s) + "\n"; });
+    testDisplay.printBlock({ type: "tool_result", tool_use_id: "id1", is_error: false, content: "" }, "user",
+      { tool_use_result: { structuredPatch: [hunk] } });
+    vi.restoreAllMocks();
+    expect(raw).toContain("\x1b[48;5;22m"); // bgGreen
+  });
+
+  it("- lines have bgRed applied", () => {
+    testDisplay.toolUseNames.set("id1", "Edit");
+    const hunk = { oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: ["+added", "-removed line", " ctx"] };
+    let raw = "";
+    vi.spyOn(console, "log").mockImplementation((s: any) => { raw += String(s) + "\n"; });
+    testDisplay.printBlock({ type: "tool_result", tool_use_id: "id1", is_error: false, content: "" }, "user",
+      { tool_use_result: { structuredPatch: [hunk] } });
+    vi.restoreAllMocks();
+    expect(raw).toContain("\x1b[48;5;52m"); // bgRed
+  });
+
+  it("context lines are darkGray", () => {
+    testDisplay.toolUseNames.set("id1", "Edit");
+    const hunk = { oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: ["+a", "-b", " context line"] };
+    let raw = "";
+    vi.spyOn(console, "log").mockImplementation((s: any) => { raw += String(s) + "\n"; });
+    testDisplay.printBlock({ type: "tool_result", tool_use_id: "id1", is_error: false, content: "" }, "user",
+      { tool_use_result: { structuredPatch: [hunk] } });
+    vi.restoreAllMocks();
+    expect(raw).toContain("\x1b[90m context line"); // darkGray
+  });
+
+  it("all three line types appear in correct order", () => {
+    testDisplay.toolUseNames.set("id1", "Edit");
+    const hunk = { oldStart: 1, oldLines: 3, newStart: 1, newLines: 4, lines: ["+added line", "-removed line", " context line"] };
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_result", tool_use_id: "id1", is_error: false, content: "" }, "user",
+        { tool_use_result: { structuredPatch: [hunk] } });
+    });
+    const lines = stripAnsi(output).split("\n");
+    const headerIdx = lines.findIndex(l => l.includes("@@"));
+    expect(headerIdx).toBeGreaterThanOrEqual(0);
+    expect(lines[headerIdx]).toContain("@@ -1,3 +1,4 @@");
+    expect(lines[headerIdx + 1].trimEnd()).toContain("+added line");
+    expect(lines[headerIdx + 2].trimEnd()).toContain("-removed line");
+    expect(lines[headerIdx + 3]).toContain(" context line");
+  });
+
+  it("empty structuredPatch falls back to text content", () => {
+    testDisplay.toolUseNames.set("id1", "Edit");
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_result", tool_use_id: "id1", is_error: false, content: "fallback text" }, "user",
+        { tool_use_result: { structuredPatch: [] } });
+    });
+    expect(stripAnsi(output)).toContain("→ fallback text");
+  });
+
+  it("no msg arg falls back to text content", () => {
+    testDisplay.toolUseNames.set("id1", "Edit");
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_result", tool_use_id: "id1", is_error: false, content: "no msg" }, "user");
+    });
+    expect(stripAnsi(output)).toContain("→ no msg");
+  });
+});
+
 describe("Status line", () => {
   afterEach(() => {
     testDisplay.statusBar.stop();
