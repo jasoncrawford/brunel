@@ -5,7 +5,7 @@ import { fileURLToPath } from "url";
 import { Display, c, hr } from "./views/display.js";
 import { StatusBar } from "./views/status-bar.js";
 import { Input } from "./views/input.js";
-import { WorkerSession, registerWorkerCommands, startWorkerMode, generateAgentId } from "./controllers/worker-controller.js";
+import { WorkerSession, registerWorkerCommands, startWorkerMode } from "./controllers/worker-controller.js";
 import type { RunQuery } from "./controllers/worker-controller.js";
 import { loadConfig, getConfig } from "../config.js";
 import { Workspace, confirmIfUnsafe } from "./models/workspace.js";
@@ -244,7 +244,7 @@ export async function main(
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const config = await loadConfig(process.argv);
   const settings = new Settings({ model: config.model, effort: config.effort });
-  const statusBar = new StatusBar({ agentId: generateAgentId(), settings });
+  const statusBar = new StatusBar({ agentId: WorkerSession.generateAgentId(), settings });
   const display = new Display(config, statusBar);
   const permConfig = {
     permissionMode: config.permissionMode,

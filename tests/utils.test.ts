@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { generateAgentId } from "../src/agent/controllers/worker-controller.js";
+import { WorkerSession } from "../src/agent/controllers/worker-controller.js";
+const generateAgentId = WorkerSession.generateAgentId.bind(WorkerSession);
 import { shortWorkerId } from "../shared/utils.js";
 
 describe("generateAgentId", () => {

@@ -1,6 +1,6 @@
 import * as Wire from "../../shared/wire.js";
 
-export function formatCommentLocation(
+function formatCommentLocation(
   path: unknown,
   line?: unknown,
   startLine?: unknown
@@ -59,7 +59,7 @@ export function buildEventPrompt(events: Wire.WebhookEvent[]): string {
   return body;
 }
 
-export function coalesceEvents(events: Wire.WebhookEvent[]): Wire.WebhookEvent[] {
+function coalesceEvents(events: Wire.WebhookEvent[]): Wire.WebhookEvent[] {
   const result: Wire.WebhookEvent[] = [];
 
   // Separate check_suite events
@@ -147,20 +147,13 @@ function sortEvents(events: Wire.WebhookEvent[]): Wire.WebhookEvent[] {
   });
 }
 
-export function fmtEventList(events: Wire.WebhookEvent[]): string {
-  return events.map(e => {
-    const action = e.payload["action"] as string | undefined;
-    return action ? `${e.name}/${action}` : e.name;
-  }).join(", ");
-}
-
 // ── Event formatter table ─────────────────────────────────────────────────────
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export type EventTemplateFmt = (payload: any, event: Wire.WebhookEvent) => string;
-export type EventTemplateFmtTable = Record<string, EventTemplateFmt>;
+type EventTemplateFmt = (payload: any, event: Wire.WebhookEvent) => string;
+type EventTemplateFmtTable = Record<string, EventTemplateFmt>;
 
-export function resolveEventTemplate(table: EventTemplateFmtTable, key: string, event: Wire.WebhookEvent): string {
+function resolveEventTemplate(table: EventTemplateFmtTable, key: string, event: Wire.WebhookEvent): string {
   const fmt = table[key] ?? table._default;
   if (!fmt) return "";
   return fmt(event.payload, event);
@@ -174,7 +167,7 @@ const BRANCH_REVIEW_PROMPT =
 
 const CODE_REVIEW_PROMPT = "Please respond in whatever way you think is most appropriate, replying and/or making code changes.";
 
-export const EVENT_FMT: EventTemplateFmtTable = {
+const EVENT_FMT: EventTemplateFmtTable = {
   _check_suites: (p) => {
     const failed = p.failed as string[];
     if (p.status === "failed") {
