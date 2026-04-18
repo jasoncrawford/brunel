@@ -13,7 +13,7 @@ import { Workspace, confirmIfUnsafe } from "../models/workspace.js";
 import { fmtError } from "../../utils.js";
 import { getConfig } from "../../config.js";
 import type { CommandRegistry } from "./command-controller.js";
-import { Input } from "../views/input.js";
+import { Picker } from "../views/picker.js";
 
 const execAsync = promisify(exec);
 
@@ -113,7 +113,7 @@ export type WorkerSessionOptions = {
   /** Interval in ms between worker-sent pings. Dead connections are detected after
    * one interval with no pong. Default is set in the config schema (pingIntervalMs). */
   pingIntervalMs?: number;
-  /** Pick function used by confirmTaskQuit. Supplied by startWorkerMode via input.pick. */
+  /** Pick function used by confirmTaskQuit. Supplied by startWorkerMode via picker.pick. */
   pickFn?: (options: string[]) => Promise<number>;
 };
 
@@ -667,7 +667,7 @@ export function registerWorkerCommands(session: WorkerSession | undefined, regis
  * a cleanup function — does NOT call main(). The caller (main itself) owns
  * the query loop and calls cleanup() after the loop exits.
  */
-export async function startWorkerMode(display: WorkerDisplay, statusBar: StatusBar, input: Input): Promise<{
+export async function startWorkerMode(display: WorkerDisplay, statusBar: StatusBar, picker: Picker): Promise<{
   session: WorkerSession;
   cleanup: () => Promise<void>;
 }> {
@@ -678,7 +678,7 @@ export async function startWorkerMode(display: WorkerDisplay, statusBar: StatusB
 
   const confirm = async (msg: string): Promise<boolean> => {
     display.print(c.amber(`\n⚠ Potential data loss:\n${msg}`));
-    const idx = await input.pick(["Yes, proceed", "No, cancel"]);
+    const idx = await picker.pick(["Yes, proceed", "No, cancel"]);
     return idx === 0;
   };
 
@@ -749,7 +749,7 @@ export async function startWorkerMode(display: WorkerDisplay, statusBar: StatusB
     afterTask,
     workspace,
     pingIntervalMs: getConfig().pingIntervalMs,
-    pickFn: (opts) => input.pick(opts),
+    pickFn: (opts) => picker.pick(opts),
   });
 
   const shutdown = async () => {

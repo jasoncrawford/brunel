@@ -19,13 +19,13 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import { AgentController } from "../src/agent/controllers/agent-controller.js";
 import { Settings } from "../src/agent/models/settings.js";
 import { Input } from "../src/agent/views/input.js";
+import { Picker } from "../src/agent/views/picker.js";
 import { Display } from "../src/agent/views/display.js";
 import { StatusBar } from "../src/agent/views/status-bar.js";
 
 let testDisplay: Display;
 let testController: AgentController;
-let mockInput: {
-  ask: ReturnType<typeof vi.fn>;
+let mockPicker: {
   pick: ReturnType<typeof vi.fn>;
   pickMultiple: ReturnType<typeof vi.fn>;
   pickQuestion: ReturnType<typeof vi.fn>;
@@ -71,13 +71,12 @@ beforeEach(() => {
   testDisplay = new Display(getConfig(), new StatusBar({ agentId: "test-agent" }));
   testDisplay.toolUseNames.clear();
   testDisplay.statusBar.stop();
-  mockInput = {
-    ask: vi.fn().mockResolvedValue(""),
+  mockPicker = {
     pick: vi.fn().mockResolvedValue(0),
     pickMultiple: vi.fn().mockResolvedValue([]),
     pickQuestion: vi.fn().mockResolvedValue({ type: "answer", value: "Fast" }),
   };
-  testController = new AgentController(testDisplay, mockInput as unknown as Input, defaultPermConfig, new Settings({}));
+  testController = new AgentController(testDisplay, mockPicker as unknown as Picker, defaultPermConfig, new Settings({}));
   getConfig().verbose = false;
   vi.clearAllMocks();
 });
@@ -308,7 +307,7 @@ describe("runQuery - AskUserQuestion handling", () => {
   };
 
   it("returns behavior:allow with answer injected for single-select", async () => {
-    mockInput.pickQuestion.mockResolvedValueOnce({ type: "answer", value: "Safe" });
+    mockPicker.pickQuestion.mockResolvedValueOnce({ type: "answer", value: "Safe" });
     mockQueryMessages([
       { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } },
     ]);
@@ -327,7 +326,7 @@ describe("runQuery - AskUserQuestion handling", () => {
   });
 
   it("returns behavior:deny when user picks Let's discuss", async () => {
-    mockInput.pickQuestion.mockResolvedValueOnce({ type: "discuss" });
+    mockPicker.pickQuestion.mockResolvedValueOnce({ type: "discuss" });
     mockQueryMessages([
       { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } },
     ]);
@@ -345,7 +344,7 @@ describe("runQuery - AskUserQuestion handling", () => {
   });
 
   it("uses free text as answer when user picks Other:", async () => {
-    mockInput.pickQuestion.mockResolvedValueOnce({ type: "other", text: "Something custom" });
+    mockPicker.pickQuestion.mockResolvedValueOnce({ type: "other", text: "Something custom" });
     mockQueryMessages([
       { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } },
     ]);
@@ -364,7 +363,7 @@ describe("runQuery - AskUserQuestion handling", () => {
   });
 
   it("handles multi-select: joins selected labels with comma", async () => {
-    mockInput.pickMultiple.mockResolvedValue([0, 1]); // user picks both
+    mockPicker.pickMultiple.mockResolvedValue([0, 1]); // user picks both
     mockQueryMessages([
       { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } },
     ]);
@@ -395,7 +394,7 @@ describe("runQuery - AskUserQuestion handling", () => {
   });
 
   it("preserves other input fields in updatedInput", async () => {
-    mockInput.pickQuestion.mockResolvedValueOnce({ type: "answer", value: "Fast" });
+    mockPicker.pickQuestion.mockResolvedValueOnce({ type: "answer", value: "Fast" });
     mockQueryMessages([
       { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } },
     ]);
@@ -417,7 +416,7 @@ describe("runQuery - tool permission handling (non-bypass mode)", () => {
   const FAKE_OPTIONS = { signal: new AbortController().signal, toolUseID: "tu_2" };
 
   it("unknown tool: pick index 0 (Allow) → returns behavior:allow", async () => {
-    mockInput.pick.mockResolvedValue(0); // Allow
+    mockPicker.pick.mockResolvedValue(0); // Allow
     mockQueryMessages([
       { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } },
     ]);
@@ -437,7 +436,7 @@ describe("runQuery - tool permission handling (non-bypass mode)", () => {
   });
 
   it("unknown tool: pick index 1 (Deny) → returns behavior:deny with message", async () => {
-    mockInput.pick.mockResolvedValue(1); // Deny
+    mockPicker.pick.mockResolvedValue(1); // Deny
     mockQueryMessages([
       { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } },
     ]);

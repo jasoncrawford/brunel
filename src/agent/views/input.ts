@@ -1,8 +1,6 @@
 import { c } from "./display.js";
 import type { Display } from "./display.js";
 import type { CommandSuggestion } from "../controllers/command-controller.js";
-import { pick, pickMultiple, pickQuestion, promptLine } from "./picker.js";
-import type { PickConfig, PickResult, PickQuestionResult } from "./picker.js";
 
 function filterCommands(query: string, commands: CommandSuggestion[]): CommandSuggestion[] {
   if (query === "") return commands;
@@ -574,25 +572,4 @@ export class Input {
     });
   }
 
-  // ── Interactive pickers (delegate to standalone functions in picker.ts) ──────
-
-  pick(options: string[]): Promise<number>;
-  pick(options: string[], config: PickConfig): Promise<PickResult>;
-  pick(options: string[], config?: PickConfig): Promise<number | PickResult> {
-    return pick(options, config as PickConfig);
-  }
-
-  pickMultiple(options: string[], promptStr?: string): Promise<number[]> {
-    return pickMultiple(options, promptStr);
-  }
-
-  promptLine(prompt: string): Promise<string> {
-    return promptLine(prompt);
-  }
-
-  pickQuestion(
-    options: Array<{ label: string; description: string }>,
-  ): Promise<PickQuestionResult> {
-    return pickQuestion(options);
-  }
 }

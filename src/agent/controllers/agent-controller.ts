@@ -3,7 +3,7 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { CanUseTool, PermissionMode, PermissionResult } from "@anthropic-ai/claude-agent-sdk";
 import { c } from "../views/display.js";
 import type { Display } from "../views/display.js";
-import { Input } from "../views/input.js";
+import { Picker } from "../views/picker.js";
 import type { PickQuestionResult } from "../views/picker.js";
 import { Settings } from "../models/settings.js";
 import type { ModelInfo, FetchModelsFn, EffortValue } from "../models/settings.js";
@@ -62,7 +62,7 @@ export function createFetchModelsFn(permConfig: AgentPermConfig): FetchModelsFn 
 export class AgentController {
   constructor(
     private display: Display,
-    private input: Input,
+    private picker: Picker,
     private permConfig: AgentPermConfig,
     private settings: Settings,
   ) {}
@@ -211,10 +211,10 @@ export class AgentController {
       display.print(c.yellow(`\n? ${q.question}`));
       if (q.multiSelect) {
         const lines = q.options.map((o: QuestionOption) => o.description ? `${o.label} — ${o.description}` : o.label);
-        const idxs = await this.input.pickMultiple(lines);
+        const idxs = await this.picker.pickMultiple(lines);
         answers[q.question] = idxs.map((i: number) => q.options[i].label).join(", ");
       } else {
-        const result: PickQuestionResult = await this.input.pickQuestion(q.options);
+        const result: PickQuestionResult = await this.picker.pickQuestion(q.options);
         if (result.type === "discuss") {
           display.statusBar.start(getStatusText);
           return { behavior: "deny", message: "The user would like to discuss more before answering. Prompt them to begin the discussion." };
@@ -235,7 +235,7 @@ export class AgentController {
     const { display } = this;
     display.statusBar.stop();
     display.print(c.amber(`\n⚠ ${toolName}(${display.fmtArgs(input)})`));
-    const idx = await this.input.pick(["Allow", "Deny"]);
+    const idx = await this.picker.pick(["Allow", "Deny"]);
     display.statusBar.start(getStatusText);
     if (idx === 0) return { behavior: "allow", updatedInput: input };
     return { behavior: "deny", message: "User denied tool request" };
