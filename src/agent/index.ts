@@ -24,12 +24,11 @@ export async function main(
   permConfig: AgentPermConfig,
   display: Display,
   settings: Settings,
-  inp: Input,
+  input: Input,
   runWorkerMode?: boolean,
   workspaceCfg?: { workspaceDir: string; repoUrl: string },
 ): Promise<void> {
   const statusBar = display.statusBar;
-  const input = inp;
 
   // Worker mode setup: create workspace, session, signal handlers.
   const workerCtx = runWorkerMode ? await startWorkerMode(display, statusBar, input) : undefined;
@@ -162,10 +161,10 @@ export async function main(
     // empty promptLine suppresses the drawFresh callback so incoming messages
     // are printed cleanly without a prompt preceding or following them.
     const promptStr = session ? (showPrompt ? "\n[agent] > " : "") : "\n> ";
-    const typed = await input.ask(promptStr, () => controller.listCommands(), wsAbort);
+    const userInput = await input.ask(promptStr, () => controller.listCommands(), wsAbort);
 
     // ^D / ^C on empty buffer — treat as exit.
-    if (typed === "__eof__") {
+    if (userInput === "__eof__") {
       if (!session) { await doExit(); break; }
       const taskInfo = session.getTaskQuitInfo();
       if (taskInfo) {
@@ -178,10 +177,10 @@ export async function main(
 
     // Ignore the internal abort sentinel (fired when wsAbort resolves at the
     // same tick as the ask() call; never a user action).
-    if (typed === "__abort__") continue;
+    if (userInput === "__abort__") continue;
 
     // WS_FATAL: a fatal foreman_error was received — drop back to interactive REPL.
-    if (WorkerSession.isFatalSignal(typed)) {
+    if (WorkerSession.isFatalSignal(userInput)) {
       showPrompt = true;
       continue;
     }
@@ -189,7 +188,7 @@ export async function main(
     // WS_PROMPT: a task prompt or debounced event prompt is ready. Hide the
     // prompt, drain all queued prompts through runQueryFn, then show the prompt
     // again. Stops draining if a prompt is interrupted or errors.
-    if (WorkerSession.isWsSignal(typed)) {
+    if (WorkerSession.isWsSignal(userInput)) {
       showPrompt = false;
       while (session?.hasPendingPrompts()) {
         const item = session.takeNextPrompt()!;
@@ -201,7 +200,7 @@ export async function main(
       continue;
     }
 
-    const action = await controller.dispatch(typed);
+    const action = await controller.dispatch(userInput);
 
     if (action.type === "skip") continue;
 
