@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PassThrough } from "stream";
-import { ask } from "../src/agent/views/input.js";
+import { Input } from "../src/agent/views/input.js";
 import { Display } from "../src/agent/views/display.js";
 import { StatusBar } from "../src/agent/views/status-bar.js";
 import { getConfig } from "../src/config.js";
@@ -32,9 +32,11 @@ function collectOutput(spy: ReturnType<typeof vi.spyOn>): string {
 }
 
 let testDisplay: Display;
+let testInput: Input;
 
 beforeEach(() => {
   testDisplay = new Display(getConfig(), new StatusBar({ agentId: "test-agent" }));
+  testInput = new Input(testDisplay);
   origStdin = process.stdin;
   origColumns = process.stdout.columns;
   vi.spyOn(process.stdout, "write").mockImplementation(() => true);
@@ -58,7 +60,7 @@ describe("ask() - multiline rendering", () => {
     setColumns(10);
 
     await withFakeStdin(async (stdin) => {
-      const p = ask(testDisplay.statusBar, "> ", () => []);
+      const p = testInput.ask("> ", () => []);
       stdin.push("12345678"); // fills row 0 exactly (pending-wrap)
       stdin.push("9");        // goes to row 1
       stdin.push("\r");
@@ -75,7 +77,7 @@ describe("ask() - multiline rendering", () => {
     const writeSpy = vi.mocked(process.stdout.write);
 
     await withFakeStdin(async (stdin) => {
-      const p = ask(testDisplay.statusBar, "> ", () => []);
+      const p = testInput.ask("> ", () => []);
       stdin.push("12345678"); // fills row 0 (pending-wrap at cursor=8, row 0)
       writeSpy.mockClear();   // clear setup output
       stdin.push("9");        // prevRow should be 0 → no cursor-up
@@ -101,7 +103,7 @@ describe("ask() - multiline rendering", () => {
     const writeSpy = vi.mocked(process.stdout.write);
 
     await withFakeStdin(async (stdin) => {
-      const p = ask(testDisplay.statusBar, "> ", () => []);
+      const p = testInput.ask("> ", () => []);
       stdin.push("123456789"); // cursor=9 on row 1
       writeSpy.mockClear();
       stdin.push("\x1b[D");    // left arrow: prevRow=1 → cursor=8 (row 0) → \x1b[1A
@@ -117,7 +119,7 @@ describe("ask() - multiline rendering", () => {
     setColumns(10);
 
     await withFakeStdin(async (stdin) => {
-      const p = ask(testDisplay.statusBar, "> ", () => []);
+      const p = testInput.ask("> ", () => []);
       stdin.push("12345678"); // fills row 0
       stdin.push("9");        // row 1, cursor=9
       stdin.push("\x1b[D");   // left → cursor=8 (row 1 → row 0 boundary)
@@ -133,7 +135,7 @@ describe("ask() - multiline rendering", () => {
     const writeSpy = vi.mocked(process.stdout.write);
 
     await withFakeStdin(async (stdin) => {
-      const p = ask(testDisplay.statusBar, "> ", () => []);
+      const p = testInput.ask("> ", () => []);
       stdin.push("123456789"); // cursor=9, visual=11, row=1
       writeSpy.mockClear();
       stdin.push("\x01");      // ^A → moveTo(0), prevCursor=9 (row 1)
@@ -149,7 +151,7 @@ describe("ask() - multiline rendering", () => {
     const writeSpy = vi.mocked(process.stdout.write);
 
     await withFakeStdin(async (stdin) => {
-      const p = ask(testDisplay.statusBar, "> ", () => []);
+      const p = testInput.ask("> ", () => []);
       stdin.push("123456789"); // fill to row 1
       stdin.push("\x01");      // ^A → cursor=0, row 0
       writeSpy.mockClear();
@@ -173,7 +175,7 @@ describe("ask() - multiline rendering", () => {
     const writeSpy = vi.mocked(process.stdout.write);
 
     await withFakeStdin(async (stdin) => {
-      const p = ask(testDisplay.statusBar, "> ", () => []);
+      const p = testInput.ask("> ", () => []);
       stdin.push("123456789"); // cursor=9 on row 1
       writeSpy.mockClear();
       stdin.push("\x15");      // ^U → kill to start
@@ -196,7 +198,7 @@ describe("ask() - up/down arrow navigation", () => {
     setColumns(10);
 
     await withFakeStdin(async (stdin) => {
-      const p = ask(testDisplay.statusBar, "> ", () => []);
+      const p = testInput.ask("> ", () => []);
       stdin.push("123456789X"); // cursor=10, row=1, col=2
       stdin.push("\x1b[A");    // up arrow → row=0, col=2 → cursor=0
       stdin.push("Y");
@@ -214,7 +216,7 @@ describe("ask() - up/down arrow navigation", () => {
     setColumns(10);
 
     await withFakeStdin(async (stdin) => {
-      const p = ask(testDisplay.statusBar, "> ", () => []);
+      const p = testInput.ask("> ", () => []);
       stdin.push("123456789X"); // cursor=10, row=1
       stdin.push("\x01");       // ^A → cursor=0, row=0, col=2
       stdin.push("\x1b[B");     // down arrow → row=1, col=2 → cursor=10
@@ -229,7 +231,7 @@ describe("ask() - up/down arrow navigation", () => {
     setColumns(10);
 
     await withFakeStdin(async (stdin) => {
-      const p = ask(testDisplay.statusBar, "> ", () => []);
+      const p = testInput.ask("> ", () => []);
       stdin.push("hello");
       stdin.push("\x01");    // ^A → cursor=0
       stdin.push("\x1b[A"); // up arrow at row 0 → no-op
@@ -244,7 +246,7 @@ describe("ask() - up/down arrow navigation", () => {
     setColumns(10);
 
     await withFakeStdin(async (stdin) => {
-      const p = ask(testDisplay.statusBar, "> ", () => []);
+      const p = testInput.ask("> ", () => []);
       stdin.push("hello");  // single row
       stdin.push("\x01");   // ^A → cursor=0
       stdin.push("\x1b[B"); // down arrow at last row → no-op (stays at cursor=0)
@@ -280,7 +282,7 @@ describe("ask() - status update during multiline input (issue #486)", () => {
     testDisplay.statusBar.startPersistent(() => "status");
 
     await withFakeStdin(async (stdin) => {
-      const p = ask(testDisplay.statusBar, "> ", () => []);
+      const p = testInput.ask("> ", () => []);
       stdin.push("123456789"); // cursor on row 1 (9 chars + 2-char prompt wraps)
       writeSpy.mockClear();
 
@@ -316,7 +318,7 @@ describe("ask() - status update during multiline input (issue #486)", () => {
     testDisplay.statusBar.startPersistent(() => "status");
 
     await withFakeStdin(async (stdin) => {
-      const p = ask(testDisplay.statusBar, "> ", () => []);
+      const p = testInput.ask("> ", () => []);
       stdin.push("hello"); // 5 chars, stays on row 0
       writeSpy.mockClear();
 
@@ -366,7 +368,7 @@ describe("testDisplay.print() callback for ask() redraw", () => {
     vi.spyOn(console, "log").mockImplementation(() => {});
 
     await withFakeStdin(async (stdin) => {
-      const p = ask(testDisplay.statusBar, "> ", () => []);
+      const p = testInput.ask("> ", () => []);
       stdin.push("hello");
       writeSpy.mockClear();
 

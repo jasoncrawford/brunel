@@ -14,26 +14,22 @@ vi.mock("fs", () => ({
   },
 }));
 
-vi.mock("../src/agent/views/input.js", async (importOriginal) => {
-  const actual = await importOriginal() as Record<string, unknown>;
-  return {
-    ...actual,
-    pick:         vi.fn().mockResolvedValue(0),
-    pickMultiple: vi.fn().mockResolvedValue([]),
-    pickQuestion: vi.fn().mockResolvedValue({ type: "answer", value: "Fast" }),
-  };
-});
-
 import { PassThrough } from "stream";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { AgentController } from "../src/agent/controllers/agent-controller.js";
 import { Settings } from "../src/agent/models/settings.js";
-import { ask, pick, pickMultiple, pickQuestion } from "../src/agent/views/input.js";
+import { Input } from "../src/agent/views/input.js";
 import { Display } from "../src/agent/views/display.js";
 import { StatusBar } from "../src/agent/views/status-bar.js";
 
 let testDisplay: Display;
 let testController: AgentController;
+let mockInput: {
+  ask: ReturnType<typeof vi.fn>;
+  pick: ReturnType<typeof vi.fn>;
+  pickMultiple: ReturnType<typeof vi.fn>;
+  pickQuestion: ReturnType<typeof vi.fn>;
+};
 
 const defaultPermConfig = {
   permissionMode: "default" as const,
@@ -75,7 +71,13 @@ beforeEach(() => {
   testDisplay = new Display(getConfig(), new StatusBar({ agentId: "test-agent" }));
   testDisplay.toolUseNames.clear();
   testDisplay.statusBar.stop();
-  testController = new AgentController(testDisplay, defaultPermConfig, new Settings({}));
+  mockInput = {
+    ask: vi.fn().mockResolvedValue(""),
+    pick: vi.fn().mockResolvedValue(0),
+    pickMultiple: vi.fn().mockResolvedValue([]),
+    pickQuestion: vi.fn().mockResolvedValue({ type: "answer", value: "Fast" }),
+  };
+  testController = new AgentController(testDisplay, mockInput as unknown as Input, defaultPermConfig, new Settings({}));
   getConfig().verbose = false;
   vi.clearAllMocks();
 });
@@ -306,7 +308,7 @@ describe("runQuery - AskUserQuestion handling", () => {
   };
 
   it("returns behavior:allow with answer injected for single-select", async () => {
-    vi.mocked(pickQuestion).mockResolvedValueOnce({ type: "answer", value: "Safe" });
+    mockInput.pickQuestion.mockResolvedValueOnce({ type: "answer", value: "Safe" });
     mockQueryMessages([
       { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } },
     ]);
@@ -325,7 +327,7 @@ describe("runQuery - AskUserQuestion handling", () => {
   });
 
   it("returns behavior:deny when user picks Let's discuss", async () => {
-    vi.mocked(pickQuestion).mockResolvedValueOnce({ type: "discuss" });
+    mockInput.pickQuestion.mockResolvedValueOnce({ type: "discuss" });
     mockQueryMessages([
       { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } },
     ]);
@@ -343,7 +345,7 @@ describe("runQuery - AskUserQuestion handling", () => {
   });
 
   it("uses free text as answer when user picks Other:", async () => {
-    vi.mocked(pickQuestion).mockResolvedValueOnce({ type: "other", text: "Something custom" });
+    mockInput.pickQuestion.mockResolvedValueOnce({ type: "other", text: "Something custom" });
     mockQueryMessages([
       { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } },
     ]);
@@ -362,7 +364,7 @@ describe("runQuery - AskUserQuestion handling", () => {
   });
 
   it("handles multi-select: joins selected labels with comma", async () => {
-    (pickMultiple as any).mockResolvedValue([0, 1]); // user picks both
+    mockInput.pickMultiple.mockResolvedValue([0, 1]); // user picks both
     mockQueryMessages([
       { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } },
     ]);
@@ -393,7 +395,7 @@ describe("runQuery - AskUserQuestion handling", () => {
   });
 
   it("preserves other input fields in updatedInput", async () => {
-    vi.mocked(pickQuestion).mockResolvedValueOnce({ type: "answer", value: "Fast" });
+    mockInput.pickQuestion.mockResolvedValueOnce({ type: "answer", value: "Fast" });
     mockQueryMessages([
       { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } },
     ]);
@@ -415,7 +417,7 @@ describe("runQuery - tool permission handling (non-bypass mode)", () => {
   const FAKE_OPTIONS = { signal: new AbortController().signal, toolUseID: "tu_2" };
 
   it("unknown tool: pick index 0 (Allow) → returns behavior:allow", async () => {
-    (pick as any).mockResolvedValue(0); // Allow
+    mockInput.pick.mockResolvedValue(0); // Allow
     mockQueryMessages([
       { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } },
     ]);
@@ -435,7 +437,7 @@ describe("runQuery - tool permission handling (non-bypass mode)", () => {
   });
 
   it("unknown tool: pick index 1 (Deny) → returns behavior:deny with message", async () => {
-    (pick as any).mockResolvedValue(1); // Deny
+    mockInput.pick.mockResolvedValue(1); // Deny
     mockQueryMessages([
       { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } },
     ]);
@@ -700,7 +702,7 @@ describe("runQuery - prompt redraw after query (worker mode integration)", () =>
     Object.defineProperty(process, "stdin", { value: fakeStdin, configurable: true });
 
     try {
-      const askPromise = ask(testDisplay.statusBar, "[worker] > ", () => []);
+      const askPromise = new Input(testDisplay).ask("[worker] > ", () => []);
 
       await testController.runQuery("test", undefined);
 
@@ -738,7 +740,7 @@ describe("runQuery - prompt redraw after query (worker mode integration)", () =>
     Object.defineProperty(process, "stdin", { value: fakeStdin, configurable: true });
 
     try {
-      const askPromise = ask(testDisplay.statusBar, "\n[worker] > ", () => []);
+      const askPromise = new Input(testDisplay).ask("\n[worker] > ", () => []);
 
       await testController.runQuery("test", undefined);
 
