@@ -1,6 +1,6 @@
 import { c } from "../views/display.js";
 import type { WorkerDisplay } from "./worker-controller.js";
-import type { PickResult } from "../views/input.js";
+import type { PickResult } from "../views/picker.js";
 import { Settings } from "../models/settings.js";
 import type { FetchModelsFn, EffortValue } from "../models/settings.js";
 

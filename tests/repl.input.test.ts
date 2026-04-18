@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PassThrough } from "stream";
 import { Input, _resetStash } from "../src/agent/views/input.js";
-import type { PickQuestionResult } from "../src/agent/views/input.js";
+import type { PickQuestionResult } from "../src/agent/views/picker.js";
 import { Display } from "../src/agent/views/display.js";
 import { StatusBar } from "../src/agent/views/status-bar.js";
 import { getConfig } from "../src/config.js";

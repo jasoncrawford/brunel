@@ -4,7 +4,7 @@ import type { CanUseTool, PermissionMode, PermissionResult } from "@anthropic-ai
 import { c } from "../views/display.js";
 import type { Display } from "../views/display.js";
 import { Input } from "../views/input.js";
-import type { PickQuestionResult } from "../views/input.js";
+import type { PickQuestionResult } from "../views/picker.js";
 import { Settings } from "../models/settings.js";
 import type { ModelInfo, FetchModelsFn, EffortValue } from "../models/settings.js";
 import { QueryStats } from "../models/query-stats.js";
