@@ -13,7 +13,7 @@ import { Workspace, confirmIfUnsafe } from "../models/workspace.js";
 import { fmtError } from "../../utils.js";
 import { getConfig } from "../../config.js";
 import type { CommandRegistry } from "./command-controller.js";
-import { pick, Input } from "../views/input.js";
+import { Input } from "../views/input.js";
 
 const execAsync = promisify(exec);
 
@@ -120,6 +120,8 @@ export type WorkerSessionOptions = {
   /** Interval in ms between worker-sent pings. Dead connections are detected after
    * one interval with no pong. Default is set in the config schema (pingIntervalMs). */
   pingIntervalMs?: number;
+  /** Pick function used by confirmTaskQuit. Supplied by startWorkerMode via input.pick. */
+  pickFn?: (options: string[]) => Promise<number>;
 };
 
 // Sentinel: a prompt is ready for main() to execute
@@ -305,7 +307,7 @@ export class WorkerSession {
    */
   async confirmTaskQuit(
     info: TaskQuitInfo,
-    pickFn: (options: string[]) => Promise<number> = pick,
+    pickFn: (options: string[]) => Promise<number> = this.options.pickFn!,
   ): Promise<"quit" | "complete-and-quit" | "cancel"> {
     if (info.issueClosed) {
       this.display.print(c.amber(`\nTask #${info.taskNumber} is closed but not complete. Complete it before exiting?`));
@@ -747,6 +749,7 @@ export async function startWorkerMode(display: WorkerDisplay, statusBar: StatusB
     afterTask,
     workspace,
     pingIntervalMs: getConfig().pingIntervalMs,
+    pickFn: (opts) => input.pick(opts),
   });
 
   const shutdown = async () => {

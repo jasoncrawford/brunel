@@ -104,7 +104,7 @@ async function runWorkerMain(runQueryFn = vi.fn().mockResolvedValue(undefined)):
 
   const testDisplay = makeTestDisplay();
   try {
-    await main(runQueryFn, permConfig, testDisplay, new Settings({}), true /* runWorkerMode */, undefined, mockInput as unknown as Input);
+    await main(runQueryFn, permConfig, testDisplay, new Settings({}), mockInput as unknown as Input, true /* runWorkerMode */);
     return { exitCalled: false, exitCode: undefined };
   } catch (err) {
     if (err instanceof Error && err.message === "__process_exit__") {
@@ -141,7 +141,7 @@ describe("workerMain startup banner", () => {
       throw new Error("__process_exit__");
     }) as unknown as ReturnType<typeof vi.spyOn>;
     try {
-      await main(vi.fn().mockResolvedValue(undefined), permConfig, testDisplay, new Settings({}), true /* runWorkerMode */, undefined, mockInput as unknown as Input);
+      await main(vi.fn().mockResolvedValue(undefined), permConfig, testDisplay, new Settings({}), mockInput as unknown as Input, true /* runWorkerMode */);
     } catch (err) {
       if (!(err instanceof Error && err.message === "__process_exit__")) throw err;
     } finally {
@@ -214,7 +214,7 @@ describe("workerMain exit behavior", () => {
     }) as unknown as ReturnType<typeof vi.spyOn>;
 
     let workerDone = false;
-    const workerPromise = main(runQueryFn, permConfig, makeTestDisplay(), new Settings({}), true /* runWorkerMode */, undefined, mockInput as unknown as Input).then(
+    const workerPromise = main(runQueryFn, permConfig, makeTestDisplay(), new Settings({}), mockInput as unknown as Input, true /* runWorkerMode */).then(
       () => { workerDone = true; },
       () => { workerDone = true; },
     );
@@ -248,7 +248,7 @@ describe("workerMain exit behavior", () => {
     }) as unknown as ReturnType<typeof vi.spyOn>;
 
     try {
-      await main(vi.fn().mockResolvedValue(undefined), permConfig, makeTestDisplay(), new Settings({}), true /* runWorkerMode */, undefined, mockInput as unknown as Input);
+      await main(vi.fn().mockResolvedValue(undefined), permConfig, makeTestDisplay(), new Settings({}), mockInput as unknown as Input, true /* runWorkerMode */);
     } catch (err) {
       if (!(err instanceof Error && err.message === "__process_exit__")) throw err;
     } finally {

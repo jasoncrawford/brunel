@@ -24,12 +24,12 @@ export async function main(
   permConfig: AgentPermConfig,
   display: Display,
   settings: Settings,
+  inp: Input,
   runWorkerMode?: boolean,
   workspaceCfg?: { workspaceDir: string; repoUrl: string },
-  inp?: Input,
 ): Promise<void> {
   const statusBar = display.statusBar;
-  const input = inp ?? new Input(display);
+  const input = inp;
 
   // Worker mode setup: create workspace, session, signal handlers.
   const workerCtx = runWorkerMode ? await startWorkerMode(display, statusBar, input) : undefined;
@@ -252,7 +252,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     allowDangerouslySkipPermissions: config.allowDangerouslySkipPermissions,
   };
 
-  const agentController = new AgentController(display, new Input(display), permConfig, settings);
+  const input = new Input(display);
+  const agentController = new AgentController(display, input, permConfig, settings);
   const runQuery: RunQuery = (prompt, sessionId, ac, model, effort) =>
     agentController.runQuery(prompt, sessionId, ac, model, effort);
 
@@ -265,5 +266,5 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 
   const runWorkerMode = process.argv.includes("--worker-mode");
 
-  await main(runQuery, permConfig, display, settings, runWorkerMode, workspaceCfg);
+  await main(runQuery, permConfig, display, settings, input, runWorkerMode, workspaceCfg);
 }

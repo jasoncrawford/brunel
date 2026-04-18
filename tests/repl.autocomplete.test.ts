@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PassThrough } from "stream";
-import { ask } from "../src/agent/views/input.js";
+import { Input } from "../src/agent/views/input.js";
+import { Display } from "../src/agent/views/display.js";
 import { StatusBar } from "../src/agent/views/status-bar.js";
+import { getConfig } from "../src/config.js";
 import { CommandRegistry, CommandController, parseFrontmatter, listSkillNames, matchCommands, filterCommands, type ListDir, type CommandSuggestion } from "../src/agent/controllers/command-controller.js";
 import { registerTestCommands } from "./helpers.js";
 
@@ -17,6 +19,7 @@ function makeStdin() {
 let origStdin: NodeJS.ReadStream;
 let registry: CommandController;
 let testStatusBar: StatusBar;
+let testInput: Input;
 
 function withFakeStdin(fn: (stdin: PassThrough) => Promise<void>): Promise<void> {
   const stdin = makeStdin();
@@ -31,6 +34,7 @@ beforeEach(() => {
   vi.spyOn(process.stdout, "write").mockImplementation(() => true);
   registry = new CommandController(new CommandRegistry());
   testStatusBar = new StatusBar({ agentId: "test-agent" });
+  testInput = new Input(new Display(getConfig(), testStatusBar));
 });
 
 afterEach(() => {
@@ -528,7 +532,7 @@ describe("listCommands", () => {
 describe("ask() - Tab completion", () => {
   it("Tab with no match is a no-op", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask(testStatusBar, "> ", cmds);
+      const p = testInput.ask("> ", cmds);
       stdin.push("/zzz");
       stdin.push("\x09"); // Tab
       stdin.push("\r");
@@ -539,7 +543,7 @@ describe("ask() - Tab completion", () => {
 
   it("Tab with one match completes buffer", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask(testStatusBar, "> ", cmds);
+      const p = testInput.ask("> ", cmds);
       stdin.push("/ex");
       stdin.push("\x09"); // Tab
       stdin.push("\r");
@@ -550,7 +554,7 @@ describe("ask() - Tab completion", () => {
 
   it("Tab with multiple matches completes to first (alphabetical)", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask(testStatusBar, "> ", cmds);
+      const p = testInput.ask("> ", cmds);
       stdin.push("/");
       stdin.push("\x09"); // Tab — "brainstorm" is first alphabetically
       stdin.push("\r");
@@ -561,7 +565,7 @@ describe("ask() - Tab completion", () => {
 
   it("Tab on non-slash input is a no-op", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask(testStatusBar, "> ", cmds);
+      const p = testInput.ask("> ", cmds);
       stdin.push("hello");
       stdin.push("\x09"); // Tab
       stdin.push("\r");
@@ -572,7 +576,7 @@ describe("ask() - Tab completion", () => {
 
   it("Tab with cursor not at end completes and moves cursor to end", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask(testStatusBar, "> ", cmds);
+      const p = testInput.ask("> ", cmds);
       stdin.push("/ex");
       stdin.push("\x1b[D"); // left arrow (cursor now at position 2)
       stdin.push("\x09");   // Tab
@@ -584,7 +588,7 @@ describe("ask() - Tab completion", () => {
 
   it("Tab adds trailing space so arguments can be typed immediately", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask(testStatusBar, "> ", cmds);
+      const p = testInput.ask("> ", cmds);
       stdin.push("/ex");
       stdin.push("\x09");   // Tab — completes to "/exit "
       stdin.push("arg1");   // type argument right away, no extra space needed
@@ -600,7 +604,7 @@ describe("ask() - Tab completion", () => {
 describe("ask() - Enter completion", () => {
   it("Enter with one match completes and submits", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask(testStatusBar, "> ", cmds);
+      const p = testInput.ask("> ", cmds);
       stdin.push("/ex");
       stdin.push("\r");
       const result = await p;
@@ -610,7 +614,7 @@ describe("ask() - Enter completion", () => {
 
   it("Enter with no match (slash prefix) submits as-is", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask(testStatusBar, "> ", cmds);
+      const p = testInput.ask("> ", cmds);
       stdin.push("/zzz");
       stdin.push("\r");
       const result = await p;
@@ -620,7 +624,7 @@ describe("ask() - Enter completion", () => {
 
   it("Enter on non-slash input submits as-is (no completion)", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask(testStatusBar, "> ", cmds);
+      const p = testInput.ask("> ", cmds);
       stdin.push("hello world");
       stdin.push("\r");
       const result = await p;
@@ -630,7 +634,7 @@ describe("ask() - Enter completion", () => {
 
   it("Enter with space after command does not complete (no suggestions)", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask(testStatusBar, "> ", cmds);
+      const p = testInput.ask("> ", cmds);
       stdin.push("/exit foo");
       stdin.push("\r");
       const result = await p;
@@ -640,7 +644,7 @@ describe("ask() - Enter completion", () => {
 
   it("\\n also triggers Enter completion", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask(testStatusBar, "> ", cmds);
+      const p = testInput.ask("> ", cmds);
       stdin.push("/ex");
       stdin.push("\n");
       const result = await p;
@@ -654,7 +658,7 @@ describe("ask() - Enter completion", () => {
 describe("ask() - autocomplete edge cases", () => {
   it("bare / shows all commands and Enter picks first", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask(testStatusBar, "> ", () => [
+      const p = testInput.ask("> ", () => [
         { name: "alpha", description: "" },
         { name: "beta",  description: "" },
         { name: "gamma", description: "" },
@@ -668,7 +672,7 @@ describe("ask() - autocomplete edge cases", () => {
 
   it("^K leaving / in buffer; Tab completes from all commands", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask(testStatusBar, "> ", cmds);
+      const p = testInput.ask("> ", cmds);
       stdin.push("/exit");
       stdin.push("\x01");    // ^A → start of buffer
       stdin.push("\x1b[C"); // right arrow → position 1 (after /)
@@ -682,7 +686,7 @@ describe("ask() - autocomplete edge cases", () => {
 
   it("submit without ever showing suggestions (clearSuggestions guard)", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask(testStatusBar, "> ", () => []);
+      const p = testInput.ask("> ", () => []);
       stdin.push("hello");
       stdin.push("\r");
       const result = await p;
@@ -693,7 +697,7 @@ describe("ask() - autocomplete edge cases", () => {
 
   it("pasted slash prefix triggers Tab completion", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask(testStatusBar, "> ", cmds);
+      const p = testInput.ask("> ", cmds);
       stdin.push("\x1b[200~/ex\x1b[201~"); // paste "/ex"
       stdin.push("\x09"); // Tab → should complete to "/exit"
       stdin.push("\r");
@@ -704,7 +708,7 @@ describe("ask() - autocomplete edge cases", () => {
 
   it("paste of non-slash text into non-slash buffer: no suggestions", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask(testStatusBar, "> ", cmds);
+      const p = testInput.ask("> ", cmds);
       stdin.push("ab");
       stdin.push("\x1b[D"); // left
       stdin.push("\x1b[200~hello\x1b[201~"); // paste "hello" mid-buffer
@@ -716,7 +720,7 @@ describe("ask() - autocomplete edge cases", () => {
 
   it("typing / writes suggestion content to stdout", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask(testStatusBar, "> ", cmds);
+      const p = testInput.ask("> ", cmds);
       stdin.push("/");
       stdin.push("\r"); // submit to resolve the promise
       await p;
@@ -730,7 +734,7 @@ describe("ask() - autocomplete edge cases", () => {
 
   it("typing /ex narrows suggestion to only /exit", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask(testStatusBar, "> ", cmds);
+      const p = testInput.ask("> ", cmds);
       stdin.push("/ex");
       stdin.push("\r"); // submit (also completes to /exit)
       await p;
@@ -742,7 +746,7 @@ describe("ask() - autocomplete edge cases", () => {
 
   it("space after /ex hides suggestion content; second space draws no suggestion text", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask(testStatusBar, "> ", cmds);
+      const p = testInput.ask("> ", cmds);
       stdin.push("/ex");
       vi.mocked(process.stdout.write).mockClear();
       stdin.push(" ");
@@ -768,7 +772,7 @@ describe("ask() - autocomplete edge cases", () => {
 
   it("^U kill then non-slash char: suggestions do not appear", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask(testStatusBar, "> ", cmds);
+      const p = testInput.ask("> ", cmds);
       stdin.push("/exit");
       stdin.push("\x15"); // ^U — kill to start; buffer is now ""
       vi.mocked(process.stdout.write).mockClear();
@@ -786,7 +790,7 @@ describe("ask() - autocomplete edge cases", () => {
 
   it("Enter on empty input submits empty string (clearSuggestions guard fires silently)", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask(testStatusBar, "> ", cmds);
+      const p = testInput.ask("> ", cmds);
       stdin.push("\r");
       const result = await p;
       expect(result).toBe("");
@@ -803,7 +807,7 @@ describe("ask() - autocomplete edge cases", () => {
       { name: "foxtrot", description: "d6" },
     ];
     await withFakeStdin(async (stdin) => {
-      const p = ask(testStatusBar, "> ", sixCmds);
+      const p = testInput.ask("> ", sixCmds);
       stdin.push("/");
       stdin.push("\r");
       await p;
@@ -817,7 +821,7 @@ describe("ask() - autocomplete edge cases", () => {
 
   it("suggestions appear on separate lines (each on its own line)", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask(testStatusBar, "> ", cmds);
+      const p = testInput.ask("> ", cmds);
       stdin.push("/");
       stdin.push("\r");
       await p;
@@ -835,7 +839,7 @@ describe("ask() - autocomplete edge cases", () => {
 
   it("descriptions appear in suggestion output", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask(testStatusBar, "> ", cmds);
+      const p = testInput.ask("> ", cmds);
       stdin.push("/");
       stdin.push("\r");
       await p;
@@ -852,7 +856,7 @@ describe("ask() - autocomplete edge cases", () => {
       { name: "muchlonger", description: "Long desc" },
     ];
     await withFakeStdin(async (stdin) => {
-      const p = ask(testStatusBar, "> ", fixedCmds);
+      const p = testInput.ask("> ", fixedCmds);
       stdin.push("/");
       stdin.push("\r");
       await p;
@@ -884,7 +888,7 @@ describe("ask() - substring and description autocomplete", () => {
 
   it("non-prefix substring of command name triggers Tab completion", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask(testStatusBar, "> ", extCmds);
+      const p = testInput.ask("> ", extCmds);
       stdin.push("/xit");   // non-prefix substring of "exit"
       stdin.push("\x09");   // Tab
       stdin.push("\r");
@@ -895,7 +899,7 @@ describe("ask() - substring and description autocomplete", () => {
 
   it("description substring shows matching command in suggestions", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask(testStatusBar, "> ", extCmds);
+      const p = testInput.ask("> ", extCmds);
       stdin.push("/suite"); // matches "run-tests" description
       stdin.push("\r");     // Enter
       await p;
@@ -906,7 +910,7 @@ describe("ask() - substring and description autocomplete", () => {
 
   it("description substring Enter-completes to matching command", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask(testStatusBar, "> ", extCmds);
+      const p = testInput.ask("> ", extCmds);
       stdin.push("/suite"); // only matches "run-tests" via description
       stdin.push("\r");
       const result = await p;
@@ -916,7 +920,7 @@ describe("ask() - substring and description autocomplete", () => {
 
   it("matching is case-insensitive for command name", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask(testStatusBar, "> ", extCmds);
+      const p = testInput.ask("> ", extCmds);
       stdin.push("/EXIT");
       stdin.push("\r");
       const result = await p;
@@ -926,7 +930,7 @@ describe("ask() - substring and description autocomplete", () => {
 
   it("matching is case-insensitive for description", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask(testStatusBar, "> ", extCmds);
+      const p = testInput.ask("> ", extCmds);
       stdin.push("/SUITE");
       stdin.push("\r");
       const result = await p;
@@ -940,7 +944,7 @@ describe("ask() - substring and description autocomplete", () => {
       { name: "brainstorm", description: "Run ideas by the AI" },  // description matches "run"
     ];
     await withFakeStdin(async (stdin) => {
-      const p = ask(testStatusBar, "> ", sortCmds);
+      const p = testInput.ask("> ", sortCmds);
       stdin.push("/run");
       stdin.push("\r"); // Enter picks first match
       const result = await p;
@@ -957,7 +961,7 @@ const UP   = "\x1b[A";
 describe("ask() - arrow navigation in autocomplete", () => {
   it("down arrow then Enter selects first suggestion", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask(testStatusBar, "> ", cmds);
+      const p = testInput.ask("> ", cmds);
       stdin.push("/");
       stdin.push(DOWN);  // highlight first suggestion (brainstorm)
       stdin.push("\r");   // Enter selects it
@@ -968,7 +972,7 @@ describe("ask() - arrow navigation in autocomplete", () => {
 
   it("down arrow twice then Enter selects second suggestion", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask(testStatusBar, "> ", cmds);
+      const p = testInput.ask("> ", cmds);
       stdin.push("/");
       stdin.push(DOWN);  // highlight brainstorm
       stdin.push(DOWN);  // highlight clear
@@ -980,7 +984,7 @@ describe("ask() - arrow navigation in autocomplete", () => {
 
   it("down arrow three times then Enter selects third suggestion", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask(testStatusBar, "> ", cmds);
+      const p = testInput.ask("> ", cmds);
       stdin.push("/");
       stdin.push(DOWN);  // brainstorm
       stdin.push(DOWN);  // clear
@@ -993,7 +997,7 @@ describe("ask() - arrow navigation in autocomplete", () => {
 
   it("down arrow past last suggestion wraps or clamps at last", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask(testStatusBar, "> ", cmds);
+      const p = testInput.ask("> ", cmds);
       stdin.push("/");
       stdin.push(DOWN);  // brainstorm
       stdin.push(DOWN);  // clear
@@ -1007,7 +1011,7 @@ describe("ask() - arrow navigation in autocomplete", () => {
 
   it("down then up arrow returns to unselected, Enter completes to first match", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask(testStatusBar, "> ", cmds);
+      const p = testInput.ask("> ", cmds);
       stdin.push("/");
       stdin.push(DOWN);  // highlight brainstorm
       stdin.push(UP);    // back to unselected
@@ -1019,7 +1023,7 @@ describe("ask() - arrow navigation in autocomplete", () => {
 
   it("Tab with arrow-selected suggestion completes with trailing space", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask(testStatusBar, "> ", cmds);
+      const p = testInput.ask("> ", cmds);
       stdin.push("/");
       stdin.push(DOWN);  // highlight brainstorm
       stdin.push(DOWN);  // highlight clear
@@ -1033,7 +1037,7 @@ describe("ask() - arrow navigation in autocomplete", () => {
 
   it("typing after arrow selection resets selection and updates buffer", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask(testStatusBar, "> ", cmds);
+      const p = testInput.ask("> ", cmds);
       stdin.push("/");
       stdin.push(DOWN);  // highlight brainstorm
       stdin.push("e");   // type 'e' — resets selection, buffer becomes "/e"
@@ -1045,7 +1049,7 @@ describe("ask() - arrow navigation in autocomplete", () => {
 
   it("down arrow with no suggestions is a no-op", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask(testStatusBar, "> ", cmds);
+      const p = testInput.ask("> ", cmds);
       stdin.push("hello");  // no slash, no suggestions
       stdin.push(DOWN);
       stdin.push("\r");
@@ -1056,7 +1060,7 @@ describe("ask() - arrow navigation in autocomplete", () => {
 
   it("selected suggestion is rendered differently (not all darkGray)", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask(testStatusBar, "> ", cmds);
+      const p = testInput.ask("> ", cmds);
       stdin.push("/");
       stdin.push(DOWN);  // highlight first suggestion
       stdin.push("\r");
@@ -1069,7 +1073,7 @@ describe("ask() - arrow navigation in autocomplete", () => {
 
   it("arrow-selected Enter submits directly (does not just fill buffer)", async () => {
     await withFakeStdin(async (stdin) => {
-      const p = ask(testStatusBar, "> ", cmds);
+      const p = testInput.ask("> ", cmds);
       stdin.push("/");
       stdin.push(DOWN);  // highlight brainstorm
       stdin.push(DOWN);  // highlight clear

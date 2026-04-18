@@ -18,7 +18,7 @@ export function _resetStash(): void { stash = null; }
 // (\x1b[200~ ... \x1b[201~), letting us collect it as a single input
 // rather than having each newline submit a separate prompt.
 
-export function ask(
+function ask(
   statusBar: StatusBar,
   promptStr: string,
   getCommands: () => CommandSuggestion[] = () => [],
@@ -581,9 +581,9 @@ export type PickResult =
  * Without config: returns the selected index (number).
  * With config: returns a PickResult (supports escape, text entry, current marker).
  */
-export async function pick(options: string[]): Promise<number>;
-export async function pick(options: string[], config: PickConfig): Promise<PickResult>;
-export async function pick(options: string[], config?: PickConfig): Promise<number | PickResult> {
+async function pick(options: string[]): Promise<number>;
+async function pick(options: string[], config: PickConfig): Promise<PickResult>;
+async function pick(options: string[], config?: PickConfig): Promise<number | PickResult> {
   const currentIdx = config?.currentIdx ?? -1;
   const escapable = config?.escapable ?? false;
   const lastIsTextEntry = config?.lastIsTextEntry ?? false;
@@ -698,7 +698,7 @@ export async function pick(options: string[], config?: PickConfig): Promise<numb
  * Up/down arrows move the cursor; Space toggles selection; Enter confirms.
  * Ctrl-C exits the process.
  */
-export async function pickMultiple(options: string[], promptStr?: string): Promise<number[]> {
+async function pickMultiple(options: string[], promptStr?: string): Promise<number[]> {
   return new Promise((resolve) => {
     let idx = 0;
     let done = false;
@@ -754,7 +754,7 @@ export async function pickMultiple(options: string[], promptStr?: string): Promi
  * Minimal single-line text prompt. Reads characters until Enter,
  * supporting backspace. No autocomplete or multiline support.
  */
-export async function promptLine(prompt: string): Promise<string> {
+async function promptLine(prompt: string): Promise<string> {
   return new Promise((resolve) => {
     let buf = "";
     process.stdout.write(prompt);
@@ -800,7 +800,7 @@ export type PickQuestionResult =
  * "Other:" (free-text entry) and "Let's discuss" (deny) are always appended.
  * Digit keys 1–9 jump the cursor to that 1-based index.
  */
-export async function pickQuestion(
+async function pickQuestion(
   options: Array<{ label: string; description: string }>,
 ): Promise<PickQuestionResult> {
   return new Promise((resolve) => {
@@ -940,9 +940,6 @@ export async function pickQuestion(
 /**
  * View class for interactive terminal input. Receives a Display reference so
  * ask() can access the status bar without callers threading it through.
- *
- * Methods delegate to the module-level implementations; the class provides
- * a clean, dependency-injected interface for controllers.
  */
 export class Input {
   constructor(private readonly display: Display) {}
@@ -967,5 +964,9 @@ export class Input {
 
   pickQuestion(options: Array<{ label: string; description: string }>): Promise<PickQuestionResult> {
     return pickQuestion(options);
+  }
+
+  promptLine(prompt: string): Promise<string> {
+    return promptLine(prompt);
   }
 }
