@@ -1,45 +1,38 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { stripAnsi } from "./helpers.js";
 import { getConfig } from "../src/config.js";
-import {
-  effectiveWidth,
-  clearBreak,
-  W,
-} from "../src/agent/views/display.js";
+import { clearBreak } from "../src/agent/views/display.js";
+import { effectiveWidth, W } from "../src/agent/views/style.js";
 
 beforeEach(() => getConfig().verbose = false);
 afterEach(() => getConfig().verbose = false);
 
 describe("effectiveWidth()", () => {
   it("verbose=false: returns full terminal width", () => {
-    getConfig().verbose = false;
     const expected = process.stdout.columns ?? W;
-    expect(effectiveWidth()).toBe(expected);
+    expect(effectiveWidth(W, false)).toBe(expected);
   });
 
   it("verbose=true: returns terminal width minus 9 (verbose timestamp prefix)", () => {
-    getConfig().verbose = true;
     const expected = (process.stdout.columns ?? W) - 9;
-    expect(effectiveWidth()).toBe(expected);
+    expect(effectiveWidth(W, true)).toBe(expected);
   });
 
   it("verbose=false with custom fallback: uses fallback when no columns", () => {
-    getConfig().verbose = false;
     const cols = process.stdout.columns;
     if (cols == null) {
-      expect(effectiveWidth(80)).toBe(80);
+      expect(effectiveWidth(80, false)).toBe(80);
     } else {
-      expect(effectiveWidth(80)).toBe(cols);
+      expect(effectiveWidth(80, false)).toBe(cols);
     }
   });
 
   it("verbose=true with custom fallback: subtracts 9 from fallback when no columns", () => {
-    getConfig().verbose = true;
     const cols = process.stdout.columns;
     if (cols == null) {
-      expect(effectiveWidth(80)).toBe(80 - 9);
+      expect(effectiveWidth(80, true)).toBe(80 - 9);
     } else {
-      expect(effectiveWidth(80)).toBe(cols - 9);
+      expect(effectiveWidth(80, true)).toBe(cols - 9);
     }
   });
 });

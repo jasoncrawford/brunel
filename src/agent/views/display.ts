@@ -29,14 +29,10 @@ import {
   renderMarkdown,
 } from "./renderer.js";
 
-// Re-export terminal layout / style utilities so importers that
-// previously sourced them from display.ts continue to work.
-export { c, s, W, hr, effectiveWidth };
-
 // ── clearBreak ─────────────────────────────────────────────────────────────
 
 export function clearBreak(): string {
-  const width = effectiveWidth();
+  const width = effectiveWidth(W, getConfig().verbose);
   const label = "=== Context cleared ";
   const fill = "=".repeat(Math.max(0, width - label.length));
   return "\n" + c.sageGreen(s.bold(label + fill));
@@ -87,7 +83,7 @@ function fmtSubagentType(subagentType: string | null | undefined): string {
 }
 
 const ASSISTANT_BLOCK_FMT: FmtTable = {
-  thinking: (b) => c.gray("\n" + (getConfig().thinkOutLoud ? renderMarkdown(b.thinking ?? "") : "Thinking...")),
+  thinking: (b) => c.gray("\n" + (b._thinkOutLoud ? renderMarkdown(b.thinking ?? "") : "Thinking...")),
   text:     (b) => c.yellow(`\n${renderMarkdown(b.text ?? "")}`),
   _default: (b) => c.darkGray(`[assistant/${b.type}]`),
 };
@@ -113,11 +109,17 @@ const TOOL_CALL_FMT: FmtTable = {
 };
 
 const TOOL_RESULT_FMT: FmtTable = {
-  _default:   (b) => c.darkGray(`→ ${getConfig().verbose ? toolResultText(b) : trunc(toolResultText(b), 100)}`),
+  _default:   {
+    quiet:   (b) => c.darkGray(`→ ${trunc(toolResultText(b), 100)}`),
+    verbose: (b) => c.darkGray(`→ ${toolResultText(b)}`),
+  },
   Read:       (b) => c.darkGray(`→ ${fmtCount(toolResultText(b).split("\n").length, "line")}`),
   Edit:       (b) => fmtEditResult(b),
   Skill:      (b) => c.darkGray(`→ Loaded skill`),
-  Bash:       (b) => c.darkGray(`→ ${fmtBashOutput(toolResultText(b))}`),
+  Bash:       {
+    quiet:   (b) => c.darkGray(`→ ${trunc(fmtBashOutput(toolResultText(b)), 100)}`),
+    verbose: (b) => c.darkGray(`→ ${fmtBashOutput(toolResultText(b))}`),
+  },
   Write:      (b) => c.darkGray(`→ ${fmtWriteOutput(b)}`),
   ToolSearch: (b) => c.darkGray(`→ ${fmtToolSearchOutput(b.content)}`),
   TodoWrite:  (b) => c.darkGray(`→ ${fmtTodoWriteOutput(b)}`),
@@ -311,7 +313,7 @@ export class Display {
       return;
     }
     const blockFmt = role === "assistant" ? ASSISTANT_BLOCK_FMT : USER_BLOCK_FMT;
-    this.print(this.resolve(blockFmt, b.type, { ...b, _isSynthetic: msg?.isSynthetic ?? false }));
+    this.print(this.resolve(blockFmt, b.type, { ...b, _isSynthetic: msg?.isSynthetic ?? false, _thinkOutLoud: this.config.thinkOutLoud }));
   }
 
   /** Print a full SDK message (system, assistant, user, result, etc.). */

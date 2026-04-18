@@ -1,4 +1,4 @@
-import { c } from "./display.js";
+import { c } from "./style.js";
 import type { Display } from "./display.js";
 import type { CommandSuggestion } from "../controllers/command-controller.js";
 

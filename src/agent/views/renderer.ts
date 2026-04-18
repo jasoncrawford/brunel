@@ -5,7 +5,6 @@
  */
 import { c, s, W, effectiveWidth } from "./style.js";
 import { trunc, fmtCount } from "../../../shared/formatters.js";
-import { getConfig } from "../../config.js";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -60,10 +59,14 @@ export function fmtEditResult(b: {
   return c.darkGray(`→ ${trunc(toolResultText(b), 100)}`);
 }
 
+/**
+ * Formats bash output for display. Returns "Success" for empty output,
+ * otherwise returns the full trimmed text. Callers decide whether to truncate.
+ */
 export function fmtBashOutput(text: string): string {
   const t = text.trim();
   if (!t || t === "(Bash completed with no output)") return "Success";
-  return getConfig().verbose ? t : trunc(t, 100);
+  return t;
 }
 
 export function fmtWriteOutput(b: { content: unknown; _input?: Record<string, unknown> }): string {

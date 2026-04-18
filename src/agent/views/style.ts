@@ -1,9 +1,9 @@
 /**
  * Terminal color, style, and layout constants.
  * Extracted here so renderer.ts can import them without creating a
- * circular dependency with display.ts.
+ * circular dependency with display.ts. No runtime config access —
+ * callers pass the verbose flag where needed.
  */
-import { getConfig } from "../../config.js";
 
 // ── Display width ──────────────────────────────────────────────────────────
 
@@ -11,14 +11,15 @@ export const W = 70;
 export const hr = (ch = "─") => ch.repeat(W);
 
 /** Visible width of the verbose timestamp prefix "HH:mm:ss " */
-const VERBOSE_PREFIX_LEN = 9;
+export const VERBOSE_PREFIX_LEN = 9;
 
 /**
  * Returns the usable terminal width, accounting for the verbose timestamp
- * prefix when verbose mode is active.
+ * prefix when verbose mode is active. Pass `verbose` from the caller's
+ * config rather than reading it here so this module stays dependency-free.
  */
-export function effectiveWidth(fallback = W): number {
-  return (process.stdout.columns ?? fallback) - (getConfig().verbose ? VERBOSE_PREFIX_LEN : 0);
+export function effectiveWidth(fallback = W, verbose = false): number {
+  return (process.stdout.columns ?? fallback) - (verbose ? VERBOSE_PREFIX_LEN : 0);
 }
 
 // ── Colors ─────────────────────────────────────────────────────────────────

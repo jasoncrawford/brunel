@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { stripAnsi } from "./helpers.js";
 import { getConfig } from "../src/config.js";
 import { fmtTime } from "../shared/formatters.js";
-import { s, Display } from "../src/agent/views/display.js";
+import { s } from "../src/agent/views/style.js";
+import { Display } from "../src/agent/views/display.js";
 import { StatusBar } from "../src/agent/views/status-bar.js";
 
 let testDisplay: Display;
