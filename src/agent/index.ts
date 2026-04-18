@@ -14,7 +14,7 @@ import { fmtError } from "../utils.js";
 import { Settings } from "./models/settings.js";
 import { CommandRegistry, CommandController } from "./controllers/command-controller.js";
 import { SettingsController } from "./controllers/settings-controller.js";
-import { registerWorkspaceCommands } from "./controllers/workspace-controller.js";
+import { WorkspaceController } from "./controllers/workspace-controller.js";
 import { AgentController, logFull, createFetchModelsFn } from "./controllers/agent-controller.js";
 import type { AgentPermConfig } from "./controllers/agent-controller.js";
 
@@ -84,7 +84,7 @@ export async function main(
   // modes; commands that require a foreman connection degrade gracefully.
   const registry = new CommandRegistry();
   const controller = new CommandController(registry);
-  registerWorkspaceCommands(workspace, registry.scoped("workspace"), display);
+  new WorkspaceController(workspace, display).registerCommands(registry.scoped("workspace"));
   registerWorkerCommands(session, registry.scoped("worker"), display);
   registry.register("exit", {
     description: "Exit",

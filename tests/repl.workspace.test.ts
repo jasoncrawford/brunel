@@ -6,7 +6,7 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => ({ query: vi.fn() }));
 vi.mock("fs", () => ({ default: { appendFileSync: vi.fn() } }));
 
 import { Workspace } from "../src/agent/models/workspace.js";
-import { registerWorkspaceCommands } from "../src/agent/controllers/workspace-controller.js";
+import { WorkspaceController } from "../src/agent/controllers/workspace-controller.js";
 import { CommandRegistry, CommandController } from "../src/agent/controllers/command-controller.js";
 import { stripAnsi } from "./helpers.js";
 
@@ -42,7 +42,7 @@ function makeWorkspace(confirm = vi.fn().mockResolvedValue(true)): Workspace {
 function makeAndRegister(workspace: Workspace | undefined): void {
   const reg = new CommandRegistry();
   registry = new CommandController(reg);
-  registerWorkspaceCommands(workspace, reg.scoped("workspace"), testDisplay);
+  new WorkspaceController(workspace, testDisplay).registerCommands(reg.scoped("workspace"));
 }
 
 // ── workspace:create ──────────────────────────────────────────────────────────
