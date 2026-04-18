@@ -1,4 +1,5 @@
 import { c, s } from "./display.js";
+import type { Display } from "./display.js";
 import type { StatusBar } from "./status-bar.js";
 import { filterCommands } from "../controllers/command-controller.js";
 import type { CommandSuggestion } from "../controllers/command-controller.js";
@@ -932,4 +933,39 @@ export async function pickQuestion(
 
     process.stdin.on("data", onData);
   });
+}
+
+// ── Input class ───────────────────────────────────────────────────────────────
+
+/**
+ * View class for interactive terminal input. Receives a Display reference so
+ * ask() can access the status bar without callers threading it through.
+ *
+ * Methods delegate to the module-level implementations; the class provides
+ * a clean, dependency-injected interface for controllers.
+ */
+export class Input {
+  constructor(private readonly display: Display) {}
+
+  ask(
+    promptStr: string,
+    getCommands: () => CommandSuggestion[] = () => [],
+    abort?: Promise<string>,
+  ): Promise<string> {
+    return ask(this.display.statusBar, promptStr, getCommands, abort);
+  }
+
+  pick(options: string[]): Promise<number>;
+  pick(options: string[], config: PickConfig): Promise<PickResult>;
+  pick(options: string[], config?: PickConfig): Promise<number | PickResult> {
+    return config !== undefined ? pick(options, config) : pick(options);
+  }
+
+  pickMultiple(options: string[], promptStr?: string): Promise<number[]> {
+    return pickMultiple(options, promptStr);
+  }
+
+  pickQuestion(options: Array<{ label: string; description: string }>): Promise<PickQuestionResult> {
+    return pickQuestion(options);
+  }
 }

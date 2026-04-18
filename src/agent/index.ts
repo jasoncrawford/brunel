@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "url";
 import { Display, c, hr } from "./views/display.js";
 import { StatusBar } from "./views/status-bar.js";
-import { ask, pick } from "./views/input.js";
+import { Input } from "./views/input.js";
 import { WorkerSession, registerWorkerCommands, startWorkerMode, generateAgentId } from "./controllers/worker-controller.js";
 import type { RunQuery } from "./controllers/worker-controller.js";
 import { loadConfig, getConfig } from "../config.js";
@@ -26,11 +26,13 @@ export async function main(
   settings: Settings,
   runWorkerMode?: boolean,
   workspaceCfg?: { workspaceDir: string; repoUrl: string },
+  inp?: Input,
 ): Promise<void> {
   const statusBar = display.statusBar;
+  const input = inp ?? new Input(display);
 
   // Worker mode setup: create workspace, session, signal handlers.
-  const workerCtx = runWorkerMode ? await startWorkerMode(display, statusBar) : undefined;
+  const workerCtx = runWorkerMode ? await startWorkerMode(display, statusBar, input) : undefined;
   const session = workerCtx?.session;
 
   const fetchModelsFn = createFetchModelsFn(permConfig);
@@ -53,7 +55,7 @@ export async function main(
   const confirm = async (msg: string): Promise<boolean> => {
     statusBar.stop();
     display.print(c.amber(`\n⚠ Potential data loss:\n${msg}`));
-    const idx = await pick(["Yes, proceed", "No, cancel"]);
+    const idx = await input.pick(["Yes, proceed", "No, cancel"]);
     return idx === 0;
   };
 
@@ -108,7 +110,7 @@ export async function main(
     handler: async (args) => {
       await settingsController.pickModel(
         args,
-        (opts, idx) => pick(opts, { currentIdx: idx, escapable: true }),
+        (opts, idx) => input.pick(opts, { currentIdx: idx, escapable: true }),
         fetchModelsFn,
       );
     },
@@ -118,7 +120,7 @@ export async function main(
     handler: async (args) => {
       await settingsController.pickEffort(
         args,
-        (opts, idx) => pick(opts, { currentIdx: idx, escapable: true }),
+        (opts, idx) => input.pick(opts, { currentIdx: idx, escapable: true }),
       );
     },
   });
@@ -160,10 +162,10 @@ export async function main(
     // empty promptLine suppresses the drawFresh callback so incoming messages
     // are printed cleanly without a prompt preceding or following them.
     const promptStr = session ? (showPrompt ? "\n[agent] > " : "") : "\n> ";
-    const input = await ask(statusBar, promptStr, () => controller.listCommands(), wsAbort);
+    const typed = await input.ask(promptStr, () => controller.listCommands(), wsAbort);
 
     // ^D / ^C on empty buffer — treat as exit.
-    if (input === "__eof__") {
+    if (typed === "__eof__") {
       if (!session) { await doExit(); break; }
       const taskInfo = session.getTaskQuitInfo();
       if (taskInfo) {
@@ -176,10 +178,10 @@ export async function main(
 
     // Ignore the internal abort sentinel (fired when wsAbort resolves at the
     // same tick as the ask() call; never a user action).
-    if (input === "__abort__") continue;
+    if (typed === "__abort__") continue;
 
     // WS_FATAL: a fatal foreman_error was received — drop back to interactive REPL.
-    if (WorkerSession.isFatalSignal(input)) {
+    if (WorkerSession.isFatalSignal(typed)) {
       showPrompt = true;
       continue;
     }
@@ -187,7 +189,7 @@ export async function main(
     // WS_PROMPT: a task prompt or debounced event prompt is ready. Hide the
     // prompt, drain all queued prompts through runQueryFn, then show the prompt
     // again. Stops draining if a prompt is interrupted or errors.
-    if (WorkerSession.isWsSignal(input)) {
+    if (WorkerSession.isWsSignal(typed)) {
       showPrompt = false;
       while (session?.hasPendingPrompts()) {
         const item = session.takeNextPrompt()!;
@@ -199,7 +201,7 @@ export async function main(
       continue;
     }
 
-    const action = await controller.dispatch(input);
+    const action = await controller.dispatch(typed);
 
     if (action.type === "skip") continue;
 
@@ -250,7 +252,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     allowDangerouslySkipPermissions: config.allowDangerouslySkipPermissions,
   };
 
-  const agentController = new AgentController(display, permConfig, settings);
+  const agentController = new AgentController(display, new Input(display), permConfig, settings);
   const runQuery: RunQuery = (prompt, sessionId, ac, model, effort) =>
     agentController.runQuery(prompt, sessionId, ac, model, effort);
 

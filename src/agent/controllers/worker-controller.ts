@@ -13,7 +13,7 @@ import { Workspace, confirmIfUnsafe } from "../models/workspace.js";
 import { fmtError } from "../../utils.js";
 import { getConfig } from "../../config.js";
 import type { CommandRegistry } from "./command-controller.js";
-import { pick } from "../views/input.js";
+import { pick, Input } from "../views/input.js";
 
 const execAsync = promisify(exec);
 
@@ -665,7 +665,7 @@ export function registerWorkerCommands(session: WorkerSession | undefined, regis
  * a cleanup function — does NOT call main(). The caller (main itself) owns
  * the query loop and calls cleanup() after the loop exits.
  */
-export async function startWorkerMode(display: WorkerDisplay, statusBar: StatusBar): Promise<{
+export async function startWorkerMode(display: WorkerDisplay, statusBar: StatusBar, input: Input): Promise<{
   session: WorkerSession;
   cleanup: () => Promise<void>;
 }> {
@@ -676,7 +676,7 @@ export async function startWorkerMode(display: WorkerDisplay, statusBar: StatusB
 
   const confirm = async (msg: string): Promise<boolean> => {
     display.print(c.amber(`\n⚠ Potential data loss:\n${msg}`));
-    const idx = await pick(["Yes, proceed", "No, cancel"]);
+    const idx = await input.pick(["Yes, proceed", "No, cancel"]);
     return idx === 0;
   };
 
