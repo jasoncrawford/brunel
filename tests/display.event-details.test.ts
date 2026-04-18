@@ -3,7 +3,7 @@
  * timestamps and event-specific details for worker event_notification lines.
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { fmtTime, fmtEventDetails } from "../src/agent/views/display.js";
+import { fmtTime, fmtEventDetails } from "../shared/formatters.js";
 import * as Wire from "../shared/wire.js";
 
 afterEach(() => {
