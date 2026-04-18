@@ -67,6 +67,7 @@ vi.mock("../src/agent/models/workspace.js", async (importOriginal) => {
 import { main } from "../src/agent/index.js";
 import { confirmIfUnsafe } from "../src/agent/models/workspace.js";
 import { Input } from "../src/agent/views/input.js";
+import { Picker } from "../src/agent/views/picker.js";
 import { Display } from "../src/agent/views/display.js";
 import { StatusBar } from "../src/agent/views/status-bar.js";
 import { Settings } from "../src/agent/models/settings.js";
@@ -84,11 +85,14 @@ const permConfig = {
   allowDangerouslySkipPermissions: false,
 };
 
-let mockInput: { ask: ReturnType<typeof vi.fn>; pick: ReturnType<typeof vi.fn>; pickMultiple: ReturnType<typeof vi.fn>; pickQuestion: ReturnType<typeof vi.fn> };
+let mockInput: { ask: ReturnType<typeof vi.fn> };
+let mockPicker: { pick: ReturnType<typeof vi.fn>; pickMultiple: ReturnType<typeof vi.fn>; pickQuestion: ReturnType<typeof vi.fn> };
 
 function makeMockInput() {
   mockInput = {
     ask: vi.fn().mockResolvedValue("__eof__"),
+  };
+  mockPicker = {
     pick: vi.fn().mockResolvedValue(0),
     pickMultiple: vi.fn().mockResolvedValue([]),
     pickQuestion: vi.fn().mockResolvedValue({ type: "answer", value: "" }),
@@ -104,7 +108,7 @@ async function runWorkerMain(runQueryFn = vi.fn().mockResolvedValue(undefined)):
 
   const testDisplay = makeTestDisplay();
   try {
-    await main(runQueryFn, permConfig, testDisplay, new Settings({}), mockInput as unknown as Input, true /* runWorkerMode */);
+    await main(runQueryFn, permConfig, testDisplay, new Settings({}), mockInput as unknown as Input, mockPicker as unknown as Picker, true /* runWorkerMode */);
     return { exitCalled: false, exitCode: undefined };
   } catch (err) {
     if (err instanceof Error && err.message === "__process_exit__") {
@@ -141,7 +145,7 @@ describe("workerMain startup banner", () => {
       throw new Error("__process_exit__");
     }) as unknown as ReturnType<typeof vi.spyOn>;
     try {
-      await main(vi.fn().mockResolvedValue(undefined), permConfig, testDisplay, new Settings({}), mockInput as unknown as Input, true /* runWorkerMode */);
+      await main(vi.fn().mockResolvedValue(undefined), permConfig, testDisplay, new Settings({}), mockInput as unknown as Input, mockPicker as unknown as Picker, true /* runWorkerMode */);
     } catch (err) {
       if (!(err instanceof Error && err.message === "__process_exit__")) throw err;
     } finally {
@@ -214,7 +218,7 @@ describe("workerMain exit behavior", () => {
     }) as unknown as ReturnType<typeof vi.spyOn>;
 
     let workerDone = false;
-    const workerPromise = main(runQueryFn, permConfig, makeTestDisplay(), new Settings({}), mockInput as unknown as Input, true /* runWorkerMode */).then(
+    const workerPromise = main(runQueryFn, permConfig, makeTestDisplay(), new Settings({}), mockInput as unknown as Input, mockPicker as unknown as Picker, true /* runWorkerMode */).then(
       () => { workerDone = true; },
       () => { workerDone = true; },
     );
@@ -248,7 +252,7 @@ describe("workerMain exit behavior", () => {
     }) as unknown as ReturnType<typeof vi.spyOn>;
 
     try {
-      await main(vi.fn().mockResolvedValue(undefined), permConfig, makeTestDisplay(), new Settings({}), mockInput as unknown as Input, true /* runWorkerMode */);
+      await main(vi.fn().mockResolvedValue(undefined), permConfig, makeTestDisplay(), new Settings({}), mockInput as unknown as Input, mockPicker as unknown as Picker, true /* runWorkerMode */);
     } catch (err) {
       if (!(err instanceof Error && err.message === "__process_exit__")) throw err;
     } finally {

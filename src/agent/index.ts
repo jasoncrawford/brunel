@@ -5,6 +5,7 @@ import { fileURLToPath } from "url";
 import { Display, c, hr } from "./views/display.js";
 import { StatusBar } from "./views/status-bar.js";
 import { Input } from "./views/input.js";
+import { Picker } from "./views/picker.js";
 import { WorkerSession, registerWorkerCommands, startWorkerMode } from "./controllers/worker-controller.js";
 import type { RunQuery } from "./controllers/worker-controller.js";
 import { loadConfig, getConfig } from "../config.js";
@@ -25,13 +26,14 @@ export async function main(
   display: Display,
   settings: Settings,
   input: Input,
+  picker: Picker,
   runWorkerMode?: boolean,
   workspaceCfg?: { workspaceDir: string; repoUrl: string },
 ): Promise<void> {
   const statusBar = display.statusBar;
 
   // Worker mode setup: create workspace, session, signal handlers.
-  const workerCtx = runWorkerMode ? await startWorkerMode(display, statusBar, input) : undefined;
+  const workerCtx = runWorkerMode ? await startWorkerMode(display, statusBar, picker) : undefined;
   const session = workerCtx?.session;
 
   const fetchModelsFn = createFetchModelsFn(permConfig);
@@ -54,7 +56,7 @@ export async function main(
   const confirm = async (msg: string): Promise<boolean> => {
     statusBar.stop();
     display.print(c.amber(`\n⚠ Potential data loss:\n${msg}`));
-    const idx = await input.pick(["Yes, proceed", "No, cancel"]);
+    const idx = await picker.pick(["Yes, proceed", "No, cancel"]);
     return idx === 0;
   };
 
@@ -109,7 +111,7 @@ export async function main(
     handler: async (args) => {
       await settingsController.pickModel(
         args,
-        (opts, idx) => input.pick(opts, { currentIdx: idx, escapable: true }),
+        (opts, idx) => picker.pick(opts, { currentIdx: idx, escapable: true }),
         fetchModelsFn,
       );
     },
@@ -119,7 +121,7 @@ export async function main(
     handler: async (args) => {
       await settingsController.pickEffort(
         args,
-        (opts, idx) => input.pick(opts, { currentIdx: idx, escapable: true }),
+        (opts, idx) => picker.pick(opts, { currentIdx: idx, escapable: true }),
       );
     },
   });
@@ -252,7 +254,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   };
 
   const input = new Input(display);
-  const agentController = new AgentController(display, input, permConfig, settings);
+  const picker = new Picker();
+  const agentController = new AgentController(display, picker, permConfig, settings);
   const runQuery: RunQuery = (prompt, sessionId, ac, model, effort) =>
     agentController.runQuery(prompt, sessionId, ac, model, effort);
 
@@ -265,5 +268,5 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 
   const runWorkerMode = process.argv.includes("--worker-mode");
 
-  await main(runQuery, permConfig, display, settings, input, runWorkerMode, workspaceCfg);
+  await main(runQuery, permConfig, display, settings, input, picker, runWorkerMode, workspaceCfg);
 }
