@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { getConfig } from "../src/config.js";
 import { stripAnsi } from "./helpers.js";
 
-// Mock the SDK before importing runQuery
+// Mock the SDK before importing AgentController
 vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
   query: vi.fn(),
 }));
@@ -26,13 +26,14 @@ vi.mock("../src/agent/views/input.js", async (importOriginal) => {
 
 import { PassThrough } from "stream";
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { runQuery } from "../src/agent/index.js";
+import { AgentController } from "../src/agent/controllers/agent-controller.js";
 import { Settings } from "../src/agent/models/settings.js";
 import { ask, pick, pickMultiple, pickQuestion } from "../src/agent/views/input.js";
 import { Display } from "../src/agent/views/display.js";
 import { StatusBar } from "../src/agent/views/status-bar.js";
 
 let testDisplay: Display;
+let testController: AgentController;
 
 const defaultPermConfig = {
   permissionMode: "default" as const,
@@ -74,6 +75,7 @@ beforeEach(() => {
   testDisplay = new Display(getConfig(), new StatusBar({ agentId: "test-agent" }));
   testDisplay.toolUseNames.clear();
   testDisplay.statusBar.stop();
+  testController = new AgentController(testDisplay, defaultPermConfig, new Settings({}));
   getConfig().verbose = false;
   vi.clearAllMocks();
 });
@@ -91,7 +93,7 @@ describe("runQuery - session ID", () => {
     ]);
     const cap = captureConsole();
     try {
-      const sid = await runQuery(testDisplay, defaultPermConfig, "hello", undefined);
+      const sid = await testController.runQuery("hello", undefined);
       expect(sid).toBe("abc-123");
     } finally {
       cap.restore();
@@ -104,7 +106,7 @@ describe("runQuery - session ID", () => {
     ]);
     const cap = captureConsole();
     try {
-      const sid = await runQuery(testDisplay, defaultPermConfig, "hello", undefined);
+      const sid = await testController.runQuery("hello", undefined);
       expect(sid).toBeUndefined();
     } finally {
       cap.restore();
@@ -117,7 +119,7 @@ describe("runQuery - session ID", () => {
     ]);
     const cap = captureConsole();
     try {
-      await runQuery(testDisplay, defaultPermConfig, "hello", "existing-session-id");
+      await testController.runQuery("hello", "existing-session-id");
     } finally {
       cap.restore();
     }
@@ -131,7 +133,7 @@ describe("runQuery - session ID", () => {
     ]);
     const cap = captureConsole();
     try {
-      await runQuery(testDisplay, defaultPermConfig, "hello", undefined);
+      await testController.runQuery("hello", undefined);
     } finally {
       cap.restore();
     }
@@ -154,11 +156,10 @@ describe("runQuery - stream event stat accumulation", () => {
 
     const cap = captureConsole();
     try {
-      await runQuery(testDisplay, defaultPermConfig, "test", undefined);
+      await testController.runQuery("test", undefined);
     } finally {
       cap.restore();
     }
-    // Verify result was printed (which means processing completed correctly)
     const plain = cap.lines.map(stripAnsi).join("\n");
     expect(plain).toContain("2s");
   });
@@ -173,11 +174,10 @@ describe("runQuery - stream event stat accumulation", () => {
     ]);
     const cap = captureConsole();
     try {
-      await runQuery(testDisplay, defaultPermConfig, "test", undefined);
+      await testController.runQuery("test", undefined);
     } finally {
       cap.restore();
     }
-    // Subagent tokens (999) must not appear in the stats output; only the top-level 50 in.
     const plain = cap.lines.map(stripAnsi).join("\n");
     expect(plain).not.toContain("999");
   });
@@ -191,13 +191,11 @@ describe("runQuery - message processing", () => {
     ]);
     const cap = captureConsole();
     try {
-      await runQuery(testDisplay, defaultPermConfig, "test", undefined);
+      await testController.runQuery("test", undefined);
     } finally {
       cap.restore();
     }
-    // Only result should be in output; message_start (stream_event) should not produce visible output
     const plain = cap.lines.map(stripAnsi).join("\n");
-    // Should NOT contain anything from message_start
     expect(plain).not.toContain("message_start");
   });
 
@@ -208,7 +206,7 @@ describe("runQuery - message processing", () => {
     ]);
     const cap = captureConsole();
     try {
-      await runQuery(testDisplay, defaultPermConfig, "test", undefined);
+      await testController.runQuery("test", undefined);
     } finally {
       cap.restore();
     }
@@ -226,11 +224,10 @@ describe("runQuery - logFull behavior", () => {
     ]);
     const cap = captureConsole();
     try {
-      await runQuery(testDisplay, defaultPermConfig, "test", undefined);
+      await testController.runQuery("test", undefined);
     } finally {
       cap.restore();
     }
-    // Check that appendFileSync was NOT called with content_block_delta
     const calls = (fs.appendFileSync as any).mock.calls;
     const hasContentBlockDelta = calls.some((call: any[]) =>
       String(call[1]).includes("content_block_delta")
@@ -246,7 +243,7 @@ describe("runQuery - logFull behavior", () => {
     ]);
     const cap = captureConsole();
     try {
-      await runQuery(testDisplay, defaultPermConfig, "test", undefined);
+      await testController.runQuery("test", undefined);
     } finally {
       cap.restore();
     }
@@ -266,7 +263,7 @@ describe("runQuery - error handling", () => {
     const cap = captureConsole();
     let thrown: unknown;
     try {
-      await runQuery(testDisplay, defaultPermConfig, "test", undefined);
+      await testController.runQuery("test", undefined);
     } catch (err) {
       thrown = err;
     } finally {
@@ -284,7 +281,7 @@ describe("runQuery - canUseTool callback registration", () => {
     ]);
     const cap = captureConsole();
     try {
-      await runQuery(testDisplay, defaultPermConfig, "test", undefined);
+      await testController.runQuery("test", undefined);
     } finally {
       cap.restore();
     }
@@ -316,7 +313,7 @@ describe("runQuery - AskUserQuestion handling", () => {
     const cap = captureConsole();
     let canUseTool: Function;
     try {
-      await runQuery(testDisplay, defaultPermConfig, "test", undefined);
+      await testController.runQuery("test", undefined);
       canUseTool = (query as any).mock.calls[0][0].options.canUseTool;
     } finally {
       cap.restore();
@@ -335,7 +332,7 @@ describe("runQuery - AskUserQuestion handling", () => {
     const cap = captureConsole();
     let canUseTool: Function;
     try {
-      await runQuery(testDisplay, defaultPermConfig, "test", undefined);
+      await testController.runQuery("test", undefined);
       canUseTool = (query as any).mock.calls[0][0].options.canUseTool;
     } finally {
       cap.restore();
@@ -353,7 +350,7 @@ describe("runQuery - AskUserQuestion handling", () => {
     const cap = captureConsole();
     let canUseTool: Function;
     try {
-      await runQuery(testDisplay, defaultPermConfig, "test", undefined);
+      await testController.runQuery("test", undefined);
       canUseTool = (query as any).mock.calls[0][0].options.canUseTool;
     } finally {
       cap.restore();
@@ -372,7 +369,7 @@ describe("runQuery - AskUserQuestion handling", () => {
     const cap = captureConsole();
     let canUseTool: Function;
     try {
-      await runQuery(testDisplay, defaultPermConfig, "test", undefined);
+      await testController.runQuery("test", undefined);
       canUseTool = (query as any).mock.calls[0][0].options.canUseTool;
     } finally {
       cap.restore();
@@ -403,7 +400,7 @@ describe("runQuery - AskUserQuestion handling", () => {
     const cap = captureConsole();
     let canUseTool: Function;
     try {
-      await runQuery(testDisplay, defaultPermConfig, "test", undefined);
+      await testController.runQuery("test", undefined);
       canUseTool = (query as any).mock.calls[0][0].options.canUseTool;
     } finally {
       cap.restore();
@@ -415,7 +412,6 @@ describe("runQuery - AskUserQuestion handling", () => {
 });
 
 describe("runQuery - tool permission handling (non-bypass mode)", () => {
-  // Non-bypass is the default in tests (BYPASS = process.argv.includes("--dangerously-skip-permissions"))
   const FAKE_OPTIONS = { signal: new AbortController().signal, toolUseID: "tu_2" };
 
   it("unknown tool: pick index 0 (Allow) → returns behavior:allow", async () => {
@@ -426,7 +422,7 @@ describe("runQuery - tool permission handling (non-bypass mode)", () => {
     const cap = captureConsole();
     let canUseTool: Function;
     try {
-      await runQuery(testDisplay, defaultPermConfig, "test", undefined);
+      await testController.runQuery("test", undefined);
       canUseTool = (query as any).mock.calls[0][0].options.canUseTool;
     } finally {
       cap.restore();
@@ -446,7 +442,7 @@ describe("runQuery - tool permission handling (non-bypass mode)", () => {
     const cap = captureConsole();
     let canUseTool: Function;
     try {
-      await runQuery(testDisplay, defaultPermConfig, "test", undefined);
+      await testController.runQuery("test", undefined);
       canUseTool = (query as any).mock.calls[0][0].options.canUseTool;
     } finally {
       cap.restore();
@@ -466,7 +462,7 @@ describe("runQuery - interrupt support", () => {
     const cap = captureConsole();
     const ac = new AbortController();
     try {
-      await runQuery(testDisplay, defaultPermConfig, "test", undefined, ac);
+      await testController.runQuery("test", undefined, ac);
     } finally {
       cap.restore();
     }
@@ -475,14 +471,11 @@ describe("runQuery - interrupt support", () => {
   });
 
   it("aborted mid-query → returns without throwing, prints Interrupted.", async () => {
-    // Mock a generator that ends when the AbortController is aborted
     (query as any).mockImplementation((opts: any) => {
       return (async function* () {
-        // Simulate the SDK: wait until aborted, then end without result message
         await new Promise<void>((resolve) => {
           opts.options.abortController.signal.addEventListener("abort", resolve, { once: true });
         });
-        // No result message emitted — generator just ends
       })();
     });
 
@@ -490,16 +483,15 @@ describe("runQuery - interrupt support", () => {
     const ac = new AbortController();
     let thrown: unknown;
     try {
-      // Abort after a short delay
       setTimeout(() => ac.abort(), 5);
-      await runQuery(testDisplay, defaultPermConfig, "test", "sess-1", ac);
+      await testController.runQuery("test", "sess-1", ac);
     } catch (err) {
       thrown = err;
     } finally {
       cap.restore();
     }
 
-    expect(thrown).toBeUndefined(); // no throw
+    expect(thrown).toBeUndefined();
     const output = cap.lines.map(stripAnsi).join("\n");
     expect(output).toContain("Interrupted.");
   });
@@ -519,7 +511,7 @@ describe("runQuery - interrupt support", () => {
     let sessionId: string | undefined;
     try {
       setTimeout(() => ac.abort(), 5);
-      sessionId = await runQuery(testDisplay, defaultPermConfig, "test", undefined, ac);
+      sessionId = await testController.runQuery("test", undefined, ac);
     } finally {
       cap.restore();
     }
@@ -532,7 +524,7 @@ describe("runQuery - interrupt support", () => {
     ]);
     const cap = captureConsole();
     try {
-      await runQuery(testDisplay, defaultPermConfig, "test", undefined);
+      await testController.runQuery("test", undefined);
     } finally {
       cap.restore();
     }
@@ -547,7 +539,7 @@ describe("runQuery - interrupt support", () => {
     const before = process.stdin.listenerCount("data");
     const cap = captureConsole();
     try {
-      await runQuery(testDisplay, defaultPermConfig, "test", undefined);
+      await testController.runQuery("test", undefined);
     } finally {
       cap.restore();
     }
@@ -564,7 +556,6 @@ describe("runQuery - interrupt via ^C on stdin", () => {
     (query as any).mockImplementation((_opts: any) => {
       const gen = (async function* () {
         await closePromise;
-        // generator ends without emitting result
       })();
       (gen as any).close = () => { closeCalled = true; resolveClose(); };
       return gen;
@@ -582,7 +573,7 @@ describe("runQuery - interrupt via ^C on stdin", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
 
     try {
-      const queryPromise = runQuery(testDisplay, defaultPermConfig, "test", undefined);
+      const queryPromise = testController.runQuery("test", undefined);
       await new Promise((r) => setTimeout(r, 5));
       fakeStdin.push("\x03");
       await queryPromise;
@@ -592,7 +583,6 @@ describe("runQuery - interrupt via ^C on stdin", () => {
     }
 
     expect(closeCalled).toBe(true);
-    // stdout must NOT contain the "^C" echo
     const stdoutStr = writtenToStdout.join("");
     expect(stdoutStr).not.toContain("^C");
   });
@@ -609,7 +599,7 @@ describe("runQuery - interrupt via ^C on stdin", () => {
     const cap = captureConsole();
     let thrown: unknown;
     try {
-      await runQuery(testDisplay, defaultPermConfig, "test", "sess-1");
+      await testController.runQuery("test", "sess-1");
     } catch (err) {
       thrown = err;
     } finally {
@@ -633,7 +623,7 @@ describe("runQuery - interrupt via ^C on stdin", () => {
     const cap = captureConsole();
     let thrown: unknown;
     try {
-      await runQuery(testDisplay, defaultPermConfig, "test", undefined);
+      await testController.runQuery("test", undefined);
     } catch (err) {
       thrown = err;
     } finally {
@@ -654,7 +644,7 @@ describe("runQuery - model option", () => {
     ]);
     const cap = captureConsole();
     try {
-      await runQuery(testDisplay, defaultPermConfig, "test", undefined, undefined, "opus");
+      await testController.runQuery("test", undefined, undefined, "opus");
     } finally {
       cap.restore();
     }
@@ -668,7 +658,7 @@ describe("runQuery - model option", () => {
     ]);
     const cap = captureConsole();
     try {
-      await runQuery(testDisplay, defaultPermConfig, "test", undefined);
+      await testController.runQuery("test", undefined);
     } finally {
       cap.restore();
     }
@@ -683,7 +673,7 @@ describe("runQuery - model option", () => {
     expect(Settings.getCachedModels()).toBeNull();
     const cap = captureConsole();
     try {
-      await runQuery(testDisplay, defaultPermConfig, "test", undefined);
+      await testController.runQuery("test", undefined);
     } finally {
       cap.restore();
     }
@@ -694,10 +684,6 @@ describe("runQuery - model option", () => {
 
 describe("runQuery - prompt redraw after query (worker mode integration)", () => {
   it("redraws input prompt on stdout after query completes, not during query output", async () => {
-    // In worker mode: ask() is waiting for input while runQuery runs in the background.
-    // The prompt should appear on stdout once initially (from ask()) and again after
-    // the query completes (the fix for issue #108). It must NOT appear interleaved
-    // with query output (which would cause double-spacing).
     (query as any).mockImplementation(async function* () {
       yield { type: "assistant", message: { content: [{ type: "text", text: "assistant output" }] } };
       yield { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } };
@@ -714,19 +700,17 @@ describe("runQuery - prompt redraw after query (worker mode integration)", () =>
     Object.defineProperty(process, "stdin", { value: fakeStdin, configurable: true });
 
     try {
-      // Start ask() — writes the prompt and registers drawFresh as the callback
       const askPromise = ask(testDisplay.statusBar, "[worker] > ", () => []);
 
-      // Run the query to completion — drawFresh should be called once afterward
-      await runQuery(testDisplay, defaultPermConfig, "test", undefined);
+      await testController.runQuery("test", undefined);
 
       const promptIdx = written.findIndex(s => s.includes("[worker] > "));
       const assistantIdx = written.findIndex(s => stripAnsi(s).includes("assistant output"));
       const lastPromptIdx = written.map((s, i) => s.includes("[worker] > ") ? i : -1).filter(i => i >= 0).at(-1)!;
 
-      expect(promptIdx).toBeGreaterThan(-1);        // prompt drawn initially by ask()
-      expect(assistantIdx).toBeGreaterThan(-1);     // query output appeared
-      expect(lastPromptIdx).toBeGreaterThan(assistantIdx); // prompt redrawn AFTER query output
+      expect(promptIdx).toBeGreaterThan(-1);
+      expect(assistantIdx).toBeGreaterThan(-1);
+      expect(lastPromptIdx).toBeGreaterThan(assistantIdx);
 
       fakeStdin.push("\r");
       await askPromise;
@@ -737,10 +721,6 @@ describe("runQuery - prompt redraw after query (worker mode integration)", () =>
   });
 
   it("prompt does not appear between output lines when ask() is active during query (issue #554)", async () => {
-    // Regression test: when a debounce-triggered query runs while ask() is still
-    // active, the status bar callbacks must be cleared so _drawStatus() does not
-    // call the ask() redraw handler after every display.print(), which was causing
-    // "[worker] > " to appear between every line of Claude's output.
     (query as any).mockImplementation(async function* () {
       yield { type: "assistant", message: { content: [{ type: "text", text: "First line" }] } };
       yield { type: "assistant", message: { content: [{ type: "text", text: "Second line" }] } };
@@ -758,10 +738,9 @@ describe("runQuery - prompt redraw after query (worker mode integration)", () =>
     Object.defineProperty(process, "stdin", { value: fakeStdin, configurable: true });
 
     try {
-      // ask() registers all three display callbacks (print, status, clear)
       const askPromise = ask(testDisplay.statusBar, "\n[worker] > ", () => []);
 
-      await runQuery(testDisplay, defaultPermConfig, "test", undefined);
+      await testController.runQuery("test", undefined);
 
       const allOutput = written.join("");
       const firstIdx  = allOutput.indexOf("First line");
@@ -769,7 +748,6 @@ describe("runQuery - prompt redraw after query (worker mode integration)", () =>
       expect(firstIdx).toBeGreaterThan(-1);
       expect(secondIdx).toBeGreaterThan(firstIdx);
 
-      // Nothing between the two output lines should contain the prompt string
       const between = allOutput.slice(firstIdx + "First line".length, secondIdx);
       expect(between).not.toContain("[worker] > ");
 

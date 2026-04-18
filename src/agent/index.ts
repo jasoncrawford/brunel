@@ -1,236 +1,27 @@
 import "dotenv/config";
 import os from "node:os";
 import path from "node:path";
-import fs from "fs";
 import { fileURLToPath } from "url";
-import { query } from "@anthropic-ai/claude-agent-sdk";
-import type { CanUseTool, PermissionMode, PermissionResult } from "@anthropic-ai/claude-agent-sdk";
 import { Display, c, hr } from "./views/display.js";
 import { StatusBar } from "./views/status-bar.js";
-import { ask, pick, pickMultiple, pickQuestion } from "./views/input.js";
-import type { PickQuestionResult } from "./views/input.js";
+import { ask, pick } from "./views/input.js";
 import { WorkerSession, registerWorkerCommands, startWorkerMode, generateAgentId } from "./controllers/worker-controller.js";
 import type { RunQuery } from "./controllers/worker-controller.js";
 import { loadConfig, getConfig } from "../config.js";
 import { Workspace, confirmIfUnsafe } from "./models/workspace.js";
-import { registerWorkspaceCommands } from "./controllers/workspace-controller.js";
 import { fmtError } from "../utils.js";
 import { Settings } from "./models/settings.js";
-import type { ModelInfo, FetchModelsFn, EffortValue } from "./models/settings.js";
 import { CommandRegistry, CommandController } from "./controllers/command-controller.js";
 import { SettingsController } from "./controllers/settings-controller.js";
-import { QueryStats } from "./models/query-stats.js";
-// ── Log file ──────────────────────────────────────────────────────────────────
-
-const LOG_FILE = "repl.log";
-
-export function logFull(label: string, data: unknown) {
-  const entry =
-    `\n${"=".repeat(70)}\n` +
-    `${new Date().toISOString()}  ${label}\n` +
-    `${"-".repeat(70)}\n` +
-    JSON.stringify(data, null, 2) +
-    "\n";
-  fs.appendFileSync(LOG_FILE, entry);
-}
-
-// ── REPL ──────────────────────────────────────────────────────────────────────
-
-type QuestionOption = { label: string; description: string };
-type Question = { question: string; header: string; options: QuestionOption[]; multiSelect: boolean };
-
-export async function handleAskUserQuestion(
-  input: Record<string, unknown>,
-  getStatusText: () => string,
-  display: Display,
-): Promise<PermissionResult> {
-  display.statusBar.stop();
-  const questions = (input.questions as Question[]) ?? [];
-  const answers: Record<string, string> = {};
-
-  for (const q of questions) {
-    display.print(c.yellow(`\n? ${q.question}`));
-    if (q.multiSelect) {
-      const lines = q.options.map(o => o.description ? `${o.label} — ${o.description}` : o.label);
-      const idxs = await pickMultiple(lines);
-      answers[q.question] = idxs.map(i => q.options[i].label).join(", ");
-    } else {
-      const result: PickQuestionResult = await pickQuestion(q.options);
-      if (result.type === "discuss") {
-        display.statusBar.start(getStatusText);
-        return { behavior: "deny", message: "The user would like to discuss more before answering. Prompt them to begin the discussion." };
-      }
-      answers[q.question] = result.type === "answer" ? result.value : result.text;
-    }
-  }
-
-  display.statusBar.start(getStatusText);
-  return { behavior: "allow", updatedInput: { ...input, answers } };
-}
-
-export async function handleToolPermission(
-  toolName: string,
-  input: Record<string, unknown>,
-  getStatusText: () => string,
-  display: Display,
-): Promise<PermissionResult> {
-  display.statusBar.stop();
-  display.print(c.amber(`\n⚠ ${toolName}(${display.fmtArgs(input)})`));
-  const idx = await pick(["Allow", "Deny"]);
-  display.statusBar.start(getStatusText);
-  if (idx === 0) return { behavior: "allow", updatedInput: input };
-  return { behavior: "deny", message: "User denied tool request" };
-}
-
-export async function runQuery(
-  display: Display,
-  permConfig: { permissionMode: PermissionMode; allowDangerouslySkipPermissions: boolean },
-  prompt: string,
-  sessionId: string | undefined,
-  abortController?: AbortController,
-  model?: string,
-  effort?: EffortValue,
-): Promise<string | undefined> {
-  logFull("QUERY", { prompt, sessionId });
-  const statusBar = display.statusBar;
-  // Save and clear the input print callback while the query runs. In worker
-  // mode, ask() registers drawFresh() as the callback so the prompt redraws
-  // after background WebSocket messages — but during a query run the callback
-  // fires on every display.print() call, adding an extra \r\n after each piece
-  // of output and causing double-spacing. After the query finishes we restore
-  // and invoke the callback so the prompt redraws once (fixes issue #108).
-  const savedInputCallback = statusBar.inputPrint;
-  const savedStatusCallback = statusBar.inputStatus;
-  const savedClearCallback = statusBar.inputClear;
-  statusBar.inputPrint = null;
-  statusBar.inputStatus = null;
-  statusBar.inputClear = null;
-  if (savedInputCallback) {
-    // ask() was active when this query started (e.g., debounce-triggered while the
-    // worker prompt was showing). Clear from cursor to end of screen so the prompt
-    // area is wiped and _clearStatus/_drawStatus can track the cursor correctly.
-    process.stdout.write("\r\n\x1b[J");
-  }
-
-  const stats = new QueryStats();
-  const getStatusText = () => c.darkGray(stats.getStatusText());
-  statusBar.start(getStatusText);
-
-  const canUseTool: CanUseTool = async (toolName, input) => {
-    if (toolName === "AskUserQuestion") {
-      return handleAskUserQuestion(input, getStatusText, display);
-    }
-    if (permConfig.allowDangerouslySkipPermissions) return { behavior: "allow", updatedInput: input };
-    return handleToolPermission(toolName, input, getStatusText, display);
-  };
-
-  // Use caller-provided AbortController (worker mode) or create our own (REPL mode).
-  const ac = abortController ?? new AbortController();
-
-  const iterable = query({
-    prompt,
-    options: {
-      cwd: process.cwd(),
-      systemPrompt: { type: "preset", preset: "claude_code" },
-      settingSources: ["user", "project"],
-      permissionMode: permConfig.permissionMode,
-      includePartialMessages: true,
-      canUseTool,
-      abortController: ac,
-      ...(permConfig.allowDangerouslySkipPermissions ? { allowDangerouslySkipPermissions: true } : {}),
-      ...(sessionId ? { resume: sessionId } : {}),
-      ...(model ? { model } : {}),
-      ...(effort ? { effort } : {}),
-    },
-  });
-
-  // Cache the available models list from the SDK (fire-and-forget).
-  // The Query object exposes supportedModels() which returns model info
-  // without consuming the message stream.
-  type QueryWithModels = { supportedModels?: () => Promise<ModelInfo[]> };
-  const qm = iterable as unknown as QueryWithModels;
-  if (typeof qm.supportedModels === "function") {
-    qm.supportedModels().then(models => { Settings.setCachedModels(models); }).catch(() => {});
-  }
-
-  // Register a temporary raw-stdin listener to catch ^C and abort the query.
-  // The listener is removed in a finally block regardless of how the query ends.
-  const onInterrupt = (chunk: string) => {
-    if (chunk.includes("\x03")) {
-      (iterable as unknown as { close?: () => void }).close?.();
-      ac.abort();
-    }
-  };
-  process.stdin.on("data", onInterrupt);
-
-  let capturedSessionId = sessionId;
-  let resultReceived = false;
-
-  try {
-    for await (const message of iterable) {
-      if (!(message.type === "stream_event" && (message.event as { type?: string }).type === "content_block_delta")) {
-        logFull("MESSAGE", message);
-      }
-
-      if (message.type === "system" && message.subtype === "init" && !capturedSessionId) {
-        capturedSessionId = message.session_id;
-      }
-
-      // Extract turn count and token totals from streaming events.
-      if (message.type === "stream_event") {
-        if (message.parent_tool_use_id == null) {
-          stats.update(message.event as Parameters<typeof stats.update>[0]);
-        }
-        continue; // stream events are display-only; don't pass to printMessage
-      }
-
-      // Stop the status line before printing the result so it transitions
-      // cleanly into the permanent summary line.
-      if (message.type === "result") {
-        resultReceived = true;
-        statusBar.stop();
-      }
-
-      display.printMessage(message);
-    }
-  } catch (err) {
-    // SDK throws when aborted — treat as clean interrupt, not an error
-    if (!(err instanceof Error && /aborted by user/i.test(err.message))) throw err;
-  } finally {
-    process.stdin.removeListener("data", onInterrupt);
-  }
-
-  statusBar.stop(); // no-op if result message already stopped it
-
-  if (!resultReceived) {
-    display.print(c.darkGray("\nInterrupted. What should the agent do instead?"));
-  }
-
-  // Restore the callbacks and redraw the prompt. In worker mode this redraws
-  // the waiting "[worker] > " prompt after query output has scrolled past it.
-  statusBar.inputPrint = savedInputCallback;
-  statusBar.inputStatus = savedStatusCallback;
-  statusBar.inputClear = savedClearCallback;
-  savedInputCallback?.();
-
-  return capturedSessionId;
-}
-
-function createFetchModelsFn(permConfig: { permissionMode: PermissionMode }): FetchModelsFn {
-  return async () => {
-    const q = query({ prompt: "", options: { cwd: process.cwd(), systemPrompt: { type: "preset", preset: "claude_code" }, permissionMode: permConfig.permissionMode } });
-    type QueryWithModels = { supportedModels?: () => Promise<ModelInfo[]> };
-    const qm = q as unknown as QueryWithModels;
-    if (typeof qm.supportedModels === "function") return qm.supportedModels();
-    return [];
-  };
-}
+import { registerWorkspaceCommands } from "./controllers/workspace-controller.js";
+import { AgentController, logFull, createFetchModelsFn } from "./controllers/agent-controller.js";
+import type { AgentPermConfig } from "./controllers/agent-controller.js";
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 export async function main(
   runQueryFn: RunQuery,
-  permConfig: { permissionMode: PermissionMode; allowDangerouslySkipPermissions: boolean },
+  permConfig: AgentPermConfig,
   display: Display,
   settings: Settings,
   runWorkerMode?: boolean,
@@ -248,7 +39,7 @@ export async function main(
   // Print the startup banner.
   display.print(c.sageGreen(hr("═")));
   display.print(c.skyBlue(display.s.bold("  Brunel Agent")));
-  display.print(c.lavender(`  Permissions: ${permConfig.permissionMode} | Model: ${settings.model ?? "default"} | Effort: ${settings.effort ?? "auto"} | Output: ${getConfig().verbose ? "verbose" : "quiet"} | Log: ${LOG_FILE}`));
+  display.print(c.lavender(`  Permissions: ${permConfig.permissionMode} | Model: ${settings.model ?? "default"} | Effort: ${settings.effort ?? "auto"} | Output: ${getConfig().verbose ? "verbose" : "quiet"} | Log: repl.log`));
   display.print(c.sageGreen(hr("═")));
 
   process.stdout.write("\x1b[?2004h"); // enable bracketed paste mode
@@ -357,6 +148,12 @@ export async function main(
   // to assign a task and is not ready for interactive input until then.
   let showPrompt = !session;
 
+  // ── Routing loop ─────────────────────────────────────────────────────────
+  // Takes input from the user or foreman and routes each event to the right handler:
+  //   command       → execute the registered command handler
+  //   user prompt   → run a query via runQueryFn (AgentController.runQuery)
+  //   foreman signal → worker controller (WorkerSession) provides the next prompt
+
   while (true) {
     const wsAbort = session?.createWsInputPromise();
     // Use an empty prompt string when not ready for interactive input. An
@@ -382,7 +179,6 @@ export async function main(
     if (input === "__abort__") continue;
 
     // WS_FATAL: a fatal foreman_error was received — drop back to interactive REPL.
-    // The session has already stopped reconnecting; just show the prompt and continue.
     if (WorkerSession.isFatalSignal(input)) {
       showPrompt = true;
       continue;
@@ -419,6 +215,7 @@ export async function main(
       continue;
     }
 
+    // User typed a plain prompt → route to AgentController.runQuery via runQueryFn.
     if (action.type !== "query") continue;
 
     await runPrompt(action.prompt);
@@ -453,8 +250,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     allowDangerouslySkipPermissions: config.allowDangerouslySkipPermissions,
   };
 
-  const boundRunQuery: RunQuery = (prompt, sessionId, ac, model, effort) =>
-    runQuery(display, permConfig, prompt, sessionId, ac, model, effort);
+  const agentController = new AgentController(display, permConfig, settings);
+  const runQuery: RunQuery = (prompt, sessionId, ac, model, effort) =>
+    agentController.runQuery(prompt, sessionId, ac, model, effort);
 
   const workspaceCfg = (config.githubRepo && config.githubToken)
     ? {
@@ -465,5 +263,5 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 
   const runWorkerMode = process.argv.includes("--worker-mode");
 
-  await main(boundRunQuery, permConfig, display, settings, runWorkerMode, workspaceCfg);
+  await main(runQuery, permConfig, display, settings, runWorkerMode, workspaceCfg);
 }

@@ -143,8 +143,8 @@ type BufferableMessage = Extract<Wire.WorkerMessage, { type: "task_complete" }>;
 /**
  * WebSocket client and task lifecycle manager. WorkerSession owns the foreman
  * connection, handshake protocol, task state, event debouncing, and prompt
- * queuing. It does NOT execute queries — instead it queues prompts for main()
- * to run via the RunQuery function injected there.
+ * queuing. It does NOT execute queries — instead it queues prompts for
+ * main() in index.ts to run via the injected runQueryFn.
  *
  * When a task is assigned or a debounced event fires, WorkerSession pushes a
  * QueuedPrompt and signals main()'s ask() loop via the WS_PROMPT sentinel.
