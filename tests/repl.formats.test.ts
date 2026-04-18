@@ -1,39 +1,54 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { stripAnsi } from "./helpers.js";
 import { getConfig } from "../src/config.js";
-import {
-  resolve,
-  ASSISTANT_BLOCK_FMT,
-  USER_BLOCK_FMT,
-  TOOL_CALL_FMT,
-  TOOL_RESULT_FMT,
-  TOOL_ERROR_FMT,
-  SYSTEM_FMT,
-  MESSAGE_FMT,
-  fmtTodoWriteInput,
-  fmtAskUserQuestionInput,
-  fmtToolSearchOutput,
-  fmtTodoWriteOutput,
-  type FmtTable,
-} from "../src/agent/views/display.js";
+import { Display, resolve, type FmtTable } from "../src/agent/views/display.js";
+import { StatusBar } from "../src/agent/views/status-bar.js";
 
-// Helper to call resolve and strip ANSI
-function r(table: FmtTable, key: string, data: any): string | null {
-  const result = resolve(table, key, data);
-  return result === null ? null : stripAnsi(result);
+let testDisplay: Display;
+
+function captureOutput(fn: () => void): string {
+  let output = "";
+  vi.spyOn(console, "log").mockImplementation((s: any) => { output += String(s) + "\n"; });
+  fn();
+  vi.restoreAllMocks();
+  return output;
 }
+
+function captureRaw(fn: () => void): string {
+  let raw = "";
+  vi.spyOn(console, "log").mockImplementation((s: any) => { raw += String(s) + "\n"; });
+  fn();
+  vi.restoreAllMocks();
+  return raw;
+}
+
+beforeEach(() => {
+  testDisplay = new Display(getConfig(), new StatusBar({ agentId: "test-agent" }));
+  testDisplay.toolUseNames.clear();
+  testDisplay.statusBar.stop();
+  getConfig().verbose = false;
+});
+
+afterEach(() => {
+  testDisplay.toolUseNames.clear();
+  testDisplay.statusBar.stop();
+  getConfig().verbose = false;
+  vi.restoreAllMocks();
+});
 
 describe("resolve()", () => {
   afterEach(() => getConfig().verbose = false);
 
   it("key exists as Fmt function → calls it", () => {
     const table: FmtTable = { foo: (d) => `value:${d.x}` };
-    expect(r(table, "foo", { x: 42 })).toBe("value:42");
+    const result = resolve(table, "foo", { x: 42 });
+    expect(stripAnsi(result!)).toBe("value:42");
   });
 
   it("key missing, _default exists → calls _default", () => {
     const table: FmtTable = { _default: (d) => `default:${d.x}` };
-    expect(r(table, "missing", { x: 7 })).toBe("default:7");
+    const result = resolve(table, "missing", { x: 7 });
+    expect(stripAnsi(result!)).toBe("default:7");
   });
 
   it("key missing, no _default → returns null", () => {
@@ -46,7 +61,7 @@ describe("resolve()", () => {
     const table: FmtTable = {
       foo: { quiet: () => "quiet", verbose: () => "verbose" },
     };
-    expect(r(table, "foo", {})).toBe("quiet");
+    expect(stripAnsi(resolve(table, "foo", {})!)).toBe("quiet");
   });
 
   it("key as { quiet, verbose }, VERBOSE=true → calls verbose", () => {
@@ -54,7 +69,7 @@ describe("resolve()", () => {
     const table: FmtTable = {
       foo: { quiet: () => "quiet", verbose: () => "verbose" },
     };
-    expect(r(table, "foo", {})).toBe("verbose");
+    expect(stripAnsi(resolve(table, "foo", {})!)).toBe("verbose");
   });
 
   it("{ verbose: fn } with VERBOSE=false → returns null", () => {
@@ -66,7 +81,7 @@ describe("resolve()", () => {
   it("{ verbose: fn } with VERBOSE=true → calls fn", () => {
     getConfig().verbose = true;
     const table: FmtTable = { foo: { verbose: () => "v" } };
-    expect(r(table, "foo", {})).toBe("v");
+    expect(stripAnsi(resolve(table, "foo", {})!)).toBe("v");
   });
 
   it("formatter returns null → resolve returns null", () => {
@@ -78,338 +93,495 @@ describe("resolve()", () => {
 describe("ASSISTANT_BLOCK_FMT", () => {
   it("thinking block: thinkOutLoud=true shows content wrapped in gray", () => {
     getConfig().thinkOutLoud = true;
-    const result = resolve(ASSISTANT_BLOCK_FMT, "thinking", { thinking: "hello" })!;
+    const raw = captureRaw(() => {
+      testDisplay.printBlock({ type: "thinking", thinking: "hello" }, "assistant");
+    });
     getConfig().thinkOutLoud = false;
-    expect(stripAnsi(result)).toContain("hello");
-    // gray color: \x1b[38;5;246m
-    expect(result).toContain("\x1b[38;5;246m");
+    expect(stripAnsi(raw)).toContain("hello");
+    expect(raw).toContain("\x1b[38;5;246m"); // gray
   });
 
   it("thinking block: thinkOutLoud=false shows 'Thinking...' placeholder in gray", () => {
-    const result = resolve(ASSISTANT_BLOCK_FMT, "thinking", { thinking: "hello" })!;
-    expect(stripAnsi(result)).toBe("\nThinking...");
-    expect(result).toContain("\x1b[38;5;246m");
+    const raw = captureRaw(() => {
+      testDisplay.printBlock({ type: "thinking", thinking: "hello" }, "assistant");
+    });
+    expect(stripAnsi(raw)).toContain("Thinking...");
+    expect(stripAnsi(raw)).not.toContain("hello");
+    expect(raw).toContain("\x1b[38;5;246m"); // gray
   });
 
   it("text block wraps renderMarkdown in yellow", () => {
-    const result = resolve(ASSISTANT_BLOCK_FMT, "text", { text: "world" })!;
-    expect(stripAnsi(result)).toContain("world");
-    // yellow color: \x1b[38;5;221m
-    expect(result).toContain("\x1b[38;5;221m");
+    const raw = captureRaw(() => {
+      testDisplay.printBlock({ type: "text", text: "world" }, "assistant");
+    });
+    expect(stripAnsi(raw)).toContain("world");
+    expect(raw).toContain("\x1b[38;5;221m"); // yellow
   });
 
   it("_default block shows [assistant/someType]", () => {
-    expect(r(ASSISTANT_BLOCK_FMT, "_default", { type: "someType" })).toBe("[assistant/someType]");
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "someType" }, "assistant");
+    });
+    expect(stripAnsi(output)).toContain("[assistant/someType]");
   });
 
   it("unknown type falls through to _default", () => {
-    expect(r(ASSISTANT_BLOCK_FMT, "unknownType", { type: "unknownType" })).toBe("[assistant/unknownType]");
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "unknownType" }, "assistant");
+    });
+    expect(stripAnsi(output)).toContain("[assistant/unknownType]");
   });
 });
 
 describe("USER_BLOCK_FMT", () => {
   it("text block, _isSynthetic=false → raw text", () => {
-    const result = r(USER_BLOCK_FMT, "text", { text: "user said this", _isSynthetic: false });
-    expect(result).toContain("user said this");
-    // Should NOT have darkGray ANSI
-    const raw = resolve(USER_BLOCK_FMT, "text", { text: "user said this", _isSynthetic: false })!;
-    expect(raw).not.toContain("\x1b[90m");
+    const raw = captureRaw(() => {
+      testDisplay.printBlock({ type: "text", text: "user said this" }, "user");
+    });
+    expect(stripAnsi(raw)).toContain("user said this");
+    expect(raw).not.toContain("\x1b[90m"); // not darkGray
   });
 
-  it("text block, _isSynthetic=true → null (hidden)", () => {
-    const raw = resolve(USER_BLOCK_FMT, "text", { text: "synthetic msg", _isSynthetic: true });
-    expect(raw).toBeNull();
+  it("text block, isSynthetic=true → null (hidden)", () => {
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "text", text: "synthetic msg" }, "user", { isSynthetic: true });
+    });
+    expect(output.trim()).toBe("");
   });
 
   it("_default: [user/someType]", () => {
-    expect(r(USER_BLOCK_FMT, "_default", { type: "someType" })).toBe("[user/someType]");
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "someType" }, "user");
+    });
+    expect(stripAnsi(output)).toContain("[user/someType]");
   });
 });
 
 describe("TOOL_CALL_FMT", () => {
   it("Bash: shows $ <command>", () => {
-    const result = r(TOOL_CALL_FMT, "Bash", { input: { command: "ls -la" } });
-    expect(result).toContain("$ ls -la");
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_use", id: "1", name: "Bash", input: { command: "ls -la" } }, "assistant");
+    });
+    expect(stripAnsi(output)).toContain("$ ls -la");
   });
 
   it("Read: shows • Read(<file_path>)", () => {
-    const result = r(TOOL_CALL_FMT, "Read", { input: { file_path: "/foo/bar.ts" } });
-    expect(result).toContain("• Read(/foo/bar.ts)");
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_use", id: "1", name: "Read", input: { file_path: "/foo/bar.ts" } }, "assistant");
+    });
+    expect(stripAnsi(output)).toContain("• Read(/foo/bar.ts)");
   });
 
   it("Write: shows • Write(<file_path>)", () => {
-    const result = r(TOOL_CALL_FMT, "Write", { input: { file_path: "/foo/out.ts" } });
-    expect(result).toContain("• Write(/foo/out.ts)");
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_use", id: "1", name: "Write", input: { file_path: "/foo/out.ts" } }, "assistant");
+    });
+    expect(stripAnsi(output)).toContain("• Write(/foo/out.ts)");
   });
 
   it("Edit: shows • Edit(<file_path>)", () => {
-    const result = r(TOOL_CALL_FMT, "Edit", { input: { file_path: "/foo/edit.ts" } });
-    expect(result).toContain("• Edit(/foo/edit.ts)");
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_use", id: "1", name: "Edit", input: { file_path: "/foo/edit.ts" } }, "assistant");
+    });
+    expect(stripAnsi(output)).toContain("• Edit(/foo/edit.ts)");
   });
 
   it("Glob: shows • Glob(<pattern>)", () => {
-    const result = r(TOOL_CALL_FMT, "Glob", { input: { pattern: "**/*.ts" } });
-    expect(result).toContain("• Glob(**/*.ts)");
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_use", id: "1", name: "Glob", input: { pattern: "**/*.ts" } }, "assistant");
+    });
+    expect(stripAnsi(output)).toContain("• Glob(**/*.ts)");
   });
 
   it("Grep: shows • grep <pattern> <path>", () => {
-    const result = r(TOOL_CALL_FMT, "Grep", { input: { pattern: "foo", path: "/src" } });
-    expect(result).toContain("• grep foo /src");
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_use", id: "1", name: "Grep", input: { pattern: "foo", path: "/src" } }, "assistant");
+    });
+    expect(stripAnsi(output)).toContain("• grep foo /src");
   });
 
   it("Skill: shows • Skill(<skill>)", () => {
-    const result = r(TOOL_CALL_FMT, "Skill", { input: { skill: "test-discipline" } });
-    expect(result).toContain("• Skill(test-discipline)");
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_use", id: "1", name: "Skill", input: { skill: "test-discipline" } }, "assistant");
+    });
+    expect(stripAnsi(output)).toContain("• Skill(test-discipline)");
   });
 
   it("Agent: shows • <subagent_type>(<prompt>)", () => {
-    const result = r(TOOL_CALL_FMT, "Agent", {
-      input: { subagent_type: "Explore", prompt: "find files" },
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_use", id: "1", name: "Agent", input: { subagent_type: "Explore", prompt: "find files" } }, "assistant");
     });
-    expect(result).toContain("• Explore(find files)");
+    expect(stripAnsi(output)).toContain("• Explore(find files)");
   });
 
   it("Agent: shows • Subagent(<prompt>) for general-purpose subagent type", () => {
-    const result = r(TOOL_CALL_FMT, "Agent", {
-      input: { subagent_type: "general-purpose", prompt: "research something" },
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_use", id: "1", name: "Agent", input: { subagent_type: "general-purpose", prompt: "research something" } }, "assistant");
     });
-    expect(result).toContain("• Subagent(research something)");
+    expect(stripAnsi(output)).toContain("• Subagent(research something)");
   });
 
   it("Agent: shows • Subagent(<prompt>) when subagent_type is missing", () => {
-    const result = r(TOOL_CALL_FMT, "Agent", {
-      input: { prompt: "research something" },
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_use", id: "1", name: "Agent", input: { prompt: "research something" } }, "assistant");
     });
-    expect(result).toContain("• Subagent(research something)");
+    expect(stripAnsi(output)).toContain("• Subagent(research something)");
   });
 
   it("AskUserQuestion: shows question text(s)", () => {
-    const result = r(TOOL_CALL_FMT, "AskUserQuestion", {
-      input: { questions: [{ question: "Which approach?", header: "Approach", options: [], multiSelect: false }] },
+    const output = captureOutput(() => {
+      testDisplay.printBlock({
+        type: "tool_use", id: "1", name: "AskUserQuestion",
+        input: { questions: [{ question: "Which approach?", header: "Approach", options: [], multiSelect: false }] },
+      }, "assistant");
     });
-    expect(result).toContain('• AskUserQuestion("Which approach?")');
+    expect(stripAnsi(output)).toContain('• AskUserQuestion("Which approach?")');
   });
 
   it("AskUserQuestion: shows multiple question texts", () => {
-    const result = r(TOOL_CALL_FMT, "AskUserQuestion", {
-      input: {
-        questions: [
-          { question: "Which approach?", header: "A", options: [], multiSelect: false },
-          { question: "Which format?", header: "B", options: [], multiSelect: false },
-        ],
-      },
+    const output = captureOutput(() => {
+      testDisplay.printBlock({
+        type: "tool_use", id: "1", name: "AskUserQuestion",
+        input: {
+          questions: [
+            { question: "Which approach?", header: "A", options: [], multiSelect: false },
+            { question: "Which format?", header: "B", options: [], multiSelect: false },
+          ],
+        },
+      }, "assistant");
     });
-    expect(result).toContain('• AskUserQuestion("Which approach?", "Which format?")');
+    expect(stripAnsi(output)).toContain('• AskUserQuestion("Which approach?", "Which format?")');
   });
 
   it("_default: shows • <name>(<fmtArgs(input)>)", () => {
-    const result = r(TOOL_CALL_FMT, "_default", {
-      name: "MyTool",
-      input: { key: "val" },
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_use", id: "1", name: "MyTool", input: { key: "val" } }, "assistant");
     });
-    expect(result).toContain("• MyTool(key=val)");
+    expect(stripAnsi(output)).toContain("• MyTool(key=val)");
   });
 
   it("with input.description: description appended in gray", () => {
-    const raw = resolve(TOOL_CALL_FMT, "Bash", {
-      input: { command: "ls", description: "list files" },
-    })!;
-    // gray: \x1b[38;5;246m
-    expect(raw).toContain("\x1b[38;5;246m");
+    const raw = captureRaw(() => {
+      testDisplay.printBlock({ type: "tool_use", id: "1", name: "Bash", input: { command: "ls", description: "list files" } }, "assistant");
+    });
+    expect(raw).toContain("\x1b[38;5;246m"); // gray
     expect(stripAnsi(raw)).toContain("# list files");
   });
 
   it("without description: no gray suffix", () => {
-    const raw = resolve(TOOL_CALL_FMT, "Bash", { input: { command: "ls" } })!;
-    expect(raw).not.toContain("\x1b[38;5;246m");
+    const raw = captureRaw(() => {
+      testDisplay.printBlock({ type: "tool_use", id: "1", name: "Bash", input: { command: "ls" } }, "assistant");
+    });
+    expect(raw).not.toContain("\x1b[38;5;246m"); // no gray
   });
 });
 
 describe("TOOL_RESULT_FMT", () => {
   it("_default: → <truncated text> in darkGray", () => {
-    const raw = resolve(TOOL_RESULT_FMT, "_default", { content: "result text" })!;
-    expect(raw).toContain("\x1b[90m");
+    testDisplay.toolUseNames.set("id1", "UnknownTool");
+    const raw = captureRaw(() => {
+      testDisplay.printBlock({ type: "tool_result", tool_use_id: "id1", is_error: false, content: "result text" }, "user");
+    });
+    expect(raw).toContain("\x1b[90m"); // darkGray
     expect(stripAnsi(raw)).toContain("→ result text");
   });
 
   it("Read: → N line(s) in darkGray", () => {
-    const content = "line1\nline2\nline3";
-    const raw = resolve(TOOL_RESULT_FMT, "Read", { content })!;
-    expect(raw).toContain("\x1b[90m");
+    testDisplay.toolUseNames.set("id1", "Read");
+    const raw = captureRaw(() => {
+      testDisplay.printBlock({ type: "tool_result", tool_use_id: "id1", is_error: false, content: "line1\nline2\nline3" }, "user");
+    });
+    expect(raw).toContain("\x1b[90m"); // darkGray
     expect(stripAnsi(raw)).toContain("→ 3 lines");
   });
 
   it("Read: 1 line singular", () => {
-    const raw = resolve(TOOL_RESULT_FMT, "Read", { content: "single line" })!;
-    expect(stripAnsi(raw)).toContain("→ 1 line");
+    testDisplay.toolUseNames.set("id1", "Read");
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_result", tool_use_id: "id1", is_error: false, content: "single line" }, "user");
+    });
+    expect(stripAnsi(output)).toContain("→ 1 line");
   });
 
   it("Edit with structuredPatch: renders diff", () => {
-    const hunk = {
-      oldStart: 1, oldLines: 1, newStart: 1, newLines: 1,
-      lines: ["-old", "+new"],
-    };
-    const b = { content: "", _msg: { tool_use_result: { structuredPatch: [hunk] } } };
-    const result = stripAnsi(resolve(TOOL_RESULT_FMT, "Edit", b)!);
-    expect(result).toContain("@@");
+    testDisplay.toolUseNames.set("id1", "Edit");
+    const hunk = { oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: ["-old", "+new"] };
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_result", tool_use_id: "id1", is_error: false, content: "" }, "user",
+        { tool_use_result: { structuredPatch: [hunk] } });
+    });
+    expect(stripAnsi(output)).toContain("@@");
   });
 
   it("Edit without patch: falls back to → <text>", () => {
-    const b = { content: "edited ok" };
-    const result = stripAnsi(resolve(TOOL_RESULT_FMT, "Edit", b)!);
-    expect(result).toContain("→ edited ok");
+    testDisplay.toolUseNames.set("id1", "Edit");
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_result", tool_use_id: "id1", is_error: false, content: "edited ok" }, "user");
+    });
+    expect(stripAnsi(output)).toContain("→ edited ok");
   });
 
-  it("Skill: shows → Success", () => {
-    const raw = resolve(TOOL_RESULT_FMT, "Skill", { content: "Base directory for this skill: /some/path\n..." })!;
-    expect(stripAnsi(raw)).toBe("→ Loaded skill");
+  it("Skill: shows → Loaded skill", () => {
+    testDisplay.toolUseNames.set("id1", "Skill");
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_result", tool_use_id: "id1", is_error: false, content: "Base directory for this skill: /some/path\n..." }, "user");
+    });
+    expect(stripAnsi(output)).toBe("→ Loaded skill\n");
   });
 
   it("Bash: empty result → → Success", () => {
-    const raw = resolve(TOOL_RESULT_FMT, "Bash", { content: "" })!;
-    expect(stripAnsi(raw)).toBe("→ Success");
+    testDisplay.toolUseNames.set("id1", "Bash");
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_result", tool_use_id: "id1", is_error: false, content: "" }, "user");
+    });
+    expect(stripAnsi(output)).toContain("→ Success");
   });
 
   it("Bash: no-output message → → Success", () => {
-    const raw = resolve(TOOL_RESULT_FMT, "Bash", { content: "(Bash completed with no output)" })!;
-    expect(stripAnsi(raw)).toBe("→ Success");
+    testDisplay.toolUseNames.set("id1", "Bash");
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_result", tool_use_id: "id1", is_error: false, content: "(Bash completed with no output)" }, "user");
+    });
+    expect(stripAnsi(output)).toContain("→ Success");
   });
 
   it("Bash: with output → shows truncated output", () => {
-    const raw = resolve(TOOL_RESULT_FMT, "Bash", { content: "hello world" })!;
-    expect(stripAnsi(raw)).toBe("→ hello world");
+    testDisplay.toolUseNames.set("id1", "Bash");
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_result", tool_use_id: "id1", is_error: false, content: "hello world" }, "user");
+    });
+    expect(stripAnsi(output)).toContain("→ hello world");
   });
 
   it("Bash: result in darkGray", () => {
-    const raw = resolve(TOOL_RESULT_FMT, "Bash", { content: "" })!;
+    testDisplay.toolUseNames.set("id1", "Bash");
+    const raw = captureRaw(() => {
+      testDisplay.printBlock({ type: "tool_result", tool_use_id: "id1", is_error: false, content: "" }, "user");
+    });
     expect(raw).toContain("\x1b[90m");
   });
 
   it("Write new file with _input.content: shows → Created N lines", () => {
-    const b = { content: "File created successfully at: /path/file.md", _input: { content: "line1\nline2\nline3" } };
-    const raw = resolve(TOOL_RESULT_FMT, "Write", b)!;
-    expect(stripAnsi(raw)).toBe("→ Created 3 lines");
+    testDisplay.toolUseNames.set("id1", "Write");
+    // Pre-populate input cache by printing the tool_use first
+    captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_use", id: "id1", name: "Write", input: { content: "line1\nline2\nline3" } }, "assistant");
+    });
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_result", tool_use_id: "id1", is_error: false, content: "File created successfully at: /path/file.md" }, "user");
+    });
+    expect(stripAnsi(output)).toContain("→ Created 3 lines");
   });
 
   it("Write new file 1 line: singular form", () => {
-    const b = { content: "File created successfully at: /path/file.md", _input: { content: "only one line" } };
-    const raw = resolve(TOOL_RESULT_FMT, "Write", b)!;
-    expect(stripAnsi(raw)).toBe("→ Created 1 line");
+    testDisplay.toolUseNames.set("id1", "Write");
+    captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_use", id: "id1", name: "Write", input: { content: "only one line" } }, "assistant");
+    });
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_result", tool_use_id: "id1", is_error: false, content: "File created successfully at: /path/file.md" }, "user");
+    });
+    expect(stripAnsi(output)).toContain("→ Created 1 line");
   });
 
   it("Write updated file with _input.content: shows → Updated N lines", () => {
-    const b = { content: "The file /path/file.md has been updated successfully.", _input: { content: "line1\nline2" } };
-    const raw = resolve(TOOL_RESULT_FMT, "Write", b)!;
-    expect(stripAnsi(raw)).toBe("→ Updated 2 lines");
+    testDisplay.toolUseNames.set("id1", "Write");
+    captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_use", id: "id1", name: "Write", input: { content: "line1\nline2" } }, "assistant");
+    });
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_result", tool_use_id: "id1", is_error: false, content: "The file /path/file.md has been updated successfully." }, "user");
+    });
+    expect(stripAnsi(output)).toContain("→ Updated 2 lines");
   });
 
-  it("Write without _input: falls back to → <text>", () => {
-    const b = { content: "File created successfully at: /path/file.md" };
-    const raw = resolve(TOOL_RESULT_FMT, "Write", b)!;
-    expect(stripAnsi(raw)).toContain("→ File created");
+  it("Write without prior tool_use input: falls back to → <text>", () => {
+    testDisplay.toolUseNames.set("id1", "Write");
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_result", tool_use_id: "id1", is_error: false, content: "File created successfully at: /path/file.md" }, "user");
+    });
+    expect(stripAnsi(output)).toContain("→ File created");
   });
 });
 
-describe("fmtAskUserQuestionInput()", () => {
-  it("returns quoted question text for a single question", () => {
-    expect(fmtAskUserQuestionInput([{ question: "Which approach?" }])).toBe('"Which approach?"');
+describe("fmtAskUserQuestionInput — via TOOL_CALL_FMT", () => {
+  it("shows quoted question text for a single question", () => {
+    const output = captureOutput(() => {
+      testDisplay.printBlock({
+        type: "tool_use", id: "1", name: "AskUserQuestion",
+        input: { questions: [{ question: "Which approach?" }] },
+      }, "assistant");
+    });
+    expect(stripAnsi(output)).toContain('"Which approach?"');
   });
 
   it("joins multiple questions with comma", () => {
-    expect(fmtAskUserQuestionInput([{ question: "A?" }, { question: "B?" }])).toBe('"A?", "B?"');
+    const output = captureOutput(() => {
+      testDisplay.printBlock({
+        type: "tool_use", id: "1", name: "AskUserQuestion",
+        input: { questions: [{ question: "A?" }, { question: "B?" }] },
+      }, "assistant");
+    });
+    expect(stripAnsi(output)).toContain('"A?"');
+    expect(stripAnsi(output)).toContain('"B?"');
   });
 
-  it("returns empty string for empty array", () => {
-    expect(fmtAskUserQuestionInput([])).toBe("");
+  it("empty question list shown as AskUserQuestion()", () => {
+    const output = captureOutput(() => {
+      testDisplay.printBlock({
+        type: "tool_use", id: "1", name: "AskUserQuestion",
+        input: { questions: [] },
+      }, "assistant");
+    });
+    expect(stripAnsi(output)).toContain("AskUserQuestion()");
   });
 
-  it("returns empty string for non-array input", () => {
-    expect(fmtAskUserQuestionInput(null)).toBe("");
-    expect(fmtAskUserQuestionInput(undefined)).toBe("");
+  it("null questions input treated as empty", () => {
+    const output = captureOutput(() => {
+      testDisplay.printBlock({
+        type: "tool_use", id: "1", name: "AskUserQuestion",
+        input: { questions: null },
+      }, "assistant");
+    });
+    expect(stripAnsi(output)).toContain("AskUserQuestion()");
   });
 });
 
-describe("fmtTodoWriteInput()", () => {
-  it("returns count string for an array of todos", () => {
-    const todos = [{ content: "a", status: "pending" }, { content: "b", status: "pending" }];
-    expect(fmtTodoWriteInput(todos)).toBe("2 todos");
+describe("fmtTodoWriteInput — via TOOL_CALL_FMT", () => {
+  it("shows count string for an array of todos", () => {
+    const output = captureOutput(() => {
+      testDisplay.printBlock({
+        type: "tool_use", id: "1", name: "TodoWrite",
+        input: { todos: [{ content: "a", status: "pending" }, { content: "b", status: "pending" }] },
+      }, "assistant");
+    });
+    expect(stripAnsi(output)).toContain("• TodoWrite(2 todos)");
   });
 
   it("uses singular for 1 todo", () => {
-    expect(fmtTodoWriteInput([{ content: "only" }])).toBe("1 todo");
+    const output = captureOutput(() => {
+      testDisplay.printBlock({
+        type: "tool_use", id: "1", name: "TodoWrite",
+        input: { todos: [{ content: "only" }] },
+      }, "assistant");
+    });
+    expect(stripAnsi(output)).toContain("• TodoWrite(1 todo)");
   });
 
   it("returns 0 todos for an empty array", () => {
-    expect(fmtTodoWriteInput([])).toBe("0 todos");
+    const output = captureOutput(() => {
+      testDisplay.printBlock({
+        type: "tool_use", id: "1", name: "TodoWrite",
+        input: { todos: [] },
+      }, "assistant");
+    });
+    expect(stripAnsi(output)).toContain("• TodoWrite(0 todos)");
   });
 
-  it("returns 0 todos for non-array input", () => {
-    expect(fmtTodoWriteInput(null)).toBe("0 todos");
-    expect(fmtTodoWriteInput(undefined)).toBe("0 todos");
-  });
-});
-
-describe("fmtToolSearchOutput()", () => {
-  it("returns loaded: <name> for a single tool_reference", () => {
-    const content = [{ type: "tool_reference", tool_name: "TodoWrite" }];
-    expect(fmtToolSearchOutput(content)).toBe("loaded: TodoWrite");
-  });
-
-  it("joins multiple tool references with comma", () => {
-    const content = [
-      { type: "tool_reference", tool_name: "TodoWrite" },
-      { type: "tool_reference", tool_name: "TodoRead" },
-    ];
-    expect(fmtToolSearchOutput(content)).toContain("TodoWrite");
-    expect(fmtToolSearchOutput(content)).toContain("TodoRead");
-  });
-
-  it("returns loaded: ? when no tool references found", () => {
-    expect(fmtToolSearchOutput([])).toBe("loaded: ?");
-    expect(fmtToolSearchOutput([{ type: "text", text: "something" }])).toBe("loaded: ?");
+  it("returns 0 todos for null input", () => {
+    const output = captureOutput(() => {
+      testDisplay.printBlock({
+        type: "tool_use", id: "1", name: "TodoWrite",
+        input: { todos: null },
+      }, "assistant");
+    });
+    expect(stripAnsi(output)).toContain("• TodoWrite(0 todos)");
   });
 });
 
-describe("fmtTodoWriteOutput()", () => {
+describe("fmtToolSearchOutput — via TOOL_RESULT_FMT", () => {
+  it("shows loaded: <name> for a single tool_reference", () => {
+    testDisplay.toolUseNames.set("id1", "ToolSearch");
+    const output = captureOutput(() => {
+      testDisplay.printBlock({
+        type: "tool_result", tool_use_id: "id1", is_error: false,
+        content: [{ type: "tool_reference", tool_name: "TodoWrite" }],
+      }, "user");
+    });
+    expect(stripAnsi(output)).toContain("→ loaded: TodoWrite");
+  });
+
+  it("joins multiple tool references", () => {
+    testDisplay.toolUseNames.set("id1", "ToolSearch");
+    const output = captureOutput(() => {
+      testDisplay.printBlock({
+        type: "tool_result", tool_use_id: "id1", is_error: false,
+        content: [
+          { type: "tool_reference", tool_name: "TodoWrite" },
+          { type: "tool_reference", tool_name: "TodoRead" },
+        ],
+      }, "user");
+    });
+    expect(stripAnsi(output)).toContain("TodoWrite");
+    expect(stripAnsi(output)).toContain("TodoRead");
+  });
+
+  it("shows loaded: ? when no tool references found", () => {
+    testDisplay.toolUseNames.set("id1", "ToolSearch");
+    const output = captureOutput(() => {
+      testDisplay.printBlock({
+        type: "tool_result", tool_use_id: "id1", is_error: false,
+        content: [{ type: "text", text: "something" }],
+      }, "user");
+    });
+    expect(stripAnsi(output)).toContain("→ loaded: ?");
+  });
+
+  it("result in darkGray", () => {
+    testDisplay.toolUseNames.set("id1", "ToolSearch");
+    const raw = captureRaw(() => {
+      testDisplay.printBlock({
+        type: "tool_result", tool_use_id: "id1", is_error: false,
+        content: [{ type: "tool_reference", tool_name: "TodoWrite" }],
+      }, "user");
+    });
+    expect(raw).toContain("\x1b[90m");
+  });
+});
+
+describe("fmtTodoWriteOutput — via TOOL_RESULT_FMT", () => {
   it("shows [✓] box for completed todos", () => {
-    const b = {
-      content: "Todos modified.",
-      _msg: { tool_use_result: { newTodos: [{ content: "done task", status: "completed" }] } },
-    };
-    expect(fmtTodoWriteOutput(b as any)).toContain("[✓] done task");
+    testDisplay.toolUseNames.set("id1", "TodoWrite");
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_result", tool_use_id: "id1", is_error: false, content: "Todos modified." }, "user",
+        { tool_use_result: { newTodos: [{ content: "done task", status: "completed" }] } });
+    });
+    expect(stripAnsi(output)).toContain("[✓] done task");
   });
 
   it("shows [►] box for in_progress todos", () => {
-    const b = {
-      content: "Todos modified.",
-      _msg: { tool_use_result: { newTodos: [{ content: "active task", status: "in_progress" }] } },
-    };
-    expect(fmtTodoWriteOutput(b as any)).toContain("[►] active task");
+    testDisplay.toolUseNames.set("id1", "TodoWrite");
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_result", tool_use_id: "id1", is_error: false, content: "Todos modified." }, "user",
+        { tool_use_result: { newTodos: [{ content: "active task", status: "in_progress" }] } });
+    });
+    expect(stripAnsi(output)).toContain("[►] active task");
   });
 
   it("shows [ ] box for pending todos", () => {
-    const b = {
-      content: "Todos modified.",
-      _msg: { tool_use_result: { newTodos: [{ content: "future task", status: "pending" }] } },
-    };
-    expect(fmtTodoWriteOutput(b as any)).toContain("[ ] future task");
+    testDisplay.toolUseNames.set("id1", "TodoWrite");
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_result", tool_use_id: "id1", is_error: false, content: "Todos modified." }, "user",
+        { tool_use_result: { newTodos: [{ content: "future task", status: "pending" }] } });
+    });
+    expect(stripAnsi(output)).toContain("[ ] future task");
   });
 
-  it("renders multiple todos as a checklist with each item on its own line", () => {
-    const b = {
-      content: "Todos modified.",
-      _msg: {
-        tool_use_result: {
-          newTodos: [
-            { content: "task a", status: "completed" },
-            { content: "task b", status: "in_progress" },
-            { content: "task c", status: "pending" },
-          ],
-        },
-      },
-    };
-    const result = fmtTodoWriteOutput(b as any);
-    const lines = result.split("\n");
+  it("renders multiple todos with each item on its own line", () => {
+    testDisplay.toolUseNames.set("id1", "TodoWrite");
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_result", tool_use_id: "id1", is_error: false, content: "Todos modified." }, "user",
+        {
+          tool_use_result: {
+            newTodos: [
+              { content: "task a", status: "completed" },
+              { content: "task b", status: "in_progress" },
+              { content: "task c", status: "pending" },
+            ],
+          },
+        });
+    });
+    const lines = stripAnsi(output).split("\n").filter(Boolean);
     expect(lines).toHaveLength(3);
     expect(lines[0]).toContain("[✓] task a");
     expect(lines[1]).toContain("[►] task b");
@@ -417,22 +589,39 @@ describe("fmtTodoWriteOutput()", () => {
   });
 
   it("returns 'todos cleared' when newTodos is empty", () => {
-    const b = { content: "Todos modified.", _msg: { tool_use_result: { newTodos: [] } } };
-    expect(fmtTodoWriteOutput(b as any)).toBe("todos cleared");
+    testDisplay.toolUseNames.set("id1", "TodoWrite");
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_result", tool_use_id: "id1", is_error: false, content: "Todos modified." }, "user",
+        { tool_use_result: { newTodos: [] } });
+    });
+    expect(stripAnsi(output)).toContain("todos cleared");
   });
 
   it("falls back to text when no tool_use_result", () => {
-    const b = { content: "Todos have been modified successfully." };
-    const result = fmtTodoWriteOutput(b as any);
-    expect(result).toContain("Todos have been modified");
+    testDisplay.toolUseNames.set("id1", "TodoWrite");
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_result", tool_use_id: "id1", is_error: false, content: "Todos have been modified successfully." }, "user");
+    });
+    expect(stripAnsi(output)).toContain("Todos have been modified");
+  });
+
+  it("result in darkGray", () => {
+    testDisplay.toolUseNames.set("id1", "TodoWrite");
+    const raw = captureRaw(() => {
+      testDisplay.printBlock({ type: "tool_result", tool_use_id: "id1", is_error: false, content: "Todos modified." }, "user",
+        { tool_use_result: { newTodos: [{ content: "a", status: "done" }] } });
+    });
+    expect(raw).toContain("\x1b[90m");
   });
 });
 
 describe("TOOL_CALL_FMT — ToolSearch and TodoWrite", () => {
   it("ToolSearch: shows • ToolSearch(<query>) without key= prefix", () => {
-    const result = r(TOOL_CALL_FMT, "ToolSearch", { input: { query: "TodoWrite" } });
-    expect(result).toContain("• ToolSearch(TodoWrite)");
-    expect(result).not.toContain("query=");
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_use", id: "1", name: "ToolSearch", input: { query: "TodoWrite" } }, "assistant");
+    });
+    expect(stripAnsi(output)).toContain("• ToolSearch(TodoWrite)");
+    expect(stripAnsi(output)).not.toContain("query=");
   });
 
   it("TodoWrite: shows • TodoWrite(<N> todo(s)) with count, not [object Object]", () => {
@@ -441,72 +630,70 @@ describe("TOOL_CALL_FMT — ToolSearch and TodoWrite", () => {
       { content: "task b", status: "pending" },
       { content: "task c", status: "pending" },
     ];
-    const result = r(TOOL_CALL_FMT, "TodoWrite", { input: { todos } });
-    expect(result).toContain("• TodoWrite(3 todos)");
-    expect(result).not.toContain("[object Object]");
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_use", id: "1", name: "TodoWrite", input: { todos } }, "assistant");
+    });
+    expect(stripAnsi(output)).toContain("• TodoWrite(3 todos)");
+    expect(stripAnsi(output)).not.toContain("[object Object]");
   });
 
   it("TodoWrite: singular for 1 todo", () => {
-    const result = r(TOOL_CALL_FMT, "TodoWrite", { input: { todos: [{ content: "x" }] } });
-    expect(result).toContain("• TodoWrite(1 todo)");
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_use", id: "1", name: "TodoWrite", input: { todos: [{ content: "x" }] } }, "assistant");
+    });
+    expect(stripAnsi(output)).toContain("• TodoWrite(1 todo)");
   });
 });
 
 describe("TOOL_RESULT_FMT — ToolSearch and TodoWrite", () => {
   it("ToolSearch: shows → loaded: <tool name> from tool_reference", () => {
-    const b = { content: [{ type: "tool_reference", tool_name: "TodoWrite" }] };
-    const result = r(TOOL_RESULT_FMT, "ToolSearch", b)!;
-    expect(result).toContain("→ loaded: TodoWrite");
-    expect(result).not.toContain("[tool:");
-  });
-
-  it("ToolSearch: result in darkGray", () => {
-    const b = { content: [{ type: "tool_reference", tool_name: "TodoWrite" }] };
-    const raw = resolve(TOOL_RESULT_FMT, "ToolSearch", b)!;
-    expect(raw).toContain("\x1b[90m");
+    testDisplay.toolUseNames.set("id1", "ToolSearch");
+    const output = captureOutput(() => {
+      testDisplay.printBlock({
+        type: "tool_result", tool_use_id: "id1", is_error: false,
+        content: [{ type: "tool_reference", tool_name: "TodoWrite" }],
+      }, "user");
+    });
+    expect(stripAnsi(output)).toContain("→ loaded: TodoWrite");
+    expect(stripAnsi(output)).not.toContain("[tool:");
   });
 
   it("TodoWrite: shows → checklist with symbols and content", () => {
-    const b = {
-      content: "Todos modified.",
-      _msg: {
-        tool_use_result: {
-          newTodos: [
-            { content: "a", status: "in_progress" },
-            { content: "b", status: "pending" },
-          ],
-        },
-      },
-    };
-    const result = r(TOOL_RESULT_FMT, "TodoWrite", b)!;
-    expect(result).toContain("[►] a");
-    expect(result).toContain("[ ] b");
-    expect(result).not.toContain("modified successfully");
-  });
-
-  it("TodoWrite: result in darkGray", () => {
-    const b = {
-      content: "Todos modified.",
-      _msg: { tool_use_result: { newTodos: [{ content: "a", status: "done" }] } },
-    };
-    const raw = resolve(TOOL_RESULT_FMT, "TodoWrite", b)!;
-    expect(raw).toContain("\x1b[90m");
+    testDisplay.toolUseNames.set("id1", "TodoWrite");
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_result", tool_use_id: "id1", is_error: false, content: "Todos modified." }, "user",
+        {
+          tool_use_result: {
+            newTodos: [
+              { content: "a", status: "in_progress" },
+              { content: "b", status: "pending" },
+            ],
+          },
+        });
+    });
+    expect(stripAnsi(output)).toContain("[►] a");
+    expect(stripAnsi(output)).toContain("[ ] b");
+    expect(stripAnsi(output)).not.toContain("modified successfully");
   });
 });
 
 describe("TOOL_ERROR_FMT", () => {
   it("_default: ! <error text> in salmon", () => {
-    const raw = resolve(TOOL_ERROR_FMT, "_default", { content: "something went wrong" })!;
-    // salmon: \x1b[38;5;203m
-    expect(raw).toContain("\x1b[38;5;203m");
+    testDisplay.toolUseNames.set("id1", "UnknownTool");
+    const raw = captureRaw(() => {
+      testDisplay.printBlock({ type: "tool_result", tool_use_id: "id1", is_error: true, content: "something went wrong" }, "user");
+    });
+    expect(raw).toContain("\x1b[38;5;203m"); // salmon
     expect(stripAnsi(raw)).toContain("! something went wrong");
   });
 
   it("AskUserQuestion: denial rendered in dark gray, not salmon", () => {
-    const raw = resolve(TOOL_ERROR_FMT, "AskUserQuestion", { content: "The user would like to discuss" })!;
-    // darkGray: \x1b[90m, not salmon \x1b[38;5;203m
-    expect(raw).toContain("\x1b[90m");
-    expect(raw).not.toContain("\x1b[38;5;203m");
+    testDisplay.toolUseNames.set("id1", "AskUserQuestion");
+    const raw = captureRaw(() => {
+      testDisplay.printBlock({ type: "tool_result", tool_use_id: "id1", is_error: true, content: "The user would like to discuss" }, "user");
+    });
+    expect(raw).toContain("\x1b[90m"); // darkGray
+    expect(raw).not.toContain("\x1b[38;5;203m"); // not salmon
     expect(stripAnsi(raw)).toContain("The user would like to discuss");
   });
 });
@@ -514,166 +701,220 @@ describe("TOOL_ERROR_FMT", () => {
 describe("SYSTEM_FMT", () => {
   afterEach(() => getConfig().verbose = false);
 
-  it("init, VERBOSE=false → null", () => {
+  it("init, VERBOSE=false → nothing printed", () => {
     getConfig().verbose = false;
-    expect(resolve(SYSTEM_FMT, "init", { session_id: "abc" })).toBeNull();
+    const output = captureOutput(() => {
+      testDisplay.printMessage({ type: "system", subtype: "init", session_id: "abc" });
+    });
+    expect(output).toBe("");
   });
 
   it("init, VERBOSE=true → session: <session_id>", () => {
     getConfig().verbose = true;
-    expect(r(SYSTEM_FMT, "init", { session_id: "abc" })).toBe("init: session abc");
+    const output = captureOutput(() => {
+      testDisplay.printMessage({ type: "system", subtype: "init", session_id: "abc" });
+    });
+    expect(stripAnsi(output)).toContain("init: session abc");
   });
 
   it("task_started → lavender ▶ agent started: <description>", () => {
-    const raw = resolve(SYSTEM_FMT, "task_started", { description: "Running tests" })!;
-    // lavender: \x1b[38;5;183m
-    expect(raw).toContain("\x1b[38;5;183m");
+    const raw = captureRaw(() => {
+      testDisplay.printMessage({ type: "system", subtype: "task_started", description: "Running tests" });
+    });
+    expect(raw).toContain("\x1b[38;5;183m"); // lavender
     expect(stripAnsi(raw)).toContain("▶ agent started: Running tests");
   });
 
   it("task_progress → lavender • <description>", () => {
-    const raw = resolve(SYSTEM_FMT, "task_progress", { description: "Step 2" })!;
-    expect(raw).toContain("\x1b[38;5;183m");
+    const raw = captureRaw(() => {
+      testDisplay.printMessage({ type: "system", subtype: "task_progress", description: "Step 2" });
+    });
+    expect(raw).toContain("\x1b[38;5;183m"); // lavender
     expect(stripAnsi(raw)).toContain("• Step 2");
   });
 
   it("task_notification → lavender ◀︎ <status>: <summary>", () => {
-    const raw = resolve(SYSTEM_FMT, "task_notification", { status: "done", summary: "All good" })!;
-    expect(raw).toContain("\x1b[38;5;183m");
+    const raw = captureRaw(() => {
+      testDisplay.printMessage({ type: "system", subtype: "task_notification", status: "done", summary: "All good" });
+    });
+    expect(raw).toContain("\x1b[38;5;183m"); // lavender
     expect(stripAnsi(raw)).toContain("done: All good");
   });
 
   it("compact_boundary (auto) → shows compaction notice with token count", () => {
-    const msg = {
-      subtype: "compact_boundary",
-      compact_metadata: { trigger: "auto", pre_tokens: 50000 },
-    };
-    const result = r(SYSTEM_FMT, "compact_boundary", msg)!;
-    expect(result).not.toBeNull();
-    expect(result).toContain("compacted");
-    expect(result).toContain("auto");
-    expect(result).toContain("50k");
+    const output = captureOutput(() => {
+      testDisplay.printMessage({
+        type: "system",
+        subtype: "compact_boundary",
+        compact_metadata: { trigger: "auto", pre_tokens: 50000 },
+      });
+    });
+    expect(stripAnsi(output)).toContain("compacted");
+    expect(stripAnsi(output)).toContain("auto");
+    expect(stripAnsi(output)).toContain("50k");
   });
 
   it("compact_boundary (manual) → shows manual trigger", () => {
-    const msg = {
-      subtype: "compact_boundary",
-      compact_metadata: { trigger: "manual", pre_tokens: 10000 },
-    };
-    const result = r(SYSTEM_FMT, "compact_boundary", msg)!;
-    expect(result).not.toBeNull();
-    expect(result).toContain("manual");
+    const output = captureOutput(() => {
+      testDisplay.printMessage({
+        type: "system",
+        subtype: "compact_boundary",
+        compact_metadata: { trigger: "manual", pre_tokens: 10000 },
+      });
+    });
+    expect(stripAnsi(output)).toContain("manual");
   });
 
   it("compact_boundary → always shown (not verbose-only)", () => {
     getConfig().verbose = false;
-    const msg = {
-      subtype: "compact_boundary",
-      compact_metadata: { trigger: "auto", pre_tokens: 1000 },
-    };
-    expect(resolve(SYSTEM_FMT, "compact_boundary", msg)).not.toBeNull();
+    const output = captureOutput(() => {
+      testDisplay.printMessage({
+        type: "system",
+        subtype: "compact_boundary",
+        compact_metadata: { trigger: "auto", pre_tokens: 1000 },
+      });
+    });
+    expect(output).not.toBe("");
   });
 
   it("status/compacting → shows compacting notice (verbose and quiet)", () => {
     for (const v of [false, true]) {
       getConfig().verbose = v;
-      const msg = { subtype: "status", status: "compacting" };
-      const result = r(SYSTEM_FMT, "status", msg);
-      expect(result).not.toBeNull();
-      expect(result!.toLowerCase()).toContain("compact");
+      const output = captureOutput(() => {
+        testDisplay.printMessage({ type: "system", subtype: "status", status: "compacting" });
+      });
+      expect(output).not.toBe("");
+      expect(stripAnsi(output).toLowerCase()).toContain("compact");
     }
   });
 
-  it("status/null → null (compaction done, no message needed)", () => {
-    const msg = { subtype: "status", status: null };
-    expect(resolve(SYSTEM_FMT, "status", msg)).toBeNull();
+  it("status/null → nothing printed (compaction done)", () => {
+    const output = captureOutput(() => {
+      testDisplay.printMessage({ type: "system", subtype: "status", status: null });
+    });
+    expect(output).toBe("");
   });
 
-  it("hook_started, VERBOSE=false → null", () => {
+  it("hook_started, VERBOSE=false → nothing printed", () => {
     getConfig().verbose = false;
-    expect(resolve(SYSTEM_FMT, "hook_started", { hook_name: "my-hook", hook_event: "PreToolUse" })).toBeNull();
+    const output = captureOutput(() => {
+      testDisplay.printMessage({ type: "system", subtype: "hook_started", hook_name: "my-hook", hook_event: "PreToolUse" });
+    });
+    expect(output).toBe("");
   });
 
   it("hook_started, VERBOSE=true → hook: <hook_name> (<hook_event>)", () => {
     getConfig().verbose = true;
-    expect(r(SYSTEM_FMT, "hook_started", { hook_name: "my-hook", hook_event: "PreToolUse" }))
-      .toBe("hook: my-hook (PreToolUse)");
+    const output = captureOutput(() => {
+      testDisplay.printMessage({ type: "system", subtype: "hook_started", hook_name: "my-hook", hook_event: "PreToolUse" });
+    });
+    expect(stripAnsi(output)).toContain("hook: my-hook (PreToolUse)");
   });
 
-  it("hook_response, VERBOSE=false → null", () => {
+  it("hook_response, VERBOSE=false → nothing printed", () => {
     getConfig().verbose = false;
-    expect(resolve(SYSTEM_FMT, "hook_response", { hook_name: "my-hook", hook_event: "PreToolUse", outcome: "success" })).toBeNull();
+    const output = captureOutput(() => {
+      testDisplay.printMessage({ type: "system", subtype: "hook_response", hook_name: "my-hook", hook_event: "PreToolUse", outcome: "success" });
+    });
+    expect(output).toBe("");
   });
 
   it("hook_response, VERBOSE=true, success → hook: <hook_name> — success", () => {
     getConfig().verbose = true;
-    expect(r(SYSTEM_FMT, "hook_response", { hook_name: "my-hook", hook_event: "PreToolUse", outcome: "success" }))
-      .toBe("hook: my-hook — success");
+    const output = captureOutput(() => {
+      testDisplay.printMessage({ type: "system", subtype: "hook_response", hook_name: "my-hook", hook_event: "PreToolUse", outcome: "success" });
+    });
+    expect(stripAnsi(output)).toContain("hook: my-hook — success");
   });
 
   it("hook_response, VERBOSE=true, error with exit code → includes [exit N]", () => {
     getConfig().verbose = true;
-    expect(r(SYSTEM_FMT, "hook_response", { hook_name: "lint-hook", hook_event: "PostToolUse", outcome: "error", exit_code: 1 }))
-      .toBe("hook: lint-hook — error [exit 1]");
+    const output = captureOutput(() => {
+      testDisplay.printMessage({ type: "system", subtype: "hook_response", hook_name: "lint-hook", hook_event: "PostToolUse", outcome: "error", exit_code: 1 });
+    });
+    expect(stripAnsi(output)).toContain("hook: lint-hook — error [exit 1]");
   });
 
   it("hook_response, VERBOSE=true, exit_code=0 → no exit suffix", () => {
     getConfig().verbose = true;
-    expect(r(SYSTEM_FMT, "hook_response", { hook_name: "my-hook", hook_event: "PreToolUse", outcome: "success", exit_code: 0 }))
-      .toBe("hook: my-hook — success");
+    const output = captureOutput(() => {
+      testDisplay.printMessage({ type: "system", subtype: "hook_response", hook_name: "my-hook", hook_event: "PreToolUse", outcome: "success", exit_code: 0 });
+    });
+    expect(stripAnsi(output)).toContain("hook: my-hook — success");
+    expect(stripAnsi(output)).not.toContain("[exit");
   });
 
   it("api_retry → shown in non-verbose mode (not verbose-only)", () => {
     getConfig().verbose = false;
-    const msg = { subtype: "api_retry", attempt: 1, max_retries: 10, retry_delay_ms: 500 };
-    expect(resolve(SYSTEM_FMT, "api_retry", msg)).not.toBeNull();
+    const output = captureOutput(() => {
+      testDisplay.printMessage({ type: "system", subtype: "api_retry", attempt: 1, max_retries: 10, retry_delay_ms: 500 });
+    });
+    expect(output).not.toBe("");
   });
 
   it("api_retry → amber warning color", () => {
-    const msg = { subtype: "api_retry", attempt: 1, max_retries: 10, retry_delay_ms: 500 };
-    const raw = resolve(SYSTEM_FMT, "api_retry", msg)!;
-    // amber: \x1b[38;5;214m
-    expect(raw).toContain("\x1b[38;5;214m");
+    const raw = captureRaw(() => {
+      testDisplay.printMessage({ type: "system", subtype: "api_retry", attempt: 1, max_retries: 10, retry_delay_ms: 500 });
+    });
+    expect(raw).toContain("\x1b[38;5;214m"); // amber
   });
 
   it("api_retry → 'API failure, retrying in Xs (attempt N/M)'", () => {
-    const msg = { subtype: "api_retry", attempt: 1, max_retries: 10, retry_delay_ms: 545.686 };
-    expect(r(SYSTEM_FMT, "api_retry", msg)).toBe("API failure, retrying in 0.5s (attempt 1/10)");
+    const output = captureOutput(() => {
+      testDisplay.printMessage({ type: "system", subtype: "api_retry", attempt: 1, max_retries: 10, retry_delay_ms: 545.686 });
+    });
+    expect(stripAnsi(output)).toContain("API failure, retrying in 0.5s (attempt 1/10)");
   });
 
   it("api_retry → rounds delay to 1 decimal place", () => {
-    const msg = { subtype: "api_retry", attempt: 3, max_retries: 5, retry_delay_ms: 2000 };
-    expect(r(SYSTEM_FMT, "api_retry", msg)).toBe("API failure, retrying in 2s (attempt 3/5)");
+    const output = captureOutput(() => {
+      testDisplay.printMessage({ type: "system", subtype: "api_retry", attempt: 3, max_retries: 5, retry_delay_ms: 2000 });
+    });
+    expect(stripAnsi(output)).toContain("API failure, retrying in 2s (attempt 3/5)");
   });
 
   it("api_retry with error_status → includes status code in message", () => {
-    const msg = { subtype: "api_retry", attempt: 1, max_retries: 10, retry_delay_ms: 500, error_status: 429, error: "rate_limit" };
-    expect(r(SYSTEM_FMT, "api_retry", msg)).toBe("API failure (429), retrying in 0.5s (attempt 1/10)");
+    const output = captureOutput(() => {
+      testDisplay.printMessage({ type: "system", subtype: "api_retry", attempt: 1, max_retries: 10, retry_delay_ms: 500, error_status: 429, error: "rate_limit" });
+    });
+    expect(stripAnsi(output)).toContain("API failure (429), retrying in 0.5s (attempt 1/10)");
   });
 
   it("api_retry with error_status null and named error → includes error name", () => {
-    const msg = { subtype: "api_retry", attempt: 2, max_retries: 5, retry_delay_ms: 1000, error_status: null, error: "server_error" };
-    expect(r(SYSTEM_FMT, "api_retry", msg)).toBe("API failure (server_error), retrying in 1s (attempt 2/5)");
+    const output = captureOutput(() => {
+      testDisplay.printMessage({ type: "system", subtype: "api_retry", attempt: 2, max_retries: 5, retry_delay_ms: 1000, error_status: null, error: "server_error" });
+    });
+    expect(stripAnsi(output)).toContain("API failure (server_error), retrying in 1s (attempt 2/5)");
   });
 
   it("api_retry with error_status null and error 'unknown' → no detail appended", () => {
-    const msg = { subtype: "api_retry", attempt: 1, max_retries: 3, retry_delay_ms: 500, error_status: null, error: "unknown" };
-    expect(r(SYSTEM_FMT, "api_retry", msg)).toBe("API failure, retrying in 0.5s (attempt 1/3)");
+    const output = captureOutput(() => {
+      testDisplay.printMessage({ type: "system", subtype: "api_retry", attempt: 1, max_retries: 3, retry_delay_ms: 500, error_status: null, error: "unknown" });
+    });
+    expect(stripAnsi(output)).toContain("API failure, retrying in 0.5s (attempt 1/3)");
   });
 
   it("api_retry with error_status present and error 'unknown' → shows status code not error string", () => {
-    const msg = { subtype: "api_retry", attempt: 1, max_retries: 3, retry_delay_ms: 500, error_status: 503, error: "unknown" };
-    expect(r(SYSTEM_FMT, "api_retry", msg)).toBe("API failure (503), retrying in 0.5s (attempt 1/3)");
+    const output = captureOutput(() => {
+      testDisplay.printMessage({ type: "system", subtype: "api_retry", attempt: 1, max_retries: 3, retry_delay_ms: 500, error_status: 503, error: "unknown" });
+    });
+    expect(stripAnsi(output)).toContain("API failure (503), retrying in 0.5s (attempt 1/3)");
   });
 
-  it("_default, VERBOSE=false → null", () => {
+  it("_default, VERBOSE=false → nothing printed", () => {
     getConfig().verbose = false;
-    expect(resolve(SYSTEM_FMT, "unknown_subtype", { subtype: "unknown_subtype" })).toBeNull();
+    const output = captureOutput(() => {
+      testDisplay.printMessage({ type: "system", subtype: "unknown_subtype" });
+    });
+    expect(output).toBe("");
   });
 
   it("_default, VERBOSE=true → system/<subtype>", () => {
     getConfig().verbose = true;
-    expect(r(SYSTEM_FMT, "_default", { subtype: "whatever" })).toBe("system/whatever");
+    const output = captureOutput(() => {
+      testDisplay.printMessage({ type: "system", subtype: "whatever" });
+    });
+    expect(stripAnsi(output)).toContain("system/whatever");
   });
 });
 
@@ -681,19 +922,23 @@ describe("MESSAGE_FMT", () => {
   afterEach(() => getConfig().verbose = false);
 
   it("_empty → [<type> — empty] in darkGray", () => {
-    const raw = resolve(MESSAGE_FMT, "_empty", { type: "assistant" })!;
-    expect(raw).toContain("\x1b[90m");
+    const raw = captureRaw(() => {
+      testDisplay.printMessage({ type: "assistant", message: { content: [] } });
+    });
+    expect(raw).toContain("\x1b[90m"); // darkGray
     expect(stripAnsi(raw)).toContain("[assistant — empty]");
   });
 
   it("result → \\n<fmtStats(...)> in darkGray", () => {
-    const msg = {
-      duration_ms: 5000,
-      num_turns: 2,
-      usage: { output_tokens: 150, input_tokens: 800 },
-    };
-    const raw = resolve(MESSAGE_FMT, "result", msg)!;
-    expect(raw).toContain("\x1b[90m");
+    const raw = captureRaw(() => {
+      testDisplay.printMessage({
+        type: "result",
+        duration_ms: 5000,
+        num_turns: 2,
+        usage: { output_tokens: 150, input_tokens: 800 },
+      });
+    });
+    expect(raw).toContain("\x1b[90m"); // darkGray
     const text = stripAnsi(raw);
     expect(text).toContain("5s");
     expect(text).toContain("2 turns");
@@ -701,86 +946,84 @@ describe("MESSAGE_FMT", () => {
     expect(text).toContain("150 out");
   });
 
-  it("rate_limit_event, status=allowed, VERBOSE=false → null", () => {
+  it("rate_limit_event, status=allowed, VERBOSE=false → nothing printed", () => {
     getConfig().verbose = false;
-    expect(resolve(MESSAGE_FMT, "rate_limit_event", { rate_limit_info: { status: "allowed" } })).toBeNull();
+    const output = captureOutput(() => {
+      testDisplay.printMessage({ type: "rate_limit_event", rate_limit_info: { status: "allowed" } });
+    });
+    expect(output).toBe("");
   });
 
-  it("rate_limit_event, status=allowed, VERBOSE=true → null (silenced)", () => {
+  it("rate_limit_event, status=allowed, VERBOSE=true → nothing printed (silenced)", () => {
     getConfig().verbose = true;
-    expect(resolve(MESSAGE_FMT, "rate_limit_event", { rate_limit_info: { status: "allowed" } })).toBeNull();
-  });
-
-  it("rate_limit_event, status=allowed_warning, VERBOSE=false → shows warning (not verbose-only)", () => {
-    getConfig().verbose = false;
-    const result = r(MESSAGE_FMT, "rate_limit_event", {
-      rate_limit_info: { status: "allowed_warning", rateLimitType: "seven_day", utilization: 0.85 },
+    const output = captureOutput(() => {
+      testDisplay.printMessage({ type: "rate_limit_event", rate_limit_info: { status: "allowed" } });
     });
-    expect(result).not.toBeNull();
-    expect(result).toBe("Usage warning: 85% of seven-day usage limit");
+    expect(output).toBe("");
   });
 
-  it("rate_limit_event, status=allowed_warning, VERBOSE=true → shows warning with details", () => {
+  it("rate_limit_event, status=allowed_warning, VERBOSE=false → shows warning", () => {
+    getConfig().verbose = false;
+    const output = captureOutput(() => {
+      testDisplay.printMessage({ type: "rate_limit_event", rate_limit_info: { status: "allowed_warning", rateLimitType: "seven_day", utilization: 0.85 } });
+    });
+    expect(output).not.toBe("");
+    expect(stripAnsi(output)).toContain("Usage warning: 85% of seven-day usage limit");
+  });
+
+  it("rate_limit_event, status=allowed_warning, VERBOSE=true → shows warning", () => {
     getConfig().verbose = true;
-    const result = r(MESSAGE_FMT, "rate_limit_event", {
-      rate_limit_info: { status: "allowed_warning", rateLimitType: "seven_day", utilization: 0.85 },
+    const output = captureOutput(() => {
+      testDisplay.printMessage({ type: "rate_limit_event", rate_limit_info: { status: "allowed_warning", rateLimitType: "seven_day", utilization: 0.85 } });
     });
-    expect(result).not.toBeNull();
-    expect(result).toBe("Usage warning: 85% of seven-day usage limit");
+    expect(stripAnsi(output)).toContain("Usage warning: 85% of seven-day usage limit");
   });
 
-  it("rate_limit_event, status=allowed_warning, five_hour type → formats correctly", () => {
+  it("rate_limit_event, five_hour type → formats correctly", () => {
     getConfig().verbose = false;
-    const result = r(MESSAGE_FMT, "rate_limit_event", {
-      rate_limit_info: { status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.72 },
+    const output = captureOutput(() => {
+      testDisplay.printMessage({ type: "rate_limit_event", rate_limit_info: { status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.72 } });
     });
-    expect(result).toBe("Usage warning: 72% of five-hour usage limit");
+    expect(stripAnsi(output)).toContain("Usage warning: 72% of five-hour usage limit");
   });
 
-  it("rate_limit_event, status=allowed_warning, seven_day_sonnet type → formats correctly", () => {
+  it("rate_limit_event, seven_day_sonnet type → formats correctly", () => {
     getConfig().verbose = false;
-    const result = r(MESSAGE_FMT, "rate_limit_event", {
-      rate_limit_info: { status: "allowed_warning", rateLimitType: "seven_day_sonnet", utilization: 0.9 },
+    const output = captureOutput(() => {
+      testDisplay.printMessage({ type: "rate_limit_event", rate_limit_info: { status: "allowed_warning", rateLimitType: "seven_day_sonnet", utilization: 0.9 } });
     });
-    expect(result).toBe("Usage warning: 90% of seven-day Sonnet usage limit");
+    expect(stripAnsi(output)).toContain("Usage warning: 90% of seven-day Sonnet usage limit");
   });
 
   it("rate_limit_event, status=allowed_warning, no rateLimitType → omits limit type", () => {
     getConfig().verbose = false;
-    const result = r(MESSAGE_FMT, "rate_limit_event", {
-      rate_limit_info: { status: "allowed_warning", utilization: 0.82 },
+    const output = captureOutput(() => {
+      testDisplay.printMessage({ type: "rate_limit_event", rate_limit_info: { status: "allowed_warning", utilization: 0.82 } });
     });
-    expect(result).toBe("Usage warning: 82% used");
+    expect(stripAnsi(output)).toContain("Usage warning: 82% used");
   });
 
-  it("rate_limit_event, status=rejected, VERBOSE=false → shows rejection (not verbose-only)", () => {
+  it("rate_limit_event, status=rejected, VERBOSE=false → shows rejection", () => {
     getConfig().verbose = false;
-    const result = r(MESSAGE_FMT, "rate_limit_event", {
-      rate_limit_info: { status: "rejected" },
+    const output = captureOutput(() => {
+      testDisplay.printMessage({ type: "rate_limit_event", rate_limit_info: { status: "rejected" } });
     });
-    expect(result).not.toBeNull();
-    expect(result).toBe("Usage limit reached");
-  });
-
-  it("rate_limit_event, status=rejected, VERBOSE=true → shows rejection", () => {
-    getConfig().verbose = true;
-    const result = r(MESSAGE_FMT, "rate_limit_event", {
-      rate_limit_info: { status: "rejected" },
-    });
-    expect(result).not.toBeNull();
-    expect(result).toBe("Usage limit reached");
+    expect(output).not.toBe("");
+    expect(stripAnsi(output)).toContain("Usage limit reached");
   });
 
   it("rate_limit_event, status=rejected, with rateLimitType → includes limit type", () => {
     getConfig().verbose = false;
-    const result = r(MESSAGE_FMT, "rate_limit_event", {
-      rate_limit_info: { status: "rejected", rateLimitType: "seven_day_opus" },
+    const output = captureOutput(() => {
+      testDisplay.printMessage({ type: "rate_limit_event", rate_limit_info: { status: "rejected", rateLimitType: "seven_day_opus" } });
     });
-    expect(result).toBe("Usage limit reached: seven-day Opus usage limit");
+    expect(stripAnsi(output)).toContain("Usage limit reached: seven-day Opus usage limit");
   });
 
   it("_default → msg: <type>", () => {
-    expect(r(MESSAGE_FMT, "_default", { type: "whatever" })).toBe("msg: whatever");
+    const output = captureOutput(() => {
+      testDisplay.printMessage({ type: "whatever" });
+    });
+    expect(stripAnsi(output)).toContain("msg: whatever");
   });
 });
-

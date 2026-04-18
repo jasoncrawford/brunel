@@ -1,5 +1,4 @@
 import { describe, it, expect } from "vitest";
-import { stripAnsi } from "./helpers.js";
 import {
   trunc,
   fmtCount,
@@ -7,9 +6,6 @@ import {
   fmtNum,
   fmtStats,
   fmtArgs,
-  toolResultText,
-  fmtEditResult,
-  fmtHunk,
   c,
 } from "../src/agent/views/display.js";
 
@@ -193,110 +189,11 @@ describe("fmtArgs", () => {
   });
 });
 
-describe("toolResultText", () => {
-  it("string content returned directly", () => {
-    expect(toolResultText({ content: "hello" })).toBe("hello");
-  });
-
-  it("array with text block", () => {
-    expect(toolResultText({ content: [{ type: "text", text: "hi" }] })).toBe("hi");
-  });
-
-  it("array with tool_reference", () => {
-    expect(toolResultText({ content: [{ type: "tool_reference", tool_name: "Write" }] })).toBe("[tool:Write]");
-  });
-
-  it("mixed array: text + tool_reference joined with space", () => {
-    const result = toolResultText({
-      content: [
-        { type: "text", text: "done" },
-        { type: "tool_reference", tool_name: "Read" },
-      ],
-    });
-    expect(result).toBe("done [tool:Read]");
-  });
-
-  it("unknown type in array returns [type]", () => {
-    expect(toolResultText({ content: [{ type: "image" }] })).toBe("[image]");
-  });
-
-  it("null content returns empty string", () => {
-    expect(toolResultText({ content: null })).toBe("[?]");
-  });
-
-  it("single non-array object treated as array of one", () => {
-    expect(toolResultText({ content: { type: "text", text: "single" } })).toBe("single");
-  });
-});
-
-describe("fmtEditResult", () => {
-  it("structuredPatch with hunks renders hunks", () => {
-    const hunk = {
-      oldStart: 1, oldLines: 2, newStart: 1, newLines: 3,
-      lines: ["-old", "+new", " ctx"],
-    };
-    const b = { _msg: { tool_use_result: { structuredPatch: [hunk] } }, content: "" };
-    const result = stripAnsi(fmtEditResult(b));
-    expect(result).toContain("@@ -1,2 +1,3 @@");
-    expect(result).toContain("-old");
-    expect(result).toContain("+new");
-  });
-
-  it("empty patch array falls back to toolResultText", () => {
-    const b = { _msg: { tool_use_result: { structuredPatch: [] } }, content: "fallback text" };
-    const result = stripAnsi(fmtEditResult(b));
-    expect(result).toContain("fallback text");
-  });
-
-  it("no _msg falls back to toolResultText", () => {
-    const b = { content: "no msg" };
-    const result = stripAnsi(fmtEditResult(b));
-    expect(result).toContain("no msg");
-  });
-
-  it("structuredPatch = null falls back", () => {
-    const b = { _msg: { tool_use_result: { structuredPatch: null } }, content: "null patch" };
-    const result = stripAnsi(fmtEditResult(b));
-    expect(result).toContain("null patch");
-  });
-});
-
-describe("fmtHunk", () => {
-  const hunk = {
-    oldStart: 1, oldLines: 3, newStart: 1, newLines: 4,
-    lines: ["+added line", "-removed line", " context line"],
-  };
-
-  it("header line has @@ format", () => {
-    const result = stripAnsi(fmtHunk(hunk));
-    expect(result).toContain("@@ -1,3 +1,4 @@");
-  });
-
-  it("lines starting with + are in result (bgGreen applied)", () => {
-    const result = fmtHunk(hunk);
-    // bgGreen ANSI: \x1b[48;5;22m
-    expect(result).toContain("\x1b[48;5;22m");
-  });
-
-  it("lines starting with - are in result (bgRed applied)", () => {
-    const result = fmtHunk(hunk);
-    // bgRed ANSI: \x1b[48;5;52m
-    expect(result).toContain("\x1b[48;5;52m");
-  });
-
-  it("context lines are darkGray", () => {
-    const result = fmtHunk(hunk);
-    // darkGray ANSI: \x1b[90m
-    expect(result).toContain("\x1b[90m context line");
-  });
-
-  it("all three types in correct order", () => {
-    const result = stripAnsi(fmtHunk(hunk));
-    const lines = result.split("\n");
-    expect(lines[0]).toContain("@@");
-    // The padEnd ensures + line is long but starts with "+added line"
-    expect(lines[1].trimEnd()).toContain("+added line");
-    expect(lines[2].trimEnd()).toContain("-removed line");
-    expect(lines[3]).toContain(" context line");
+// Keep c import used — verify color object is intact
+describe("c (color utilities)", () => {
+  it("c.skyBlue applies ANSI color", () => {
+    const result = c.skyBlue("text");
+    expect(result).toContain("\x1b[38;5;117m");
+    expect(result).toContain("text");
   });
 });

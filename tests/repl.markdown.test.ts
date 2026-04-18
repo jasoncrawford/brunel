@@ -1,187 +1,213 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { stripAnsi } from "./helpers.js";
-import { mdInline, renderMarkdown, renderTable, s } from "../src/agent/views/display.js";
+import { getConfig } from "../src/config.js";
+import { Display } from "../src/agent/views/display.js";
+import { StatusBar } from "../src/agent/views/status-bar.js";
+
+let testDisplay: Display;
+
+function captureOutput(fn: () => void): string {
+  let output = "";
+  vi.spyOn(console, "log").mockImplementation((s: any) => { output += String(s) + "\n"; });
+  fn();
+  vi.restoreAllMocks();
+  return output;
+}
+
+function printText(text: string): string {
+  return captureOutput(() => {
+    testDisplay.printBlock({ type: "text", text }, "assistant");
+  });
+}
+
+const setColumns = (n: number | undefined) => {
+  Object.defineProperty(process.stdout, "columns", { value: n, writable: true, configurable: true });
+};
+
+beforeEach(() => {
+  testDisplay = new Display(getConfig(), new StatusBar({ agentId: "test-agent" }));
+  testDisplay.statusBar.stop();
+  getConfig().verbose = false;
+});
+
+afterEach(() => {
+  testDisplay.statusBar.stop();
+  getConfig().verbose = false;
+  vi.restoreAllMocks();
+});
 
 describe("mdInline", () => {
   it("bold with **", () => {
-    const result = mdInline("**bold**");
-    expect(stripAnsi(result)).toBe("bold");
-    expect(result).toContain("\x1b[1m");
+    const output = printText("**bold**");
+    expect(stripAnsi(output)).toContain("bold");
+    expect(output).toContain("\x1b[1m");
   });
 
   it("bold with __", () => {
-    const result = mdInline("__bold__");
-    expect(stripAnsi(result)).toBe("bold");
-    expect(result).toContain("\x1b[1m");
+    const output = printText("__bold__");
+    expect(stripAnsi(output)).toContain("bold");
+    expect(output).toContain("\x1b[1m");
   });
 
   it("inline code: bold+underline applied", () => {
-    const result = mdInline("`code`");
-    expect(stripAnsi(result)).toBe("code");
-    expect(result).toContain("\x1b[1m");
-    expect(result).toContain("\x1b[4m");
+    const output = printText("`code`");
+    expect(stripAnsi(output)).toContain("code");
+    expect(output).toContain("\x1b[1m");
+    expect(output).toContain("\x1b[4m");
   });
 
   it("multiple bold occurrences", () => {
-    const result = stripAnsi(mdInline("**a** and **b**"));
-    expect(result).toBe("a and b");
-    const raw = mdInline("**a** and **b**");
-    // Both 'a' and 'b' should be bolded (two bold escape sequences)
-    const boldCount = (raw.match(/\x1b\[1m/g) ?? []).length;
+    const output = printText("**a** and **b**");
+    expect(stripAnsi(output)).toContain("a and b");
+    const boldCount = (output.match(/\x1b\[1m/g) ?? []).length;
     expect(boldCount).toBe(2);
   });
 
   it("no markdown passes through unchanged", () => {
-    expect(mdInline("plain text")).toBe("plain text");
+    const output = printText("plain text");
+    expect(stripAnsi(output)).toContain("plain text");
+    expect(output).not.toContain("\x1b[1m");
   });
 
   it("unclosed ** passes through unchanged", () => {
-    expect(mdInline("**unclosed")).toBe("**unclosed");
+    const output = printText("**unclosed");
+    expect(stripAnsi(output)).toContain("**unclosed");
   });
 
   it("strikethrough passes through as-is", () => {
-    expect(mdInline("~~strike~~")).toBe("~~strike~~");
+    const output = printText("~~strike~~");
+    expect(stripAnsi(output)).toContain("~~strike~~");
   });
 
   it("italic passes through as-is", () => {
-    expect(mdInline("*italic*")).toBe("*italic*");
+    const output = printText("*italic*");
+    expect(stripAnsi(output)).toContain("*italic*");
   });
 });
 
 describe("renderMarkdown - plain text", () => {
   it("non-markdown line passed through", () => {
-    const result = stripAnsi(renderMarkdown("just text"));
-    expect(result).toBe("just text");
+    expect(stripAnsi(printText("just text"))).toContain("just text");
   });
 
-  it("empty string returns empty string", () => {
-    expect(renderMarkdown("")).toBe("");
+  it("empty string renders without content", () => {
+    expect(stripAnsi(printText("")).trim()).toBe("");
   });
 });
 
 describe("renderMarkdown - headings", () => {
   it("H1 is uppercased and bold", () => {
-    const result = renderMarkdown("# Hello World");
-    const plain = stripAnsi(result);
-    expect(plain).toBe("HELLO WORLD");
-    expect(result).toContain("\x1b[1m");
+    const output = printText("# Hello World");
+    expect(stripAnsi(output)).toContain("HELLO WORLD");
+    expect(output).toContain("\x1b[1m");
   });
 
   it("H2 is bold but not uppercased", () => {
-    const result = renderMarkdown("## Section");
-    const plain = stripAnsi(result);
-    expect(plain).toBe("Section");
-    expect(result).toContain("\x1b[1m");
+    const output = printText("## Section");
+    expect(stripAnsi(output)).toContain("Section");
+    expect(stripAnsi(output)).not.toContain("SECTION");
+    expect(output).toContain("\x1b[1m");
   });
 
   it("H3 is bold but not uppercased", () => {
-    const result = renderMarkdown("### Sub");
-    const plain = stripAnsi(result);
-    expect(plain).toBe("Sub");
-    expect(result).toContain("\x1b[1m");
+    const output = printText("### Sub");
+    expect(stripAnsi(output)).toContain("Sub");
+    expect(stripAnsi(output)).not.toContain("SUB");
+    expect(output).toContain("\x1b[1m");
   });
 });
 
 describe("renderMarkdown - blockquotes", () => {
   it("> quoted text → ▏ prefix", () => {
-    const result = stripAnsi(renderMarkdown("> quoted text"));
-    expect(result).toBe("▏ quoted text");
+    expect(stripAnsi(printText("> quoted text"))).toContain("▏ quoted text");
   });
 
   it("nested blockquote gets single ▏ prefix", () => {
-    const result = stripAnsi(renderMarkdown("> > inner"));
-    expect(result).toBe("▏ > inner");
+    expect(stripAnsi(printText("> > inner"))).toContain("▏ > inner");
   });
 });
 
 describe("renderMarkdown - lists", () => {
   it("- item → • item", () => {
-    expect(stripAnsi(renderMarkdown("- item"))).toBe("• item");
+    expect(stripAnsi(printText("- item"))).toContain("• item");
   });
 
   it("* item → • item", () => {
-    expect(stripAnsi(renderMarkdown("* item"))).toBe("• item");
+    expect(stripAnsi(printText("* item"))).toContain("• item");
   });
 
   it("+ item → • item", () => {
-    expect(stripAnsi(renderMarkdown("+ item"))).toBe("• item");
+    expect(stripAnsi(printText("+ item"))).toContain("• item");
   });
 
   it("indented list item preserves indentation", () => {
-    expect(stripAnsi(renderMarkdown("  - indented"))).toBe("  • indented");
+    expect(stripAnsi(printText("  - indented"))).toContain("  • indented");
   });
 
   it("ordered list: 1. stays as-is", () => {
-    expect(stripAnsi(renderMarkdown("1. ordered"))).toBe("1. ordered");
+    expect(stripAnsi(printText("1. ordered"))).toContain("1. ordered");
   });
 
   it("ordered list: 2. stays as-is", () => {
-    expect(stripAnsi(renderMarkdown("2. second"))).toBe("2. second");
+    expect(stripAnsi(printText("2. second"))).toContain("2. second");
   });
 
   it("indented ordered list preserves indentation", () => {
-    expect(stripAnsi(renderMarkdown("  1. indented ordered"))).toBe("  1. indented ordered");
+    expect(stripAnsi(printText("  1. indented ordered"))).toContain("  1. indented ordered");
   });
 });
 
 describe("renderMarkdown - code blocks", () => {
   it("code block lines get 2-space indent, fences omitted", () => {
-    const result = stripAnsi(renderMarkdown("```\ncode\n```"));
-    expect(result).toBe("  code");
+    expect(stripAnsi(printText("```\ncode\n```"))).toContain("  code");
   });
 
   it("language tag stripped", () => {
-    const result = stripAnsi(renderMarkdown("```ts\nconst x = 1;\n```"));
-    expect(result).toBe("  const x = 1;");
+    expect(stripAnsi(printText("```ts\nconst x = 1;\n```"))).toContain("  const x = 1;");
   });
 
   it("multi-line code block each line indented", () => {
-    const result = stripAnsi(renderMarkdown("```\nline1\nline2\n```"));
-    expect(result).toBe("  line1\n  line2");
+    const result = stripAnsi(printText("```\nline1\nline2\n```"));
+    expect(result).toContain("  line1");
+    expect(result).toContain("  line2");
   });
 
   it("backtick fences not in output", () => {
-    const result = stripAnsi(renderMarkdown("```\ncode\n```"));
-    expect(result).not.toContain("```");
+    expect(stripAnsi(printText("```\ncode\n```"))).not.toContain("```");
   });
 
   it("code content not processed by mdInline", () => {
-    const result = renderMarkdown("```\n**not bold**\n```");
-    // The content should not have bold ANSI codes
-    expect(result).not.toContain("\x1b[1m");
-    expect(stripAnsi(result)).toContain("**not bold**");
+    const output = printText("```\n**not bold**\n```");
+    expect(output).not.toContain("\x1b[1m");
+    expect(stripAnsi(output)).toContain("**not bold**");
   });
 
   it("unclosed code block: remaining lines get 2-space indent", () => {
-    const result = stripAnsi(renderMarkdown("```\nline1\nline2"));
-    expect(result).toBe("  line1\n  line2");
+    const result = stripAnsi(printText("```\nline1\nline2"));
+    expect(result).toContain("  line1");
+    expect(result).toContain("  line2");
   });
 });
 
 describe("renderMarkdown - horizontal rules", () => {
   it("--- renders as ─ repeated W times", () => {
-    const result = stripAnsi(renderMarkdown("---"));
-    expect(result).toBe("─".repeat(70));
+    expect(stripAnsi(printText("---"))).toContain("─".repeat(70));
   });
 
   it("*** renders as rule", () => {
-    const result = stripAnsi(renderMarkdown("***"));
-    expect(result).toBe("─".repeat(70));
+    expect(stripAnsi(printText("***"))).toContain("─".repeat(70));
   });
 
   it("___ renders as rule", () => {
-    const result = stripAnsi(renderMarkdown("___"));
-    expect(result).toBe("─".repeat(70));
+    expect(stripAnsi(printText("___"))).toContain("─".repeat(70));
   });
 
   it("---- (4+ dashes) renders as rule", () => {
-    const result = stripAnsi(renderMarkdown("----"));
-    expect(result).toBe("─".repeat(70));
+    expect(stripAnsi(printText("----"))).toContain("─".repeat(70));
   });
 
   it("-- (only 2 chars) does NOT render as rule", () => {
-    const result = stripAnsi(renderMarkdown("-- "));
-    expect(result).not.toBe("─".repeat(70));
+    expect(stripAnsi(printText("-- "))).not.toContain("─".repeat(70));
   });
 });
 
@@ -189,104 +215,90 @@ describe("renderMarkdown - tables", () => {
   const tableInput = `| Name | Age |\n| --- | --- |\n| Alice | 30 |`;
 
   it("table renders with │ borders", () => {
-    const result = stripAnsi(renderMarkdown(tableInput));
-    expect(result).toContain("│");
+    expect(stripAnsi(printText(tableInput))).toContain("│");
   });
 
   it("separator row replaced with divider ├─...─┤", () => {
-    const result = stripAnsi(renderMarkdown(tableInput));
+    const result = stripAnsi(printText(tableInput));
     expect(result).toContain("├─");
     expect(result).toContain("─┤");
   });
 
   it("table data rows rendered", () => {
-    const result = stripAnsi(renderMarkdown(tableInput));
+    const result = stripAnsi(printText(tableInput));
     expect(result).toContain("Alice");
     expect(result).toContain("30");
   });
 
   it("table at end of input (no trailing newline) still rendered", () => {
-    const result = stripAnsi(renderMarkdown("| A | B |\n| --- | --- |\n| 1 | 2 |"));
+    const result = stripAnsi(printText("| A | B |\n| --- | --- |\n| 1 | 2 |"));
     expect(result).toContain("│");
     expect(result).toContain("1");
   });
 
   it("single-column table renders", () => {
-    const result = stripAnsi(renderMarkdown("| Col |\n| --- |\n| val |"));
+    const result = stripAnsi(printText("| Col |\n| --- |\n| val |"));
     expect(result).toContain("│");
     expect(result).toContain("val");
   });
 });
 
 describe("renderTable - text wrapping", () => {
+  let savedColumns: number | undefined;
+
+  beforeEach(() => { savedColumns = process.stdout.columns; });
+  afterEach(() => { setColumns(savedColumns); });
+
   it("table that fits within maxWidth is not wrapped", () => {
-    const lines = [
-      "| A | B |",
-      "| --- | --- |",
-      "| short | text |",
-    ];
-    const result = stripAnsi(renderTable(lines, 80));
-    const outputLines = result.split("\n");
+    setColumns(80);
+    const tableMarkdown = "| A | B |\n| --- | --- |\n| short | text |";
+    const result = stripAnsi(printText(tableMarkdown));
+    const outputLines = result.split("\n").filter(l => l.startsWith("│") || l.startsWith("├"));
     expect(outputLines).toHaveLength(3); // header, divider, data row
   });
 
   it("each output line fits within maxWidth when wrapping needed", () => {
-    const lines = [
-      "| Bug | Root cause | Fix |",
-      "| --- | --- | --- |",
-      "| Short | A very long root cause explanation that exceeds the column width significantly | Short fix |",
-    ];
-    const result = stripAnsi(renderTable(lines, 60));
-    for (const line of result.split("\n")) {
-      expect(line.length).toBeLessThanOrEqual(60);
+    setColumns(60);
+    const tableMarkdown = "| Bug | Root cause | Fix |\n| --- | --- | --- |\n| Short | A very long root cause explanation that exceeds the column width significantly | Short fix |";
+    const result = stripAnsi(printText(tableMarkdown));
+    for (const line of result.split("\n").filter(Boolean)) {
+      if (line.startsWith("│") || line.startsWith("├")) {
+        expect(line.length).toBeLessThanOrEqual(60);
+      }
     }
   });
 
   it("all cell content is preserved after wrapping", () => {
-    const lines = [
-      "| Col A | Col B |",
-      "| --- | --- |",
-      "| short | this is a very long text that will need to be wrapped across multiple lines in the output |",
-    ];
-    const result = stripAnsi(renderTable(lines, 40));
-    // All words from the long cell should appear somewhere in the output
+    setColumns(40);
+    const tableMarkdown = "| Col A | Col B |\n| --- | --- |\n| short | this is a very long text that will need to be wrapped across multiple lines in the output |";
+    const result = stripAnsi(printText(tableMarkdown));
     expect(result).toContain("short");
     expect(result).toContain("this is a very long text");
     expect(result).toContain("multiple lines");
   });
 
   it("divider line fits within maxWidth", () => {
-    const lines = [
-      "| Bug | Root cause | Fix |",
-      "| --- | --- | --- |",
-      "| Short | Very long root cause text that needs wrapping here | Short |",
-    ];
-    const result = stripAnsi(renderTable(lines, 50));
+    setColumns(50);
+    const tableMarkdown = "| Bug | Root cause | Fix |\n| --- | --- | --- |\n| Short | Very long root cause text that needs wrapping here | Short |";
+    const result = stripAnsi(printText(tableMarkdown));
     const dividerLine = result.split("\n").find(l => l.startsWith("├"));
     expect(dividerLine).toBeDefined();
     expect(dividerLine!.length).toBeLessThanOrEqual(50);
   });
 
   it("short columns keep natural width when only wide column wraps", () => {
-    const lines = [
-      "| Name | Description |",
-      "| ---- | ----------- |",
-      "| Alice | A very long description that should wrap to multiple lines in the output |",
-    ];
-    const result = stripAnsi(renderTable(lines, 40));
+    setColumns(40);
+    const tableMarkdown = "| Name | Description |\n| ---- | ----------- |\n| Alice | A very long description that should wrap to multiple lines in the output |";
+    const result = stripAnsi(printText(tableMarkdown));
     expect(result).toContain("Alice");
     expect(result).toContain("A very long");
   });
 
   it("wrapped row has │ borders on every output line", () => {
-    const lines = [
-      "| A | B |",
-      "| - | - |",
-      "| x | this is a long cell that wraps |",
-    ];
-    const result = stripAnsi(renderTable(lines, 25));
+    setColumns(25);
+    const tableMarkdown = "| A | B |\n| - | - |\n| x | this is a long cell that wraps |";
+    const result = stripAnsi(printText(tableMarkdown));
     const dataLines = result.split("\n").filter(l => l.startsWith("│"));
-    // There should be more than one data line because of wrapping
     expect(dataLines.length).toBeGreaterThan(1);
     for (const line of dataLines) {
       expect(line).toMatch(/^│.*│$/);
@@ -295,71 +307,51 @@ describe("renderTable - text wrapping", () => {
 });
 
 describe("renderTable - inline formatting column widths", () => {
+  let savedColumns: number | undefined;
+
+  beforeEach(() => { savedColumns = process.stdout.columns; });
+  afterEach(() => { setColumns(savedColumns); });
+
   it("all rows have equal visible column widths when mixing bold and plain cells", () => {
-    // **Alice** is 9 raw chars but 5 visible; Bob is 3 visible
-    // Both columns should render with the same width (max visible = 5)
-    const lines = [
-      "| Name | Status |",
-      "| --- | --- |",
-      "| **Alice** | active |",
-      "| Bob | inactive |",
-    ];
-    const result = renderTable(lines, 80);
+    setColumns(80);
+    const tableMarkdown = "| Name | Status |\n| --- | --- |\n| **Alice** | active |\n| Bob | inactive |";
+    const result = printText(tableMarkdown);
     const rowLines = stripAnsi(result).split("\n").filter(l => l.startsWith("│"));
     const lengths = rowLines.map(l => l.length);
     expect(lengths.every(l => l === lengths[0])).toBe(true);
   });
 
   it("bold cell renders with ANSI bold codes in output", () => {
-    const lines = [
-      "| Name |",
-      "| --- |",
-      "| **Alice** |",
-    ];
-    const result = renderTable(lines, 80);
-    expect(result).toContain("\x1b[1m");
-    expect(stripAnsi(result)).toContain("Alice");
+    setColumns(80);
+    const tableMarkdown = "| Name |\n| --- |\n| **Alice** |";
+    const output = printText(tableMarkdown);
+    expect(output).toContain("\x1b[1m");
+    expect(stripAnsi(output)).toContain("Alice");
   });
 
   it("inline code in table cell renders with bold+underline", () => {
-    const lines = [
-      "| Command |",
-      "| --- |",
-      "| `git status` |",
-    ];
-    const result = renderTable(lines, 80);
-    expect(result).toContain("\x1b[1m");
-    expect(result).toContain("\x1b[4m");
-    expect(stripAnsi(result)).toContain("git status");
+    setColumns(80);
+    const tableMarkdown = "| Command |\n| --- |\n| `git status` |";
+    const output = printText(tableMarkdown);
+    expect(output).toContain("\x1b[1m");
+    expect(output).toContain("\x1b[4m");
+    expect(stripAnsi(output)).toContain("git status");
   });
 
   it("column width reflects visible length not raw markdown length", () => {
-    // A table with only one formatted cell; column width should equal
-    // the visible length of **bold** (4), not the raw length (9)
-    // Header "Col" is 3 chars, so column width = max(3, 4) = 4
-    const lines = [
-      "| Col |",
-      "| --- |",
-      "| **bold** |",
-    ];
-    const result = stripAnsi(renderTable(lines, 80));
+    setColumns(80);
+    const tableMarkdown = "| Col |\n| --- |\n| **bold** |";
+    const result = stripAnsi(printText(tableMarkdown));
     expect(result).toContain("bold");
-    // Divider for width=4: "├─" + "────" + "─┤" = "├──────┤"
     expect(result).toContain("├──────┤");
-    // Data row for "bold" padded to 4: "│ bold │" (no extra spaces)
     expect(result).toContain("│ bold │");
   });
 
   it("plain text rows still align with formatted rows", () => {
-    const lines = [
-      "| Name | Status |",
-      "| --- | --- |",
-      "| **Alice** | active |",
-      "| Bob | inactive |",
-    ];
-    const result = stripAnsi(renderTable(lines, 80));
+    setColumns(80);
+    const tableMarkdown = "| Name | Status |\n| --- | --- |\n| **Alice** | active |\n| Bob | inactive |";
+    const result = stripAnsi(printText(tableMarkdown));
     const rowLines = result.split("\n").filter(l => l.startsWith("│"));
-    // Each row must end with │ at the same position
     const lastPipe = rowLines.map(l => l.lastIndexOf("│"));
     expect(lastPipe.every(p => p === lastPipe[0])).toBe(true);
   });
@@ -367,8 +359,7 @@ describe("renderTable - inline formatting column widths", () => {
 
 describe("renderMarkdown - mixed content", () => {
   it("heading + paragraph + list all rendered", () => {
-    const input = "# Title\n\nSome text.\n\n- item1\n- item2";
-    const result = stripAnsi(renderMarkdown(input));
+    const result = stripAnsi(printText("# Title\n\nSome text.\n\n- item1\n- item2"));
     expect(result).toContain("TITLE");
     expect(result).toContain("Some text.");
     expect(result).toContain("• item1");
@@ -376,16 +367,14 @@ describe("renderMarkdown - mixed content", () => {
   });
 
   it("code block interior not processed as markdown", () => {
-    const input = "# Heading\n\n```\n# not a heading\n```\n\nafter";
-    const result = stripAnsi(renderMarkdown(input));
+    const result = stripAnsi(printText("# Heading\n\n```\n# not a heading\n```\n\nafter"));
     expect(result).toContain("HEADING");
     expect(result).toContain("  # not a heading");
     expect(result).toContain("after");
   });
 
   it("table followed by paragraph: table flushed, paragraph continues", () => {
-    const input = "| A |\n| - |\n| 1 |\n\nParagraph after";
-    const result = stripAnsi(renderMarkdown(input));
+    const result = stripAnsi(printText("| A |\n| - |\n| 1 |\n\nParagraph after"));
     expect(result).toContain("│");
     expect(result).toContain("Paragraph after");
   });

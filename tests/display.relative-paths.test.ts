@@ -2,14 +2,33 @@
  * Tests for toRelativePath() — strips cwd prefix from file paths before display.
  */
 import path from "path";
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { stripAnsi } from "./helpers.js";
-import { toRelativePath, resolve, TOOL_CALL_FMT, type FmtTable } from "../src/agent/views/display.js";
+import { getConfig } from "../src/config.js";
+import { toRelativePath, Display } from "../src/agent/views/display.js";
+import { StatusBar } from "../src/agent/views/status-bar.js";
 
-function r(table: FmtTable, key: string, data: any): string | null {
-  const result = resolve(table, key, data);
-  return result === null ? null : stripAnsi(result);
+let testDisplay: Display;
+
+function captureOutput(fn: () => void): string {
+  let output = "";
+  vi.spyOn(console, "log").mockImplementation((s: any) => { output += String(s) + "\n"; });
+  fn();
+  vi.restoreAllMocks();
+  return output;
 }
+
+beforeEach(() => {
+  testDisplay = new Display(getConfig(), new StatusBar({ agentId: "test-agent" }));
+  testDisplay.statusBar.stop();
+  getConfig().verbose = false;
+});
+
+afterEach(() => {
+  testDisplay.statusBar.stop();
+  getConfig().verbose = false;
+  vi.restoreAllMocks();
+});
 
 describe("toRelativePath()", () => {
   it("strips cwd prefix from path under cwd", () => {
@@ -45,51 +64,67 @@ describe("toRelativePath()", () => {
 describe("TOOL_CALL_FMT — relative paths for Read/Write/Edit", () => {
   it("Read: relativizes absolute path under cwd", () => {
     const abs = path.join(process.cwd(), "src/foreman.ts");
-    const result = r(TOOL_CALL_FMT, "Read", { input: { file_path: abs } });
-    expect(result).toContain("• Read(src/foreman.ts)");
-    expect(result).not.toContain(process.cwd());
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_use", id: "1", name: "Read", input: { file_path: abs } }, "assistant");
+    });
+    expect(stripAnsi(output)).toContain("• Read(src/foreman.ts)");
+    expect(stripAnsi(output)).not.toContain(process.cwd());
   });
 
   it("Read: keeps path outside cwd as-is", () => {
-    const result = r(TOOL_CALL_FMT, "Read", { input: { file_path: "/foo/bar.ts" } });
-    expect(result).toContain("• Read(/foo/bar.ts)");
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_use", id: "1", name: "Read", input: { file_path: "/foo/bar.ts" } }, "assistant");
+    });
+    expect(stripAnsi(output)).toContain("• Read(/foo/bar.ts)");
   });
 
   it("Write: relativizes absolute path under cwd", () => {
     const abs = path.join(process.cwd(), "src/output.ts");
-    const result = r(TOOL_CALL_FMT, "Write", { input: { file_path: abs } });
-    expect(result).toContain("• Write(src/output.ts)");
-    expect(result).not.toContain(process.cwd());
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_use", id: "1", name: "Write", input: { file_path: abs } }, "assistant");
+    });
+    expect(stripAnsi(output)).toContain("• Write(src/output.ts)");
+    expect(stripAnsi(output)).not.toContain(process.cwd());
   });
 
   it("Write: keeps path outside cwd as-is", () => {
-    const result = r(TOOL_CALL_FMT, "Write", { input: { file_path: "/foo/out.ts" } });
-    expect(result).toContain("• Write(/foo/out.ts)");
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_use", id: "1", name: "Write", input: { file_path: "/foo/out.ts" } }, "assistant");
+    });
+    expect(stripAnsi(output)).toContain("• Write(/foo/out.ts)");
   });
 
   it("Edit: relativizes absolute path under cwd", () => {
     const abs = path.join(process.cwd(), "src/edit.ts");
-    const result = r(TOOL_CALL_FMT, "Edit", { input: { file_path: abs } });
-    expect(result).toContain("• Edit(src/edit.ts)");
-    expect(result).not.toContain(process.cwd());
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_use", id: "1", name: "Edit", input: { file_path: abs } }, "assistant");
+    });
+    expect(stripAnsi(output)).toContain("• Edit(src/edit.ts)");
+    expect(stripAnsi(output)).not.toContain(process.cwd());
   });
 
   it("Edit: keeps path outside cwd as-is", () => {
-    const result = r(TOOL_CALL_FMT, "Edit", { input: { file_path: "/foo/edit.ts" } });
-    expect(result).toContain("• Edit(/foo/edit.ts)");
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_use", id: "1", name: "Edit", input: { file_path: "/foo/edit.ts" } }, "assistant");
+    });
+    expect(stripAnsi(output)).toContain("• Edit(/foo/edit.ts)");
   });
 });
 
 describe("TOOL_CALL_FMT — relative paths for Grep", () => {
   it("Grep: relativizes absolute path under cwd", () => {
     const abs = path.join(process.cwd(), "src");
-    const result = r(TOOL_CALL_FMT, "Grep", { input: { pattern: "foo", path: abs } });
-    expect(result).toContain("• grep foo src");
-    expect(result).not.toContain(process.cwd());
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_use", id: "1", name: "Grep", input: { pattern: "foo", path: abs } }, "assistant");
+    });
+    expect(stripAnsi(output)).toContain("• grep foo src");
+    expect(stripAnsi(output)).not.toContain(process.cwd());
   });
 
   it("Grep: keeps path outside cwd as-is", () => {
-    const result = r(TOOL_CALL_FMT, "Grep", { input: { pattern: "foo", path: "/src" } });
-    expect(result).toContain("• grep foo /src");
+    const output = captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_use", id: "1", name: "Grep", input: { pattern: "foo", path: "/src" } }, "assistant");
+    });
+    expect(stripAnsi(output)).toContain("• grep foo /src");
   });
 });
