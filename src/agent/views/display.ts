@@ -2,21 +2,18 @@ import type * as Wire from "../../../shared/wire.js";
 import type { StatusBar } from "./status-bar.js";
 import type { BrunelConfig } from "../../config.js";
 import { fmtTime, fmtArgs } from "../../../shared/formatters.js";
-import { c, s } from "./style.js";
-import {
-  type ToolUseBlock,
-  type ToolResultBlock,
-  type ContentBlock,
-  clearBreak as _clearBreak,
-  formatToolCall,
-  formatToolResult,
-  formatContentBlock,
-  formatSystemEvent,
-  formatMessageEvent,
-  formatForemanMessage,
+import { c, s, W } from "./style.js";
+import { Renderer } from "./renderer.js";
+import type {
+  ToolUseBlock,
+  ToolResultBlock,
+  ContentBlock,
 } from "./renderer.js";
 
 // ── Display class ──────────────────────────────────────────────────────────
+
+/** Visible width of the verbose timestamp prefix "HH:mm:ss " */
+const VERBOSE_PREFIX_LEN = 9;
 
 /**
  * View class for terminal I/O. Receives config in its constructor so config
@@ -36,15 +33,24 @@ export class Display {
 
   private readonly _toolUseNames = new Map<string, string>();
   private readonly _toolUseInputs = new Map<string, Record<string, unknown>>();
+  private readonly renderer: Renderer;
 
-  constructor(readonly config: BrunelConfig, readonly statusBar: StatusBar) {}
+  constructor(readonly config: BrunelConfig, readonly statusBar: StatusBar) {
+    this.renderer = new Renderer(this);
+  }
 
   /** Public accessor for tests to clear tool-use state between tests. */
   get toolUseNames(): Map<string, string> { return this._toolUseNames; }
 
+  get verbose(): boolean { return this.config.verbose; }
+
+  effectiveWidth(fallback = W): number {
+    return (process.stdout.columns ?? fallback) - (this.verbose ? VERBOSE_PREFIX_LEN : 0);
+  }
+
   /** Returns a styled "context cleared" divider string. */
   clearBreak(): string {
-    return _clearBreak(this.config.verbose);
+    return this.renderer.clearBreak();
   }
 
   private _printLine(line: string): void {
@@ -87,19 +93,19 @@ export class Display {
       const tu = b as ToolUseBlock;
       this._toolUseNames.set(tu.id, tu.name);
       this._toolUseInputs.set(tu.id, tu.input);
-      this.print(formatToolCall(tu));
+      this.print(this.renderer.formatToolCall(tu));
       return;
     }
     if (b.type === "tool_result") {
       const tr = b as ToolResultBlock;
       const name = this._toolUseNames.get(tr.tool_use_id) ?? "";
       const _input = this._toolUseInputs.get(tr.tool_use_id);
-      this.print(formatToolResult({ ...tr, _input }, name, msg, this.config.verbose));
+      this.print(this.renderer.formatToolResult({ ...tr, _input }, name, msg));
       // Fire after the tool result is printed — tool has just finished running.
       this.statusBar.fireOnToolResult(name);
       return;
     }
-    this.print(formatContentBlock(b, role, !!(msg?.isSynthetic), this.config.thinkOutLoud));
+    this.print(this.renderer.formatContentBlock(b, role, !!(msg?.isSynthetic), this.config.thinkOutLoud));
   }
 
   /** Print a full SDK message (system, assistant, user, result, etc.). */
@@ -111,7 +117,7 @@ export class Display {
 
     if (m.type === "system") {
       const subtype = typeof m.subtype === "string" ? m.subtype : "_default";
-      this.print(formatSystemEvent(subtype, m, this.config.verbose));
+      this.print(this.renderer.formatSystemEvent(subtype, m));
       return;
     }
 
@@ -119,17 +125,17 @@ export class Display {
       const role = m.type as "assistant" | "user";
       const message = m.message as { content?: ContentBlock[] } | undefined;
       const content = message?.content ?? [];
-      if (!content.length) { this.print(formatMessageEvent("_empty", m)); return; }
+      if (!content.length) { this.print(this.renderer.formatMessageEvent("_empty", m)); return; }
       for (const b of content) this.printBlock(b, role, m);
       return;
     }
 
     const type = typeof m.type === "string" ? m.type : "_default";
-    this.print(formatMessageEvent(type, m));
+    this.print(this.renderer.formatMessageEvent(type, m));
   }
 
   /** Print a foreman→worker wire message. */
   printForemanMessage(msg: Wire.ForemanMessage): void {
-    this.print(formatForemanMessage(msg, this.config.verbose));
+    this.print(this.renderer.formatForemanMessage(msg));
   }
 }
