@@ -519,16 +519,19 @@ export class ForemanWss {
     return routeResult(null);
   }
 
-  async routeIssueEvent(p: R, evt: WebhookEvent, issue: R, issueNumber: number): Promise<RouteResult> {
+  /**
+   * Phase 1: apply foreman-side effects for an issue event.
+   * Returns the task to forward to the worker, or null to skip notification.
+   * Returning null is an explicit signal: newly-enqueued tasks have no worker yet,
+   * unlabeled doesn't need worker notification, and errors skip forwarding to avoid
+   * notifying the worker of state the foreman failed to record.
+   */
+  private async applyIssueEffects(p: R, issue: R, issueNumber: number): Promise<Task | null> {
     let task = await Task.getByIssue(issueNumber);
     // GitHub issue_comment events on PRs have the PR number in issue.number.
     if (!task) task = await Task.getByPr(issueNumber);
 
     const action = p.action as string | undefined;
-
-    // Phase 1: foreman-side effects.
-    // Return early only when there is genuinely nothing to forward: no task tracked,
-    // or "unlabeled" (worker doesn't need to know the label was removed).
 
     if (!task) {
       // Check if this webhook should enqueue a new task.
@@ -551,9 +554,9 @@ export class ForemanWss {
           log(`ERROR Failed to persist task #${issueNumber}: ${fmtError(err)}`);
           return null;
         });
-        if (!enqueued) return routeResult(null);
+        if (!enqueued) return null;
         log(`[task #${issueNumber}] enqueued via issues/${action}`);
-        return routeResult(enqueued);
+        return enqueued; // returned for routeResult; forwardEvent will queue it (no worker yet)
       }
       // No task found and not an enqueue event — still fall through so closed/reopened
       // can update blocker state (issue may be a dependency, not a task itself).
@@ -563,16 +566,15 @@ export class ForemanWss {
       action === "unlabeled" &&
       (p.label as R | undefined)?.name === this.config.taskLabel
     ) {
-      // Explicit early return: worker doesn't need to know the label was removed.
       try {
         await this.taskManager.dequeueIssue(issueNumber);
         log(`[task #${issueNumber}] dequeued (label removed)`);
       } catch (err) {
         log(`ERROR Failed to dequeue task #${issueNumber}: ${fmtError(err)}`);
-        return routeResult(task);
+        return null; // error: skip notification
       }
       await this.assignWork();
-      return routeResult(task);
+      return null; // worker doesn't need to know the label was removed
     }
 
     if (action === "closed") {
@@ -580,7 +582,7 @@ export class ForemanWss {
         await this.taskManager.closeIssue(issueNumber);
       } catch (err) {
         log(`ERROR Failed to close issue #${issueNumber}: ${fmtError(err)}`);
-        return routeResult(task);
+        return null; // error: skip notification to avoid inconsistency
       }
       await this.assignWork();
     }
@@ -590,7 +592,7 @@ export class ForemanWss {
         await this.taskManager.reopenIssue(issueNumber);
       } catch (err) {
         log(`ERROR Failed to reopen issue #${issueNumber}: ${fmtError(err)}`);
-        return routeResult(task);
+        return null; // error: skip notification to avoid inconsistency
       }
       await this.assignWork();
     }
@@ -605,10 +607,13 @@ export class ForemanWss {
       }
     }
 
-    // Phase 2: forward to worker. Forwarding is the default; skipping requires an explicit return above.
-    // No task means there is no worker to notify (e.g., event was for a dependency issue).
-    if (!task) return routeResult(null);
-    this.forwardEvent(task, evt, `#${issueNumber}`);
+    return task; // null if no task (e.g., dependency issue — nothing to forward)
+  }
+
+  /** Phase 2: always invoked; forwards to the worker iff phase 1 found a task to notify. */
+  async routeIssueEvent(p: R, evt: WebhookEvent, issue: R, issueNumber: number): Promise<RouteResult> {
+    const task = await this.applyIssueEffects(p, issue, issueNumber);
+    if (task) this.forwardEvent(task, evt, `#${issueNumber}`);
     return routeResult(task);
   }
 
