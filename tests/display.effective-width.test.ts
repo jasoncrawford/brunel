@@ -34,14 +34,14 @@ describe("clearBreak() - verbose mode reduces width", () => {
   it("verbose=false: divider fills full terminal width", () => {
     getConfig().verbose = false;
     const expectedWidth = process.stdout.columns ?? W;
-    const lines = stripAnsi(display.clearBreak()).split("\n");
+    const lines = stripAnsi(display.renderer.clearBreak()).split("\n");
     expect(lines[1]).toHaveLength(expectedWidth);
   });
 
   it("verbose=true: divider is narrower by 9 (verbose timestamp prefix)", () => {
     getConfig().verbose = true;
     const expectedWidth = (process.stdout.columns ?? W) - 9;
-    const lines = stripAnsi(display.clearBreak()).split("\n");
+    const lines = stripAnsi(display.renderer.clearBreak()).split("\n");
     expect(lines[1]).toHaveLength(expectedWidth);
   });
 });

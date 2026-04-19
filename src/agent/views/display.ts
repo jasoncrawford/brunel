@@ -33,7 +33,7 @@ export class Display {
 
   private readonly _toolUseNames = new Map<string, string>();
   private readonly _toolUseInputs = new Map<string, Record<string, unknown>>();
-  private readonly renderer: Renderer;
+  readonly renderer: Renderer;
 
   constructor(readonly config: BrunelConfig, readonly statusBar: StatusBar) {
     this.renderer = new Renderer(this);
@@ -46,11 +46,6 @@ export class Display {
 
   effectiveWidth(fallback = W): number {
     return (process.stdout.columns ?? fallback) - (this.verbose ? VERBOSE_PREFIX_LEN : 0);
-  }
-
-  /** Returns a styled "context cleared" divider string. */
-  clearBreak(): string {
-    return this.renderer.clearBreak();
   }
 
   private _printLine(line: string): void {
