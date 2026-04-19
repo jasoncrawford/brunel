@@ -556,7 +556,7 @@ export class ForemanWss {
         });
         if (!enqueued) return null;
         log(`[task #${issueNumber}] enqueued via issues/${action}`);
-        return enqueued; // returned for routeResult; forwardEvent will queue it (no worker yet)
+        return null; // task just enqueued; no worker assigned yet, nothing to forward
       }
       // No task found and not an enqueue event — still fall through so closed/reopened
       // can update blocker state (issue may be a dependency, not a task itself).

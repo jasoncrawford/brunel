@@ -334,7 +334,7 @@ describe("routeCheckEvent — via branch name", () => {
 // ── routeIssueEvent ───────────────────────────────────────────────────────────
 
 describe("routeIssueEvent — enqueue on labeled", () => {
-  it("calls handleIssueLabeledEvent and returns the enqueued task", async () => {
+  it("calls handleIssueLabeledEvent and logs enqueue; returns null (no worker assigned yet)", async () => {
     const task = Task.fromTest({ task_id: "42", issue_number: 42 });
     const { wss, taskManager } = makeDeps();
     taskManager.handleIssueLabeledEvent.mockResolvedValue(task);
@@ -348,7 +348,7 @@ describe("routeIssueEvent — enqueue on labeled", () => {
     expect(taskManager.handleIssueLabeledEvent).toHaveBeenCalledWith(
       42, "Do something", "details", ["brunel:ready"], "open",
     );
-    expect(result).toEqual({ taskId: "42", workerId: null });
+    expect(result).toEqual({ taskId: null, workerId: null });
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("enqueued via issues/labeled"));
   });
 
@@ -381,7 +381,7 @@ describe("routeIssueEvent — enqueue on labeled", () => {
 });
 
 describe("routeIssueEvent — enqueue on opened", () => {
-  it("calls handleIssueLabeledEvent when opened with the task label already attached", async () => {
+  it("calls handleIssueLabeledEvent when opened with the task label already attached; returns null (no worker yet)", async () => {
     const task = Task.fromTest({ task_id: "42", issue_number: 42 });
     const { wss, taskManager } = makeDeps();
     taskManager.handleIssueLabeledEvent.mockResolvedValue(task);
@@ -393,7 +393,7 @@ describe("routeIssueEvent — enqueue on opened", () => {
       42,
     );
     expect(taskManager.handleIssueLabeledEvent).toHaveBeenCalled();
-    expect(result).toEqual({ taskId: "42", workerId: null });
+    expect(result).toEqual({ taskId: null, workerId: null });
   });
 
   it("does not call handleIssueLabeledEvent when opened without the task label", async () => {
