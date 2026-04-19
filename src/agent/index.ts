@@ -7,7 +7,7 @@ import { c, hr } from "./views/style.js";
 import { StatusBar } from "./views/status-bar.js";
 import { Input } from "./views/input.js";
 import { Picker } from "./views/picker.js";
-import { WorkerSession, registerWorkerCommands, startWorkerMode } from "./controllers/worker-controller.js";
+import { registerWorkerCommands, startWorkerMode, WorkerSession } from "./controllers/worker-controller.js";
 import type { RunQuery } from "./controllers/worker-controller.js";
 import { loadConfig, getConfig } from "../config.js";
 import { Workspace } from "./models/workspace.js";
@@ -162,23 +162,40 @@ export async function main(
     }
   };
 
-  // In worker mode, the prompt starts hidden — the agent waits for the foreman
-  // to assign a task and is not ready for interactive input until then.
-  let showPrompt = !session;
+  // ── Session event subscriptions ───────────────────────────────────────────
+  // Subscribe to session events once at startup. Both events cancel any live
+  // ask() so the routing loop wakes up and can drain queued prompts or drop
+  // back to interactive mode.
+
+  if (session) {
+    session.on("prompts_ready", () => { input.cancel(); });
+    session.on("fatal", () => { input.cancel(); });
+  }
 
   // ── Routing loop ─────────────────────────────────────────────────────────
   // Takes input from the user or foreman and routes each event to the right handler:
   //   command       → execute the registered command handler
   //   user prompt   → run a query via runQueryFn (AgentController.runQuery)
-  //   foreman signal → worker controller (WorkerSession) provides the next prompt
+  //   foreman event → WorkerSession emits "prompts_ready", ask() is cancelled,
+  //                   loop drains queued prompts then resumes waiting for input
 
   while (true) {
-    const wsAbort = session?.createWsInputPromise();
-    // Use an empty prompt string when not ready for interactive input. An
-    // empty promptLine suppresses the drawFresh callback so incoming messages
-    // are printed cleanly without a prompt preceding or following them.
-    const promptStr = session ? (showPrompt ? "\n[agent] > " : "") : "\n> ";
-    const userInput = await input.ask(promptStr, () => controller.listCommands(), wsAbort);
+    // Drain any foreman prompts that arrived between iterations (handles the
+    // case where "prompts_ready" fired before ask() was active).
+    if (session?.hasPendingPrompts()) {
+      await drainPendingPrompts();
+      continue;
+    }
+
+    const promptStr = session ? "\n[agent] > " : "\n> ";
+    const userInput = await input.ask(promptStr, () => controller.listCommands());
+
+    // ask() was cancelled by a session event ("prompts_ready" or "fatal").
+    // Drain any queued prompts (no-op for "fatal") and loop back.
+    if (userInput === null) {
+      await drainPendingPrompts();
+      continue;
+    }
 
     // ^D / ^C on empty buffer — treat as exit.
     if (userInput === "__eof__") {
@@ -190,26 +207,6 @@ export async function main(
         if (choice === "complete-and-quit") await session.completeCurrentTask();
       }
       break;
-    }
-
-    // Ignore the internal abort sentinel (fired when wsAbort resolves at the
-    // same tick as the ask() call; never a user action).
-    if (userInput === "__abort__") continue;
-
-    // WS_FATAL: a fatal foreman_error was received — drop back to interactive REPL.
-    if (WorkerSession.isFatalSignal(userInput)) {
-      showPrompt = true;
-      continue;
-    }
-
-    // WS_PROMPT: a task prompt or debounced event prompt is ready. Hide the
-    // prompt, drain all queued prompts through runQueryFn, then show the prompt
-    // again. Stops draining if a prompt is interrupted or errors.
-    if (WorkerSession.isWsSignal(userInput)) {
-      showPrompt = false;
-      await drainPendingPrompts();
-      showPrompt = true;
-      continue;
     }
 
     const action = await controller.dispatch(userInput);
@@ -224,7 +221,6 @@ export async function main(
     if (action.type === "command") {
       const result = await registry.execute(action.name, action.args);
       if (result === "exit") break;
-      if (result === "task-complete") showPrompt = false;
       continue;
     }
 

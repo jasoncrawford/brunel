@@ -425,15 +425,27 @@ describe("ask() - bracketed paste", () => {
   });
 });
 
-describe("ask() - abort parameter", () => {
-  it("resolves with abort value when abort promise fires first", async () => {
+describe("ask() - cancel()", () => {
+  it("cancel() while ask() is running resolves with null", async () => {
     await withFakeStdin(async () => {
-      let resolveAbort!: (v: string) => void;
-      const abort = new Promise<string>((r) => { resolveAbort = r; });
-      const result = testInput.ask("> ", undefined, abort);
-      // Fire abort before any stdin input
-      resolveAbort("__abort__");
-      expect(await result).toBe("__abort__");
+      const p = testInput.ask("> ", () => []);
+      testInput.cancel();
+      expect(await p).toBeNull();
+    });
+  });
+
+  it("cancel() before ask() is called is a no-op", () => {
+    // Should not throw
+    expect(() => testInput.cancel()).not.toThrow();
+  });
+
+  it("cancel() after ask() resolves is a no-op", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = testInput.ask("> ", () => []);
+      stdin.push("hello\r");
+      await p;
+      // After resolution, cancel should be a no-op
+      expect(() => testInput.cancel()).not.toThrow();
     });
   });
 });
@@ -525,20 +537,17 @@ describe("ask() - drawFresh after print()", () => {
 });
 
 describe("ask() - blank line suppression with \\n prefix prompt", () => {
-  it("abort via promise with \\n prefix does NOT write \\r\\n\\x1b[J (no separator line)", async () => {
-    // When ask() is aborted by a WS event the old code called submit() which
-    // always wrote \r\n\x1b[J. That separator line is never consumed (no status
-    // bar runs after a WS-triggered abort) and accumulates as blank lines on
-    // each abort/re-prompt cycle (issue #418).
+  it("cancel() with \\n prefix does NOT write \\r\\n\\x1b[J (no separator line)", async () => {
+    // When ask() is cancelled by a session event, the cleanup must NOT write
+    // \r\n\x1b[J. That separator line is never consumed (no status bar runs
+    // after a cancel) and accumulates as blank lines on each cancel/re-prompt
+    // cycle (issue #418).
     const writeSpy = vi.mocked(process.stdout.write);
 
-    let resolveAbort!: (v: string) => void;
-    const abortP = new Promise<string>((res) => { resolveAbort = res; });
-
     await withFakeStdin(async (_stdin) => {
-      const p = testInput.ask("\n> ", () => [], abortP);
+      const p = testInput.ask("\n> ", () => []);
       writeSpy.mockClear();
-      resolveAbort("WS_EVENT");
+      testInput.cancel();
       await p;
     });
 
@@ -546,19 +555,16 @@ describe("ask() - blank line suppression with \\n prefix prompt", () => {
     expect(writes).not.toContain("\r\n\x1b[J");
   });
 
-  it("abort via promise with \\n prefix writes cursor-up to clear the blank line", async () => {
-    // The abort cleanup should go up 1 row to erase the blank line that the
+  it("cancel() with \\n prefix writes cursor-up to clear the blank line", async () => {
+    // The cancel cleanup should go up 1 row to erase the blank line that the
     // \n prefix wrote when ask() was first called, so the next prompt starts
     // at the same vertical position and blank lines do not accumulate.
     const writeSpy = vi.mocked(process.stdout.write);
 
-    let resolveAbort!: (v: string) => void;
-    const abortP = new Promise<string>((res) => { resolveAbort = res; });
-
     await withFakeStdin(async (_stdin) => {
-      const p = testInput.ask("\n> ", () => [], abortP);
+      const p = testInput.ask("\n> ", () => []);
       writeSpy.mockClear();
-      resolveAbort("WS_EVENT");
+      testInput.cancel();
       await p;
     });
 

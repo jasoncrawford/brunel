@@ -108,17 +108,17 @@ describe("task_assigned", () => {
 // ── Event handling during a running query ─────────────────────────────────────
 
 describe("event_notification", () => {
-  it("resolves WS input promise when actionable event_notification fires after debounce", async () => {
+  it("emits 'prompts_ready' when actionable event_notification fires after debounce", async () => {
     vi.useFakeTimers();
     // Must assign a task first so the debounce fires (requires currentTaskId to be set).
     sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
     session.takeNextPrompt(); // consume initial prompt
 
-    const promise = session.createWsInputPromise();
+    const onPromptsReady = vi.fn();
+    session.on("prompts_ready", onPromptsReady);
     sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
     await vi.runAllTimersAsync();
-    const result = await promise;
-    expect(result).toBeTruthy();
+    expect(onPromptsReady).toHaveBeenCalled();
   });
 
   it("queues event when event_notification arrives during a running query; drains after query ends", () => {
@@ -260,7 +260,7 @@ describe("state after task_complete", () => {
 
 // ── Prompt queuing API ────────────────────────────────────────────────────────
 
-describe("hasPendingPrompts / takeNextPrompt / createWsInputPromise", () => {
+describe("hasPendingPrompts / takeNextPrompt / prompts_ready event", () => {
   it("hasPendingPrompts is false initially", () => {
     expect(session.hasPendingPrompts()).toBe(false);
   });
@@ -269,31 +269,11 @@ describe("hasPendingPrompts / takeNextPrompt / createWsInputPromise", () => {
     expect(session.takeNextPrompt()).toBeUndefined();
   });
 
-  it("createWsInputPromise resolves immediately if prompts already queued", async () => {
+  it("emits 'prompts_ready' synchronously when task_assigned arrives", () => {
+    const onPromptsReady = vi.fn();
+    session.on("prompts_ready", onPromptsReady);
     sendMsg(fakeWs, { type: "task_assigned", taskId: "1", issue: makeIssue() });
-    // Prompt is now queued; new promise should resolve immediately
-    const p = session.createWsInputPromise();
-    const result = await Promise.race([p, new Promise<"pending">((r) => setTimeout(() => r("pending"), 10))]);
-    expect(result).not.toBe("pending");
-  });
-
-  it("createWsInputPromise resolves when task_assigned arrives", async () => {
-    const promise = session.createWsInputPromise();
-    sendMsg(fakeWs, { type: "task_assigned", taskId: "1", issue: makeIssue() });
-    expect(await promise).toBeTruthy();
-  });
-
-  it("each new createWsInputPromise abandons the previous one", async () => {
-    const first = session.createWsInputPromise();
-    const second = session.createWsInputPromise();
-
-    sendMsg(fakeWs, { type: "task_assigned", taskId: "1", issue: makeIssue() });
-
-    // second gets resolved
-    expect(await second).toBeTruthy();
-    // first was abandoned and never resolves
-    const firstResult = await Promise.race([first, new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 20))]);
-    expect(firstResult).toBe("timeout");
+    expect(onPromptsReady).toHaveBeenCalledOnce();
   });
 
   it("task_assigned prompt has fresh=true (signals main() to reset sessionId)", () => {
@@ -876,14 +856,12 @@ describe("log_only event filtering", () => {
     }
   });
 
-  it("log_only event does not resolve WS input promise", async () => {
-    const promise = session.createWsInputPromise();
+  it("log_only event does not emit 'prompts_ready'", async () => {
+    const onPromptsReady = vi.fn();
+    session.on("prompts_ready", onPromptsReady);
     sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: { id: "e1", name: "check_run", payload: { action: "completed" } } });
-    const result = await Promise.race([
-      promise,
-      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 30)),
-    ]);
-    expect(result).toBe("timeout");
+    await new Promise<void>((r) => setTimeout(r, 30));
+    expect(onPromptsReady).not.toHaveBeenCalled();
   });
 
   it("issue_comment from railway-bot is silently dropped (log_only)", async () => {
@@ -1273,11 +1251,11 @@ describe("foreman_error", () => {
     }
   });
 
-  it("fatal: resolves WS input promise with the fatal sentinel", async () => {
-    const wsInput = session.createWsInputPromise();
+  it("fatal: emits 'fatal' event", () => {
+    const onFatal = vi.fn();
+    session.on("fatal", onFatal);
     sendMsg(fakeWs, { type: "foreman_error", message: "Catastrophic failure", fatal: true });
-    const result = await wsInput;
-    expect(WorkerSession.isFatalSignal(result)).toBe(true);
+    expect(onFatal).toHaveBeenCalledOnce();
   });
 
   it("fatal: does not reconnect after ws closes", async () => {
@@ -1309,13 +1287,11 @@ describe("foreman_error", () => {
     );
   });
 
-  it("isFatalSignal returns true for the fatal sentinel and false for others", async () => {
-    const wsInput = session.createWsInputPromise();
-    sendMsg(fakeWs, { type: "foreman_error", message: "Fatal", fatal: true });
-    const sentinel = await wsInput;
-    expect(WorkerSession.isFatalSignal(sentinel)).toBe(true);
-    expect(WorkerSession.isFatalSignal("")).toBe(false);
-    expect(WorkerSession.isWsSignal(sentinel)).toBe(false);
+  it("non-fatal: does not emit 'fatal' event", () => {
+    const onFatal = vi.fn();
+    session.on("fatal", onFatal);
+    sendMsg(fakeWs, { type: "foreman_error", message: "Transient", fatal: false });
+    expect(onFatal).not.toHaveBeenCalled();
   });
 });
 
