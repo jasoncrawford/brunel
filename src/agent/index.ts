@@ -149,6 +149,19 @@ export async function main(
     }
   };
 
+  /**
+   * Drain all pending foreman prompts through runQueryFn. Stops draining if a
+   * prompt is interrupted or errors.
+   */
+  const drainPendingPrompts = async (): Promise<void> => {
+    while (session?.hasPendingPrompts()) {
+      const item = session.takeNextPrompt()!;
+      if (item.fresh) sessionId = undefined; // new task → fresh conversation
+      const ok = await runPrompt(item.prompt);
+      if (!ok) break;
+    }
+  };
+
   // In worker mode, the prompt starts hidden — the agent waits for the foreman
   // to assign a task and is not ready for interactive input until then.
   let showPrompt = !session;
@@ -194,12 +207,7 @@ export async function main(
     // again. Stops draining if a prompt is interrupted or errors.
     if (WorkerSession.isWsSignal(userInput)) {
       showPrompt = false;
-      while (session?.hasPendingPrompts()) {
-        const item = session.takeNextPrompt()!;
-        if (item.fresh) sessionId = undefined; // new task → fresh conversation
-        const ok = await runPrompt(item.prompt);
-        if (!ok) break;
-      }
+      await drainPendingPrompts();
       showPrompt = true;
       continue;
     }
@@ -226,14 +234,7 @@ export async function main(
     await runPrompt(action.prompt);
 
     // Drain any foreman prompts that arrived during the user's query.
-    if (session) {
-      while (session.hasPendingPrompts()) {
-        const item = session.takeNextPrompt()!;
-        if (item.fresh) sessionId = undefined;
-        const ok = await runPrompt(item.prompt);
-        if (!ok) break;
-      }
-    }
+    await drainPendingPrompts();
   }
 
   // Worker mode post-loop: send goodbye, destroy workspace, tear down I/O, exit.
