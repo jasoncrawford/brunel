@@ -13,7 +13,6 @@ function makeStdin() {
 }
 
 let origStdin: NodeJS.ReadStream;
-let origColumns: number | undefined;
 
 function withFakeStdin(fn: (stdin: PassThrough) => Promise<void>): Promise<void> {
   const stdin = makeStdin();
@@ -24,7 +23,7 @@ function withFakeStdin(fn: (stdin: PassThrough) => Promise<void>): Promise<void>
 }
 
 function setColumns(n: number) {
-  Object.defineProperty(process.stdout, "columns", { value: n, configurable: true, writable: true });
+  testDisplay.getColumns = () => n;
 }
 
 function collectOutput(spy: ReturnType<typeof vi.spyOn>): string {
@@ -38,15 +37,11 @@ beforeEach(() => {
   testDisplay = new Display(getConfig(), new StatusBar({ agentId: "test-agent" }));
   testInput = new Input(testDisplay);
   origStdin = process.stdin;
-  origColumns = process.stdout.columns;
   vi.spyOn(process.stdout, "write").mockImplementation(() => true);
 });
 
 afterEach(() => {
   Object.defineProperty(process, "stdin", { value: origStdin, configurable: true });
-  if (origColumns !== undefined) {
-    setColumns(origColumns);
-  }
   vi.restoreAllMocks();
 });
 

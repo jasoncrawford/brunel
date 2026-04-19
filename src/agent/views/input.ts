@@ -120,7 +120,7 @@ export class Input {
   // Row 0 is the line that contains the visual start of the prompt.
 
   private _screenPosOf(pos: number): { row: number; col: number } {
-    const cols = process.stdout.columns || 80;
+    const cols = this.display.getColumns() || 80;
     // Pasted newlines are rendered as \r\n    (CR + LF + 4-space indent)
     const disp = this._buffer.slice(0, pos).replace(/\n/g, "\r\n    ");
     let row = 0;
@@ -140,7 +140,7 @@ export class Input {
 
   private _renderSuggestions(suggestions: CommandSuggestion[], selIdx = -1): string[] {
     if (suggestions.length === 0) return [];
-    const cols = process.stdout.columns || 80;
+    const cols = this.display.getColumns() || 80;
     const maxNameLen = Math.max(...suggestions.map(s => s.name.length));
     return suggestions.map((s, i) => {
       const isSelected = i === selIdx;

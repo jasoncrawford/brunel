@@ -21,7 +21,7 @@ function printText(text: string): string {
 }
 
 const setColumns = (n: number | undefined) => {
-  Object.defineProperty(process.stdout, "columns", { value: n, writable: true, configurable: true });
+  testDisplay.getColumns = () => n;
 };
 
 beforeEach(() => {
@@ -244,10 +244,6 @@ describe("renderMarkdown - tables", () => {
 });
 
 describe("renderTable - text wrapping", () => {
-  let savedColumns: number | undefined;
-
-  beforeEach(() => { savedColumns = process.stdout.columns; });
-  afterEach(() => { setColumns(savedColumns); });
 
   it("table that fits within maxWidth is not wrapped", () => {
     setColumns(80);
@@ -307,10 +303,6 @@ describe("renderTable - text wrapping", () => {
 });
 
 describe("renderTable - inline formatting column widths", () => {
-  let savedColumns: number | undefined;
-
-  beforeEach(() => { savedColumns = process.stdout.columns; });
-  afterEach(() => { setColumns(savedColumns); });
 
   it("all rows have equal visible column widths when mixing bold and plain cells", () => {
     setColumns(80);

@@ -19,8 +19,9 @@ function getStatus(opts: {
   disconnectCode?: number;
   reconnectAt?: number;
   verbose?: boolean;
+  getColumns?: () => number | undefined;
 }): string {
-  const bar = new StatusBar({ agentId: opts.agentId });
+  const bar = new StatusBar({ agentId: opts.agentId, getColumns: opts.getColumns });
   if (opts.verbose !== undefined) getConfig().verbose = opts.verbose;
   bar.update({
     connectionStatus: opts.connectionStatus,
@@ -52,25 +53,19 @@ describe("StatusBar status text", () => {
   });
 
   it("with task, PR, and branch", () => {
-    const origColumns = Object.getOwnPropertyDescriptor(process.stdout, "columns");
-    Object.defineProperty(process.stdout, "columns", { value: 120, configurable: true });
-    try {
-      const result = getStatus({
-        agentId: "7c254628-abcd-1234-efgh-000000000000",
-        taskNumber: 374,
-        prNumber: 406,
-        branch: "db-single-source-of-truth",
-        connectionStatus: "connected",
-      });
-      expect(result).toContain("worker 7c254628");
-      expect(result).toContain("task #374");
-      expect(result).toContain("PR #406");
-      expect(result).toContain("db-single-source-of-truth");
-      expect(result).toContain("Connected");
-    } finally {
-      if (origColumns) Object.defineProperty(process.stdout, "columns", origColumns);
-      else delete (process.stdout as { columns?: number }).columns;
-    }
+    const result = getStatus({
+      agentId: "7c254628-abcd-1234-efgh-000000000000",
+      taskNumber: 374,
+      prNumber: 406,
+      branch: "db-single-source-of-truth",
+      connectionStatus: "connected",
+      getColumns: () => 120,
+    });
+    expect(result).toContain("worker 7c254628");
+    expect(result).toContain("task #374");
+    expect(result).toContain("PR #406");
+    expect(result).toContain("db-single-source-of-truth");
+    expect(result).toContain("Connected");
   });
 
   it("disconnected shows Disconnected on right", () => {
@@ -161,25 +156,15 @@ describe("StatusBar status text", () => {
   });
 
   it("result fits within terminal width", () => {
-    const origColumns = Object.getOwnPropertyDescriptor(process.stdout, "columns");
-    Object.defineProperty(process.stdout, "columns", { value: 80, configurable: true });
-    try {
-      const result = getStatus({
-        agentId: "7c254628-abcd-1234-efgh-000000000000",
-        taskNumber: 374,
-        prNumber: 406,
-        branch: "my-very-long-branch-name-that-is-quite-verbose",
-        connectionStatus: "connected",
-      });
-      expect(result.length).toBe(79); // width - 1 (last-column wrap avoidance)
-    } finally {
-      if (origColumns) {
-        Object.defineProperty(process.stdout, "columns", origColumns);
-      } else {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        delete (process.stdout as any).columns;
-      }
-    }
+    const result = getStatus({
+      agentId: "7c254628-abcd-1234-efgh-000000000000",
+      taskNumber: 374,
+      prNumber: 406,
+      branch: "my-very-long-branch-name-that-is-quite-verbose",
+      connectionStatus: "connected",
+      getColumns: () => 80,
+    });
+    expect(result.length).toBe(79); // width - 1 (last-column wrap avoidance)
   });
 
   it("shows 'sonnet' when model is undefined", () => {

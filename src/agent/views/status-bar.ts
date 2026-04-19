@@ -70,9 +70,16 @@ export class StatusBar extends EventEmitter {
   // prompt area including any leading blank line (see issue #418).
   inputClear: (() => void) | null = null;
 
-  constructor({ agentId, settings, ...initial }: { agentId: string; settings?: Settings } & Omit<WorkerStatusPatch, "reconnectAt">) {
+  /**
+   * Returns the current terminal column count. Defaults to reading
+   * `process.stdout.columns`; override in tests to avoid global patching.
+   */
+  getColumns: () => number | undefined = () => process.stdout.columns;
+
+  constructor({ agentId, settings, getColumns, ...initial }: { agentId: string; settings?: Settings; getColumns?: () => number | undefined } & Omit<WorkerStatusPatch, "reconnectAt">) {
     super();
     this.agentId = agentId;
+    if (getColumns) this.getColumns = getColumns;
     if ("connectionStatus" in initial) this._connectionStatus = initial.connectionStatus!;
     if ("disconnectCode" in initial) this._disconnectCode = initial.disconnectCode;
     if ("taskNumber" in initial) this._taskNumber = initial.taskNumber;
@@ -142,7 +149,7 @@ export class StatusBar extends EventEmitter {
   }
 
   private _fmtWorkerStatus(): string {
-    const width = (process.stdout.columns ?? W) - 1; // -1 to avoid last-column wrap
+    const width = (this.getColumns() ?? W) - 1; // -1 to avoid last-column wrap
 
     // Right side: connection status
     const retryInSeconds = this._reconnectAt != null
