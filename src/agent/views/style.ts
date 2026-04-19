@@ -10,18 +10,6 @@
 export const W = 70;
 export const hr = (ch = "─") => ch.repeat(W);
 
-/** Visible width of the verbose timestamp prefix "HH:mm:ss " */
-export const VERBOSE_PREFIX_LEN = 9;
-
-/**
- * Returns the usable terminal width, accounting for the verbose timestamp
- * prefix when verbose mode is active. Pass `verbose` from the caller's
- * config rather than reading it here so this module stays dependency-free.
- */
-export function effectiveWidth(fallback = W, verbose = false): number {
-  return (process.stdout.columns ?? fallback) - (verbose ? VERBOSE_PREFIX_LEN : 0);
-}
-
 // ── Colors ─────────────────────────────────────────────────────────────────
 
 export const c = {

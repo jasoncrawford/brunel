@@ -1,32 +1,22 @@
 import type * as Wire from "../../../shared/wire.js";
 import type { StatusBar } from "./status-bar.js";
-import { getConfig } from "../../config.js";
 import type { BrunelConfig } from "../../config.js";
 import { fmtTime, fmtArgs } from "../../../shared/formatters.js";
-import { c, s, W, effectiveWidth as _effectiveWidth } from "./style.js";
+import { c, s } from "./style.js";
 import {
   type ToolUseBlock,
   type ToolResultBlock,
   type ContentBlock,
-  type FmtTable,
   clearBreak as _clearBreak,
-  ASSISTANT_BLOCK_FMT,
-  USER_BLOCK_FMT,
-  TOOL_CALL_FMT,
-  TOOL_RESULT_FMT,
-  TOOL_ERROR_FMT,
-  SYSTEM_FMT,
-  MESSAGE_FMT,
-  FOREMAN_MESSAGE_FMT,
+  formatToolCall,
+  formatToolResult,
+  formatContentBlock,
+  formatSystemEvent,
+  formatMessageEvent,
+  formatForemanMessage,
 } from "./renderer.js";
 
-export type {
-  ToolUseBlock,
-  ToolResultBlock,
-  ContentBlock,
-  FmtTable,
-} from "./renderer.js";
-export type { Fmt, FmtEntry } from "./renderer.js";
+export type { ToolUseBlock, ToolResultBlock, ContentBlock } from "./renderer.js";
 
 // ── Display class ──────────────────────────────────────────────────────────
 
@@ -57,23 +47,6 @@ export class Display {
   /** Returns a styled "context cleared" divider string. */
   clearBreak(): string {
     return _clearBreak(this.config.verbose);
-  }
-
-  /** Returns the usable terminal width, adjusted for the verbose timestamp prefix. */
-  effectiveWidth(fallback = W): number {
-    return _effectiveWidth(fallback, this.config.verbose);
-  }
-
-  /**
-   * Resolve a format table entry for the given key.
-   * Uses this.config.verbose to select between verbose/quiet variants.
-   */
-  resolve(table: FmtTable, key: string, data: unknown): string | null {
-    const entry = table[key] ?? table._default;
-    if (!entry) return null;
-    if (typeof entry === "function") return entry(data);
-    const fmt = this.config.verbose ? entry.verbose : entry.quiet;
-    return fmt ? fmt(data) : null;
   }
 
   private _printLine(line: string): void {
@@ -113,25 +86,22 @@ export class Display {
   /** Print a single content block from an assistant/user message. */
   printBlock(b: ContentBlock, role: "assistant" | "user", msg?: Record<string, unknown>): void {
     if (b.type === "tool_use") {
-      // Safe cast: we checked b.type === "tool_use" at runtime
       const tu = b as ToolUseBlock;
       this._toolUseNames.set(tu.id, tu.name);
       this._toolUseInputs.set(tu.id, tu.input);
-      this.print(this.resolve(TOOL_CALL_FMT, tu.name, tu));
+      this.print(formatToolCall(tu));
       return;
     }
     if (b.type === "tool_result") {
-      // Safe cast: we checked b.type === "tool_result" at runtime
       const tr = b as ToolResultBlock;
       const name = this._toolUseNames.get(tr.tool_use_id) ?? "";
       const _input = this._toolUseInputs.get(tr.tool_use_id);
-      this.print(this.resolve(tr.is_error ? TOOL_ERROR_FMT : TOOL_RESULT_FMT, name, { ...tr, _msg: msg, _input }));
+      this.print(formatToolResult({ ...tr, _input }, name, msg, this.config.verbose));
       // Fire after the tool result is printed — tool has just finished running.
       this.statusBar.fireOnToolResult(name);
       return;
     }
-    const blockFmt = role === "assistant" ? ASSISTANT_BLOCK_FMT : USER_BLOCK_FMT;
-    this.print(this.resolve(blockFmt, b.type, { ...b, _isSynthetic: msg?.isSynthetic ?? false, _thinkOutLoud: this.config.thinkOutLoud }));
+    this.print(formatContentBlock(b, role, !!(msg?.isSynthetic), this.config.thinkOutLoud));
   }
 
   /** Print a full SDK message (system, assistant, user, result, etc.). */
@@ -143,7 +113,7 @@ export class Display {
 
     if (m.type === "system") {
       const subtype = typeof m.subtype === "string" ? m.subtype : "_default";
-      this.print(this.resolve(SYSTEM_FMT, subtype, m));
+      this.print(formatSystemEvent(subtype, m, this.config.verbose));
       return;
     }
 
@@ -151,35 +121,17 @@ export class Display {
       const role = m.type as "assistant" | "user";
       const message = m.message as { content?: ContentBlock[] } | undefined;
       const content = message?.content ?? [];
-      if (!content.length) { this.print(this.resolve(MESSAGE_FMT, "_empty", m)); return; }
+      if (!content.length) { this.print(formatMessageEvent("_empty", m)); return; }
       for (const b of content) this.printBlock(b, role, m);
       return;
     }
 
     const type = typeof m.type === "string" ? m.type : "_default";
-    this.print(this.resolve(MESSAGE_FMT, type, m));
+    this.print(formatMessageEvent(type, m));
   }
 
   /** Print a foreman→worker wire message. */
   printForemanMessage(msg: Wire.ForemanMessage): void {
-    this.print(this.resolve(FOREMAN_MESSAGE_FMT, msg.type, msg));
+    this.print(formatForemanMessage(msg, this.config.verbose));
   }
-}
-
-// ── Standalone resolve ─────────────────────────────────────────────────────
-//
-// Uses getConfig().verbose directly. Exported for tests that exercise the
-// dispatch mechanism with custom FmtTable objects. Class methods use
-// this.resolve() with injected config instead.
-
-/**
- * Resolve a format table entry. Uses getConfig().verbose for verbose/quiet dispatch.
- * @see Display.resolve for the config-injected version
- */
-export function resolve(table: FmtTable, key: string, data: unknown): string | null {
-  const entry = table[key] ?? table._default;
-  if (!entry) return null;
-  if (typeof entry === "function") return entry(data);
-  const fmt = getConfig().verbose ? entry.verbose : entry.quiet;
-  return fmt ? fmt(data) : null;
 }

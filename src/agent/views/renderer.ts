@@ -4,7 +4,7 @@
  * No I/O — callers pass results to display.print().
  */
 import * as Wire from "../../../shared/wire.js";
-import { c, s, W, effectiveWidth } from "./style.js";
+import { c, s, W } from "./style.js";
 import {
   trunc,
   fmtCount,
@@ -15,6 +15,15 @@ import {
   fmtArgs,
   toRelativePath,
 } from "../../../shared/formatters.js";
+
+// ── Layout ─────────────────────────────────────────────────────────────────
+
+/** Visible width of the verbose timestamp prefix "HH:mm:ss " */
+const VERBOSE_PREFIX_LEN = 9;
+
+function effectiveWidth(fallback = W, verbose = false): number {
+  return (process.stdout.columns ?? fallback) - (verbose ? VERBOSE_PREFIX_LEN : 0);
+}
 
 // ── Content block types ────────────────────────────────────────────────────
 
@@ -48,6 +57,24 @@ export type ContentBlock =
 export type Fmt = (data: any) => string | null;
 export type FmtEntry = Fmt | { quiet?: Fmt; verbose?: Fmt };
 export type FmtTable = Record<string, FmtEntry>;
+
+// ── Internal dispatch ──────────────────────────────────────────────────────
+
+function _resolve(table: FmtTable, key: string, data: unknown, verbose: boolean): string | null {
+  const entry = table[key] ?? table._default;
+  if (!entry) return null;
+  if (typeof entry === "function") return entry(data);
+  const fmt = verbose ? entry.verbose : entry.quiet;
+  return fmt ? fmt(data) : null;
+}
+
+/**
+ * Resolve a format table entry. Exported for tests that exercise the dispatch
+ * mechanism with custom FmtTable objects.
+ */
+export function resolve(table: FmtTable, key: string, data: unknown, verbose: boolean): string | null {
+  return _resolve(table, key, data, verbose);
+}
 
 // ── clearBreak ─────────────────────────────────────────────────────────────
 
@@ -380,12 +407,12 @@ export function renderMarkdown(text: string): string {
   return out.join("\n");
 }
 
-// ── Message format tables ──────────────────────────────────────────────────
+// ── Message format tables (private) ───────────────────────────────────────
 //
-// These are pure string-producing dispatch tables. Display.resolve() selects
-// the right entry using the verbose flag from its injected config.
+// These dispatch tables are internal to this module. Display calls the
+// exported format* functions below rather than importing the tables directly.
 
-function fmtToolCall(b: ToolUseBlock, fmt: string): string {
+function fmtToolCallLine(b: ToolUseBlock, fmt: string): string {
   fmt = c.skyBlue(`\n${fmt}`);
   if (b.input?.description) fmt += c.gray(` # ${b.input.description}`);
   return fmt;
@@ -396,33 +423,22 @@ function fmtSubagentType(subagentType: string | null | undefined): string {
   return subagentType;
 }
 
-export const ASSISTANT_BLOCK_FMT: FmtTable = {
-  thinking: (b) => c.gray("\n" + (b._thinkOutLoud ? renderMarkdown(b.thinking ?? "") : "Thinking...")),
-  text:     (b) => c.yellow(`\n${renderMarkdown(b.text ?? "")}`),
-  _default: (b) => c.darkGray(`[assistant/${b.type}]`),
+const TOOL_CALL_FMT: FmtTable = {
+  Bash:       (b) => fmtToolCallLine(b, `$ ${b.input?.command ?? ""}`),
+  Read:       (b) => fmtToolCallLine(b, `• Read(${toRelativePath(b.input?.file_path ?? "?")})`),
+  Write:      (b) => fmtToolCallLine(b, `• Write(${toRelativePath(b.input?.file_path ?? "?")})`),
+  Edit:       (b) => fmtToolCallLine(b, `• Edit(${toRelativePath(b.input?.file_path ?? "?")})`),
+  Glob:       (b) => fmtToolCallLine(b, `• Glob(${b.input?.pattern ?? "?"})`),
+  Grep:       (b) => fmtToolCallLine(b, `• grep ${trunc(b.input?.pattern ?? "?", 30)} ${b.input?.path != null ? toRelativePath(b.input.path as string) : "."}`),
+  Skill:      (b) => fmtToolCallLine(b, `• Skill(${b.input?.skill ?? "?"})`),
+  Agent:      (b) => fmtToolCallLine(b, `• ${fmtSubagentType(b.input?.subagent_type)}(${trunc(b.input?.prompt ?? "", 80)})`),
+  ToolSearch: (b) => fmtToolCallLine(b, `• ToolSearch(${b.input?.query ?? "?"})`),
+  TodoWrite:  (b) => fmtToolCallLine(b, `• TodoWrite(${fmtTodoWriteInput(b.input?.todos)})`),
+  AskUserQuestion: (b) => fmtToolCallLine(b, `• AskUserQuestion(${fmtAskUserQuestionInput(b.input?.questions)})`),
+  _default:   (b) => fmtToolCallLine(b, `• ${b.name}(${fmtArgs(b.input)})`),
 };
 
-export const USER_BLOCK_FMT: FmtTable = {
-  text:     (b) => b._isSynthetic ? null : `\n${b.text ?? ""}`,
-  _default: (b) => c.darkGray(`[user/${b.type}]`),
-};
-
-export const TOOL_CALL_FMT: FmtTable = {
-  Bash:       (b) => fmtToolCall(b, `$ ${b.input?.command ?? ""}`),
-  Read:       (b) => fmtToolCall(b, `• Read(${toRelativePath(b.input?.file_path ?? "?")})`),
-  Write:      (b) => fmtToolCall(b, `• Write(${toRelativePath(b.input?.file_path ?? "?")})`),
-  Edit:       (b) => fmtToolCall(b, `• Edit(${toRelativePath(b.input?.file_path ?? "?")})`),
-  Glob:       (b) => fmtToolCall(b, `• Glob(${b.input?.pattern ?? "?"})`),
-  Grep:       (b) => fmtToolCall(b, `• grep ${trunc(b.input?.pattern ?? "?", 30)} ${b.input?.path != null ? toRelativePath(b.input.path as string) : "."}`),
-  Skill:      (b) => fmtToolCall(b, `• Skill(${b.input?.skill ?? "?"})`),
-  Agent:      (b) => fmtToolCall(b, `• ${fmtSubagentType(b.input?.subagent_type)}(${trunc(b.input?.prompt ?? "", 80)})`),
-  ToolSearch: (b) => fmtToolCall(b, `• ToolSearch(${b.input?.query ?? "?"})`),
-  TodoWrite:  (b) => fmtToolCall(b, `• TodoWrite(${fmtTodoWriteInput(b.input?.todos)})`),
-  AskUserQuestion: (b) => fmtToolCall(b, `• AskUserQuestion(${fmtAskUserQuestionInput(b.input?.questions)})`),
-  _default:   (b) => fmtToolCall(b, `• ${b.name}(${fmtArgs(b.input)})`),
-};
-
-export const TOOL_RESULT_FMT: FmtTable = {
+const TOOL_RESULT_FMT: FmtTable = {
   _default:   {
     quiet:   (b) => c.darkGray(`→ ${trunc(toolResultText(b), 100)}`),
     verbose: (b) => c.darkGray(`→ ${toolResultText(b)}`),
@@ -439,9 +455,20 @@ export const TOOL_RESULT_FMT: FmtTable = {
   TodoWrite:  (b) => c.darkGray(`→ ${fmtTodoWriteOutput(b)}`),
 };
 
-export const TOOL_ERROR_FMT: FmtTable = {
+const TOOL_ERROR_FMT: FmtTable = {
   AskUserQuestion: (b) => c.darkGray(`→ ${toolResultText(b)}`),
   _default:        (b) => c.salmon(`! ${toolResultText(b)}`),
+};
+
+const ASSISTANT_BLOCK_FMT: FmtTable = {
+  thinking: (b) => c.gray("\n" + (b._thinkOutLoud ? renderMarkdown(b.thinking ?? "") : "Thinking...")),
+  text:     (b) => c.yellow(`\n${renderMarkdown(b.text ?? "")}`),
+  _default: (b) => c.darkGray(`[assistant/${b.type}]`),
+};
+
+const USER_BLOCK_FMT: FmtTable = {
+  text:     (b) => b._isSynthetic ? null : `\n${b.text ?? ""}`,
+  _default: (b) => c.darkGray(`[user/${b.type}]`),
 };
 
 function fmtCompactionDetail(meta: unknown): string {
@@ -495,7 +522,7 @@ function fmtApiRetryDetail(m: { error_status?: number | null; error?: string }):
   return "";
 }
 
-export const SYSTEM_FMT: FmtTable = {
+const SYSTEM_FMT: FmtTable = {
   init:              { verbose: (m) => c.darkGray(`init: session ${m.session_id}`) },
   task_started:      (m) => c.lavender(`  ▶ agent started: ${m.description}`),
   task_progress:     (m) => c.lavender(`  • ${m.description}`),
@@ -508,7 +535,7 @@ export const SYSTEM_FMT: FmtTable = {
   _default:          { verbose: (m) => c.darkGray(`system/${m.subtype}`) },
 };
 
-export const MESSAGE_FMT: FmtTable = {
+const MESSAGE_FMT: FmtTable = {
   _empty:           (m) => c.darkGray(`[${m.type} — empty]`),
   result:           (m) => c.darkGray(`\n${fmtStats(Math.round(m.duration_ms / 1000), m.num_turns, m.usage.output_tokens, m.usage.input_tokens)}`),
   rate_limit_event: (m) => {
@@ -519,10 +546,60 @@ export const MESSAGE_FMT: FmtTable = {
   _default:         (m) => c.darkGray(`msg: ${m.type}`),
 };
 
-export const FOREMAN_MESSAGE_FMT: FmtTable = {
+const FOREMAN_MESSAGE_FMT: FmtTable = {
   task_assigned:      { verbose: (m) => c.darkGray(`Task assigned: #${m.issue.number}, ${m.issue.title}`) },
   event_notification: { verbose: (m) => c.darkGray(`Event received [${fmtTime()}]: ${fmtEvent(m.event as Wire.WebhookEvent)}`) },
   hello_ack:          { verbose: (m) => c.darkGray(`hello_ack: ${m.status}`) },
   foreman_error:      (m) => c.boldRed(`[foreman error] ${m.message}`),
   _default:           (m) => c.darkGray(`Unknown foreman message: ${m.type}`),
 };
+
+// ── Public format functions ────────────────────────────────────────────────
+//
+// Display calls these instead of importing the FmtTable constants above.
+
+/** Format a tool use block — the "calling a tool" line. */
+export function formatToolCall(b: ToolUseBlock): string | null {
+  return _resolve(TOOL_CALL_FMT, b.name, b, false);
+}
+
+/** Format a tool result or tool error block. */
+export function formatToolResult(
+  b: ToolResultBlock & { _input?: Record<string, unknown> },
+  toolName: string,
+  msg: Record<string, unknown> | undefined,
+  verbose: boolean,
+): string | null {
+  return _resolve(
+    b.is_error ? TOOL_ERROR_FMT : TOOL_RESULT_FMT,
+    toolName,
+    { ...b, _msg: msg },
+    verbose,
+  );
+}
+
+/** Format an assistant or user content block. */
+export function formatContentBlock(
+  b: ContentBlock,
+  role: "assistant" | "user",
+  isSynthetic: boolean,
+  thinkOutLoud: boolean,
+): string | null {
+  const fmt = role === "assistant" ? ASSISTANT_BLOCK_FMT : USER_BLOCK_FMT;
+  return _resolve(fmt, b.type, { ...b, _isSynthetic: isSynthetic, _thinkOutLoud: thinkOutLoud }, false);
+}
+
+/** Format a system event. */
+export function formatSystemEvent(subtype: string, m: unknown, verbose: boolean): string | null {
+  return _resolve(SYSTEM_FMT, subtype, m, verbose);
+}
+
+/** Format a result/rate-limit/other SDK message event. */
+export function formatMessageEvent(type: string, m: unknown): string | null {
+  return _resolve(MESSAGE_FMT, type, m, false);
+}
+
+/** Format a foreman→worker wire message. */
+export function formatForemanMessage(msg: Wire.ForemanMessage, verbose: boolean): string | null {
+  return _resolve(FOREMAN_MESSAGE_FMT, msg.type, msg, verbose);
+}
