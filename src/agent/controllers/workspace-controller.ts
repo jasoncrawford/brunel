@@ -1,4 +1,4 @@
-import { c } from "../views/display.js";
+import { c } from "../views/style.js";
 import type { CommandRegistry } from "./command-controller.js";
 import type { WorkerDisplay } from "./worker-controller.js";
 import { Workspace, confirmIfUnsafe } from "../models/workspace.js";

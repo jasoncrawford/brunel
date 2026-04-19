@@ -2,7 +2,7 @@ import { exec } from "node:child_process";
 import { randomInt } from "node:crypto";
 import { promisify } from "node:util";
 import { WebSocket } from "ws";
-import { c } from "../views/display.js";
+import { c } from "../views/style.js";
 import { StatusBar } from "../views/status-bar.js";
 import { buildInitialPrompt, buildEventPrompt } from "../worker-prompts.js";
 import type { EffortValue } from "../models/settings.js";

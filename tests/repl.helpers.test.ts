@@ -6,8 +6,8 @@ import {
   fmtNum,
   fmtStats,
   fmtArgs,
-  c,
-} from "../src/agent/views/display.js";
+} from "../shared/formatters.js";
+import { c } from "../src/agent/views/style.js";
 
 describe("trunc", () => {
   it("returns short string unchanged", () => {

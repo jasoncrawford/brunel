@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { stripAnsi } from "./helpers.js";
+import { Display } from "../src/agent/views/display.js";
+import { resolve } from "../src/agent/views/renderer.js";
+import type { FmtTable } from "../src/agent/views/renderer.js";
 import { getConfig } from "../src/config.js";
-import { Display, resolve, type FmtTable } from "../src/agent/views/display.js";
 import { StatusBar } from "../src/agent/views/status-bar.js";
 
 let testDisplay: Display;
@@ -37,56 +39,50 @@ afterEach(() => {
 });
 
 describe("resolve()", () => {
-  afterEach(() => getConfig().verbose = false);
-
   it("key exists as Fmt function → calls it", () => {
     const table: FmtTable = { foo: (d) => `value:${d.x}` };
-    const result = resolve(table, "foo", { x: 42 });
+    const result = resolve(table, "foo", { x: 42 }, false);
     expect(stripAnsi(result!)).toBe("value:42");
   });
 
   it("key missing, _default exists → calls _default", () => {
     const table: FmtTable = { _default: (d) => `default:${d.x}` };
-    const result = resolve(table, "missing", { x: 7 });
+    const result = resolve(table, "missing", { x: 7 }, false);
     expect(stripAnsi(result!)).toBe("default:7");
   });
 
   it("key missing, no _default → returns null", () => {
     const table: FmtTable = { foo: (d) => "foo" };
-    expect(resolve(table, "missing", {})).toBeNull();
+    expect(resolve(table, "missing", {}, false)).toBeNull();
   });
 
-  it("key as { quiet, verbose }, VERBOSE=false → calls quiet", () => {
-    getConfig().verbose = false;
+  it("key as { quiet, verbose }, verbose=false → calls quiet", () => {
     const table: FmtTable = {
       foo: { quiet: () => "quiet", verbose: () => "verbose" },
     };
-    expect(stripAnsi(resolve(table, "foo", {})!)).toBe("quiet");
+    expect(stripAnsi(resolve(table, "foo", {}, false)!)).toBe("quiet");
   });
 
-  it("key as { quiet, verbose }, VERBOSE=true → calls verbose", () => {
-    getConfig().verbose = true;
+  it("key as { quiet, verbose }, verbose=true → calls verbose", () => {
     const table: FmtTable = {
       foo: { quiet: () => "quiet", verbose: () => "verbose" },
     };
-    expect(stripAnsi(resolve(table, "foo", {})!)).toBe("verbose");
+    expect(stripAnsi(resolve(table, "foo", {}, true)!)).toBe("verbose");
   });
 
-  it("{ verbose: fn } with VERBOSE=false → returns null", () => {
-    getConfig().verbose = false;
+  it("{ verbose: fn } with verbose=false → returns null", () => {
     const table: FmtTable = { foo: { verbose: () => "v" } };
-    expect(resolve(table, "foo", {})).toBeNull();
+    expect(resolve(table, "foo", {}, false)).toBeNull();
   });
 
-  it("{ verbose: fn } with VERBOSE=true → calls fn", () => {
-    getConfig().verbose = true;
+  it("{ verbose: fn } with verbose=true → calls fn", () => {
     const table: FmtTable = { foo: { verbose: () => "v" } };
-    expect(stripAnsi(resolve(table, "foo", {})!)).toBe("v");
+    expect(stripAnsi(resolve(table, "foo", {}, true)!)).toBe("v");
   });
 
   it("formatter returns null → resolve returns null", () => {
     const table: FmtTable = { foo: () => null };
-    expect(resolve(table, "foo", {})).toBeNull();
+    expect(resolve(table, "foo", {}, false)).toBeNull();
   });
 });
 

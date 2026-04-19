@@ -5,7 +5,8 @@ import path from "path";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { stripAnsi } from "./helpers.js";
 import { getConfig } from "../src/config.js";
-import { toRelativePath, Display } from "../src/agent/views/display.js";
+import { toRelativePath } from "../shared/formatters.js";
+import { Display } from "../src/agent/views/display.js";
 import { StatusBar } from "../src/agent/views/status-bar.js";
 
 let testDisplay: Display;

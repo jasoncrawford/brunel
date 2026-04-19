@@ -1,7 +1,7 @@
 import fs from "fs";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { CanUseTool, PermissionMode, PermissionResult } from "@anthropic-ai/claude-agent-sdk";
-import { c } from "../views/display.js";
+import { c } from "../views/style.js";
 import type { Display } from "../views/display.js";
 import { Picker } from "../views/picker.js";
 import type { PickQuestionResult } from "../views/picker.js";
