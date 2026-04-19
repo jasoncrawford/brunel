@@ -263,7 +263,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const workspaceCfg = (config.githubRepo && config.githubToken)
     ? {
         workspaceDir: config.workspaceDir ?? path.join(os.homedir(), ".brunel", "workers"),
-        repoUrl: `https://${config.githubToken}@github.com/${config.githubRepo}.git`,
+        repoUrl: config.repoUrl ?? `https://${config.githubToken}@github.com/${config.githubRepo}.git`,
       }
     : undefined;
 
