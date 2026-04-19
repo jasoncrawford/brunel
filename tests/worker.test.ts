@@ -1273,11 +1273,11 @@ describe("foreman_error", () => {
     }
   });
 
-  it("fatal: resolves WS input promise with the fatal sentinel", async () => {
+  it("fatal: resolves WS input promise with the ws_fatal signal", async () => {
     const wsInput = session.createWsInputPromise();
     sendMsg(fakeWs, { type: "foreman_error", message: "Catastrophic failure", fatal: true });
     const result = await wsInput;
-    expect(WorkerSession.isFatalSignal(result)).toBe(true);
+    expect(result.type).toBe("ws_fatal");
   });
 
   it("fatal: does not reconnect after ws closes", async () => {
@@ -1309,13 +1309,16 @@ describe("foreman_error", () => {
     );
   });
 
-  it("isFatalSignal returns true for the fatal sentinel and false for others", async () => {
+  it("fatal signal has type ws_fatal; prompt signal has type ws_prompt", async () => {
     const wsInput = session.createWsInputPromise();
     sendMsg(fakeWs, { type: "foreman_error", message: "Fatal", fatal: true });
-    const sentinel = await wsInput;
-    expect(WorkerSession.isFatalSignal(sentinel)).toBe(true);
-    expect(WorkerSession.isFatalSignal("")).toBe(false);
-    expect(WorkerSession.isWsSignal(sentinel)).toBe(false);
+    const fatalSignal = await wsInput;
+    expect(fatalSignal.type).toBe("ws_fatal");
+
+    const promptInput = session.createWsInputPromise();
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "99", issue: makeIssue() });
+    const promptSignal = await promptInput;
+    expect(promptSignal.type).toBe("ws_prompt");
   });
 });
 

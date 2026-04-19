@@ -25,11 +25,11 @@ export class Input {
   // (\x1b[200~ ... \x1b[201~), letting us collect it as a single input
   // rather than having each newline submit a separate prompt.
 
-  ask(
+  ask<TAbort = never>(
     promptStr: string,
     getCommands: () => CommandSuggestion[] = () => [],
-    abort?: Promise<string>,
-  ): Promise<string> {
+    abort?: Promise<TAbort>,
+  ): Promise<string | TAbort> {
     const statusBar = this.display.statusBar;
     return new Promise((resolve) => {
       let buffer = stash ?? "";
@@ -260,7 +260,7 @@ export class Input {
             process.stdout.write("\r\x1b[J");
             cleanup();
             done = true;
-            resolve(value.trim());
+            resolve(value as string | TAbort);
           }
         });
       }

@@ -115,10 +115,10 @@ export type WorkerSessionOptions = {
   pickFn?: (options: string[]) => Promise<number>;
 };
 
-// Sentinel: a prompt is ready for main() to execute
-const WS_PROMPT = "__ws_prompt__";
-// Sentinel: a fatal foreman error was received; main() should drop back to interactive REPL
-const WS_FATAL = "__ws_fatal__";
+/** Typed signal emitted by WorkerSession to index.ts via createWsInputPromise(). */
+export type WsInputSignal =
+  | { type: "ws_prompt" }
+  | { type: "ws_fatal" };
 
 /** Task state needed to decide whether and how to prompt before quitting. */
 export type TaskQuitInfo = {
@@ -149,7 +149,7 @@ export class WorkerSession {
   private pendingEvents: Wire.WebhookEvent[] = [];
   private pendingPrompts: QueuedPrompt[] = [];
   private ws: WebSocket | undefined;
-  private resolveWsInput: ((v: string) => void) | null = null;
+  private resolveWsInput: ((v: WsInputSignal) => void) | null = null;
   private currentAc: AbortController | null = null;
   private _queryRunning = false;
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -310,15 +310,16 @@ export class WorkerSession {
   }
 
   /**
-   * Create a one-shot promise that resolves with WS_PROMPT when a queued prompt
-   * is ready for main() to execute. If prompts are already queued, resolves
-   * immediately. Each call replaces the previous unresolved promise.
+   * Create a one-shot promise that resolves with a typed WsInputSignal when a
+   * queued prompt is ready (ws_prompt) or a fatal foreman error is received
+   * (ws_fatal). If prompts are already queued, resolves immediately. Each call
+   * replaces the previous unresolved promise.
    */
-  createWsInputPromise(): Promise<string> {
+  createWsInputPromise(): Promise<WsInputSignal> {
     if (this.pendingPrompts.length > 0) {
-      return Promise.resolve(WS_PROMPT);
+      return Promise.resolve<WsInputSignal>({ type: "ws_prompt" });
     }
-    return new Promise<string>((resolve) => {
+    return new Promise<WsInputSignal>((resolve) => {
       this.resolveWsInput = resolve;
     });
   }
@@ -352,24 +353,6 @@ export class WorkerSession {
     }
   }
 
-  /**
-   * Returns true if the input string is a sentinel emitted by WorkerSession
-   * to signal that a queued prompt is ready. Used by main() to detect WS
-   * notifications without needing to know the internal sentinel value.
-   */
-  static isWsSignal(input: string): boolean {
-    return input === WS_PROMPT;
-  }
-
-  /**
-   * Returns true if the input string is the fatal-error sentinel emitted by
-   * WorkerSession when a fatal foreman_error is received. Used by main() to
-   * drop back to interactive REPL mode without exiting the process.
-   */
-  static isFatalSignal(input: string): boolean {
-    return input === WS_FATAL;
-  }
-
   /** Generate a human-readable agent ID by prepending a random human name to a UUID.
    * E.g. "patience-a9bdda00-1234-5678-abcd-ef0123456789" */
   static generateAgentId(): string {
@@ -385,7 +368,7 @@ export class WorkerSession {
    */
   private enqueuePrompt(prompt: string, fresh: boolean): void {
     this.pendingPrompts.push({ prompt, fresh });
-    this.resolveWsInput?.(WS_PROMPT);
+    this.resolveWsInput?.({ type: "ws_prompt" });
     this.resolveWsInput = null;
   }
 
@@ -497,7 +480,7 @@ export class WorkerSession {
         this.stopped = true;
         this.currentAc?.abort(); // abort any running query immediately
         this.ws?.close();
-        this.resolveWsInput?.(WS_FATAL);
+        this.resolveWsInput?.({ type: "ws_fatal" });
         this.resolveWsInput = null;
       }
       return;

@@ -8,7 +8,7 @@ import { StatusBar } from "./views/status-bar.js";
 import { Input } from "./views/input.js";
 import { Picker } from "./views/picker.js";
 import { WorkerSession, registerWorkerCommands, startWorkerMode } from "./controllers/worker-controller.js";
-import type { RunQuery } from "./controllers/worker-controller.js";
+import type { RunQuery, WsInputSignal } from "./controllers/worker-controller.js";
 import { loadConfig, getConfig } from "../config.js";
 import { Workspace } from "./models/workspace.js";
 import { fmtError } from "../utils.js";
@@ -184,7 +184,7 @@ export async function main(
     if (userInput === "__abort__") continue;
 
     // WS_FATAL: a fatal foreman_error was received — drop back to interactive REPL.
-    if (WorkerSession.isFatalSignal(userInput)) {
+    if (typeof userInput !== "string" && userInput.type === "ws_fatal") {
       showPrompt = true;
       continue;
     }
@@ -192,7 +192,7 @@ export async function main(
     // WS_PROMPT: a task prompt or debounced event prompt is ready. Hide the
     // prompt, drain all queued prompts through runQueryFn, then show the prompt
     // again. Stops draining if a prompt is interrupted or errors.
-    if (WorkerSession.isWsSignal(userInput)) {
+    if (typeof userInput !== "string" && userInput.type === "ws_prompt") {
       showPrompt = false;
       while (session?.hasPendingPrompts()) {
         const item = session.takeNextPrompt()!;
