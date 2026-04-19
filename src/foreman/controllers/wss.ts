@@ -610,7 +610,6 @@ export class ForemanWss {
     return task; // null if no task (e.g., dependency issue — nothing to forward)
   }
 
-  /** Phase 2: always invoked; forwards to the worker iff phase 1 found a task to notify. */
   async routeIssueEvent(p: R, evt: WebhookEvent, issue: R, issueNumber: number): Promise<RouteResult> {
     const task = await this.applyIssueEffects(p, issue, issueNumber);
     if (task) this.forwardEvent(task, evt, `#${issueNumber}`);
