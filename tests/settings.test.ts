@@ -21,7 +21,6 @@ function makeCtrl(s: Settings): SettingsController {
 }
 
 beforeEach(() => {
-  Settings._resetCachedModels();
   printed = [];
   cancelPick.mockResolvedValue({ type: "cancelled" });
 });
@@ -42,8 +41,8 @@ describe("Settings", () => {
   });
 
   it("emits change when model is updated via pickModel", async () => {
-    Settings.setCachedModels(MODELS);
     const s = new Settings();
+    s.setCachedModels(MODELS);
     const onChange = vi.fn();
     s.on("change", onChange);
     await makeCtrl(s).pickModel("opus", noopPick, undefined);
@@ -59,8 +58,8 @@ describe("Settings", () => {
   });
 
   it("does not emit change when pickModel is cancelled", async () => {
-    Settings.setCachedModels(MODELS);
     const s = new Settings({ model: "opus" });
+    s.setCachedModels(MODELS);
     const onChange = vi.fn();
     s.on("change", onChange);
     await makeCtrl(s).pickModel("", cancelPick, undefined);
@@ -178,16 +177,16 @@ describe("pickEffort (interactive picker)", () => {
 
 describe("pickModel <arg> (direct set)", () => {
   it("sets model by known alias", async () => {
-    Settings.setCachedModels(MODELS);
     const s = new Settings();
+    s.setCachedModels(MODELS);
     await makeCtrl(s).pickModel("opus", noopPick, undefined);
     expect(s.model).toBe("opus");
     expect(printed.join("")).toContain("Opus 4.6");
   });
 
   it("warns but accepts unknown model", async () => {
-    Settings.setCachedModels(MODELS);
     const s = new Settings();
+    s.setCachedModels(MODELS);
     await makeCtrl(s).pickModel("claude-sonnet-4-6-20250514", noopPick, undefined);
     expect(s.model).toBe("claude-sonnet-4-6-20250514");
     const output = printed.join("");
@@ -203,8 +202,8 @@ describe("pickModel <arg> (direct set)", () => {
   });
 
   it("'sonnet' maps to default", async () => {
-    Settings.setCachedModels(MODELS);
     const s = new Settings({ model: "opus" });
+    s.setCachedModels(MODELS);
     await makeCtrl(s).pickModel("sonnet", noopPick, undefined);
     expect(s.model).toBeUndefined();
     expect(printed.join("")).toContain("default");
@@ -236,57 +235,57 @@ describe("pickModel (interactive picker)", () => {
   });
 
   it("selecting first entry resets to undefined (default)", async () => {
-    Settings.setCachedModels(MODELS);
     const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickResult>>()
       .mockResolvedValue({ type: "selected", index: 0 });
     const s = new Settings({ model: "opus" });
+    s.setCachedModels(MODELS);
     await makeCtrl(s).pickModel("", pickFn, undefined);
     expect(s.model).toBeUndefined();
   });
 
   it("selecting a named model sets the model", async () => {
-    Settings.setCachedModels(MODELS);
     const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickResult>>()
       .mockResolvedValue({ type: "selected", index: 1 });
     const s = new Settings();
+    s.setCachedModels(MODELS);
     await makeCtrl(s).pickModel("", pickFn, undefined);
     expect(s.model).toBe("opus");
     expect(printed.join("")).toContain("Opus 4.6");
   });
 
   it("passes currentIdx matching the active model", async () => {
-    Settings.setCachedModels(MODELS);
     const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickResult>>()
       .mockResolvedValue({ type: "cancelled" });
     const s = new Settings({ model: "opus" });
+    s.setCachedModels(MODELS);
     await makeCtrl(s).pickModel("", pickFn, undefined);
     expect(pickFn.mock.calls[0][1]).toBe(1);
   });
 
   it("passes currentIdx 0 when no model set (default)", async () => {
-    Settings.setCachedModels(MODELS);
     const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickResult>>()
       .mockResolvedValue({ type: "cancelled" });
     const s = new Settings();
+    s.setCachedModels(MODELS);
     await makeCtrl(s).pickModel("", pickFn, undefined);
     expect(pickFn.mock.calls[0][1]).toBe(0);
   });
 
   it("shows model descriptions in options", async () => {
-    Settings.setCachedModels(MODELS);
     const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickResult>>()
       .mockResolvedValue({ type: "cancelled" });
     const s = new Settings();
+    s.setCachedModels(MODELS);
     await makeCtrl(s).pickModel("", pickFn, undefined);
     const options = pickFn.mock.calls[0][0] as string[];
     expect(options[0]).toContain("Best for everyday tasks");
   });
 
   it("does not include Other option", async () => {
-    Settings.setCachedModels(MODELS);
     const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickResult>>()
       .mockResolvedValue({ type: "cancelled" });
     const s = new Settings();
+    s.setCachedModels(MODELS);
     await makeCtrl(s).pickModel("", pickFn, undefined);
     const options = pickFn.mock.calls[0][0] as string[];
     expect(options.length).toBe(MODELS.length);
@@ -294,17 +293,17 @@ describe("pickModel (interactive picker)", () => {
   });
 
   it("cancel preserves current model", async () => {
-    Settings.setCachedModels(MODELS);
     const s = new Settings({ model: "opus" });
+    s.setCachedModels(MODELS);
     await makeCtrl(s).pickModel("", cancelPick, undefined);
     expect(s.model).toBe("opus");
   });
 
   it("uses displayName from model info, not raw alias", async () => {
-    Settings.setCachedModels(MODELS);
     const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickResult>>()
       .mockResolvedValue({ type: "cancelled" });
     const s = new Settings();
+    s.setCachedModels(MODELS);
     await makeCtrl(s).pickModel("", pickFn, undefined);
     const options = pickFn.mock.calls[0][0] as string[];
     expect(options[0]).toMatch(/^Default \(recommended\)/);

@@ -138,7 +138,7 @@ export class AgentController {
     // Cache the available models list from the SDK (fire-and-forget).
     const qm = iterable as unknown as QueryWithModels;
     if (typeof qm.supportedModels === "function") {
-      qm.supportedModels().then(models => { Settings.setCachedModels(models); }).catch(() => {});
+      qm.supportedModels().then(models => { this.settings.setCachedModels(models); }).catch(() => {});
     }
 
     // Register a temporary raw-stdin listener to catch ^C and abort the query.

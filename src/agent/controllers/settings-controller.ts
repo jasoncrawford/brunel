@@ -23,11 +23,11 @@ export class SettingsController {
     fetchModelsFn: FetchModelsFn | undefined,
   ): Promise<void> {
     // Ensure models are loaded
-    let models = Settings.getCachedModels();
+    let models = this.settings.getCachedModels();
     if (!models && fetchModelsFn) {
       try {
         models = await fetchModelsFn();
-        Settings.setCachedModels(models);
+        this.settings.setCachedModels(models);
       } catch {
         // fall through with null cache
       }
