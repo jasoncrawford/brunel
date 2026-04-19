@@ -1,5 +1,6 @@
 import { exec } from "node:child_process";
 import { randomInt } from "node:crypto";
+import { EventEmitter } from "node:events";
 import { promisify } from "node:util";
 import { WebSocket } from "ws";
 import { c } from "../views/style.js";
@@ -115,11 +116,6 @@ export type WorkerSessionOptions = {
   pickFn?: (options: string[]) => Promise<number>;
 };
 
-// Sentinel: a prompt is ready for main() to execute
-const WS_PROMPT = "__ws_prompt__";
-// Sentinel: a fatal foreman error was received; main() should drop back to interactive REPL
-const WS_FATAL = "__ws_fatal__";
-
 /** Task state needed to decide whether and how to prompt before quitting. */
 export type TaskQuitInfo = {
   taskNumber: number;
@@ -140,16 +136,17 @@ type BufferableMessage = Extract<Wire.WorkerMessage, { type: "task_complete" }>;
  * main() in index.ts to run via the injected runQueryFn.
  *
  * When a task is assigned or a debounced event fires, WorkerSession pushes a
- * QueuedPrompt and signals main()'s ask() loop via the WS_PROMPT sentinel.
- * main() drains the queue by calling takeNextPrompt() and running each prompt.
+ * QueuedPrompt and emits `"prompts_ready"`. main() listens for this event once
+ * at startup, calls input.cancel() to interrupt any live ask(), then drains
+ * the queue by calling takeNextPrompt() and running each prompt.
+ * On a fatal foreman error, WorkerSession emits `"fatal"`.
  */
-export class WorkerSession {
+export class WorkerSession extends EventEmitter {
   private currentTaskId: string | undefined;
   private currentIssue: Wire.TaskIssue | undefined;
   private pendingEvents: Wire.WebhookEvent[] = [];
   private pendingPrompts: QueuedPrompt[] = [];
   private ws: WebSocket | undefined;
-  private resolveWsInput: ((v: string) => void) | null = null;
   private currentAc: AbortController | null = null;
   private _queryRunning = false;
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -169,7 +166,9 @@ export class WorkerSession {
     private wsFactory: WsFactory,
     private display: WorkerDisplay,
     private options: WorkerSessionOptions = {},
-  ) {}
+  ) {
+    super();
+  }
 
   get agentId(): string { return this.statusBar.agentId; }
 
@@ -310,20 +309,6 @@ export class WorkerSession {
   }
 
   /**
-   * Create a one-shot promise that resolves with WS_PROMPT when a queued prompt
-   * is ready for main() to execute. If prompts are already queued, resolves
-   * immediately. Each call replaces the previous unresolved promise.
-   */
-  createWsInputPromise(): Promise<string> {
-    if (this.pendingPrompts.length > 0) {
-      return Promise.resolve(WS_PROMPT);
-    }
-    return new Promise<string>((resolve) => {
-      this.resolveWsInput = resolve;
-    });
-  }
-
-  /**
    * Abort the currently running query, if any.
    * Returns true if a query was aborted, false if no query was running.
    * Called by the SIGINT handler so ^C interrupts the current query
@@ -352,24 +337,6 @@ export class WorkerSession {
     }
   }
 
-  /**
-   * Returns true if the input string is a sentinel emitted by WorkerSession
-   * to signal that a queued prompt is ready. Used by main() to detect WS
-   * notifications without needing to know the internal sentinel value.
-   */
-  static isWsSignal(input: string): boolean {
-    return input === WS_PROMPT;
-  }
-
-  /**
-   * Returns true if the input string is the fatal-error sentinel emitted by
-   * WorkerSession when a fatal foreman_error is received. Used by main() to
-   * drop back to interactive REPL mode without exiting the process.
-   */
-  static isFatalSignal(input: string): boolean {
-    return input === WS_FATAL;
-  }
-
   /** Generate a human-readable agent ID by prepending a random human name to a UUID.
    * E.g. "patience-a9bdda00-1234-5678-abcd-ef0123456789" */
   static generateAgentId(): string {
@@ -380,13 +347,13 @@ export class WorkerSession {
   // ── Private ───────────────────────────────────────────────────────────────
 
   /**
-   * Push a prompt to the queue and signal main()'s ask() loop via WS_PROMPT.
+   * Push a prompt to the queue and emit `"prompts_ready"` so main()'s routing
+   * loop can cancel any live ask() and drain the queue.
    * fresh=true means main() should reset its sessionId (new task conversation).
    */
   private enqueuePrompt(prompt: string, fresh: boolean): void {
     this.pendingPrompts.push({ prompt, fresh });
-    this.resolveWsInput?.(WS_PROMPT);
-    this.resolveWsInput = null;
+    this.emit("prompts_ready");
   }
 
   /**
@@ -497,8 +464,7 @@ export class WorkerSession {
         this.stopped = true;
         this.currentAc?.abort(); // abort any running query immediately
         this.ws?.close();
-        this.resolveWsInput?.(WS_FATAL);
-        this.resolveWsInput = null;
+        this.emit("fatal");
       }
       return;
     }

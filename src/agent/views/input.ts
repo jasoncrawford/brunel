@@ -11,8 +11,18 @@ import { type CommandSuggestion, filterCommands } from "../controllers/command-c
 export class Input {
   /** Buffer stashed by ^S, restored as the initial value of the next ask() call. */
   private _stash: string | null = null;
+  /** Cancels the currently-running ask() call, resolving it with null. No-op if ask() is not active. */
+  private _cancelAsk: (() => void) | null = null;
 
   constructor(private readonly display: Display) {}
+
+  /**
+   * Cancel the currently-running ask() call. The promise resolves with null
+   * and the prompt area is cleared. No-op if ask() is not currently active.
+   */
+  cancel(): void {
+    this._cancelAsk?.();
+  }
 
   // ── Raw input with bracketed paste support ──────────────────────────────────
   //
@@ -23,8 +33,7 @@ export class Input {
   ask(
     promptStr: string,
     getCommands: () => CommandSuggestion[] = () => [],
-    abort?: Promise<string>,
-  ): Promise<string> {
+  ): Promise<string | null> {
     const statusBar = this.display.statusBar;
     // Capture instance reference so nested inner functions (not arrow fns) can access it.
     const input = this;
@@ -229,43 +238,40 @@ export class Input {
       }
 
       // Register the fresh-redraw hook so print() can notify us.
-      // Only register when there is a visible prompt to redraw — an empty prompt
-      // string means the caller doesn't want any prompt shown (e.g. worker
-      // standby mode), so no redraw is needed and no line-clear should fire.
       if (promptLine) {
         statusBar.inputClear = clearForPrint;
         statusBar.inputPrint = drawFresh;
         statusBar.inputStatus = redrawFromCurrent;
       }
 
-      if (abort) {
-        void abort.then((value) => {
-          if (!done) {
-            // Navigate to the end of the buffer, then erase from the top of the
-            // prefix block down to the end of the screen.  Unlike submit(), we
-            // do NOT write \r\n\x1b[J (which creates a separator line for
-            // _clearStatus() to consume later).  A WS-triggered abort is never
-            // followed by a status-bar query, so that separator is never
-            // consumed and accumulates as blank lines on each cycle (issue #418).
-            const { row: curRow } = screenPosOf(cursor);
-            const { row: endRow } = screenPosOf(buffer.length);
-            const rowDiff = endRow - curRow;
-            if (rowDiff > 0) process.stdout.write(`\x1b[${rowDiff}B`);
-            else if (rowDiff < 0) process.stdout.write(`\x1b[${-rowDiff}A`);
-            const totalUp = endRow + prefixRows;
-            if (totalUp > 0) process.stdout.write(`\x1b[${totalUp}A`);
-            process.stdout.write("\r\x1b[J");
-            cleanup();
-            done = true;
-            resolve(value.trim());
-          }
-        });
-      }
+      // Register the cancel callback so input.cancel() can interrupt this ask().
+      // Navigate to the end of the buffer, then erase from the top of the
+      // prefix block down to the end of the screen.  Unlike submit(), we
+      // do NOT write \r\n\x1b[J (which creates a separator line for
+      // _clearStatus() to consume later).  A cancel is never followed by a
+      // status-bar query, so that separator is never consumed and accumulates
+      // as blank lines on each cycle (issue #418).
+      input._cancelAsk = () => {
+        if (!done) {
+          done = true;
+          const { row: curRow } = screenPosOf(cursor);
+          const { row: endRow } = screenPosOf(buffer.length);
+          const rowDiff = endRow - curRow;
+          if (rowDiff > 0) process.stdout.write(`\x1b[${rowDiff}B`);
+          else if (rowDiff < 0) process.stdout.write(`\x1b[${-rowDiff}A`);
+          const totalUp = endRow + prefixRows;
+          if (totalUp > 0) process.stdout.write(`\x1b[${totalUp}A`);
+          process.stdout.write("\r\x1b[J");
+          cleanup();
+          resolve(null);
+        }
+      };
 
       function cleanup() {
         statusBar.inputPrint = null;
         statusBar.inputClear = null;
         statusBar.inputStatus = null;
+        input._cancelAsk = null;
         process.stdin.removeListener("data", onData);
       }
 

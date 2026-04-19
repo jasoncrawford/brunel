@@ -7,7 +7,7 @@ import { c, hr } from "./views/style.js";
 import { StatusBar } from "./views/status-bar.js";
 import { Input } from "./views/input.js";
 import { Picker } from "./views/picker.js";
-import { WorkerSession, registerWorkerCommands, startWorkerMode } from "./controllers/worker-controller.js";
+import { registerWorkerCommands, startWorkerMode, WorkerSession } from "./controllers/worker-controller.js";
 import type { RunQuery } from "./controllers/worker-controller.js";
 import { loadConfig, getConfig } from "../config.js";
 import { Workspace } from "./models/workspace.js";
@@ -162,23 +162,74 @@ export async function main(
     }
   };
 
-  // In worker mode, the prompt starts hidden — the agent waits for the foreman
-  // to assign a task and is not ready for interactive input until then.
-  let showPrompt = !session;
+  // ── Routing ───────────────────────────────────────────────────────────────
+  //
+  // Session events and user input flow through a shared async event channel.
+  // No promise-racing or event-to-promise adapters needed: session events push
+  // directly to the channel, and ask() pushes when it receives real input.
+  // The routing loop sleeps until the next event arrives.
+
+  type RoutingEvent =
+    | { type: "line"; value: string }
+    | { type: "session"; event: "prompts_ready" | "fatal" };
+
+  // Minimal async FIFO queue.
+  const routingQueue: RoutingEvent[] = [];
+  let routingWaiter: ((e: RoutingEvent) => void) | null = null;
+
+  const enqueueRoutingEvent = (event: RoutingEvent): void => {
+    if (routingWaiter) { const w = routingWaiter; routingWaiter = null; w(event); }
+    else routingQueue.push(event);
+  };
+
+  const nextRoutingEvent = (): Promise<RoutingEvent> => {
+    if (routingQueue.length) return Promise.resolve(routingQueue.shift()!);
+    return new Promise((resolve) => { routingWaiter = resolve; });
+  };
+
+  // Session events push directly to the channel (and cancel any active prompt).
+  if (session) {
+    session.on("prompts_ready", () => {
+      input.cancel();
+      enqueueRoutingEvent({ type: "session", event: "prompts_ready" });
+    });
+    session.on("fatal", () => {
+      input.cancel();
+      enqueueRoutingEvent({ type: "session", event: "fatal" });
+    });
+  }
+
+  // One round of readline: shows the prompt and pushes to the channel when the
+  // user submits real input. Fire-and-forget — the loop calls this when ready.
+  const listenForInput = (): void => {
+    const promptStr = session ? "\n[agent] > " : "\n> ";
+    void input.ask(promptStr, () => controller.listCommands()).then((line) => {
+      if (line !== null) enqueueRoutingEvent({ type: "line", value: line });
+    });
+  };
 
   // ── Routing loop ─────────────────────────────────────────────────────────
-  // Takes input from the user or foreman and routes each event to the right handler:
-  //   command       → execute the registered command handler
-  //   user prompt   → run a query via runQueryFn (AgentController.runQuery)
-  //   foreman signal → worker controller (WorkerSession) provides the next prompt
+  // Sleeps until the next routing event arrives, then dispatches it.
 
   while (true) {
-    const wsAbort = session?.createWsInputPromise();
-    // Use an empty prompt string when not ready for interactive input. An
-    // empty promptLine suppresses the drawFresh callback so incoming messages
-    // are printed cleanly without a prompt preceding or following them.
-    const promptStr = session ? (showPrompt ? "\n[agent] > " : "") : "\n> ";
-    const userInput = await input.ask(promptStr, () => controller.listCommands(), wsAbort);
+    // Skip showing the prompt when session prompts are already queued
+    // (avoids briefly flashing the prompt before immediately cancelling it).
+    if (session?.hasPendingPrompts()) {
+      await drainPendingPrompts();
+      continue;
+    }
+
+    listenForInput();
+    const event = await nextRoutingEvent();
+
+    if (event.type === "session") {
+      // input.cancel() was already called when this event was enqueued.
+      await drainPendingPrompts(); // no-op for "fatal"
+      continue;
+    }
+
+    // event.type === "line" — real user input
+    const userInput = event.value;
 
     // ^D / ^C on empty buffer — treat as exit.
     if (userInput === "__eof__") {
@@ -190,26 +241,6 @@ export async function main(
         if (choice === "complete-and-quit") await session.completeCurrentTask();
       }
       break;
-    }
-
-    // Ignore the internal abort sentinel (fired when wsAbort resolves at the
-    // same tick as the ask() call; never a user action).
-    if (userInput === "__abort__") continue;
-
-    // WS_FATAL: a fatal foreman_error was received — drop back to interactive REPL.
-    if (WorkerSession.isFatalSignal(userInput)) {
-      showPrompt = true;
-      continue;
-    }
-
-    // WS_PROMPT: a task prompt or debounced event prompt is ready. Hide the
-    // prompt, drain all queued prompts through runQueryFn, then show the prompt
-    // again. Stops draining if a prompt is interrupted or errors.
-    if (WorkerSession.isWsSignal(userInput)) {
-      showPrompt = false;
-      await drainPendingPrompts();
-      showPrompt = true;
-      continue;
     }
 
     const action = await controller.dispatch(userInput);
@@ -224,7 +255,6 @@ export async function main(
     if (action.type === "command") {
       const result = await registry.execute(action.name, action.args);
       if (result === "exit") break;
-      if (result === "task-complete") showPrompt = false;
       continue;
     }
 
