@@ -73,6 +73,28 @@ export async function main(
 
   let sessionId: string | undefined;
 
+  /**
+   * Race the current ask() against the next session event.
+   * Returns a cleanup fn to remove listeners when input wins (avoids leaks).
+   */
+  const awaitSessionEvent = (
+    s: WorkerSession,
+  ): { promise: Promise<"prompts_ready" | "fatal">; cleanup: () => void } => {
+    let onReady: (() => void) | null = null;
+    let onFatal: (() => void) | null = null;
+    const cleanup = () => {
+      if (onReady) { s.off("prompts_ready", onReady); onReady = null; }
+      if (onFatal) { s.off("fatal", onFatal); onFatal = null; }
+    };
+    const promise = new Promise<"prompts_ready" | "fatal">((resolve) => {
+      onReady = () => { cleanup(); resolve("prompts_ready"); };
+      onFatal = () => { cleanup(); resolve("fatal"); };
+      s.once("prompts_ready", onReady);
+      s.once("fatal", onFatal);
+    });
+    return { promise, cleanup };
+  };
+
   // doExit handles REPL workspace cleanup and stdin/stdout teardown.
   // Only called in REPL mode (worker mode cleanup goes through workerCtx.cleanup()).
   const doExit = async () => {
@@ -162,40 +184,52 @@ export async function main(
     }
   };
 
-  // ── Session event subscriptions ───────────────────────────────────────────
-  // Subscribe to session events once at startup. Both events cancel any live
-  // ask() so the routing loop wakes up and can drain queued prompts or drop
-  // back to interactive mode.
-
-  if (session) {
-    session.on("prompts_ready", () => { input.cancel(); });
-    session.on("fatal", () => { input.cancel(); });
-  }
-
   // ── Routing loop ─────────────────────────────────────────────────────────
-  // Takes input from the user or foreman and routes each event to the right handler:
-  //   command       → execute the registered command handler
-  //   user prompt   → run a query via runQueryFn (AgentController.runQuery)
-  //   foreman event → WorkerSession emits "prompts_ready", ask() is cancelled,
-  //                   loop drains queued prompts then resumes waiting for input
+  // Listens to both the user (via input.ask) and any active worker session
+  // simultaneously. Each iteration races the two sources; whichever fires
+  // first determines what happens next:
+  //
+  //   session event  → cancel the prompt, drain queued foreman prompts, loop
+  //   user command   → execute the registered command handler
+  //   user prompt    → run a query via runQueryFn (AgentController.runQuery)
 
   while (true) {
     // Drain any foreman prompts that arrived between iterations (handles the
-    // case where "prompts_ready" fired before ask() was active).
+    // "lost wakeup" case where a session event fired before the race starts).
     if (session?.hasPendingPrompts()) {
       await drainPendingPrompts();
       continue;
     }
 
     const promptStr = session ? "\n[agent] > " : "\n> ";
-    const userInput = await input.ask(promptStr, () => controller.listCommands());
 
-    // ask() was cancelled by a session event ("prompts_ready" or "fatal").
-    // Drain any queued prompts (no-op for "fatal") and loop back.
-    if (userInput === null) {
-      await drainPendingPrompts();
-      continue;
+    let userInput: string | null;
+
+    if (session) {
+      // Race: wait for user input OR the next session event — whichever comes first.
+      const askPromise = input.ask(promptStr, () => controller.listCommands());
+      const { promise: sessionPromise, cleanup: cancelSessionAwaiter } = awaitSessionEvent(session);
+
+      const winner = await Promise.race([
+        askPromise.then((v) => ({ from: "input" as const, value: v })),
+        sessionPromise.then((ev) => ({ from: "session" as const, event: ev })),
+      ]);
+
+      if (winner.from === "session") {
+        // Session event won — cancel the prompt to release the terminal, then drain.
+        input.cancel();
+        await askPromise; // wait for terminal cleanup (resolves null)
+        await drainPendingPrompts();
+        continue;
+      }
+
+      cancelSessionAwaiter(); // input won — remove leftover session listeners
+      userInput = winner.value;
+    } else {
+      userInput = await input.ask(promptStr, () => controller.listCommands());
     }
+
+    if (userInput === null) continue; // unexpected cancel — loop back
 
     // ^D / ^C on empty buffer — treat as exit.
     if (userInput === "__eof__") {
