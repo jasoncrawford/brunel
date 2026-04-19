@@ -2,14 +2,6 @@ import { c } from "./style.js";
 import type { Display } from "./display.js";
 import { type CommandSuggestion, filterCommands } from "../controllers/command-controller.js";
 
-// ── Stash ─────────────────────────────────────────────────────────────────────
-
-/** Buffer stashed by ^S, restored as the initial value of the next ask() call. */
-let stash: string | null = null;
-
-/** Reset the stash (exposed for testing). */
-export function _resetStash(): void { stash = null; }
-
 // ── Input class ───────────────────────────────────────────────────────────────
 
 /**
@@ -17,6 +9,9 @@ export function _resetStash(): void { stash = null; }
  * ask() can access the status bar without callers threading it through.
  */
 export class Input {
+  /** Buffer stashed by ^S, restored as the initial value of the next ask() call. */
+  private _stash: string | null = null;
+
   constructor(private readonly display: Display) {}
 
   // ── Raw input with bracketed paste support ──────────────────────────────────
@@ -31,8 +26,10 @@ export class Input {
     abort?: Promise<string>,
   ): Promise<string> {
     const statusBar = this.display.statusBar;
+    // Capture instance reference so nested inner functions (not arrow fns) can access it.
+    const input = this;
     return new Promise((resolve) => {
-      let buffer = stash ?? "";
+      let buffer = input._stash ?? "";
       let pasteBuffer = "";
       let inPaste = false;
       let done = false;
@@ -50,7 +47,7 @@ export class Input {
       let totalDrawnRows = 0;
       // Arrow-key selection index into the autocomplete suggestions (-1 = none selected)
       let selectedSuggestion = -1;
-      stash = null; // consume the stash
+      input._stash = null; // consume the stash
 
       if (promptLine) process.stdout.write("\x1b[?25h"); // show cursor when there's a visible prompt
       process.stdout.write(promptStr);
@@ -423,7 +420,7 @@ export class Input {
 
       function stashBuffer() {
         if (!buffer) return;
-        stash = buffer;
+        input._stash = buffer;
         // Navigate from current cursor row to the top of the prompt area (row 0),
         // then erase to end of screen, print the stash notification, and redraw
         // an empty prompt so the user can type their next input.

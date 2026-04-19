@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PassThrough } from "stream";
-import { Input, _resetStash } from "../src/agent/views/input.js";
+import { Input } from "../src/agent/views/input.js";
 import { Picker } from "../src/agent/views/picker.js";
 import type { PickQuestionResult } from "../src/agent/views/picker.js";
 import { Display } from "../src/agent/views/display.js";
@@ -874,9 +874,6 @@ describe("pickMultiple() - multi-selection picker", () => {
 });
 
 describe("ask() - stash (^S)", () => {
-  beforeEach(() => { _resetStash(); });
-  afterEach(() => { _resetStash(); });
-
   it("^S with non-empty buffer clears buffer so ask resolves to ''", async () => {
     await withFakeStdin(async (stdin) => {
       const p = testInput.ask("> ", () => []);
