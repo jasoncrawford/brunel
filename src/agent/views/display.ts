@@ -16,8 +16,6 @@ import {
   formatForemanMessage,
 } from "./renderer.js";
 
-export type { ToolUseBlock, ToolResultBlock, ContentBlock } from "./renderer.js";
-
 // ── Display class ──────────────────────────────────────────────────────────
 
 /**

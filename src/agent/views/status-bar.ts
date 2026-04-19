@@ -3,6 +3,7 @@ import { shortWorkerId } from "../../../shared/utils.js";
 import { getConfig } from "../../config.js";
 import type { Settings } from "../models/settings.js";
 import type { EffortValue } from "../models/settings.js";
+import { W } from "./style.js";
 
 // ── Worker status types ────────────────────────────────────────────────────────
 
@@ -18,10 +19,6 @@ export type WorkerStatusPatch = {
   model?: string | undefined;
   effort?: EffortValue | undefined;
 };
-
-// ── Worker status bar formatting ──────────────────────────────────────────────
-
-const W = 70;
 
 // ── StatusBar class ───────────────────────────────────────────────────────────
 
