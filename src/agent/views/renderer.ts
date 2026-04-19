@@ -15,15 +15,7 @@ import {
   fmtArgs,
   toRelativePath,
 } from "../../../shared/formatters.js";
-
-// ── Layout ─────────────────────────────────────────────────────────────────
-
-/** Visible width of the verbose timestamp prefix "HH:mm:ss " */
-const VERBOSE_PREFIX_LEN = 9;
-
-function effectiveWidth(fallback = W, verbose = false): number {
-  return (process.stdout.columns ?? fallback) - (verbose ? VERBOSE_PREFIX_LEN : 0);
-}
+import type { Display } from "./display.js";
 
 // ── Content block types ────────────────────────────────────────────────────
 
@@ -76,19 +68,6 @@ export function resolve(table: FmtTable, key: string, data: unknown, verbose: bo
   return _resolve(table, key, data, verbose);
 }
 
-// ── clearBreak ─────────────────────────────────────────────────────────────
-
-/**
- * Returns a styled "context cleared" divider string. Pass verbose=true to
- * account for the timestamp prefix width in verbose mode.
- */
-export function clearBreak(verbose = false): string {
-  const width = effectiveWidth(W, verbose);
-  const label = "=== Context cleared ";
-  const fill = "=".repeat(Math.max(0, width - label.length));
-  return "\n" + c.sageGreen(s.bold(label + fill));
-}
-
 // ── Hunk type ──────────────────────────────────────────────────────────────
 
 export interface Hunk {
@@ -118,30 +97,7 @@ export function toolResultText(b: { content: unknown }): string {
     .join(" ");
 }
 
-// ── Diff rendering ─────────────────────────────────────────────────────────
-
-export function fmtHunk(hunk: Hunk, verbose = false): string {
-  const header = c.darkGray(`@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`);
-  const width = effectiveWidth(80, verbose);
-  const lines = hunk.lines.map(line => {
-    if (line.startsWith("+")) return c.bgGreen(line.padEnd(width));
-    if (line.startsWith("-")) return c.bgRed(line.padEnd(width));
-    return c.darkGray(line);
-  });
-  return [header, ...lines].join("\n");
-}
-
 // ── Tool result formatters ─────────────────────────────────────────────────
-
-export function fmtEditResult(b: {
-  content: unknown;
-  _msg?: { tool_use_result?: { structuredPatch?: Hunk[] } };
-  _verbose?: boolean;
-}): string {
-  const patch = b._msg?.tool_use_result?.structuredPatch;
-  if (patch && patch.length > 0) return patch.map(h => fmtHunk(h, b._verbose)).join("\n");
-  return c.darkGray(`→ ${trunc(toolResultText(b), 100)}`);
-}
 
 /**
  * Formats bash output for display. Returns "Success" for empty output,
@@ -288,99 +244,7 @@ export function distributeWidths(naturalWidths: number[], available: number): nu
   return allocated;
 }
 
-function renderTable(tableLines: string[], maxWidth?: number): string {
-  const termWidth = maxWidth ?? effectiveWidth();
-  const rows = tableLines.map(line =>
-    line.split("|").slice(1, -1).map(cell => cell.trim())
-  );
-  const isSep = (row: string[]) => row.every(cell => /^[-: ]+$/.test(cell));
-
-  // Pre-apply inline formatting so column widths are measured in visible
-  // characters, not raw markdown source (e.g. **bold** is 4 visible chars,
-  // not 8 raw chars).
-  const fmtRows = rows.map(row => isSep(row) ? row : row.map(mdInline));
-
-  const dataRows = fmtRows.filter(r => !isSep(r));
-  const colCount = Math.max(...dataRows.map(r => r.length));
-  const naturalWidths = Array.from({ length: colCount }, (_, i) =>
-    Math.max(...dataRows.map(r => visLen(r[i] ?? "")))
-  );
-  // overhead: "│ " (2) + " │ " * (N-1) (3*(N-1)) + " │" (2) = 1 + 3*N
-  const overhead = 1 + 3 * colCount;
-  const available = Math.max(termWidth - overhead, colCount);
-  const widths = distributeWidths(naturalWidths, available);
-  const renderRow = (row: string[]): string => {
-    const wrapped = widths.map((w, i) => wrapTextAnsi(row[i] ?? "", w));
-    const numLines = Math.max(...wrapped.map(ls => ls.length));
-    const termRows: string[] = [];
-    for (let ln = 0; ln < numLines; ln++) {
-      termRows.push(
-        "│ " + widths.map((w, i) => ansiPadEnd(wrapped[i][ln] ?? "", w)).join(" │ ") + " │"
-      );
-    }
-    return termRows.join("\n");
-  };
-  const divider = "├─" + widths.map(w => "─".repeat(w)).join("─┼─") + "─┤";
-  const out: string[] = [];
-  for (const row of fmtRows) {
-    if (isSep(row)) { out.push(divider); continue; }
-    out.push(renderRow(row));
-  }
-  return out.join("\n");
-}
-
-export function renderMarkdown(text: string): string {
-  const lines = text.split("\n");
-  const out: string[] = [];
-  let inCode = false;
-  const codeLines: string[] = [];
-  let tableLines: string[] = [];
-
-  function flushTable() {
-    if (tableLines.length) { out.push(renderTable(tableLines)); tableLines = []; }
-  }
-
-  for (const line of lines) {
-    if (line.startsWith("```")) {
-      flushTable();
-      if (!inCode) { inCode = true; codeLines.length = 0; }
-      else         { inCode = false; out.push(codeLines.map(l => "  " + l).join("\n")); }
-      continue;
-    }
-    if (inCode) { codeLines.push(line); continue; }
-
-    if (line.trimStart().startsWith("|")) { tableLines.push(line); continue; }
-    flushTable();
-
-    if (/^[-*_]{3,}\s*$/.test(line)) { out.push("─".repeat(W)); continue; }
-
-    const heading = line.match(/^(#{1,6})\s+(.*)/);
-    if (heading) {
-      const text = mdInline(heading[2]);
-      out.push(s.bold(heading[1] === "#" ? text.toUpperCase() : text));
-      continue;
-    }
-
-    if (line.startsWith("> ")) { out.push("▏ " + mdInline(line.slice(2))); continue; }
-
-    const li = line.match(/^(\s*)[-*+]\s+(.*)/);
-    if (li) { out.push(li[1] + "• " + mdInline(li[2])); continue; }
-
-    const oli = line.match(/^(\s*)(\d+)\.\s+(.*)/);
-    if (oli) { out.push(oli[1] + oli[2] + ". " + mdInline(oli[3])); continue; }
-
-    out.push(mdInline(line));
-  }
-
-  if (inCode && codeLines.length) out.push(codeLines.map(l => "  " + l).join("\n"));
-  flushTable();
-  return out.join("\n");
-}
-
-// ── Message format tables (private) ───────────────────────────────────────
-//
-// These dispatch tables are internal to this module. Display calls the
-// exported format* functions below rather than importing the tables directly.
+// ── Format table helpers ───────────────────────────────────────────────────
 
 function fmtToolCallLine(b: ToolUseBlock, fmt: string): string {
   fmt = c.skyBlue(`\n${fmt}`);
@@ -392,54 +256,6 @@ function fmtSubagentType(subagentType: string | null | undefined): string {
   if (!subagentType || subagentType === "general-purpose") return "Subagent";
   return subagentType;
 }
-
-const TOOL_CALL_FMT: FmtTable = {
-  Bash:       (b) => fmtToolCallLine(b, `$ ${b.input?.command ?? ""}`),
-  Read:       (b) => fmtToolCallLine(b, `• Read(${toRelativePath(b.input?.file_path ?? "?")})`),
-  Write:      (b) => fmtToolCallLine(b, `• Write(${toRelativePath(b.input?.file_path ?? "?")})`),
-  Edit:       (b) => fmtToolCallLine(b, `• Edit(${toRelativePath(b.input?.file_path ?? "?")})`),
-  Glob:       (b) => fmtToolCallLine(b, `• Glob(${b.input?.pattern ?? "?"})`),
-  Grep:       (b) => fmtToolCallLine(b, `• grep ${trunc(b.input?.pattern ?? "?", 30)} ${b.input?.path != null ? toRelativePath(b.input.path as string) : "."}`),
-  Skill:      (b) => fmtToolCallLine(b, `• Skill(${b.input?.skill ?? "?"})`),
-  Agent:      (b) => fmtToolCallLine(b, `• ${fmtSubagentType(b.input?.subagent_type)}(${trunc(b.input?.prompt ?? "", 80)})`),
-  ToolSearch: (b) => fmtToolCallLine(b, `• ToolSearch(${b.input?.query ?? "?"})`),
-  TodoWrite:  (b) => fmtToolCallLine(b, `• TodoWrite(${fmtTodoWriteInput(b.input?.todos)})`),
-  AskUserQuestion: (b) => fmtToolCallLine(b, `• AskUserQuestion(${fmtAskUserQuestionInput(b.input?.questions)})`),
-  _default:   (b) => fmtToolCallLine(b, `• ${b.name}(${fmtArgs(b.input)})`),
-};
-
-const TOOL_RESULT_FMT: FmtTable = {
-  _default:   {
-    quiet:   (b) => c.darkGray(`→ ${trunc(toolResultText(b), 100)}`),
-    verbose: (b) => c.darkGray(`→ ${toolResultText(b)}`),
-  },
-  Read:       (b) => c.darkGray(`→ ${fmtCount(toolResultText(b).split("\n").length, "line")}`),
-  Edit:       (b) => fmtEditResult(b),
-  Skill:      (b) => c.darkGray(`→ Loaded skill`),
-  Bash:       {
-    quiet:   (b) => c.darkGray(`→ ${trunc(fmtBashOutput(toolResultText(b)), 100)}`),
-    verbose: (b) => c.darkGray(`→ ${fmtBashOutput(toolResultText(b))}`),
-  },
-  Write:      (b) => c.darkGray(`→ ${fmtWriteOutput(b)}`),
-  ToolSearch: (b) => c.darkGray(`→ ${fmtToolSearchOutput(b.content)}`),
-  TodoWrite:  (b) => c.darkGray(`→ ${fmtTodoWriteOutput(b)}`),
-};
-
-const TOOL_ERROR_FMT: FmtTable = {
-  AskUserQuestion: (b) => c.darkGray(`→ ${toolResultText(b)}`),
-  _default:        (b) => c.salmon(`! ${toolResultText(b)}`),
-};
-
-const ASSISTANT_BLOCK_FMT: FmtTable = {
-  thinking: (b) => c.gray("\n" + (b._thinkOutLoud ? renderMarkdown(b.thinking ?? "") : "Thinking...")),
-  text:     (b) => c.yellow(`\n${renderMarkdown(b.text ?? "")}`),
-  _default: (b) => c.darkGray(`[assistant/${b.type}]`),
-};
-
-const USER_BLOCK_FMT: FmtTable = {
-  text:     (b) => b._isSynthetic ? null : `\n${b.text ?? ""}`,
-  _default: (b) => c.darkGray(`[user/${b.type}]`),
-};
 
 function fmtCompactionDetail(meta: unknown): string {
   const m = meta as { trigger?: string; pre_tokens?: number } | undefined;
@@ -492,84 +308,262 @@ function fmtApiRetryDetail(m: { error_status?: number | null; error?: string }):
   return "";
 }
 
-const SYSTEM_FMT: FmtTable = {
-  init:              { verbose: (m) => c.darkGray(`init: session ${m.session_id}`) },
-  task_started:      (m) => c.lavender(`  ▶ agent started: ${m.description}`),
-  task_progress:     (m) => c.lavender(`  • ${m.description}`),
-  task_notification: (m) => c.lavender(`  ◀︎ ${m.status}: ${m.summary}`),
-  compact_boundary:  (m) => c.darkGray(`↩ Context compacted (${fmtCompactionDetail(m.compact_metadata)})`),
-  status:            (m) => m.status === "compacting" ? c.darkGray("Compacting context...") : null,
-  api_retry:         (m) => c.amber(`API failure${fmtApiRetryDetail(m)}, retrying in ${(m.retry_delay_ms / 1000).toFixed(1).replace(/\.0$/, "")}s (attempt ${m.attempt}/${m.max_retries})`),
-  hook_started:      { verbose: (m) => c.darkGray(`hook: ${m.hook_name} (${m.hook_event})`) },
-  hook_response:     { verbose: (m) => c.darkGray(`hook: ${m.hook_name} — ${m.outcome}${fmtHookExitCode(m.exit_code)}`) },
-  _default:          { verbose: (m) => c.darkGray(`system/${m.subtype}`) },
-};
+// ── Renderer class ─────────────────────────────────────────────────────────
 
-const MESSAGE_FMT: FmtTable = {
-  _empty:           (m) => c.darkGray(`[${m.type} — empty]`),
-  result:           (m) => c.darkGray(`\n${fmtStats(Math.round(m.duration_ms / 1000), m.num_turns, m.usage.output_tokens, m.usage.input_tokens)}`),
-  rate_limit_event: (m) => {
-    const info = m.rate_limit_info;
-    if (!info || info.status === "allowed") return null;
-    return c.amber(fmtRateLimitInfo(info));
-  },
-  _default:         (m) => c.darkGray(`msg: ${m.type}`),
-};
+export class Renderer {
+  constructor(private readonly display: Display) {}
 
-const FOREMAN_MESSAGE_FMT: FmtTable = {
-  task_assigned:      { verbose: (m) => c.darkGray(`Task assigned: #${m.issue.number}, ${m.issue.title}`) },
-  event_notification: { verbose: (m) => c.darkGray(`Event received [${fmtTime()}]: ${fmtEvent(m.event as Wire.WebhookEvent)}`) },
-  hello_ack:          { verbose: (m) => c.darkGray(`hello_ack: ${m.status}`) },
-  foreman_error:      (m) => c.boldRed(`[foreman error] ${m.message}`),
-  _default:           (m) => c.darkGray(`Unknown foreman message: ${m.type}`),
-};
+  // ── Format tables ─────────────────────────────────────────────────────────
+  //
+  // All tables live here as class fields so any entry can reference `this`
+  // when needed (e.g. TOOL_RESULT_FMT.Edit calls this.fmtEditResult,
+  // ASSISTANT_BLOCK_FMT.text calls this.renderMarkdown). TypeScript sets
+  // constructor parameter properties before running field initializers, so
+  // `this.display` and all prototype methods are available here.
 
-// ── Public format functions ────────────────────────────────────────────────
-//
-// Display calls these instead of importing the FmtTable constants above.
+  private readonly TOOL_CALL_FMT: FmtTable = {
+    Bash:       (b) => fmtToolCallLine(b, `$ ${b.input?.command ?? ""}`),
+    Read:       (b) => fmtToolCallLine(b, `• Read(${toRelativePath(b.input?.file_path ?? "?")})`),
+    Write:      (b) => fmtToolCallLine(b, `• Write(${toRelativePath(b.input?.file_path ?? "?")})`),
+    Edit:       (b) => fmtToolCallLine(b, `• Edit(${toRelativePath(b.input?.file_path ?? "?")})`),
+    Glob:       (b) => fmtToolCallLine(b, `• Glob(${b.input?.pattern ?? "?"})`),
+    Grep:       (b) => fmtToolCallLine(b, `• grep ${trunc(b.input?.pattern ?? "?", 30)} ${b.input?.path != null ? toRelativePath(b.input.path as string) : "."}`),
+    Skill:      (b) => fmtToolCallLine(b, `• Skill(${b.input?.skill ?? "?"})`),
+    Agent:      (b) => fmtToolCallLine(b, `• ${fmtSubagentType(b.input?.subagent_type)}(${trunc(b.input?.prompt ?? "", 80)})`),
+    ToolSearch: (b) => fmtToolCallLine(b, `• ToolSearch(${b.input?.query ?? "?"})`),
+    TodoWrite:  (b) => fmtToolCallLine(b, `• TodoWrite(${fmtTodoWriteInput(b.input?.todos)})`),
+    AskUserQuestion: (b) => fmtToolCallLine(b, `• AskUserQuestion(${fmtAskUserQuestionInput(b.input?.questions)})`),
+    _default:   (b) => fmtToolCallLine(b, `• ${b.name}(${fmtArgs(b.input)})`),
+  };
 
-/** Format a tool use block — the "calling a tool" line. */
-export function formatToolCall(b: ToolUseBlock): string | null {
-  return _resolve(TOOL_CALL_FMT, b.name, b, false);
-}
+  private readonly TOOL_ERROR_FMT: FmtTable = {
+    AskUserQuestion: (b) => c.darkGray(`→ ${toolResultText(b)}`),
+    _default:        (b) => c.salmon(`! ${toolResultText(b)}`),
+  };
 
-/** Format a tool result or tool error block. */
-export function formatToolResult(
-  b: ToolResultBlock & { _input?: Record<string, unknown> },
-  toolName: string,
-  msg: Record<string, unknown> | undefined,
-  verbose: boolean,
-): string | null {
-  return _resolve(
-    b.is_error ? TOOL_ERROR_FMT : TOOL_RESULT_FMT,
-    toolName,
-    { ...b, _msg: msg, _verbose: verbose },
-    verbose,
-  );
-}
+  private readonly TOOL_RESULT_FMT: FmtTable = {
+    _default:   {
+      quiet:   (b) => c.darkGray(`→ ${trunc(toolResultText(b), 100)}`),
+      verbose: (b) => c.darkGray(`→ ${toolResultText(b)}`),
+    },
+    Read:       (b) => c.darkGray(`→ ${fmtCount(toolResultText(b).split("\n").length, "line")}`),
+    Edit:       (b) => this.fmtEditResult(b),
+    Skill:      (b) => c.darkGray(`→ Loaded skill`),
+    Bash:       {
+      quiet:   (b) => c.darkGray(`→ ${trunc(fmtBashOutput(toolResultText(b)), 100)}`),
+      verbose: (b) => c.darkGray(`→ ${fmtBashOutput(toolResultText(b))}`),
+    },
+    Write:      (b) => c.darkGray(`→ ${fmtWriteOutput(b)}`),
+    ToolSearch: (b) => c.darkGray(`→ ${fmtToolSearchOutput(b.content)}`),
+    TodoWrite:  (b) => c.darkGray(`→ ${fmtTodoWriteOutput(b)}`),
+  };
 
-/** Format an assistant or user content block. */
-export function formatContentBlock(
-  b: ContentBlock,
-  role: "assistant" | "user",
-  isSynthetic: boolean,
-  thinkOutLoud: boolean,
-): string | null {
-  const fmt = role === "assistant" ? ASSISTANT_BLOCK_FMT : USER_BLOCK_FMT;
-  return _resolve(fmt, b.type, { ...b, _isSynthetic: isSynthetic, _thinkOutLoud: thinkOutLoud }, false);
-}
+  private readonly USER_BLOCK_FMT: FmtTable = {
+    text:     (b) => b._isSynthetic ? null : `\n${b.text ?? ""}`,
+    _default: (b) => c.darkGray(`[user/${b.type}]`),
+  };
 
-/** Format a system event. */
-export function formatSystemEvent(subtype: string, m: unknown, verbose: boolean): string | null {
-  return _resolve(SYSTEM_FMT, subtype, m, verbose);
-}
+  private readonly ASSISTANT_BLOCK_FMT: FmtTable = {
+    thinking: (b) => c.gray("\n" + (b._thinkOutLoud ? this.renderMarkdown(b.thinking ?? "") : "Thinking...")),
+    text:     (b) => c.yellow(`\n${this.renderMarkdown(b.text ?? "")}`),
+    _default: (b) => c.darkGray(`[assistant/${b.type}]`),
+  };
 
-/** Format a result/rate-limit/other SDK message event. */
-export function formatMessageEvent(type: string, m: unknown): string | null {
-  return _resolve(MESSAGE_FMT, type, m, false);
-}
+  private readonly SYSTEM_FMT: FmtTable = {
+    init:              { verbose: (m) => c.darkGray(`init: session ${m.session_id}`) },
+    task_started:      (m) => c.lavender(`  ▶ agent started: ${m.description}`),
+    task_progress:     (m) => c.lavender(`  • ${m.description}`),
+    task_notification: (m) => c.lavender(`  ◀︎ ${m.status}: ${m.summary}`),
+    compact_boundary:  (m) => c.darkGray(`↩ Context compacted (${fmtCompactionDetail(m.compact_metadata)})`),
+    status:            (m) => m.status === "compacting" ? c.darkGray("Compacting context...") : null,
+    api_retry:         (m) => c.amber(`API failure${fmtApiRetryDetail(m)}, retrying in ${(m.retry_delay_ms / 1000).toFixed(1).replace(/\.0$/, "")}s (attempt ${m.attempt}/${m.max_retries})`),
+    hook_started:      { verbose: (m) => c.darkGray(`hook: ${m.hook_name} (${m.hook_event})`) },
+    hook_response:     { verbose: (m) => c.darkGray(`hook: ${m.hook_name} — ${m.outcome}${fmtHookExitCode(m.exit_code)}`) },
+    _default:          { verbose: (m) => c.darkGray(`system/${m.subtype}`) },
+  };
 
-/** Format a foreman→worker wire message. */
-export function formatForemanMessage(msg: Wire.ForemanMessage, verbose: boolean): string | null {
-  return _resolve(FOREMAN_MESSAGE_FMT, msg.type, msg, verbose);
+  private readonly MESSAGE_FMT: FmtTable = {
+    _empty:           (m) => c.darkGray(`[${m.type} — empty]`),
+    result:           (m) => c.darkGray(`\n${fmtStats(Math.round(m.duration_ms / 1000), m.num_turns, m.usage.output_tokens, m.usage.input_tokens)}`),
+    rate_limit_event: (m) => {
+      const info = m.rate_limit_info;
+      if (!info || info.status === "allowed") return null;
+      return c.amber(fmtRateLimitInfo(info));
+    },
+    _default:         (m) => c.darkGray(`msg: ${m.type}`),
+  };
+
+  private readonly FOREMAN_MESSAGE_FMT: FmtTable = {
+    task_assigned:      { verbose: (m) => c.darkGray(`Task assigned: #${m.issue.number}, ${m.issue.title}`) },
+    event_notification: { verbose: (m) => c.darkGray(`Event received [${fmtTime()}]: ${fmtEvent(m.event as Wire.WebhookEvent)}`) },
+    hello_ack:          { verbose: (m) => c.darkGray(`hello_ack: ${m.status}`) },
+    foreman_error:      (m) => c.boldRed(`[foreman error] ${m.message}`),
+    _default:           (m) => c.darkGray(`Unknown foreman message: ${m.type}`),
+  };
+
+  private _resolve(table: FmtTable, key: string, data: unknown): string | null {
+    return resolve(table, key, data, this.display.verbose);
+  }
+
+  /** Returns a styled "context cleared" divider string. */
+  clearBreak(): string {
+    const width = this.display.effectiveWidth(W);
+    const label = "=== Context cleared ";
+    const fill = "=".repeat(Math.max(0, width - label.length));
+    return "\n" + c.sageGreen(s.bold(label + fill));
+  }
+
+  /** Format a diff hunk for display. */
+  fmtHunk(hunk: Hunk): string {
+    const header = c.darkGray(`@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`);
+    const width = this.display.effectiveWidth(80);
+    const lines = hunk.lines.map(line => {
+      if (line.startsWith("+")) return c.bgGreen(line.padEnd(width));
+      if (line.startsWith("-")) return c.bgRed(line.padEnd(width));
+      return c.darkGray(line);
+    });
+    return [header, ...lines].join("\n");
+  }
+
+  private fmtEditResult(b: {
+    content: unknown;
+    _msg?: { tool_use_result?: { structuredPatch?: Hunk[] } };
+  }): string {
+    const patch = b._msg?.tool_use_result?.structuredPatch;
+    if (patch && patch.length > 0) return patch.map(h => this.fmtHunk(h)).join("\n");
+    return c.darkGray(`→ ${trunc(toolResultText(b), 100)}`);
+  }
+
+  private renderTable(tableLines: string[], maxWidth?: number): string {
+    const termWidth = maxWidth ?? this.display.effectiveWidth();
+    const rows = tableLines.map(line =>
+      line.split("|").slice(1, -1).map(cell => cell.trim())
+    );
+    const isSep = (row: string[]) => row.every(cell => /^[-: ]+$/.test(cell));
+
+    // Pre-apply inline formatting so column widths are measured in visible
+    // characters, not raw markdown source (e.g. **bold** is 4 visible chars,
+    // not 8 raw chars).
+    const fmtRows = rows.map(row => isSep(row) ? row : row.map(mdInline));
+
+    const dataRows = fmtRows.filter(r => !isSep(r));
+    const colCount = Math.max(...dataRows.map(r => r.length));
+    const naturalWidths = Array.from({ length: colCount }, (_, i) =>
+      Math.max(...dataRows.map(r => visLen(r[i] ?? "")))
+    );
+    // overhead: "│ " (2) + " │ " * (N-1) (3*(N-1)) + " │" (2) = 1 + 3*N
+    const overhead = 1 + 3 * colCount;
+    const available = Math.max(termWidth - overhead, colCount);
+    const widths = distributeWidths(naturalWidths, available);
+    const renderRow = (row: string[]): string => {
+      const wrapped = widths.map((w, i) => wrapTextAnsi(row[i] ?? "", w));
+      const numLines = Math.max(...wrapped.map(ls => ls.length));
+      const termRows: string[] = [];
+      for (let ln = 0; ln < numLines; ln++) {
+        termRows.push(
+          "│ " + widths.map((w, i) => ansiPadEnd(wrapped[i][ln] ?? "", w)).join(" │ ") + " │"
+        );
+      }
+      return termRows.join("\n");
+    };
+    const divider = "├─" + widths.map(w => "─".repeat(w)).join("─┼─") + "─┤";
+    const out: string[] = [];
+    for (const row of fmtRows) {
+      if (isSep(row)) { out.push(divider); continue; }
+      out.push(renderRow(row));
+    }
+    return out.join("\n");
+  }
+
+  renderMarkdown(text: string): string {
+    const lines = text.split("\n");
+    const out: string[] = [];
+    let inCode = false;
+    const codeLines: string[] = [];
+    let tableLines: string[] = [];
+
+    const flushTable = () => {
+      if (tableLines.length) { out.push(this.renderTable(tableLines)); tableLines = []; }
+    };
+
+    for (const line of lines) {
+      if (line.startsWith("```")) {
+        flushTable();
+        if (!inCode) { inCode = true; codeLines.length = 0; }
+        else         { inCode = false; out.push(codeLines.map(l => "  " + l).join("\n")); }
+        continue;
+      }
+      if (inCode) { codeLines.push(line); continue; }
+
+      if (line.trimStart().startsWith("|")) { tableLines.push(line); continue; }
+      flushTable();
+
+      if (/^[-*_]{3,}\s*$/.test(line)) { out.push("─".repeat(W)); continue; }
+
+      const heading = line.match(/^(#{1,6})\s+(.*)/);
+      if (heading) {
+        const text = mdInline(heading[2]);
+        out.push(s.bold(heading[1] === "#" ? text.toUpperCase() : text));
+        continue;
+      }
+
+      if (line.startsWith("> ")) { out.push("▏ " + mdInline(line.slice(2))); continue; }
+
+      const li = line.match(/^(\s*)[-*+]\s+(.*)/);
+      if (li) { out.push(li[1] + "• " + mdInline(li[2])); continue; }
+
+      const oli = line.match(/^(\s*)(\d+)\.\s+(.*)/);
+      if (oli) { out.push(oli[1] + oli[2] + ". " + mdInline(oli[3])); continue; }
+
+      out.push(mdInline(line));
+    }
+
+    if (inCode && codeLines.length) out.push(codeLines.map(l => "  " + l).join("\n"));
+    flushTable();
+    return out.join("\n");
+  }
+
+  /** Format a tool use block — the "calling a tool" line. */
+  formatToolCall(b: ToolUseBlock): string | null {
+    return this._resolve(this.TOOL_CALL_FMT, b.name, b);
+  }
+
+  /** Format a tool result or tool error block. */
+  formatToolResult(
+    b: ToolResultBlock & { _input?: Record<string, unknown> },
+    toolName: string,
+    msg: Record<string, unknown> | undefined,
+  ): string | null {
+    return this._resolve(
+      b.is_error ? this.TOOL_ERROR_FMT : this.TOOL_RESULT_FMT,
+      toolName,
+      { ...b, _msg: msg },
+    );
+  }
+
+  /** Format an assistant or user content block. */
+  formatContentBlock(
+    b: ContentBlock,
+    role: "assistant" | "user",
+    isSynthetic: boolean,
+    thinkOutLoud: boolean,
+  ): string | null {
+    const fmt = role === "assistant" ? this.ASSISTANT_BLOCK_FMT : this.USER_BLOCK_FMT;
+    return this._resolve(fmt, b.type, { ...b, _isSynthetic: isSynthetic, _thinkOutLoud: thinkOutLoud });
+  }
+
+  /** Format a system event. */
+  formatSystemEvent(subtype: string, m: unknown): string | null {
+    return this._resolve(this.SYSTEM_FMT, subtype, m);
+  }
+
+  /** Format a result/rate-limit/other SDK message event. */
+  formatMessageEvent(type: string, m: unknown): string | null {
+    return this._resolve(this.MESSAGE_FMT, type, m);
+  }
+
+  /** Format a foreman→worker wire message. */
+  formatForemanMessage(msg: Wire.ForemanMessage): string | null {
+    return this._resolve(this.FOREMAN_MESSAGE_FMT, msg.type, msg);
+  }
 }

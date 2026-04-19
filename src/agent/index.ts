@@ -105,7 +105,7 @@ export async function main(
     description: "Clear the conversation",
     handler: async () => {
       sessionId = undefined;
-      display.print(display.clearBreak());
+      display.print(display.renderer.clearBreak());
     },
   });
   registry.register("model", {
