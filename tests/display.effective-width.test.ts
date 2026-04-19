@@ -1,11 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { stripAnsi } from "./helpers.js";
-import { getConfig } from "../src/config.js";
-import { clearBreak } from "../src/agent/views/display.js";
+import { clearBreak } from "../src/agent/views/renderer.js";
 import { effectiveWidth, W } from "../src/agent/views/style.js";
-
-beforeEach(() => getConfig().verbose = false);
-afterEach(() => getConfig().verbose = false);
 
 describe("effectiveWidth()", () => {
   it("verbose=false: returns full terminal width", () => {
@@ -39,16 +35,14 @@ describe("effectiveWidth()", () => {
 
 describe("clearBreak() - verbose mode reduces width", () => {
   it("verbose=false: divider fills full terminal width", () => {
-    getConfig().verbose = false;
     const expectedWidth = process.stdout.columns ?? W;
-    const lines = stripAnsi(clearBreak()).split("\n");
+    const lines = stripAnsi(clearBreak(false)).split("\n");
     expect(lines[1]).toHaveLength(expectedWidth);
   });
 
   it("verbose=true: divider is narrower by 9 (verbose timestamp prefix)", () => {
-    getConfig().verbose = true;
     const expectedWidth = (process.stdout.columns ?? W) - 9;
-    const lines = stripAnsi(clearBreak()).split("\n");
+    const lines = stripAnsi(clearBreak(true)).split("\n");
     expect(lines[1]).toHaveLength(expectedWidth);
   });
 });

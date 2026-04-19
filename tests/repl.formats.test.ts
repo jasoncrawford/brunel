@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { stripAnsi } from "./helpers.js";
 import { getConfig } from "../src/config.js";
-import { Display, resolve, type FmtTable } from "../src/agent/views/display.js";
+import { Display, resolve } from "../src/agent/views/display.js";
+import type { FmtTable } from "../src/agent/views/renderer.js";
 import { StatusBar } from "../src/agent/views/status-bar.js";
 
 let testDisplay: Display;
