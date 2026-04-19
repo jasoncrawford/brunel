@@ -51,7 +51,7 @@ const WORKER_NAMES = [
 
 // ── Event classification ───────────────────────────────────────────────────────
 
-function classifyEvent(event: Wire.WebhookEvent): "actionable" | "log_only" {
+export function classifyEvent(event: Wire.WebhookEvent): "actionable" | "log_only" {
   const action = event.payload["action"] as string | undefined;
 
   switch (event.name) {
