@@ -623,6 +623,52 @@ describe("ask() - blank line suppression with \\n prefix prompt", () => {
   });
 });
 
+describe("ask() - status bar repositioning on start (issue #757)", () => {
+  it("ask() with active persistent status bar calls drawRaw() immediately to position bar below prompt", async () => {
+    // Regression test for issue #757: when ask() starts after a query, the cursor
+    // sits on the blank separator row above the persistent status bar. The leading
+    // \n in "\n[agent] > " moves the cursor INTO the bar line and the prompt text
+    // overwrites its beginning.  ask() must call _fullRedraw() unconditionally (not
+    // only when the buffer is pre-populated from stash) so that drawRaw() is called
+    // and the bar is repositioned below the fresh prompt.
+    const statusBar = new StatusBar({ agentId: "test-agent" });
+    statusBar.persistentActive = true; // simulate post-query state with bar active
+    const display = new Display(getConfig(), statusBar);
+    const input = new Input(display);
+    const drawRawSpy = vi.spyOn(statusBar, "drawRaw");
+    const writeSpy = vi.mocked(process.stdout.write);
+    writeSpy.mockClear();
+
+    await withFakeStdin(async (stdin) => {
+      const p = input.ask("\n[agent] > ");
+
+      // drawRaw() must have been called during ask() initialisation —
+      // before any user input arrives.
+      expect(drawRawSpy).toHaveBeenCalled();
+
+      stdin.push("\r");
+      await p;
+    });
+  });
+
+  it("ask() with no active status bar still works correctly (drawRaw no-ops)", async () => {
+    // With no active bars drawRaw() returns 0 without writing; calling it is
+    // harmless, but the prompt should still render correctly.
+    const statusBar = new StatusBar({ agentId: "test-agent" }); // persistentActive defaults false
+    const display = new Display(getConfig(), statusBar);
+    const input = new Input(display);
+    const drawRawSpy = vi.spyOn(statusBar, "drawRaw");
+
+    await withFakeStdin(async (stdin) => {
+      const p = input.ask("\n[agent] > ");
+      // drawRaw() is called but returns 0 (no rows written); prompt still resolves
+      expect(drawRawSpy).toHaveBeenCalled();
+      stdin.push("hello\r");
+      expect(await p).toBe("hello");
+    });
+  });
+});
+
 describe("promptLine()", () => {
   it("resolves with typed text on Enter", async () => {
     await withFakeStdin(async (stdin) => {

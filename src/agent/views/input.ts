@@ -92,8 +92,13 @@ export class Input {
 
       if (this._promptLine) process.stdout.write("\x1b[?25h"); // show cursor when there's a visible prompt
       process.stdout.write(promptStr);
-      // If buffer was pre-populated from stash, render it immediately.
-      if (this._buffer) this._fullRedraw(0, this._computeMatches());
+      // Redraw the full prompt area (including status bars below) whenever there
+      // is a visible prompt. This is required even when the buffer is empty: if
+      // the status bar is active the cursor was sitting on the blank separator
+      // row above it, so the leading \n in promptStr moves into the bar line and
+      // `[agent] > ` overwrites its beginning.  _fullRedraw clears the bar line
+      // and calls drawRaw() to position the bar below the fresh prompt.
+      if (this._promptLine) this._fullRedraw(0, this._computeMatches());
 
       // Register the fresh-redraw hook so print() can notify us.
       if (this._promptLine) {
