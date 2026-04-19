@@ -120,9 +120,9 @@ export function toolResultText(b: { content: unknown }): string {
 
 // ── Diff rendering ─────────────────────────────────────────────────────────
 
-export function fmtHunk(hunk: Hunk): string {
+export function fmtHunk(hunk: Hunk, verbose = false): string {
   const header = c.darkGray(`@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`);
-  const width = effectiveWidth(80);
+  const width = effectiveWidth(80, verbose);
   const lines = hunk.lines.map(line => {
     if (line.startsWith("+")) return c.bgGreen(line.padEnd(width));
     if (line.startsWith("-")) return c.bgRed(line.padEnd(width));
@@ -136,9 +136,10 @@ export function fmtHunk(hunk: Hunk): string {
 export function fmtEditResult(b: {
   content: unknown;
   _msg?: { tool_use_result?: { structuredPatch?: Hunk[] } };
+  _verbose?: boolean;
 }): string {
   const patch = b._msg?.tool_use_result?.structuredPatch;
-  if (patch && patch.length > 0) return patch.map(fmtHunk).join("\n");
+  if (patch && patch.length > 0) return patch.map(h => fmtHunk(h, b._verbose)).join("\n");
   return c.darkGray(`→ ${trunc(toolResultText(b), 100)}`);
 }
 
@@ -207,37 +208,6 @@ function mdInline(text: string): string {
   return text;
 }
 
-function wrapText(text: string, width: number): string[] {
-  if (width <= 0 || text.length <= width) return [text];
-  const words = text.split(" ");
-  const lines: string[] = [];
-  let current = "";
-  for (const word of words) {
-    if (current === "") {
-      if (word.length > width) {
-        let rest = word;
-        while (rest.length > width) { lines.push(rest.slice(0, width)); rest = rest.slice(width); }
-        current = rest;
-      } else {
-        current = word;
-      }
-    } else if (current.length + 1 + word.length <= width) {
-      current += " " + word;
-    } else {
-      lines.push(current);
-      if (word.length > width) {
-        let rest = word;
-        while (rest.length > width) { lines.push(rest.slice(0, width)); rest = rest.slice(width); }
-        current = rest;
-      } else {
-        current = word;
-      }
-    }
-  }
-  if (current) lines.push(current);
-  return lines.length > 0 ? lines : [""];
-}
-
 // Strips ANSI escape sequences to measure the visible length of a string.
 function visLen(str: string): number {
   return str.replace(/\x1b\[[0-9;]*m/g, "").length;
@@ -248,8 +218,8 @@ function ansiPadEnd(str: string, width: number): string {
   return str + " ".repeat(Math.max(0, width - visLen(str)));
 }
 
-// Like wrapText but measures word lengths by visible characters, so ANSI
-// escape sequences in pre-formatted strings don't distort line breaks.
+// Wraps text at visible-character boundaries, ignoring ANSI escape sequences,
+// so pre-formatted strings don't have line breaks distorted by color codes.
 function wrapTextAnsi(text: string, width: number): string[] {
   if (width <= 0 || visLen(text) <= width) return [text];
   const words = text.split(" ");
@@ -573,7 +543,7 @@ export function formatToolResult(
   return _resolve(
     b.is_error ? TOOL_ERROR_FMT : TOOL_RESULT_FMT,
     toolName,
-    { ...b, _msg: msg },
+    { ...b, _msg: msg, _verbose: verbose },
     verbose,
   );
 }

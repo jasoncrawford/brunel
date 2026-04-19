@@ -43,7 +43,7 @@ export type DispatchResult =
  * Sort order: prefix matches of name, then non-prefix name substring matches,
  * then description-only matches.
  */
-function filterCommands(query: string, commands: CommandSuggestion[]): CommandSuggestion[] {
+export function filterCommands(query: string, commands: CommandSuggestion[]): CommandSuggestion[] {
   if (query === "") return commands;
   const q = query.toLowerCase();
   const prefixName = commands.filter(c => c.name.toLowerCase().startsWith(q));

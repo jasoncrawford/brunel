@@ -35,6 +35,9 @@ export type AgentPermConfig = {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+/** The SDK query object exposes supportedModels() as an undocumented extension. */
+type QueryWithModels = { supportedModels?: () => Promise<ModelInfo[]> };
+
 /**
  * Returns a function that fetches available Claude models from the SDK.
  * Used by the /model command to populate the model picker.
@@ -42,7 +45,6 @@ export type AgentPermConfig = {
 export function createFetchModelsFn(permConfig: AgentPermConfig): FetchModelsFn {
   return async () => {
     const q = query({ prompt: "", options: { cwd: process.cwd(), systemPrompt: { type: "preset", preset: "claude_code" }, permissionMode: permConfig.permissionMode } });
-    type QueryWithModels = { supportedModels?: () => Promise<ModelInfo[]> };
     const qm = q as unknown as QueryWithModels;
     if (typeof qm.supportedModels === "function") return qm.supportedModels();
     return [];
@@ -134,7 +136,6 @@ export class AgentController {
     });
 
     // Cache the available models list from the SDK (fire-and-forget).
-    type QueryWithModels = { supportedModels?: () => Promise<ModelInfo[]> };
     const qm = iterable as unknown as QueryWithModels;
     if (typeof qm.supportedModels === "function") {
       qm.supportedModels().then(models => { Settings.setCachedModels(models); }).catch(() => {});
