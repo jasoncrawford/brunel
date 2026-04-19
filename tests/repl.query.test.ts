@@ -24,6 +24,7 @@ import { Display } from "../src/agent/views/display.js";
 import { StatusBar } from "../src/agent/views/status-bar.js";
 
 let testDisplay: Display;
+let testSettings: Settings;
 let testController: AgentController;
 let mockPicker: {
   pick: ReturnType<typeof vi.fn>;
@@ -76,7 +77,8 @@ beforeEach(() => {
     pickMultiple: vi.fn().mockResolvedValue([]),
     pickQuestion: vi.fn().mockResolvedValue({ type: "answer", value: "Fast" }),
   };
-  testController = new AgentController(testDisplay, mockPicker as unknown as Picker, defaultPermConfig, new Settings({}));
+  testSettings = new Settings({});
+  testController = new AgentController(testDisplay, mockPicker as unknown as Picker, defaultPermConfig, testSettings);
   getConfig().verbose = false;
   vi.clearAllMocks();
 });
@@ -637,7 +639,6 @@ describe("runQuery - interrupt via ^C on stdin", () => {
 });
 
 describe("runQuery - model option", () => {
-  beforeEach(() => Settings._resetCachedModels());
 
   it("passes model to SDK query options when provided", async () => {
     mockQueryMessages([
@@ -671,14 +672,14 @@ describe("runQuery - model option", () => {
     mockQueryMessages([
       { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } },
     ]);
-    expect(Settings.getCachedModels()).toBeNull();
+    expect(testSettings.getCachedModels()).toBeNull();
     const cap = captureConsole();
     try {
       await testController.runQuery("test", undefined);
     } finally {
       cap.restore();
     }
-    const models = Settings.getCachedModels();
+    const models = testSettings.getCachedModels();
     expect(models).toEqual(FAKE_MODELS);
   });
 });

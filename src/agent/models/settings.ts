@@ -5,10 +5,6 @@ import { EventEmitter } from "node:events";
 export type ModelInfo = { value: string; displayName: string; description: string };
 export type FetchModelsFn = () => Promise<ModelInfo[]>;
 
-// ── Module-private model cache ────────────────────────────────────────────────
-
-let _cachedModels: ModelInfo[] | null = null;
-
 // ── Settings ──────────────────────────────────────────────────────────────────
 
 /** Owns the runtime-settable preferences (model and effort) and operations on them.
@@ -27,17 +23,6 @@ export class Settings extends EventEmitter {
   /** The valid effort values accepted as config/CLI input (excludes "auto"). */
   static readonly VALID_EFFORT_VALUES = ["low", "medium", "high", "max"] as const;
 
-  // ── Model cache ────────────────────────────────────────────────────────────
-
-  /** Returns the cached model list, or null if no query has been run yet. */
-  static getCachedModels(): ModelInfo[] | null { return _cachedModels; }
-
-  /** Update the cached models list (called from runQuery). */
-  static setCachedModels(models: ModelInfo[]): void { _cachedModels = models; }
-
-  /** Reset the cached models (for testing). */
-  static _resetCachedModels(): void { _cachedModels = null; }
-
   // ── Matching ───────────────────────────────────────────────────────────────
 
   /**
@@ -52,6 +37,7 @@ export class Settings extends EventEmitter {
 
   private _model: string | undefined;
   private _effort: EffortValue | undefined;
+  private _cachedModels: ModelInfo[] | null = null;
 
   constructor(initial: { model?: string; effort?: EffortValue } = {}) {
     super();
@@ -64,6 +50,12 @@ export class Settings extends EventEmitter {
 
   _setModel(v: string | undefined): void { this._model = v; this.emit("change"); }
   _setEffort(v: EffortValue | undefined): void { this._effort = v; this.emit("change"); }
+
+  /** Returns the cached model list, or null if no query has been run yet. */
+  getCachedModels(): ModelInfo[] | null { return this._cachedModels; }
+
+  /** Update the cached models list (called from runQuery). */
+  setCachedModels(models: ModelInfo[]): void { this._cachedModels = models; }
 }
 
 export type EffortValue = typeof Settings.VALID_EFFORT_VALUES[number];
