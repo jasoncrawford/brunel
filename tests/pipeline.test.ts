@@ -566,6 +566,7 @@ describe("pipeline: PR events forwarded and logged to DB", () => {
     send(ws, { type: "worker_hello", workerId: "w-pr", status: "idle" });
     await q.next(); // hello_ack
     await q.next(); // task_assigned
+    await q.next(); // event_notification: issues/labeled (queued at enqueue time, flushed on assign)
 
     // 2. Worker opens a PR that closes issue #100 (forwarded as event_notification)
     //    and a check_run fires for the PR.  Both are routed before awaiting any
