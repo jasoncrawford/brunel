@@ -73,28 +73,6 @@ export async function main(
 
   let sessionId: string | undefined;
 
-  /**
-   * Race the current ask() against the next session event.
-   * Returns a cleanup fn to remove listeners when input wins (avoids leaks).
-   */
-  const awaitSessionEvent = (
-    s: WorkerSession,
-  ): { promise: Promise<"prompts_ready" | "fatal">; cleanup: () => void } => {
-    let onReady: (() => void) | null = null;
-    let onFatal: (() => void) | null = null;
-    const cleanup = () => {
-      if (onReady) { s.off("prompts_ready", onReady); onReady = null; }
-      if (onFatal) { s.off("fatal", onFatal); onFatal = null; }
-    };
-    const promise = new Promise<"prompts_ready" | "fatal">((resolve) => {
-      onReady = () => { cleanup(); resolve("prompts_ready"); };
-      onFatal = () => { cleanup(); resolve("fatal"); };
-      s.once("prompts_ready", onReady);
-      s.once("fatal", onFatal);
-    });
-    return { promise, cleanup };
-  };
-
   // doExit handles REPL workspace cleanup and stdin/stdout teardown.
   // Only called in REPL mode (worker mode cleanup goes through workerCtx.cleanup()).
   const doExit = async () => {
@@ -184,52 +162,74 @@ export async function main(
     }
   };
 
-  // ── Routing loop ─────────────────────────────────────────────────────────
-  // Listens to both the user (via input.ask) and any active worker session
-  // simultaneously. Each iteration races the two sources; whichever fires
-  // first determines what happens next:
+  // ── Routing ───────────────────────────────────────────────────────────────
   //
-  //   session event  → cancel the prompt, drain queued foreman prompts, loop
-  //   user command   → execute the registered command handler
-  //   user prompt    → run a query via runQueryFn (AgentController.runQuery)
+  // Session events and user input flow through a shared async event channel.
+  // No promise-racing or event-to-promise adapters needed: session events push
+  // directly to the channel, and ask() pushes when it receives real input.
+  // The routing loop sleeps until the next event arrives.
+
+  type RoutingEvent =
+    | { type: "line"; value: string }
+    | { type: "session"; event: "prompts_ready" | "fatal" };
+
+  // Minimal async FIFO queue.
+  const routingQueue: RoutingEvent[] = [];
+  let routingWaiter: ((e: RoutingEvent) => void) | null = null;
+
+  const enqueueRoutingEvent = (event: RoutingEvent): void => {
+    if (routingWaiter) { const w = routingWaiter; routingWaiter = null; w(event); }
+    else routingQueue.push(event);
+  };
+
+  const nextRoutingEvent = (): Promise<RoutingEvent> => {
+    if (routingQueue.length) return Promise.resolve(routingQueue.shift()!);
+    return new Promise((resolve) => { routingWaiter = resolve; });
+  };
+
+  // Session events push directly to the channel (and cancel any active prompt).
+  if (session) {
+    session.on("prompts_ready", () => {
+      input.cancel();
+      enqueueRoutingEvent({ type: "session", event: "prompts_ready" });
+    });
+    session.on("fatal", () => {
+      input.cancel();
+      enqueueRoutingEvent({ type: "session", event: "fatal" });
+    });
+  }
+
+  // One round of readline: shows the prompt and pushes to the channel when the
+  // user submits real input. Fire-and-forget — the loop calls this when ready.
+  const listenForInput = (): void => {
+    const promptStr = session ? "\n[agent] > " : "\n> ";
+    void input.ask(promptStr, () => controller.listCommands()).then((line) => {
+      if (line !== null) enqueueRoutingEvent({ type: "line", value: line });
+    });
+  };
+
+  // ── Routing loop ─────────────────────────────────────────────────────────
+  // Sleeps until the next routing event arrives, then dispatches it.
 
   while (true) {
-    // Drain any foreman prompts that arrived between iterations (handles the
-    // "lost wakeup" case where a session event fired before the race starts).
+    // Skip showing the prompt when session prompts are already queued
+    // (avoids briefly flashing the prompt before immediately cancelling it).
     if (session?.hasPendingPrompts()) {
       await drainPendingPrompts();
       continue;
     }
 
-    const promptStr = session ? "\n[agent] > " : "\n> ";
+    listenForInput();
+    const event = await nextRoutingEvent();
 
-    let userInput: string | null;
-
-    if (session) {
-      // Race: wait for user input OR the next session event — whichever comes first.
-      const askPromise = input.ask(promptStr, () => controller.listCommands());
-      const { promise: sessionPromise, cleanup: cancelSessionAwaiter } = awaitSessionEvent(session);
-
-      const winner = await Promise.race([
-        askPromise.then((v) => ({ from: "input" as const, value: v })),
-        sessionPromise.then((ev) => ({ from: "session" as const, event: ev })),
-      ]);
-
-      if (winner.from === "session") {
-        // Session event won — cancel the prompt to release the terminal, then drain.
-        input.cancel();
-        await askPromise; // wait for terminal cleanup (resolves null)
-        await drainPendingPrompts();
-        continue;
-      }
-
-      cancelSessionAwaiter(); // input won — remove leftover session listeners
-      userInput = winner.value;
-    } else {
-      userInput = await input.ask(promptStr, () => controller.listCommands());
+    if (event.type === "session") {
+      // input.cancel() was already called when this event was enqueued.
+      await drainPendingPrompts(); // no-op for "fatal"
+      continue;
     }
 
-    if (userInput === null) continue; // unexpected cancel — loop back
+    // event.type === "line" — real user input
+    const userInput = event.value;
 
     // ^D / ^C on empty buffer — treat as exit.
     if (userInput === "__eof__") {
