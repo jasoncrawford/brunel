@@ -49,6 +49,22 @@ const fakeWorkspace = vi.hoisted(() => {
   return ws;
 });
 
+// Captures the WorkerSession created by startWorkerMode so tests can emit session
+// events directly (e.g. "prompts_ready") without a real foreman connection.
+const capturedSession = vi.hoisted(() => ({ current: null as import("../src/agent/controllers/worker-controller.js").WorkerSession | null }));
+
+vi.mock("../src/agent/controllers/worker-controller.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/agent/controllers/worker-controller.js")>();
+  return {
+    ...actual,
+    startWorkerMode: async (...args: Parameters<typeof actual.startWorkerMode>) => {
+      const result = await actual.startWorkerMode(...args);
+      capturedSession.current = result.session;
+      return result;
+    },
+  };
+});
+
 vi.mock("../src/agent/models/workspace.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/agent/models/workspace.js")>();
   // Use a regular function (not arrow) so it can be called with `new`.
@@ -262,6 +278,7 @@ describe("workerMain exit behavior", () => {
   });
 
   it("does not call workspace.destroy a second time if SIGINT fires after loop exits", async () => {
+
     // Simulate: user types /exit, cleanup runs, process tries to exit.
     // Before process.exit completes (in our mock it throws), emit SIGINT.
     const exitSpy = vi.spyOn(process, "exit").mockImplementation((code?: number | string) => {
@@ -281,5 +298,114 @@ describe("workerMain exit behavior", () => {
 
     // destroy should have been called exactly once, not twice
     expect(fakeWorkspace.destroy).toHaveBeenCalledOnce();
+  });
+});
+
+describe("workerMain input cancel discipline", () => {
+  let chdirSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    makeMockInput();
+    chdirSpy = vi.spyOn(process, "chdir").mockImplementation(() => {});
+    vi.mocked(confirmIfUnsafe).mockResolvedValue(true);
+    fakeWorkspace.isCreated = false;
+    vi.mocked(fakeWorkspace.destroy).mockResolvedValue(undefined);
+    vi.mocked(fakeWorkspace.checkSafety).mockResolvedValue({ uncommittedFiles: [], unpushedCommits: [], noUpstream: false });
+    vi.mocked(fakeWorkspace.create).mockImplementation(async () => { fakeWorkspace.isCreated = true; });
+    capturedSession.current = null;
+  });
+
+  afterEach(() => {
+    chdirSpy.mockRestore();
+    vi.clearAllMocks();
+  });
+
+  it("calls cancel() on the active ask() when processing a queued session event", async () => {
+    // Regression test for: user input sent to agent multiple times (issue #761).
+    //
+    // The bug: when "prompts_ready" fires while the routing loop is EXECUTING
+    // (not sleeping in nextRoutingEvent), cancel() in the event handler is a no-op
+    // because ask() hasn't started yet. The session event lands in routingQueue.
+    // Later, listenForInput() starts a new ask(), then nextRoutingEvent() immediately
+    // returns the stale queued event. Without the fix, the routing loop handles that
+    // event WITHOUT calling cancel() on the newly-started ask(), creating an orphaned
+    // ask() that accumulates stdin listeners.
+    //
+    // The fix: always call this.input.cancel() when processing a session event,
+    // even if routingWaiter was set when the event was enqueued.
+
+    const ops: string[] = [];
+    let askCount = 0;
+    let currentResolveAsk: ((val: string | null) => void) | null = null;
+
+    mockInput.ask.mockImplementation(() => {
+      askCount++;
+      const n = askCount;
+      ops.push(`ask${n}`);
+      if (n === 1) {
+        // First ask: return user input immediately to trigger runQuery.
+        return Promise.resolve("do some work");
+      }
+      // Subsequent asks: block until cancel() or EOF resolves them.
+      return new Promise<string | null>((resolve) => { currentResolveAsk = resolve; });
+    });
+
+    // cancel() resolves the current pending ask with null (mirrors real Input behavior).
+    mockInput.cancel.mockImplementation(() => {
+      if (!currentResolveAsk) return;
+      ops.push("cancel");
+      const r = currentResolveAsk;
+      currentResolveAsk = null;
+      r(null);
+    });
+
+    let runQueryCallCount = 0;
+    const runQueryFn = vi.fn().mockImplementation(async () => {
+      runQueryCallCount++;
+      if (runQueryCallCount === 1) {
+        // Simulate two foreman events arriving while the query is running.
+        // enqueuePrompt fires "prompts_ready" which calls cancel() (no-op — ask isn't
+        // active yet) and pushes a session event to routingQueue.
+        (capturedSession.current as any).enqueuePrompt("foreman event A", false);
+        (capturedSession.current as any).enqueuePrompt("foreman event B", false);
+      }
+    });
+
+    installMocks(runQueryFn);
+
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => {
+      throw new Error("__process_exit__");
+    }) as unknown as ReturnType<typeof vi.spyOn>;
+
+    let agentError: unknown;
+    const agentDone = new BrunelAgent(getConfig()).start(true).then(
+      () => {},
+      (err: unknown) => {
+        if (!(err instanceof Error && err.message === "__process_exit__")) agentError = err;
+      },
+    );
+
+    // Wait until ask#4 has started — the full bug scenario has played out by then:
+    //   ask#1 → runQuery(user) → enqueue 2 session events → drain prompts (runQuery×2)
+    //   → ask#2 → stale event1 processed → [cancel ask#2 with fix] → ask#3
+    //   → stale event2 processed → [cancel ask#3 with fix] → ask#4 (waiting)
+    await vi.waitFor(() => expect(askCount).toBeGreaterThanOrEqual(4));
+
+    // Exit cleanly by resolving ask#4 with EOF.
+    currentResolveAsk?.("__eof__" as unknown as string);
+
+    await agentDone;
+    exitSpy.mockRestore();
+
+    if (agentError) throw agentError;
+
+    // With the fix: "cancel" must appear between ask#2→ask#3 and ask#3→ask#4,
+    // proving cancel() was called for each orphaned ask before the next one started.
+    // Without the fix: ops = ["ask1","ask2","ask3","ask4"] — no cancels between asks.
+    const ask2Idx = ops.indexOf("ask2");
+    const ask3Idx = ops.indexOf("ask3");
+    const ask4Idx = ops.indexOf("ask4");
+    expect(ops.slice(ask2Idx + 1, ask3Idx)).toContain("cancel");
+    expect(ops.slice(ask3Idx + 1, ask4Idx)).toContain("cancel");
   });
 });
