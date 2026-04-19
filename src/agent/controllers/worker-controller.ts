@@ -535,8 +535,8 @@ export class WorkerSession extends EventEmitter {
       const { event } = msg;
       const action = event.payload["action"] as string | undefined;
 
-      // Track PR number from any pull_request event for the status bar.
       if (event.name === "pull_request") {
+        // Track PR number for the status bar.
         const pr = event.payload["pull_request"] as { number?: number; merged?: boolean } | undefined;
         if (action === "closed" && !pr?.merged) {
           // PR was closed without merging — clear the PR from the status bar.
@@ -544,20 +544,20 @@ export class WorkerSession extends EventEmitter {
         } else if (pr?.number != null) {
           this.statusBar.update({ prNumber: pr.number });
         }
-      }
-
-      if (event.name === "issues" && action === "closed") {
-        this.issueClosed = true;
-      } else if (event.name === "issues" && action === "reopened") {
-        this.issueClosed = false;
-      }
-
-      if (event.name === "pull_request" && action === "closed") {
-        this.prIsClosed = true;
-        // process normally (cleanup prompt still fires)
-      } else if (event.name === "pull_request" && action === "reopened") {
-        this.prIsClosed = false;
-        // process normally
+        // Track prIsClosed flag.
+        if (action === "closed") {
+          this.prIsClosed = true;
+          // process normally (cleanup prompt still fires)
+        } else if (action === "reopened") {
+          this.prIsClosed = false;
+          // process normally
+        }
+      } else if (event.name === "issues") {
+        if (action === "closed") {
+          this.issueClosed = true;
+        } else if (action === "reopened") {
+          this.issueClosed = false;
+        }
       } else if (this.prIsClosed && event.name === "check_suite") {
         // Post-merge check suite: already logged via printForemanMessage; silently drop.
         return;
