@@ -1,5 +1,6 @@
-import { EventEmitter } from "events";
+import { EventEmitter } from "node:events";
 import * as Wire from "../../../shared/wire.js";
+import { WebSocket } from "ws";
 import type { WebSocket as WsSocket } from "ws";
 import type { Task } from "./task.js";
 
@@ -84,7 +85,7 @@ export class Worker {
   }
 
   send(msg: Wire.ForemanMessage): boolean {
-    if (this.ws.readyState === 1 /* OPEN */) {
+    if (this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(msg));
       return true;
     }

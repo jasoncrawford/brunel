@@ -1,5 +1,5 @@
 import http from "http";
-import { WebSocketServer } from "ws";
+import { WebSocketServer, WebSocket } from "ws";
 import type { WebSocket as WsSocket } from "ws";
 import type { Task, Worker, LogEntry, AdminSnapshot, AdminMessage } from "../../../shared/wire.js";
 
@@ -40,7 +40,7 @@ export function createAdminWss(server: http.Server, getSnapshot?: () => Promise<
   function broadcast(msg: AdminMessage) {
     const json = JSON.stringify(msg);
     for (const ws of clients) {
-      if (ws.readyState === 1 /* OPEN */) ws.send(json);
+      if (ws.readyState === WebSocket.OPEN) ws.send(json);
     }
   }
 

@@ -148,7 +148,7 @@ export class Task extends ActiveRecord {
     body: string,
   ): Promise<number[]> {
     const [bodyBlockers, nativeBlockers] = await Promise.all([
-      Promise.resolve(Task.parseBodyBlockers(body)),
+      Task.parseBodyBlockers(body),
       fetchNativeBlockers(issueNumber),
     ]);
     return Array.from(new Set([...bodyBlockers, ...nativeBlockers]));
