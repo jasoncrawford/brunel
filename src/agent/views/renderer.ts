@@ -244,7 +244,7 @@ export function distributeWidths(naturalWidths: number[], available: number): nu
   return allocated;
 }
 
-// ── Message format tables (module-level, no `this` needed) ────────────────
+// ── Format table helpers ───────────────────────────────────────────────────
 
 function fmtToolCallLine(b: ToolUseBlock, fmt: string): string {
   fmt = c.skyBlue(`\n${fmt}`);
@@ -256,31 +256,6 @@ function fmtSubagentType(subagentType: string | null | undefined): string {
   if (!subagentType || subagentType === "general-purpose") return "Subagent";
   return subagentType;
 }
-
-const TOOL_CALL_FMT: FmtTable = {
-  Bash:       (b) => fmtToolCallLine(b, `$ ${b.input?.command ?? ""}`),
-  Read:       (b) => fmtToolCallLine(b, `• Read(${toRelativePath(b.input?.file_path ?? "?")})`),
-  Write:      (b) => fmtToolCallLine(b, `• Write(${toRelativePath(b.input?.file_path ?? "?")})`),
-  Edit:       (b) => fmtToolCallLine(b, `• Edit(${toRelativePath(b.input?.file_path ?? "?")})`),
-  Glob:       (b) => fmtToolCallLine(b, `• Glob(${b.input?.pattern ?? "?"})`),
-  Grep:       (b) => fmtToolCallLine(b, `• grep ${trunc(b.input?.pattern ?? "?", 30)} ${b.input?.path != null ? toRelativePath(b.input.path as string) : "."}`),
-  Skill:      (b) => fmtToolCallLine(b, `• Skill(${b.input?.skill ?? "?"})`),
-  Agent:      (b) => fmtToolCallLine(b, `• ${fmtSubagentType(b.input?.subagent_type)}(${trunc(b.input?.prompt ?? "", 80)})`),
-  ToolSearch: (b) => fmtToolCallLine(b, `• ToolSearch(${b.input?.query ?? "?"})`),
-  TodoWrite:  (b) => fmtToolCallLine(b, `• TodoWrite(${fmtTodoWriteInput(b.input?.todos)})`),
-  AskUserQuestion: (b) => fmtToolCallLine(b, `• AskUserQuestion(${fmtAskUserQuestionInput(b.input?.questions)})`),
-  _default:   (b) => fmtToolCallLine(b, `• ${b.name}(${fmtArgs(b.input)})`),
-};
-
-const TOOL_ERROR_FMT: FmtTable = {
-  AskUserQuestion: (b) => c.darkGray(`→ ${toolResultText(b)}`),
-  _default:        (b) => c.salmon(`! ${toolResultText(b)}`),
-};
-
-const USER_BLOCK_FMT: FmtTable = {
-  text:     (b) => b._isSynthetic ? null : `\n${b.text ?? ""}`,
-  _default: (b) => c.darkGray(`[user/${b.type}]`),
-};
 
 function fmtCompactionDetail(meta: unknown): string {
   const m = meta as { trigger?: string; pre_tokens?: number } | undefined;
@@ -333,68 +308,98 @@ function fmtApiRetryDetail(m: { error_status?: number | null; error?: string }):
   return "";
 }
 
-const SYSTEM_FMT: FmtTable = {
-  init:              { verbose: (m) => c.darkGray(`init: session ${m.session_id}`) },
-  task_started:      (m) => c.lavender(`  ▶ agent started: ${m.description}`),
-  task_progress:     (m) => c.lavender(`  • ${m.description}`),
-  task_notification: (m) => c.lavender(`  ◀︎ ${m.status}: ${m.summary}`),
-  compact_boundary:  (m) => c.darkGray(`↩ Context compacted (${fmtCompactionDetail(m.compact_metadata)})`),
-  status:            (m) => m.status === "compacting" ? c.darkGray("Compacting context...") : null,
-  api_retry:         (m) => c.amber(`API failure${fmtApiRetryDetail(m)}, retrying in ${(m.retry_delay_ms / 1000).toFixed(1).replace(/\.0$/, "")}s (attempt ${m.attempt}/${m.max_retries})`),
-  hook_started:      { verbose: (m) => c.darkGray(`hook: ${m.hook_name} (${m.hook_event})`) },
-  hook_response:     { verbose: (m) => c.darkGray(`hook: ${m.hook_name} — ${m.outcome}${fmtHookExitCode(m.exit_code)}`) },
-  _default:          { verbose: (m) => c.darkGray(`system/${m.subtype}`) },
-};
-
-const MESSAGE_FMT: FmtTable = {
-  _empty:           (m) => c.darkGray(`[${m.type} — empty]`),
-  result:           (m) => c.darkGray(`\n${fmtStats(Math.round(m.duration_ms / 1000), m.num_turns, m.usage.output_tokens, m.usage.input_tokens)}`),
-  rate_limit_event: (m) => {
-    const info = m.rate_limit_info;
-    if (!info || info.status === "allowed") return null;
-    return c.amber(fmtRateLimitInfo(info));
-  },
-  _default:         (m) => c.darkGray(`msg: ${m.type}`),
-};
-
-const FOREMAN_MESSAGE_FMT: FmtTable = {
-  task_assigned:      { verbose: (m) => c.darkGray(`Task assigned: #${m.issue.number}, ${m.issue.title}`) },
-  event_notification: { verbose: (m) => c.darkGray(`Event received [${fmtTime()}]: ${fmtEvent(m.event as Wire.WebhookEvent)}`) },
-  hello_ack:          { verbose: (m) => c.darkGray(`hello_ack: ${m.status}`) },
-  foreman_error:      (m) => c.boldRed(`[foreman error] ${m.message}`),
-  _default:           (m) => c.darkGray(`Unknown foreman message: ${m.type}`),
-};
-
 // ── Renderer class ─────────────────────────────────────────────────────────
 
 export class Renderer {
-  private readonly TOOL_RESULT_FMT: FmtTable;
-  private readonly ASSISTANT_BLOCK_FMT: FmtTable;
+  constructor(private readonly display: Display) {}
 
-  constructor(private readonly display: Display) {
-    this.TOOL_RESULT_FMT = {
-      _default:   {
-        quiet:   (b) => c.darkGray(`→ ${trunc(toolResultText(b), 100)}`),
-        verbose: (b) => c.darkGray(`→ ${toolResultText(b)}`),
-      },
-      Read:       (b) => c.darkGray(`→ ${fmtCount(toolResultText(b).split("\n").length, "line")}`),
-      Edit:       (b) => this.fmtEditResult(b),
-      Skill:      (b) => c.darkGray(`→ Loaded skill`),
-      Bash:       {
-        quiet:   (b) => c.darkGray(`→ ${trunc(fmtBashOutput(toolResultText(b)), 100)}`),
-        verbose: (b) => c.darkGray(`→ ${fmtBashOutput(toolResultText(b))}`),
-      },
-      Write:      (b) => c.darkGray(`→ ${fmtWriteOutput(b)}`),
-      ToolSearch: (b) => c.darkGray(`→ ${fmtToolSearchOutput(b.content)}`),
-      TodoWrite:  (b) => c.darkGray(`→ ${fmtTodoWriteOutput(b)}`),
-    };
+  // ── Format tables ─────────────────────────────────────────────────────────
+  //
+  // All tables live here as class fields so any entry can reference `this`
+  // when needed (e.g. TOOL_RESULT_FMT.Edit calls this.fmtEditResult,
+  // ASSISTANT_BLOCK_FMT.text calls this.renderMarkdown). TypeScript sets
+  // constructor parameter properties before running field initializers, so
+  // `this.display` and all prototype methods are available here.
 
-    this.ASSISTANT_BLOCK_FMT = {
-      thinking: (b) => c.gray("\n" + (b._thinkOutLoud ? this.renderMarkdown(b.thinking ?? "") : "Thinking...")),
-      text:     (b) => c.yellow(`\n${this.renderMarkdown(b.text ?? "")}`),
-      _default: (b) => c.darkGray(`[assistant/${b.type}]`),
-    };
-  }
+  private readonly TOOL_CALL_FMT: FmtTable = {
+    Bash:       (b) => fmtToolCallLine(b, `$ ${b.input?.command ?? ""}`),
+    Read:       (b) => fmtToolCallLine(b, `• Read(${toRelativePath(b.input?.file_path ?? "?")})`),
+    Write:      (b) => fmtToolCallLine(b, `• Write(${toRelativePath(b.input?.file_path ?? "?")})`),
+    Edit:       (b) => fmtToolCallLine(b, `• Edit(${toRelativePath(b.input?.file_path ?? "?")})`),
+    Glob:       (b) => fmtToolCallLine(b, `• Glob(${b.input?.pattern ?? "?"})`),
+    Grep:       (b) => fmtToolCallLine(b, `• grep ${trunc(b.input?.pattern ?? "?", 30)} ${b.input?.path != null ? toRelativePath(b.input.path as string) : "."}`),
+    Skill:      (b) => fmtToolCallLine(b, `• Skill(${b.input?.skill ?? "?"})`),
+    Agent:      (b) => fmtToolCallLine(b, `• ${fmtSubagentType(b.input?.subagent_type)}(${trunc(b.input?.prompt ?? "", 80)})`),
+    ToolSearch: (b) => fmtToolCallLine(b, `• ToolSearch(${b.input?.query ?? "?"})`),
+    TodoWrite:  (b) => fmtToolCallLine(b, `• TodoWrite(${fmtTodoWriteInput(b.input?.todos)})`),
+    AskUserQuestion: (b) => fmtToolCallLine(b, `• AskUserQuestion(${fmtAskUserQuestionInput(b.input?.questions)})`),
+    _default:   (b) => fmtToolCallLine(b, `• ${b.name}(${fmtArgs(b.input)})`),
+  };
+
+  private readonly TOOL_ERROR_FMT: FmtTable = {
+    AskUserQuestion: (b) => c.darkGray(`→ ${toolResultText(b)}`),
+    _default:        (b) => c.salmon(`! ${toolResultText(b)}`),
+  };
+
+  private readonly TOOL_RESULT_FMT: FmtTable = {
+    _default:   {
+      quiet:   (b) => c.darkGray(`→ ${trunc(toolResultText(b), 100)}`),
+      verbose: (b) => c.darkGray(`→ ${toolResultText(b)}`),
+    },
+    Read:       (b) => c.darkGray(`→ ${fmtCount(toolResultText(b).split("\n").length, "line")}`),
+    Edit:       (b) => this.fmtEditResult(b),
+    Skill:      (b) => c.darkGray(`→ Loaded skill`),
+    Bash:       {
+      quiet:   (b) => c.darkGray(`→ ${trunc(fmtBashOutput(toolResultText(b)), 100)}`),
+      verbose: (b) => c.darkGray(`→ ${fmtBashOutput(toolResultText(b))}`),
+    },
+    Write:      (b) => c.darkGray(`→ ${fmtWriteOutput(b)}`),
+    ToolSearch: (b) => c.darkGray(`→ ${fmtToolSearchOutput(b.content)}`),
+    TodoWrite:  (b) => c.darkGray(`→ ${fmtTodoWriteOutput(b)}`),
+  };
+
+  private readonly USER_BLOCK_FMT: FmtTable = {
+    text:     (b) => b._isSynthetic ? null : `\n${b.text ?? ""}`,
+    _default: (b) => c.darkGray(`[user/${b.type}]`),
+  };
+
+  private readonly ASSISTANT_BLOCK_FMT: FmtTable = {
+    thinking: (b) => c.gray("\n" + (b._thinkOutLoud ? this.renderMarkdown(b.thinking ?? "") : "Thinking...")),
+    text:     (b) => c.yellow(`\n${this.renderMarkdown(b.text ?? "")}`),
+    _default: (b) => c.darkGray(`[assistant/${b.type}]`),
+  };
+
+  private readonly SYSTEM_FMT: FmtTable = {
+    init:              { verbose: (m) => c.darkGray(`init: session ${m.session_id}`) },
+    task_started:      (m) => c.lavender(`  ▶ agent started: ${m.description}`),
+    task_progress:     (m) => c.lavender(`  • ${m.description}`),
+    task_notification: (m) => c.lavender(`  ◀︎ ${m.status}: ${m.summary}`),
+    compact_boundary:  (m) => c.darkGray(`↩ Context compacted (${fmtCompactionDetail(m.compact_metadata)})`),
+    status:            (m) => m.status === "compacting" ? c.darkGray("Compacting context...") : null,
+    api_retry:         (m) => c.amber(`API failure${fmtApiRetryDetail(m)}, retrying in ${(m.retry_delay_ms / 1000).toFixed(1).replace(/\.0$/, "")}s (attempt ${m.attempt}/${m.max_retries})`),
+    hook_started:      { verbose: (m) => c.darkGray(`hook: ${m.hook_name} (${m.hook_event})`) },
+    hook_response:     { verbose: (m) => c.darkGray(`hook: ${m.hook_name} — ${m.outcome}${fmtHookExitCode(m.exit_code)}`) },
+    _default:          { verbose: (m) => c.darkGray(`system/${m.subtype}`) },
+  };
+
+  private readonly MESSAGE_FMT: FmtTable = {
+    _empty:           (m) => c.darkGray(`[${m.type} — empty]`),
+    result:           (m) => c.darkGray(`\n${fmtStats(Math.round(m.duration_ms / 1000), m.num_turns, m.usage.output_tokens, m.usage.input_tokens)}`),
+    rate_limit_event: (m) => {
+      const info = m.rate_limit_info;
+      if (!info || info.status === "allowed") return null;
+      return c.amber(fmtRateLimitInfo(info));
+    },
+    _default:         (m) => c.darkGray(`msg: ${m.type}`),
+  };
+
+  private readonly FOREMAN_MESSAGE_FMT: FmtTable = {
+    task_assigned:      { verbose: (m) => c.darkGray(`Task assigned: #${m.issue.number}, ${m.issue.title}`) },
+    event_notification: { verbose: (m) => c.darkGray(`Event received [${fmtTime()}]: ${fmtEvent(m.event as Wire.WebhookEvent)}`) },
+    hello_ack:          { verbose: (m) => c.darkGray(`hello_ack: ${m.status}`) },
+    foreman_error:      (m) => c.boldRed(`[foreman error] ${m.message}`),
+    _default:           (m) => c.darkGray(`Unknown foreman message: ${m.type}`),
+  };
 
   private _resolve(table: FmtTable, key: string, data: unknown): string | null {
     return resolve(table, key, data, this.display.verbose);
@@ -520,7 +525,7 @@ export class Renderer {
 
   /** Format a tool use block — the "calling a tool" line. */
   formatToolCall(b: ToolUseBlock): string | null {
-    return this._resolve(TOOL_CALL_FMT, b.name, b);
+    return this._resolve(this.TOOL_CALL_FMT, b.name, b);
   }
 
   /** Format a tool result or tool error block. */
@@ -530,7 +535,7 @@ export class Renderer {
     msg: Record<string, unknown> | undefined,
   ): string | null {
     return this._resolve(
-      b.is_error ? TOOL_ERROR_FMT : this.TOOL_RESULT_FMT,
+      b.is_error ? this.TOOL_ERROR_FMT : this.TOOL_RESULT_FMT,
       toolName,
       { ...b, _msg: msg },
     );
@@ -543,22 +548,22 @@ export class Renderer {
     isSynthetic: boolean,
     thinkOutLoud: boolean,
   ): string | null {
-    const fmt = role === "assistant" ? this.ASSISTANT_BLOCK_FMT : USER_BLOCK_FMT;
+    const fmt = role === "assistant" ? this.ASSISTANT_BLOCK_FMT : this.USER_BLOCK_FMT;
     return this._resolve(fmt, b.type, { ...b, _isSynthetic: isSynthetic, _thinkOutLoud: thinkOutLoud });
   }
 
   /** Format a system event. */
   formatSystemEvent(subtype: string, m: unknown): string | null {
-    return this._resolve(SYSTEM_FMT, subtype, m);
+    return this._resolve(this.SYSTEM_FMT, subtype, m);
   }
 
   /** Format a result/rate-limit/other SDK message event. */
   formatMessageEvent(type: string, m: unknown): string | null {
-    return this._resolve(MESSAGE_FMT, type, m);
+    return this._resolve(this.MESSAGE_FMT, type, m);
   }
 
   /** Format a foreman→worker wire message. */
   formatForemanMessage(msg: Wire.ForemanMessage): string | null {
-    return this._resolve(FOREMAN_MESSAGE_FMT, msg.type, msg);
+    return this._resolve(this.FOREMAN_MESSAGE_FMT, msg.type, msg);
   }
 }
