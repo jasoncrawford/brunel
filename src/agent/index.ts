@@ -9,12 +9,12 @@ import { Picker } from "./views/picker.js";
 import { WorkerSession, registerWorkerCommands, startWorkerMode } from "./controllers/worker-controller.js";
 import type { RunQuery } from "./controllers/worker-controller.js";
 import { loadConfig, getConfig } from "../config.js";
-import { Workspace, confirmIfUnsafe } from "./models/workspace.js";
+import { Workspace } from "./models/workspace.js";
 import { fmtError } from "../utils.js";
 import { Settings } from "./models/settings.js";
 import { CommandRegistry, CommandController } from "./controllers/command-controller.js";
 import { SettingsController } from "./controllers/settings-controller.js";
-import { registerWorkspaceCommands } from "./controllers/workspace-controller.js";
+import { WorkspaceController } from "./controllers/workspace-controller.js";
 import { AgentController, logFull, createFetchModelsFn } from "./controllers/agent-controller.js";
 import type { AgentPermConfig } from "./controllers/agent-controller.js";
 
@@ -31,9 +31,29 @@ export async function main(
   workspaceCfg?: { workspaceDir: string; repoUrl: string },
 ): Promise<void> {
   const statusBar = display.statusBar;
+  const originalCwd = process.cwd();
 
-  // Worker mode setup: create workspace, session, signal handlers.
-  const workerCtx = runWorkerMode ? await startWorkerMode(display, statusBar, picker) : undefined;
+  const confirm = async (msg: string): Promise<boolean> => {
+    statusBar.stop();
+    display.print(c.amber(`\n⚠ Potential data loss:\n${msg}`));
+    const idx = await picker.pick(["Yes, proceed", "No, cancel"]);
+    return idx === 0;
+  };
+
+  // Construct workspace and controller once for both REPL and worker modes.
+  // In worker mode, WorkspaceController.onCreate() (called via startWorkerMode)
+  // clones the repo and changes the working directory. In REPL mode it is
+  // available for manual /workspace:* commands but not auto-cloned.
+  const workspace = workspaceCfg
+    ? new Workspace(workspaceCfg.workspaceDir, statusBar.agentId, workspaceCfg.repoUrl, originalCwd, confirm)
+    : undefined;
+  const workspaceController = new WorkspaceController(workspace, display);
+
+  // Worker mode setup: subscribe to workspace events, create the clone,
+  // configure the WorkerSession, and install signal handlers.
+  const workerCtx = runWorkerMode
+    ? await startWorkerMode(display, statusBar, picker, workspaceController)
+    : undefined;
   const session = workerCtx?.session;
 
   const fetchModelsFn = createFetchModelsFn(permConfig);
@@ -51,30 +71,11 @@ export async function main(
   process.stdin.setEncoding("utf8");
 
   let sessionId: string | undefined;
-  const originalCwd = process.cwd();
-
-  const confirm = async (msg: string): Promise<boolean> => {
-    statusBar.stop();
-    display.print(c.amber(`\n⚠ Potential data loss:\n${msg}`));
-    const idx = await picker.pick(["Yes, proceed", "No, cancel"]);
-    return idx === 0;
-  };
-
-  // In REPL mode, create a Workspace (without cloning) if GitHub is configured.
-  // In worker mode, the workspace is owned by the session (already created).
-  const workspace: Workspace | undefined = session
-    ? session.workspace
-    : workspaceCfg
-      ? new Workspace(workspaceCfg.workspaceDir, statusBar.agentId, workspaceCfg.repoUrl, originalCwd, confirm)
-      : undefined;
 
   // doExit handles REPL workspace cleanup and stdin/stdout teardown.
   // Only called in REPL mode (worker mode cleanup goes through workerCtx.cleanup()).
   const doExit = async () => {
-    if (workspace?.isCreated) {
-      const ok = await confirmIfUnsafe(workspace, workspace.confirm);
-      if (ok) await workspace.destroy();
-    }
+    await workspaceController.onDestroy();
     process.stdout.write("\x1b[?2004l\r\n");
     if (process.stdin.isTTY) process.stdin.setRawMode(false);
     process.stdin.pause();
@@ -84,7 +85,7 @@ export async function main(
   // modes; commands that require a foreman connection degrade gracefully.
   const registry = new CommandRegistry();
   const controller = new CommandController(registry);
-  registerWorkspaceCommands(workspace, registry.scoped("workspace"), display);
+  workspaceController.registerCommands(registry.scoped("workspace"));
   registerWorkerCommands(session, registry.scoped("worker"), display);
   registry.register("exit", {
     description: "Exit",
@@ -262,7 +263,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const workspaceCfg = (config.githubRepo && config.githubToken)
     ? {
         workspaceDir: config.workspaceDir ?? path.join(os.homedir(), ".brunel", "workers"),
-        repoUrl: `https://${config.githubToken}@github.com/${config.githubRepo}.git`,
+        repoUrl: config.repoUrl ?? `https://${config.githubToken}@github.com/${config.githubRepo}.git`,
       }
     : undefined;
 

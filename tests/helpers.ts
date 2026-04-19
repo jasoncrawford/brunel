@@ -14,17 +14,17 @@ export async function waitUntil(predicate: () => boolean): Promise<void> {
 
 /**
  * Register all standard built-in commands with minimal stubs.
- * Workspace commands use the real registerWorkspaceCommands (real descriptions, real handler logic).
+ * Workspace commands use WorkspaceController (real descriptions, real handler logic).
  * Returns the populated CommandController for use in tests.
  * Call this in beforeEach for tests that query the command registry.
  */
 export async function registerTestCommands(): Promise<CommandController> {
   const { CommandRegistry, CommandController } = await import("../src/agent/controllers/command-controller.js");
-  const { registerWorkspaceCommands } = await import("../src/agent/controllers/workspace-controller.js");
+  const { WorkspaceController } = await import("../src/agent/controllers/workspace-controller.js");
   const registry = new CommandRegistry();
   const controller = new CommandController(registry);
   const noopDisplay = { print: () => {}, printForemanMessage: () => {} } as WorkerDisplay;
-  registerWorkspaceCommands(undefined, registry.scoped("workspace"), noopDisplay);
+  new WorkspaceController(undefined, noopDisplay).registerCommands(registry.scoped("workspace"));
   const noop = async () => {};
   registry.register("exit",   { description: "Exit", handler: noop });
   registry.register("clear",  { description: "Clear the conversation", handler: noop });

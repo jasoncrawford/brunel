@@ -727,7 +727,8 @@ describe("hello_ack handshake — buffering", () => {
       let callCount = 0;
       const wsFactoryWs = vi.fn().mockImplementation(() => callCount++ === 0 ? wsA : wsB);
 
-      const sessionWithWs = new WorkerSession(new StatusBar({ agentId: AGENT_ID }), wsFactoryWs, display, { workspace });
+      const wc = new WorkspaceController(workspace, display);
+      const sessionWithWs = new WorkerSession(new StatusBar({ agentId: AGENT_ID }), wsFactoryWs, display, { workspaceController: wc });
       sessionWithWs.start(); // uses wsA
 
       const issue = makeIssue();
@@ -772,7 +773,8 @@ describe("hello_ack handshake — buffering", () => {
       let callCount = 0;
       const wsFactoryWs = vi.fn().mockImplementation(() => callCount++ === 0 ? wsA : wsB);
 
-      const sessionWithWs = new WorkerSession(new StatusBar({ agentId: AGENT_ID }), wsFactoryWs, display, { workspace });
+      const wc = new WorkspaceController(workspace, display);
+      const sessionWithWs = new WorkerSession(new StatusBar({ agentId: AGENT_ID }), wsFactoryWs, display, { workspaceController: wc });
       sessionWithWs.start();
 
       sendMsg(wsA, { type: "task_assigned", taskId: "42", issue: makeIssue() });
@@ -1244,7 +1246,7 @@ describe("prIsClosed guard", () => {
 });
 
 import { Workspace } from "../src/agent/models/workspace.js";
-import { registerWorkspaceCommands } from "../src/agent/controllers/workspace-controller.js";
+import { WorkspaceController } from "../src/agent/controllers/workspace-controller.js";
 import { CommandRegistry } from "../src/agent/controllers/command-controller.js";
 import type { TaskQuitInfo } from "../src/agent/controllers/worker-controller.js";
 // ── foreman_error ─────────────────────────────────────────────────────────────
@@ -1338,10 +1340,10 @@ describe("workspace slash commands in WorkerSession", () => {
 
   it("/workspace:reset calls workspace.reset() when clean", async () => {
     const workspace = makeWorkspace();
-    const sessionWs = new WorkerSession(new StatusBar({ agentId: AGENT_ID }), wsFactory, display, { workspace });
-    sessionWs.start();
+    const wc = new WorkspaceController(workspace, display);
+    new WorkerSession(new StatusBar({ agentId: AGENT_ID }), wsFactory, display, { workspaceController: wc }).start();
     const wsReg1 = new CommandRegistry();
-    registerWorkspaceCommands(sessionWs.workspace, wsReg1.scoped("workspace"), display);
+    wc.registerCommands(wsReg1.scoped("workspace"));
     await wsReg1.execute("workspace:reset", "");
     expect(workspace.reset).toHaveBeenCalledOnce();
   });
@@ -1352,10 +1354,10 @@ describe("workspace slash commands in WorkerSession", () => {
       uncommittedFiles: ["M foo.ts"], unpushedCommits: [], noUpstream: false,
     });
     (workspace.confirm as ReturnType<typeof vi.fn>).mockResolvedValue(false);
-    const sessionWs = new WorkerSession(new StatusBar({ agentId: AGENT_ID }), wsFactory, display, { workspace });
-    sessionWs.start();
+    const wc = new WorkspaceController(workspace, display);
+    new WorkerSession(new StatusBar({ agentId: AGENT_ID }), wsFactory, display, { workspaceController: wc }).start();
     const wsReg2 = new CommandRegistry();
-    registerWorkspaceCommands(sessionWs.workspace, wsReg2.scoped("workspace"), display);
+    wc.registerCommands(wsReg2.scoped("workspace"));
     await wsReg2.execute("workspace:reset", "");
     expect(workspace.reset).not.toHaveBeenCalled();
   });
@@ -1364,10 +1366,10 @@ describe("workspace slash commands in WorkerSession", () => {
     const chdirSpy = vi.spyOn(process, "chdir").mockImplementation(() => {});
     try {
       const workspace = makeWorkspace();
-      const sessionWs = new WorkerSession(new StatusBar({ agentId: AGENT_ID }), wsFactory, display, { workspace });
-      sessionWs.start();
+      const wc = new WorkspaceController(workspace, display);
+      new WorkerSession(new StatusBar({ agentId: AGENT_ID }), wsFactory, display, { workspaceController: wc }).start();
       const wsReg3 = new CommandRegistry();
-      registerWorkspaceCommands(sessionWs.workspace, wsReg3.scoped("workspace"), display);
+      wc.registerCommands(wsReg3.scoped("workspace"));
       await wsReg3.execute("workspace:remove", "");
       expect(workspace.destroy).toHaveBeenCalledOnce();
     } finally {
@@ -1378,10 +1380,10 @@ describe("workspace slash commands in WorkerSession", () => {
   it("/workspace:create prints 'already exists' when workspace is pre-created", async () => {
     const localDisplay = { print: vi.fn(), printForemanMessage: vi.fn() };
     const workspace = makeWorkspace();
-    const sessionWs = new WorkerSession(new StatusBar({ agentId: AGENT_ID }), wsFactory, display, { workspace });
-    sessionWs.start();
+    const wc = new WorkspaceController(workspace, localDisplay);
+    new WorkerSession(new StatusBar({ agentId: AGENT_ID }), wsFactory, display, { workspaceController: wc }).start();
     const wsReg4 = new CommandRegistry();
-    registerWorkspaceCommands(sessionWs.workspace, wsReg4.scoped("workspace"), localDisplay);
+    wc.registerCommands(wsReg4.scoped("workspace"));
     await wsReg4.execute("workspace:create", "");
     const printed = localDisplay.print.mock.calls.map(([s]: [unknown]) => stripAnsi(String(s))).join("\n");
     expect(printed).toContain("Workspace already exists");

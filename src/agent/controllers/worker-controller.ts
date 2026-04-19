@@ -1,19 +1,17 @@
 import { exec } from "node:child_process";
 import { randomInt } from "node:crypto";
 import { promisify } from "node:util";
-import path from "node:path";
-import os from "node:os";
 import { WebSocket } from "ws";
 import { c } from "../views/display.js";
 import { StatusBar } from "../views/status-bar.js";
 import { buildInitialPrompt, buildEventPrompt } from "../worker-prompts.js";
 import type { EffortValue } from "../models/settings.js";
 import * as Wire from "../../../shared/wire.js";
-import { Workspace, confirmIfUnsafe } from "../models/workspace.js";
 import { fmtError } from "../../utils.js";
 import { getConfig } from "../../config.js";
 import type { CommandRegistry } from "./command-controller.js";
 import { Picker } from "../views/picker.js";
+import { WorkspaceController } from "./workspace-controller.js";
 
 const execAsync = promisify(exec);
 
@@ -109,7 +107,7 @@ export type RunQuery = (prompt: string, sessionId: string | undefined, abortCont
 
 export type WorkerSessionOptions = {
   afterTask?: () => Promise<void>;
-  workspace?: Workspace;
+  workspaceController?: WorkspaceController;
   /** Interval in ms between worker-sent pings. Dead connections are detected after
    * one interval with no pong. Default is set in the config schema (pingIntervalMs). */
   pingIntervalMs?: number;
@@ -267,11 +265,6 @@ export class WorkerSession {
     this.statusBar.update({ taskNumber: undefined, prNumber: undefined, branch: "" });
     this.display.print(c.sageGreen("Task complete. Waiting for next task..."));
     return "task-complete";
-  }
-
-  /** Returns the workspace for use with registerWorkspaceCommands(). */
-  get workspace(): Workspace | undefined {
-    return this.options.workspace;
   }
 
   /**
@@ -528,7 +521,7 @@ export class WorkerSession {
           branch: "",
         });
         this.display.print(c.amber("Task cancelled (reassigned to another worker)."));
-        const workspace = this.options.workspace;
+        const workspace = this.options.workspaceController?.workspace;
         if (workspace?.isCreated) {
           // Track the reset promise so that task_assigned prompts are deferred until
           // the workspace is clean — preventing a new task from running in a dirty state.
@@ -556,7 +549,7 @@ export class WorkerSession {
       this.issueClosed = false;
       this.statusBar.update({ taskNumber: msg.issue.number, prNumber: undefined });
       void this.refreshBranch();
-      const initialPrompt = buildInitialPrompt(msg.issue, !!this.options.workspace);
+      const initialPrompt = buildInitialPrompt(msg.issue, !!this.options.workspaceController?.workspace);
       this.display.print(c.sageGreen(initialPrompt));
       // If a workspace reset is in progress (from a cancelled hello_ack), defer the
       // prompt until the reset finishes — otherwise the task could run in a dirty workspace.
@@ -662,71 +655,24 @@ export function registerWorkerCommands(session: WorkerSession | undefined, regis
 }
 
 /**
- * Set up worker mode: create the workspace, configure the WorkerSession,
- * install signal handlers, and start the session. Returns the session and
- * a cleanup function — does NOT call main(). The caller (main itself) owns
- * the query loop and calls cleanup() after the loop exits.
+ * Set up worker mode: configure the WorkerSession, install signal handlers,
+ * and start the session. Receives a WorkspaceController (constructed in
+ * index.ts) and delegates all workspace lifecycle operations to it.
+ * Returns the session and a cleanup function — does NOT call main(). The
+ * caller (main itself) owns the query loop and calls cleanup() after it exits.
  */
-export async function startWorkerMode(display: WorkerDisplay, statusBar: StatusBar, picker: Picker): Promise<{
+export async function startWorkerMode(
+  display: WorkerDisplay,
+  statusBar: StatusBar,
+  picker: Picker,
+  workspaceController: WorkspaceController | undefined,
+): Promise<{
   session: WorkerSession;
   cleanup: () => Promise<void>;
 }> {
-  const config = getConfig();
-  const originalCwd = process.cwd();
-  const workspaceDir = config.workspaceDir ?? path.join(os.homedir(), ".brunel", "workers");
-  const repoUrl = config.repoUrl ?? `https://${config.githubToken}@github.com/${config.githubRepo}.git`;
+  await workspaceController?.onCreate();
 
-  const confirm = async (msg: string): Promise<boolean> => {
-    display.print(c.amber(`\n⚠ Potential data loss:\n${msg}`));
-    const idx = await picker.pick(["Yes, proceed", "No, cancel"]);
-    return idx === 0;
-  };
-
-  const workspace = new Workspace(workspaceDir, statusBar.agentId, repoUrl, originalCwd, confirm);
-
-  // Subscribe to workspace events to display progress messages.
-  workspace.on("clone-start", ({ repoUrl: url, dir }: { repoUrl: string; dir: string }) => {
-    display.print(c.sageGreen(`[workspace] Cloning ${url} → ${dir}`));
-  });
-  workspace.on("npm-install", ({ dir }: { dir: string }) => {
-    display.print(c.sageGreen(`[workspace] Installing dependencies in ${dir}`));
-  });
-  workspace.on("reset-start", ({ dir }: { dir: string }) => {
-    display.print(c.sageGreen(`[workspace] Resetting ${dir}`));
-  });
-  workspace.on("reset-retry", ({ error }: { dir: string; error: string }) => {
-    display.print(c.amber(`[workspace] Reset failed, retrying: ${error}`));
-  });
-  workspace.on("reset-reclone", ({ repoUrl: url, dir, error }: { dir: string; error: string; repoUrl: string }) => {
-    display.print(c.amber(`[workspace] Reset failed again, re-cloning: ${error}`));
-    display.print(c.sageGreen(`[workspace] Re-cloning ${url} → ${dir}`));
-  });
-  workspace.on("destroy", ({ dir }: { dir: string }) => {
-    display.print(c.sageGreen(`[workspace] Destroying ${dir}`));
-  });
-  workspace.on("prune-start", ({ workspaceDir: dir }: { workspaceDir: string }) => {
-    display.print(c.sageGreen(`[workspace] Pruning orphaned workspaces in ${dir}`));
-  });
-  workspace.on("prune-remove", ({ dir }: { dir: string }) => {
-    display.print(c.sageGreen(`[workspace] Removing orphaned workspace ${dir}`));
-  });
-
-  await workspace.create();
-  process.chdir(workspace.dir);
-
-  const afterTask = async () => {
-    const ok = await confirmIfUnsafe(workspace, workspace.confirm);
-    if (!ok) {
-      display.print(c.amber("Workspace reset cancelled. Task not marked complete."));
-      throw new Error("cancelled");
-    }
-    try {
-      await workspace.reset();
-    } catch (err) {
-      display.print(c.boldRed(`Workspace reset failed: ${fmtError(err)}. Task not marked complete.`));
-      throw err;
-    }
-  };
+  const afterTask = workspaceController ? () => workspaceController.onReset() : undefined;
 
   let shuttingDown = false;
 
@@ -747,7 +693,7 @@ export async function startWorkerMode(display: WorkerDisplay, statusBar: StatusB
 
   const session = new WorkerSession(statusBar, wsFactory, display, {
     afterTask,
-    workspace,
+    workspaceController,
     pingIntervalMs: getConfig().pingIntervalMs,
     pickFn: (opts) => picker.pick(opts),
   });
@@ -761,8 +707,7 @@ export async function startWorkerMode(display: WorkerDisplay, statusBar: StatusB
       if (choice === "cancel") { shuttingDown = false; return; }
       if (choice === "complete-and-quit") await session.completeCurrentTask();
     }
-    const ok = await confirmIfUnsafe(workspace, workspace.confirm);
-    if (ok) await workspace.destroy();
+    await workspaceController?.onDestroy();
     process.exit(0);
   };
 
@@ -777,7 +722,11 @@ export async function startWorkerMode(display: WorkerDisplay, statusBar: StatusB
   // SIGTERM is a system/orchestrator signal: send goodbye then force-destroy without prompting.
   process.on("SIGTERM", () => {
     session.sendGoodbye();
-    void workspace.destroy().then(() => process.exit(0));
+    if (workspaceController) {
+      void workspaceController.onForceDestroy().then(() => process.exit(0));
+    } else {
+      process.exit(0);
+    }
   });
 
   session.start();
@@ -785,8 +734,7 @@ export async function startWorkerMode(display: WorkerDisplay, statusBar: StatusB
   const cleanup = async () => {
     session.sendGoodbye();
     shuttingDown = true;
-    const ok = await confirmIfUnsafe(workspace, workspace.confirm);
-    if (ok) await workspace.destroy();
+    await workspaceController?.onDestroy();
     process.stdout.write("\x1b[?2004l\r\n");
     if (process.stdin.isTTY) process.stdin.setRawMode(false);
     process.stdin.pause();
