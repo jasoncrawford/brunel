@@ -37,6 +37,10 @@ function numProp(obj: unknown, key: string): number | null {
 
 export interface RouteResult { taskId: string | null; workerId: string | null; }
 
+function routeResult(task: { taskId: string; workerId: string | null } | null | undefined): RouteResult {
+  return { taskId: task?.taskId ?? null, workerId: task?.workerId ?? null };
+}
+
 // ── ForemanWss class ──────────────────────────────────────────────────────────
 
 type ForemanWssOptions = {
@@ -457,26 +461,22 @@ export class ForemanWss {
   }
 
   async routePrEvent(p: R, evt: WebhookEvent): Promise<RouteResult> {
-    function result(task: { taskId: string; workerId: string | null } | null | undefined): RouteResult {
-      return { taskId: task?.taskId ?? null, workerId: task?.workerId ?? null };
-    }
-
     const pr = p.pull_request as R | undefined;
     const prNumber = numProp(pr, "number");
-    if (prNumber === null) return result(null);
+    if (prNumber === null) return routeResult(null);
 
-    if (p.action === "synchronize") return result(await Task.getByPr(prNumber));
+    if (p.action === "synchronize") return routeResult(await Task.getByPr(prNumber));
 
     if (p.action === "opened" && pr) {
       const task = await this.taskManager.handlePrOpenedEvent(prNumber, String(pr.body ?? ""), strProp(pr.head, "ref"));
       if (task) this.forwardEvent(task, evt, `PR #${prNumber}`);
-      return result(task);
+      return routeResult(task);
     }
 
     if (p.action === "closed" && pr) {
       const task = await this.taskManager.handlePrClosedEvent(prNumber, !!pr.merged);
       if (task) this.forwardEvent(task, evt, `PR #${prNumber}`);
-      return result(task);
+      return routeResult(task);
     }
 
     if (p.action === "edited" && pr) {
@@ -487,32 +487,24 @@ export class ForemanWss {
       }
       if (!task) task = await Task.getByPr(prNumber);
       if (task) this.forwardEvent(task, evt, `PR #${prNumber}`);
-      return result(task);
+      return routeResult(task);
     }
 
     const task = await Task.getByPr(prNumber);
     if (task) this.forwardEvent(task, evt, `PR #${prNumber}`);
-    return result(task);
+    return routeResult(task);
   }
 
   async routePrReviewEvent(p: R, evt: WebhookEvent): Promise<RouteResult> {
-    function result(task: { taskId: string; workerId: string | null } | null | undefined): RouteResult {
-      return { taskId: task?.taskId ?? null, workerId: task?.workerId ?? null };
-    }
-
     const pr = p.pull_request as R | undefined;
     const prNumber = numProp(pr, "number");
-    if (prNumber === null) return result(null);
+    if (prNumber === null) return routeResult(null);
     const task = await Task.getByPr(prNumber);
     if (task) this.forwardEvent(task, evt, `PR #${prNumber}`);
-    return result(task);
+    return routeResult(task);
   }
 
   async routeCheckEvent(p: R, evt: WebhookEvent, name: string): Promise<RouteResult> {
-    function result(task: { taskId: string; workerId: string | null } | null | undefined): RouteResult {
-      return { taskId: task?.taskId ?? null, workerId: task?.workerId ?? null };
-    }
-
     const inner = (name === "check_run" ? p.check_run : p.check_suite) as R | undefined;
     const prs = inner?.pull_requests as Array<{ number: number }> | undefined;
     const headBranch = name === "check_run"
@@ -523,15 +515,11 @@ export class ForemanWss {
       prs?.map((pr) => pr.number) ?? [],
       headBranch,
     );
-    if (found) { this.forwardEvent(found.task, evt, found.ref); return result(found.task); }
-    return result(null);
+    if (found) { this.forwardEvent(found.task, evt, found.ref); return routeResult(found.task); }
+    return routeResult(null);
   }
 
   async routeIssueEvent(p: R, evt: WebhookEvent, issue: R, issueNumber: number): Promise<RouteResult> {
-    function result(task: { taskId: string; workerId: string | null } | null | undefined): RouteResult {
-      return { taskId: task?.taskId ?? null, workerId: task?.workerId ?? null };
-    }
-
     let task = await Task.getByIssue(issueNumber);
     // GitHub issue_comment events on PRs have the PR number in issue.number.
     if (!task) task = await Task.getByPr(issueNumber);
@@ -559,9 +547,9 @@ export class ForemanWss {
           log(`ERROR Failed to persist task #${issueNumber}: ${fmtError(err)}`);
           return null;
         });
-        if (!enqueued) return result(null);
+        if (!enqueued) return routeResult(null);
         log(`[task #${issueNumber}] enqueued via issues/${action}`);
-        return result(enqueued);
+        return routeResult(enqueued);
       }
     }
 
@@ -574,10 +562,10 @@ export class ForemanWss {
         log(`[task #${issueNumber}] dequeued (label removed)`);
       } catch (err) {
         log(`ERROR Failed to dequeue task #${issueNumber}: ${fmtError(err)}`);
-        return result(task);
+        return routeResult(task);
       }
       await this.assignWork();
-      return result(task);
+      return routeResult(task);
     }
 
     if (action === "closed") {
@@ -585,10 +573,10 @@ export class ForemanWss {
         await this.taskManager.closeIssue(issueNumber);
       } catch (err) {
         log(`ERROR Failed to close issue #${issueNumber}: ${fmtError(err)}`);
-        return result(task);
+        return routeResult(task);
       }
       await this.assignWork();
-      return result(task);
+      return routeResult(task);
     }
 
     if (action === "reopened") {
@@ -596,10 +584,10 @@ export class ForemanWss {
         await this.taskManager.reopenIssue(issueNumber);
       } catch (err) {
         log(`ERROR Failed to reopen issue #${issueNumber}: ${fmtError(err)}`);
-        return result(task);
+        return routeResult(task);
       }
       await this.assignWork();
-      return result(task);
+      return routeResult(task);
     }
 
     if (action === "edited") {
@@ -612,9 +600,9 @@ export class ForemanWss {
       }
     }
 
-    if (!task) return result(null);
+    if (!task) return routeResult(null);
     this.forwardEvent(task, evt, `#${issueNumber}`);
-    return result(task);
+    return routeResult(task);
   }
 
 }
