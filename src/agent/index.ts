@@ -8,11 +8,11 @@ import { StatusBar } from "./views/status-bar.js";
 import { Input } from "./views/input.js";
 import { Picker } from "./views/picker.js";
 import { registerWorkerCommands, startWorkerMode, WorkerSession } from "./controllers/worker-controller.js";
-import type { RunQuery } from "./controllers/worker-controller.js";
 import { loadConfig, getConfig } from "../config.js";
 import { Workspace } from "./models/workspace.js";
 import { fmtError } from "../utils.js";
 import { Settings } from "./models/settings.js";
+import type { FetchModelsFn } from "./models/settings.js";
 import { CommandRegistry, CommandController } from "./controllers/command-controller.js";
 import { SettingsController } from "./controllers/settings-controller.js";
 import { WorkspaceController } from "./controllers/workspace-controller.js";
@@ -22,43 +22,27 @@ import type { AgentPermConfig } from "./controllers/agent-controller.js";
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 export async function main(
-  runQueryFn: RunQuery,
+  agentController: AgentController,
   permConfig: AgentPermConfig,
   display: Display,
   settings: Settings,
   input: Input,
   picker: Picker,
-  runWorkerMode?: boolean,
-  workspaceCfg?: { workspaceDir: string; repoUrl: string },
+  settingsController: SettingsController,
+  fetchModelsFn: FetchModelsFn,
+  controller: CommandController,
+  session: WorkerSession | undefined,
+  workspaceController: WorkspaceController,
+  workerCleanup: (() => Promise<void>) | undefined,
 ): Promise<void> {
-  const statusBar = display.statusBar;
-  const originalCwd = process.cwd();
-
-  const confirm = async (msg: string): Promise<boolean> => {
-    statusBar.stop();
-    display.print(c.amber(`\n⚠ Potential data loss:\n${msg}`));
-    const idx = await picker.pick(["Yes, proceed", "No, cancel"]);
-    return idx === 0;
+  // doExit handles REPL workspace cleanup and stdin/stdout teardown.
+  // Only called in REPL mode (worker mode cleanup goes through workerCleanup()).
+  const doExit = async () => {
+    await workspaceController.onDestroy();
+    process.stdout.write("\x1b[?2004l\r\n");
+    if (process.stdin.isTTY) process.stdin.setRawMode(false);
+    process.stdin.pause();
   };
-
-  // Construct workspace and controller once for both REPL and worker modes.
-  // In worker mode, WorkspaceController.onCreate() (called via startWorkerMode)
-  // clones the repo and changes the working directory. In REPL mode it is
-  // available for manual /workspace:* commands but not auto-cloned.
-  const workspace = workspaceCfg
-    ? new Workspace(workspaceCfg.workspaceDir, statusBar.agentId, workspaceCfg.repoUrl, originalCwd, confirm)
-    : undefined;
-  const workspaceController = new WorkspaceController(workspace, display);
-
-  // Worker mode setup: subscribe to workspace events, create the clone,
-  // configure the WorkerSession, and install signal handlers.
-  const workerCtx = runWorkerMode
-    ? await startWorkerMode(display, statusBar, picker, workspaceController)
-    : undefined;
-  const session = workerCtx?.session;
-
-  const fetchModelsFn = createFetchModelsFn(permConfig);
-  const settingsController = new SettingsController(settings, display);
 
   // Print the startup banner.
   display.print(c.sageGreen(hr("═")));
@@ -73,19 +57,11 @@ export async function main(
 
   let sessionId: string | undefined;
 
-  // doExit handles REPL workspace cleanup and stdin/stdout teardown.
-  // Only called in REPL mode (worker mode cleanup goes through workerCtx.cleanup()).
-  const doExit = async () => {
-    await workspaceController.onDestroy();
-    process.stdout.write("\x1b[?2004l\r\n");
-    if (process.stdin.isTTY) process.stdin.setRawMode(false);
-    process.stdin.pause();
-  };
-
   // Register all commands. All commands are present in both REPL and worker
   // modes; commands that require a foreman connection degrade gracefully.
-  const registry = new CommandRegistry();
-  const controller = new CommandController(registry);
+  // Registration happens here rather than the startup block because some
+  // handlers close over loop-local state (sessionId, doExit).
+  const registry = controller.registry;
   workspaceController.registerCommands(registry.scoped("workspace"));
   registerWorkerCommands(session, registry.scoped("worker"), display);
   registry.register("exit", {
@@ -129,16 +105,16 @@ export async function main(
   });
 
   /**
-   * Run a single prompt through runQueryFn. Notifies the session before/after
-   * so it can track the AbortController for interrupt() and drain pending events
-   * when the query finishes. Returns true if the query completed normally,
-   * false if interrupted or errored (caller should stop draining pending prompts).
+   * Run a single prompt through agentController.runQuery. Notifies the session
+   * before/after so it can track the AbortController for interrupt() and drain
+   * pending events when the query finishes. Returns true if the query completed
+   * normally, false if interrupted or errored (caller should stop draining).
    */
   const runPrompt = async (prompt: string): Promise<boolean> => {
     const ac = new AbortController();
     session?.notifyQueryStart(ac);
     try {
-      sessionId = await runQueryFn(prompt, sessionId, ac, settings.model, settings.effort) ?? sessionId;
+      sessionId = await agentController.runQuery(prompt, sessionId, ac, settings.model, settings.effort) ?? sessionId;
       return !ac.signal.aborted;
     } catch (err) {
       console.error(c.boldRed(`\nERROR: ${fmtError(err)}`));
@@ -150,8 +126,8 @@ export async function main(
   };
 
   /**
-   * Drain all pending foreman prompts through runQueryFn. Stops draining if a
-   * prompt is interrupted or errors.
+   * Drain all pending foreman prompts through agentController.runQuery. Stops
+   * draining if a prompt is interrupted or errors.
    */
   const drainPendingPrompts = async (): Promise<void> => {
     while (session?.hasPendingPrompts()) {
@@ -258,7 +234,7 @@ export async function main(
       continue;
     }
 
-    // User typed a plain prompt → route to AgentController.runQuery via runQueryFn.
+    // User typed a plain prompt → route to AgentController.runQuery.
     if (action.type !== "query") continue;
 
     await runPrompt(action.prompt);
@@ -268,8 +244,8 @@ export async function main(
   }
 
   // Worker mode post-loop: send goodbye, destroy workspace, tear down I/O, exit.
-  if (workerCtx) {
-    await workerCtx.cleanup();
+  if (workerCleanup) {
+    await workerCleanup();
     process.exit(0);
   }
 }
@@ -289,8 +265,14 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const input = new Input(display);
   const picker = new Picker();
   const agentController = new AgentController(display, picker, permConfig, settings);
-  const runQuery: RunQuery = (prompt, sessionId, ac, model, effort) =>
-    agentController.runQuery(prompt, sessionId, ac, model, effort);
+
+  const originalCwd = process.cwd();
+  const confirm = async (msg: string): Promise<boolean> => {
+    statusBar.stop();
+    display.print(c.amber(`\n⚠ Potential data loss:\n${msg}`));
+    const idx = await picker.pick(["Yes, proceed", "No, cancel"]);
+    return idx === 0;
+  };
 
   const workspaceCfg = (config.githubRepo && config.githubToken)
     ? {
@@ -299,7 +281,28 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       }
     : undefined;
 
-  const runWorkerMode = process.argv.includes("--worker-mode");
+  // Construct workspace and controller once for both REPL and worker modes.
+  // In worker mode, WorkspaceController.onCreate() (called via startWorkerMode)
+  // clones the repo and changes the working directory. In REPL mode it is
+  // available for manual /workspace:* commands but not auto-cloned.
+  const workspace = workspaceCfg
+    ? new Workspace(workspaceCfg.workspaceDir, statusBar.agentId, workspaceCfg.repoUrl, originalCwd, confirm)
+    : undefined;
+  const workspaceController = new WorkspaceController(workspace, display);
 
-  await main(runQuery, permConfig, display, settings, input, picker, runWorkerMode, workspaceCfg);
+  // Worker mode setup: subscribe to workspace events, create the clone,
+  // configure the WorkerSession, and install signal handlers.
+  const runWorkerMode = process.argv.includes("--worker-mode");
+  const workerCtx = runWorkerMode
+    ? await startWorkerMode(display, statusBar, picker, workspaceController)
+    : undefined;
+  const session = workerCtx?.session;
+  const workerCleanup = workerCtx?.cleanup;
+
+  const fetchModelsFn = createFetchModelsFn(permConfig);
+  const settingsController = new SettingsController(settings, display);
+  const registry = new CommandRegistry();
+  const controller = new CommandController(registry);
+
+  await main(agentController, permConfig, display, settings, input, picker, settingsController, fetchModelsFn, controller, session, workspaceController, workerCleanup);
 }

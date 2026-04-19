@@ -72,6 +72,11 @@ import { Display } from "../src/agent/views/display.js";
 import { StatusBar } from "../src/agent/views/status-bar.js";
 import { Settings } from "../src/agent/models/settings.js";
 import { getConfig } from "../src/config.js";
+import { startWorkerMode } from "../src/agent/controllers/worker-controller.js";
+import { WorkspaceController } from "../src/agent/controllers/workspace-controller.js";
+import { CommandRegistry, CommandController } from "../src/agent/controllers/command-controller.js";
+import { SettingsController } from "../src/agent/controllers/settings-controller.js";
+import { createFetchModelsFn, AgentController } from "../src/agent/controllers/agent-controller.js";
 import { stripAnsi } from "./helpers.js";
 
 function makeTestDisplay(): Display {
@@ -100,6 +105,24 @@ function makeMockInput() {
   };
 }
 
+/** Build the pre-constructed deps that the startup block would normally build. */
+async function buildWorkerDeps(testDisplay: Display, runQueryFn = vi.fn().mockResolvedValue(undefined)) {
+  const settings = new Settings({});
+  const workspaceController = new WorkspaceController(fakeWorkspace as any, testDisplay);
+  const { session, cleanup } = await startWorkerMode(
+    testDisplay,
+    testDisplay.statusBar,
+    mockPicker as unknown as Picker,
+    workspaceController,
+  );
+  const fetchModelsFn = createFetchModelsFn(permConfig);
+  const settingsController = new SettingsController(settings, testDisplay);
+  const registry = new CommandRegistry();
+  const controller = new CommandController(registry);
+  const agentController = { runQuery: runQueryFn } as unknown as AgentController;
+  return { settings, workspaceController, session, cleanup, fetchModelsFn, settingsController, registry, controller, agentController };
+}
+
 async function runWorkerMain(runQueryFn = vi.fn().mockResolvedValue(undefined)): Promise<{ exitCalled: boolean; exitCode: number | undefined }> {
   let exitCode: number | undefined;
   const exitSpy = vi.spyOn(process, "exit").mockImplementation((code?: number | string) => {
@@ -108,8 +131,14 @@ async function runWorkerMain(runQueryFn = vi.fn().mockResolvedValue(undefined)):
   }) as unknown as ReturnType<typeof vi.spyOn>;
 
   const testDisplay = makeTestDisplay();
+  const deps = await buildWorkerDeps(testDisplay, runQueryFn);
   try {
-    await main(runQueryFn, permConfig, testDisplay, new Settings({}), mockInput as unknown as Input, mockPicker as unknown as Picker, true /* runWorkerMode */, { workspaceDir: "/fake/workers", repoUrl: "https://x@github.com/owner/repo.git" });
+    await main(
+      deps.agentController, permConfig, testDisplay, deps.settings,
+      mockInput as unknown as Input, mockPicker as unknown as Picker,
+      deps.settingsController, deps.fetchModelsFn, deps.controller,
+      deps.session, deps.workspaceController, deps.cleanup,
+    );
     return { exitCalled: false, exitCode: undefined };
   } catch (err) {
     if (err instanceof Error && err.message === "__process_exit__") {
@@ -146,7 +175,13 @@ describe("workerMain startup banner", () => {
       throw new Error("__process_exit__");
     }) as unknown as ReturnType<typeof vi.spyOn>;
     try {
-      await main(vi.fn().mockResolvedValue(undefined), permConfig, testDisplay, new Settings({}), mockInput as unknown as Input, mockPicker as unknown as Picker, true /* runWorkerMode */, { workspaceDir: "/fake/workers", repoUrl: "https://x@github.com/owner/repo.git" });
+      const deps = await buildWorkerDeps(testDisplay);
+      await main(
+        deps.agentController, permConfig, testDisplay, deps.settings,
+        mockInput as unknown as Input, mockPicker as unknown as Picker,
+        deps.settingsController, deps.fetchModelsFn, deps.controller,
+        deps.session, deps.workspaceController, deps.cleanup,
+      );
     } catch (err) {
       if (!(err instanceof Error && err.message === "__process_exit__")) throw err;
     } finally {
@@ -218,8 +253,16 @@ describe("workerMain exit behavior", () => {
       throw new Error("__process_exit__");
     }) as unknown as ReturnType<typeof vi.spyOn>;
 
+    const testDisplay = makeTestDisplay();
+    const deps = await buildWorkerDeps(testDisplay, runQueryFn);
+
     let workerDone = false;
-    const workerPromise = main(runQueryFn, permConfig, makeTestDisplay(), new Settings({}), mockInput as unknown as Input, mockPicker as unknown as Picker, true /* runWorkerMode */, { workspaceDir: "/fake/workers", repoUrl: "https://x@github.com/owner/repo.git" }).then(
+    const workerPromise = main(
+      deps.agentController, permConfig, testDisplay, deps.settings,
+      mockInput as unknown as Input, mockPicker as unknown as Picker,
+      deps.settingsController, deps.fetchModelsFn, deps.controller,
+      deps.session, deps.workspaceController, deps.cleanup,
+    ).then(
       () => { workerDone = true; },
       () => { workerDone = true; },
     );
@@ -252,8 +295,15 @@ describe("workerMain exit behavior", () => {
       throw new Error("__process_exit__");
     }) as unknown as ReturnType<typeof vi.spyOn>;
 
+    const testDisplay = makeTestDisplay();
+    const deps = await buildWorkerDeps(testDisplay);
     try {
-      await main(vi.fn().mockResolvedValue(undefined), permConfig, makeTestDisplay(), new Settings({}), mockInput as unknown as Input, mockPicker as unknown as Picker, true /* runWorkerMode */, { workspaceDir: "/fake/workers", repoUrl: "https://x@github.com/owner/repo.git" });
+      await main(
+        deps.agentController, permConfig, testDisplay, deps.settings,
+        mockInput as unknown as Input, mockPicker as unknown as Picker,
+        deps.settingsController, deps.fetchModelsFn, deps.controller,
+        deps.session, deps.workspaceController, deps.cleanup,
+      );
     } catch (err) {
       if (!(err instanceof Error && err.message === "__process_exit__")) throw err;
     } finally {

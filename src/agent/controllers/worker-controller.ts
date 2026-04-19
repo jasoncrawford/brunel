@@ -104,7 +104,6 @@ function debounceMs(events: Wire.WebhookEvent[]): number {
 // ── WorkerSession ─────────────────────────────────────────────────────────────
 
 export type WsFactory = (agentId: string, taskId?: string) => WebSocket;
-export type RunQuery = (prompt: string, sessionId: string | undefined, abortController?: AbortController, model?: string, effort?: EffortValue) => Promise<string | undefined>;
 
 export type WorkerSessionOptions = {
   afterTask?: () => Promise<void>;
