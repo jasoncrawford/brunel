@@ -852,4 +852,38 @@ describe("foreman event filtering", () => {
 
     expect(await Task.getByIssue(42)).toBeNull();
   });
+
+  it("issues/closed is forwarded to the assigned worker", async () => {
+    await registerReady(taskManager, "42", 42, "owner/repo", "Issue 42", "Body", ["brunel:ready"]);
+
+    const ws = await connect();
+    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    await nextMsgWhere(ws, (m) => m.type === "task_assigned");
+
+    const reply = nextMsgWhere(ws, m => m.type === "event_notification" && (m as any).event.name === "issues");
+    foremanWss.routeEvent("evt-closed", "issues", {
+      action: "closed",
+      issue: { number: 42, title: "Issue 42", body: "Body", labels: [{ name: "brunel:ready" }] },
+      repository: { html_url: "https://github.com/owner/repo" },
+    });
+    const msg = await reply;
+    expect((msg as any).event.payload.action).toBe("closed");
+  });
+
+  it("issues/reopened is forwarded to the assigned worker", async () => {
+    await registerReady(taskManager, "42", 42, "owner/repo", "Issue 42", "Body", ["brunel:ready"]);
+
+    const ws = await connect();
+    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    await nextMsgWhere(ws, (m) => m.type === "task_assigned");
+
+    const reply = nextMsgWhere(ws, m => m.type === "event_notification" && (m as any).event.name === "issues");
+    foremanWss.routeEvent("evt-reopened", "issues", {
+      action: "reopened",
+      issue: { number: 42, title: "Issue 42", body: "Body", labels: [{ name: "brunel:ready" }] },
+      repository: { html_url: "https://github.com/owner/repo" },
+    });
+    const msg = await reply;
+    expect((msg as any).event.payload.action).toBe("reopened");
+  });
 });

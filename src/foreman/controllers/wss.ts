@@ -526,8 +526,12 @@ export class ForemanWss {
 
     const action = p.action as string | undefined;
 
-    // If the issue isn't queued yet, check if this webhook should enqueue it.
+    // Phase 1: foreman-side effects.
+    // Return early only when there is genuinely nothing to forward: no task tracked,
+    // or "unlabeled" (worker doesn't need to know the label was removed).
+
     if (!task) {
+      // Check if this webhook should enqueue a new task.
       const labeledNow =
         action === "labeled" &&
         (p.label as R | undefined)?.name === this.config.taskLabel;
@@ -551,12 +555,15 @@ export class ForemanWss {
         log(`[task #${issueNumber}] enqueued via issues/${action}`);
         return routeResult(enqueued);
       }
+      // No task found and not an enqueue event — still fall through so closed/reopened
+      // can update blocker state (issue may be a dependency, not a task itself).
     }
 
     if (
       action === "unlabeled" &&
       (p.label as R | undefined)?.name === this.config.taskLabel
     ) {
+      // Explicit early return: worker doesn't need to know the label was removed.
       try {
         await this.taskManager.dequeueIssue(issueNumber);
         log(`[task #${issueNumber}] dequeued (label removed)`);
@@ -576,7 +583,6 @@ export class ForemanWss {
         return routeResult(task);
       }
       await this.assignWork();
-      return routeResult(task);
     }
 
     if (action === "reopened") {
@@ -587,7 +593,6 @@ export class ForemanWss {
         return routeResult(task);
       }
       await this.assignWork();
-      return routeResult(task);
     }
 
     if (action === "edited") {
@@ -600,6 +605,8 @@ export class ForemanWss {
       }
     }
 
+    // Phase 2: forward to worker. Forwarding is the default; skipping requires an explicit return above.
+    // No task means there is no worker to notify (e.g., event was for a dependency issue).
     if (!task) return routeResult(null);
     this.forwardEvent(task, evt, `#${issueNumber}`);
     return routeResult(task);
