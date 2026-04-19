@@ -1,5 +1,8 @@
 import { Webhooks } from "@octokit/webhooks";
 import http from "http";
+import { createReadStream, existsSync } from "fs";
+import { join, extname } from "path";
+import { fileURLToPath } from "url";
 import { Hono } from "hono";
 import { getRequestListener } from "@hono/node-server";
 import type { TaskManager } from "../models/task-manager.js";
@@ -104,9 +107,6 @@ export function createHttpServer({ webhooks, routeEvent, taskManager }: HttpServ
 
   // ── Static files (React SPA) ───────────────────────────────────────────────
   app.use("*", async (c) => {
-    const { createReadStream, existsSync } = await import("fs");
-    const { join, extname } = await import("path");
-    const { fileURLToPath } = await import("url");
     const root = join(fileURLToPath(import.meta.url), "../../../../dist");
 
     if (!existsSync(root)) {
