@@ -64,26 +64,30 @@ vi.mock("../src/agent/models/workspace.js", async (importOriginal) => {
   };
 });
 
-import { main } from "../src/agent/index.js";
+// Mock Input, Picker, and AgentController so the BrunelAgent constructor uses
+// our test doubles instead of real instances.
+vi.mock("../src/agent/views/input.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/agent/views/input.js")>();
+  return { ...actual, Input: vi.fn() };
+});
+vi.mock("../src/agent/views/picker.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/agent/views/picker.js")>();
+  return { ...actual, Picker: vi.fn() };
+});
+vi.mock("../src/agent/controllers/agent-controller.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/agent/controllers/agent-controller.js")>();
+  return { ...actual, AgentController: vi.fn() };
+});
+
+import { BrunelAgent } from "../src/agent/index.js";
 import { confirmIfUnsafe } from "../src/agent/models/workspace.js";
 import { Input } from "../src/agent/views/input.js";
 import { Picker } from "../src/agent/views/picker.js";
-import { Display } from "../src/agent/views/display.js";
-import { StatusBar } from "../src/agent/views/status-bar.js";
-import { Settings } from "../src/agent/models/settings.js";
+import { AgentController } from "../src/agent/controllers/agent-controller.js";
 import { getConfig } from "../src/config.js";
 import { stripAnsi } from "./helpers.js";
 
-function makeTestDisplay(): Display {
-  return new Display(getConfig(), new StatusBar({ agentId: "test-agent" }));
-}
-
 // ── Helpers ─────────────────────────────────────────────────────────────────
-
-const permConfig = {
-  permissionMode: "bypassPermissions" as const,
-  allowDangerouslySkipPermissions: false,
-};
 
 let mockInput: { ask: ReturnType<typeof vi.fn>; cancel: ReturnType<typeof vi.fn> };
 let mockPicker: { pick: ReturnType<typeof vi.fn>; pickMultiple: ReturnType<typeof vi.fn>; pickQuestion: ReturnType<typeof vi.fn> };
@@ -100,16 +104,26 @@ function makeMockInput() {
   };
 }
 
+function installMocks(runQueryFn = vi.fn().mockResolvedValue(undefined)) {
+  // Regular functions required — arrow functions cannot be called with `new`.
+  // eslint-disable-next-line prefer-arrow-callback
+  vi.mocked(Input).mockImplementation(function() { return mockInput as unknown as Input; });
+  // eslint-disable-next-line prefer-arrow-callback
+  vi.mocked(Picker).mockImplementation(function() { return mockPicker as unknown as Picker; });
+  // eslint-disable-next-line prefer-arrow-callback
+  vi.mocked(AgentController).mockImplementation(function() { return { runQuery: runQueryFn } as unknown as AgentController; });
+}
+
 async function runWorkerMain(runQueryFn = vi.fn().mockResolvedValue(undefined)): Promise<{ exitCalled: boolean; exitCode: number | undefined }> {
+  installMocks(runQueryFn);
   let exitCode: number | undefined;
   const exitSpy = vi.spyOn(process, "exit").mockImplementation((code?: number | string) => {
     exitCode = typeof code === "number" ? code : 0;
     throw new Error("__process_exit__");
   }) as unknown as ReturnType<typeof vi.spyOn>;
 
-  const testDisplay = makeTestDisplay();
   try {
-    await main(runQueryFn, permConfig, testDisplay, new Settings({}), mockInput as unknown as Input, mockPicker as unknown as Picker, true /* runWorkerMode */, { workspaceDir: "/fake/workers", repoUrl: "https://x@github.com/owner/repo.git" });
+    await new BrunelAgent(getConfig()).start(true);
     return { exitCalled: false, exitCode: undefined };
   } catch (err) {
     if (err instanceof Error && err.message === "__process_exit__") {
@@ -131,22 +145,25 @@ describe("workerMain startup banner", () => {
     chdirSpy = vi.spyOn(process, "chdir").mockImplementation(() => {});
     vi.mocked(confirmIfUnsafe).mockResolvedValue(true);
     getConfig().verbose = true;
+    getConfig().permissionMode = "bypassPermissions";
   });
 
   afterEach(() => {
     getConfig().verbose = false;
+    getConfig().permissionMode = "default";
     chdirSpy.mockRestore();
     vi.clearAllMocks();
   });
 
   it("includes permissions, output mode, and logfile in the startup banner", async () => {
-    const testDisplay = makeTestDisplay();
-    const printSpy = vi.spyOn(testDisplay, "print").mockImplementation(() => {});
+    installMocks();
     const exitSpy = vi.spyOn(process, "exit").mockImplementation((code?: number | string) => {
       throw new Error("__process_exit__");
     }) as unknown as ReturnType<typeof vi.spyOn>;
+    const agent = new BrunelAgent(getConfig());
+    const printSpy = vi.spyOn(agent.display, "print").mockImplementation(() => {});
     try {
-      await main(vi.fn().mockResolvedValue(undefined), permConfig, testDisplay, new Settings({}), mockInput as unknown as Input, mockPicker as unknown as Picker, true /* runWorkerMode */, { workspaceDir: "/fake/workers", repoUrl: "https://x@github.com/owner/repo.git" });
+      await agent.start(true);
     } catch (err) {
       if (!(err instanceof Error && err.message === "__process_exit__")) throw err;
     } finally {
@@ -214,12 +231,13 @@ describe("workerMain exit behavior", () => {
       return new Promise<string>((resolve) => { resolveSecondAsk = resolve; });
     });
 
+    installMocks(runQueryFn);
     const exitSpy = vi.spyOn(process, "exit").mockImplementation((code?: number | string) => {
       throw new Error("__process_exit__");
     }) as unknown as ReturnType<typeof vi.spyOn>;
 
     let workerDone = false;
-    const workerPromise = main(runQueryFn, permConfig, makeTestDisplay(), new Settings({}), mockInput as unknown as Input, mockPicker as unknown as Picker, true /* runWorkerMode */, { workspaceDir: "/fake/workers", repoUrl: "https://x@github.com/owner/repo.git" }).then(
+    const workerPromise = new BrunelAgent(getConfig()).start(true).then(
       () => { workerDone = true; },
       () => { workerDone = true; },
     );
@@ -252,8 +270,9 @@ describe("workerMain exit behavior", () => {
       throw new Error("__process_exit__");
     }) as unknown as ReturnType<typeof vi.spyOn>;
 
+    installMocks();
     try {
-      await main(vi.fn().mockResolvedValue(undefined), permConfig, makeTestDisplay(), new Settings({}), mockInput as unknown as Input, mockPicker as unknown as Picker, true /* runWorkerMode */, { workspaceDir: "/fake/workers", repoUrl: "https://x@github.com/owner/repo.git" });
+      await new BrunelAgent(getConfig()).start(true);
     } catch (err) {
       if (!(err instanceof Error && err.message === "__process_exit__")) throw err;
     } finally {
