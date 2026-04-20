@@ -35,6 +35,12 @@ export class Display {
   private readonly _toolUseInputs = new Map<string, Record<string, unknown>>();
   readonly renderer: Renderer;
 
+  /**
+   * Returns the current terminal column count. Defaults to reading
+   * `process.stdout.columns`; override in tests to avoid global patching.
+   */
+  getColumns: () => number | undefined = () => process.stdout.columns;
+
   constructor(readonly config: BrunelConfig, readonly statusBar: StatusBar) {
     this.renderer = new Renderer(this);
   }
@@ -45,7 +51,7 @@ export class Display {
   get verbose(): boolean { return this.config.verbose; }
 
   effectiveWidth(fallback = W): number {
-    return (process.stdout.columns ?? fallback) - (this.verbose ? VERBOSE_PREFIX_LEN : 0);
+    return (this.getColumns() ?? fallback) - (this.verbose ? VERBOSE_PREFIX_LEN : 0);
   }
 
   private _printLine(line: string): void {

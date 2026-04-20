@@ -60,19 +60,12 @@ describe("StatusBar getStatusText", () => {
   });
 
   it("shows task, PR, and branch when set", () => {
-    const origColumns = Object.getOwnPropertyDescriptor(process.stdout, "columns");
-    Object.defineProperty(process.stdout, "columns", { value: 120, configurable: true });
-    try {
-      const bar = new StatusBar({ agentId: "7c254628-abcd-1234-efgh-000000000000" });
-      bar.update({ taskNumber: 374, prNumber: 406, branch: "db-single-source-of-truth", connectionStatus: "connected" });
-      const result = stripAnsi(bar.getStatusText());
-      expect(result).toContain("task #374");
-      expect(result).toContain("PR #406");
-      expect(result).toContain("db-single-source-of-truth");
-    } finally {
-      if (origColumns) Object.defineProperty(process.stdout, "columns", origColumns);
-      else delete (process.stdout as { columns?: number }).columns;
-    }
+    const bar = new StatusBar({ agentId: "7c254628-abcd-1234-efgh-000000000000", getColumns: () => 120 });
+    bar.update({ taskNumber: 374, prNumber: 406, branch: "db-single-source-of-truth", connectionStatus: "connected" });
+    const result = stripAnsi(bar.getStatusText());
+    expect(result).toContain("task #374");
+    expect(result).toContain("PR #406");
+    expect(result).toContain("db-single-source-of-truth");
   });
 });
 
@@ -144,17 +137,11 @@ describe("StatusBar class", () => {
       bar.startPersistent();
       stdoutWrite.mockClear();
 
-      const origColumns = Object.getOwnPropertyDescriptor(process.stdout, "columns");
-      Object.defineProperty(process.stdout, "columns", { value: 40, configurable: true });
-      try {
-        process.stdout.emit("resize");
-        const writes = stdoutWrite.mock.calls.map(a => String(a[0]));
-        expect(writes.length).toBeGreaterThan(0);
-        expect(writes.join("")).toContain("Connected");
-      } finally {
-        if (origColumns) Object.defineProperty(process.stdout, "columns", origColumns);
-        else delete (process.stdout as { columns?: number }).columns;
-      }
+      bar.getColumns = () => 40;
+      process.stdout.emit("resize");
+      const writes = stdoutWrite.mock.calls.map(a => String(a[0]));
+      expect(writes.length).toBeGreaterThan(0);
+      expect(writes.join("")).toContain("Connected");
     });
 
     it("does not register multiple resize listeners on repeated startPersistent calls", () => {
