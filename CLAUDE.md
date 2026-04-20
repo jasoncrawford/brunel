@@ -14,7 +14,7 @@ Two independent processes: **foreman** (server) and **worker** (agent). They com
 
 MVC structure. Models own state; controllers handle external inputs.
 
-- **Models** (`models/`) — `ActiveRecord` is the abstract base class for all DB-backed models. `Task`, `WebhookEvent`, and `ForemanMessage` are the main active-record models. `TaskManager` owns ephemeral in-memory state (event queues, branch mappings, blocker state) and encapsulates all issue/PR event lifecycle logic. `Worker` is the in-memory model for connected workers (not DB-backed).
+- **Models** (`models/`) — `ActiveRecord` is the abstract base class for all DB-backed models. `Task`, `WebhookEvent`, `ForemanMessage`, and `Repo` are the main active-record models. `TaskManager` owns ephemeral in-memory state (event queues, branch mappings, blocker state) and encapsulates all issue/PR event lifecycle logic. `Worker` is the in-memory model for connected workers (not DB-backed).
 - **Controllers** (`controllers/`) — `http-server.ts` handles webhooks + REST + SPA. `wss.ts` (`ForemanWss`) is the WebSocket protocol layer for worker↔foreman communication. `admin-ws.ts` broadcasts to the admin dashboard.
 - **Clients** (`clients/`) — `db-client.ts` wires the shared Supabase client. `github.ts` wraps GitHub API calls.
 
