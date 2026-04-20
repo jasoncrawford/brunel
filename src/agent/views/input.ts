@@ -55,6 +55,13 @@ export class Input {
     const totalUp = endRow + this._prefixRows;
     if (totalUp > 0) process.stdout.write(`\x1b[${totalUp}A`);
     process.stdout.write("\r\x1b[J");
+    // Auto-stash: if the user had typed something, save it so the next ask()
+    // call restores it — prevents input from being silently lost when a
+    // foreman message interrupts the prompt (issue #777).
+    if (this._buffer) {
+      this._stash = this._buffer;
+      process.stdout.write(c.darkGray("✦ Prompt stashed — will be restored on next input\r\n"));
+    }
     const resolve = this._resolve;
     this._cleanup();
     resolve(null);
