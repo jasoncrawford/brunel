@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
 import { Worker } from "../src/foreman/models/worker.js";
-import { setupInMemoryTasks } from "./helpers/task.js";
+import { resetDb } from "./helpers/task.js";
 import { WebhookEvent } from "../src/foreman/models/webhook-event.js";
 
 const repoSlug = "test/repo";
@@ -21,7 +21,7 @@ describe("TaskManager — queue operations", () => {
   beforeEach(() => {
     Worker._reset();
     m = new TaskManager();
-    setupInMemoryTasks(m);
+    resetDb();
   });
   afterEach(() => { vi.restoreAllMocks(); });
 
@@ -156,7 +156,7 @@ describe("TaskManager — derived blocked status", () => {
   let m: TaskManager;
   beforeEach(() => {
     m = new TaskManager();
-    setupInMemoryTasks(m);
+    resetDb();
   });
   afterEach(() => { vi.restoreAllMocks(); });
 
@@ -205,11 +205,10 @@ describe("TaskManager — derived blocked status", () => {
 
 describe("TaskManager — cancel (delete behavior)", () => {
   let m: TaskManager;
-  let addTask: ReturnType<typeof setupInMemoryTasks>["addTask"];
   beforeEach(() => {
     Worker._reset();
     m = new TaskManager();
-    ({ addTask } = setupInMemoryTasks(m));
+    resetDb();
   });
   afterEach(() => { vi.restoreAllMocks(); });
 
@@ -231,12 +230,12 @@ describe("TaskManager — cancel (delete behavior)", () => {
     expect(await Task.get("42")).not.toBeNull();
   });
 
-  it("is a no-op for a task that doesn't exist in the map", async () => {
-    // addTask creates a task with spied instance methods; delete removes it from the map
-    const ghost = addTask({ task_id: "nonexistent", issue_number: 999 });
-    await ghost.delete(); // removes from map
-    // Second delete: task is gone from map; mock should not throw
-    await expect(ghost.delete()).resolves.not.toThrow();
+  it("is a no-op for a task that no longer exists in the DB", async () => {
+    await Task.upsert("nonexistent", 999, repoSlug, "Ghost", "body", []);
+    const ghost = await Task.get("nonexistent");
+    await ghost!.delete(); // removes from DB
+    // Second delete: task is gone; should not throw
+    await expect(ghost!.delete()).resolves.not.toThrow();
   });
 });
 
@@ -244,7 +243,7 @@ describe("TaskManager — nextPending with predicate", () => {
   let m: TaskManager;
   beforeEach(() => {
     m = new TaskManager();
-    setupInMemoryTasks(m);
+    resetDb();
   });
   afterEach(() => { vi.restoreAllMocks(); });
 
@@ -274,7 +273,7 @@ describe("TaskManager changed events", () => {
   beforeEach(() => {
     Worker._reset();
     m = new TaskManager();
-    setupInMemoryTasks(m);
+    resetDb();
   });
   afterEach(() => { vi.restoreAllMocks(); });
 

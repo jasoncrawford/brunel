@@ -11,7 +11,7 @@ import { Worker } from "../src/foreman/models/worker.js";
 import { Task } from "../src/foreman/models/task.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { ForemanMessage } from "../src/foreman/models/foreman-message.js";
-import { setupInMemoryTasks } from "./helpers/task.js";
+import { resetDb, seedTask } from "./helpers/task.js";
 import * as utils from "../src/utils.js";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -39,12 +39,11 @@ function helloAck(sendMsg: ReturnType<typeof vi.spyOn>) {
 // ── Test setup ─────────────────────────────────────────────────────────────────
 
 let taskManager: TaskManager;
-let addTask: ReturnType<typeof setupInMemoryTasks>["addTask"];
 
 beforeEach(() => {
   Worker._reset();
+  resetDb();
   taskManager = new TaskManager();
-  ({ addTask } = setupInMemoryTasks(taskManager));
 });
 
 afterEach(() => {
@@ -75,13 +74,14 @@ describe("handleBusyHello", () => {
 
   describe("complete task", () => {
     it("same worker — reclaims for finalization (busy ack, task.assign NOT called again)", async () => {
-      const task = addTask({
+      await seedTask({
         task_id: "10",
         issue_number: 10,
         worker_id: "w1",
         completed_at: new Date().toISOString(),
         assigned_at: new Date().toISOString(),
       });
+      const assignSpy = vi.spyOn(Task.prototype, "assign");
 
       const { wss, sendMsg } = makeWss(taskManager);
       await wss.handleBusyHello("w1", "10", fakeWs());
@@ -89,12 +89,12 @@ describe("handleBusyHello", () => {
       const ack = helloAck(sendMsg);
       expect(ack?.status).toBe("busy");
       // task.assign must NOT be called because task is already complete
-      expect(task.assign).not.toHaveBeenCalled();
+      expect(assignSpy).not.toHaveBeenCalled();
       expect(Worker.get("w1")?.currentTaskId).toBe("10");
     });
 
     it("different worker — sends cancelled ack", async () => {
-      addTask({
+      await seedTask({
         task_id: "10",
         issue_number: 10,
         worker_id: "w2",
@@ -112,7 +112,7 @@ describe("handleBusyHello", () => {
 
   describe("live task", () => {
     it("taken by a different worker — sends cancelled ack", async () => {
-      addTask({
+      await seedTask({
         task_id: "10",
         issue_number: 10,
         worker_id: "w2",
@@ -127,37 +127,39 @@ describe("handleBusyHello", () => {
     });
 
     it("owned by same worker — reclaims (busy ack, task.assign called)", async () => {
-      const task = addTask({
+      await seedTask({
         task_id: "10",
         issue_number: 10,
         worker_id: "w1",
         assigned_at: new Date().toISOString(),
       });
+      const assignSpy = vi.spyOn(Task.prototype, "assign");
 
       const { wss, sendMsg } = makeWss(taskManager);
       await wss.handleBusyHello("w1", "10", fakeWs());
 
       const ack = helloAck(sendMsg);
       expect(ack?.status).toBe("busy");
-      expect(task.assign).toHaveBeenCalledWith(expect.objectContaining({ workerId: "w1" }));
+      expect(assignSpy).toHaveBeenCalledWith(expect.objectContaining({ workerId: "w1" }));
       expect(Worker.get("w1")?.currentTaskId).toBe("10");
     });
 
     it("unassigned — reclaims (busy ack, task.assign called)", async () => {
-      const task = addTask({ task_id: "10", issue_number: 10 });
+      await seedTask({ task_id: "10", issue_number: 10 });
+      const assignSpy = vi.spyOn(Task.prototype, "assign");
 
       const { wss, sendMsg } = makeWss(taskManager);
       await wss.handleBusyHello("w1", "10", fakeWs());
 
       const ack = helloAck(sendMsg);
       expect(ack?.status).toBe("busy");
-      expect(task.assign).toHaveBeenCalledWith(expect.objectContaining({ workerId: "w1" }));
+      expect(assignSpy).toHaveBeenCalledWith(expect.objectContaining({ workerId: "w1" }));
     });
   });
 
   describe("queued events", () => {
     it("flushes queued events after reclaim", async () => {
-      const task = addTask({
+      const task = await seedTask({
         task_id: "10",
         issue_number: 10,
         worker_id: "w1",
@@ -191,30 +193,31 @@ describe("handleIdleHello", () => {
   });
 
   it("has prior task — reverts it and sends idle ack", async () => {
-    const task = addTask({
+    await seedTask({
       task_id: "10",
       issue_number: 10,
       worker_id: "w1",
       assigned_at: new Date().toISOString(),
     });
+    const revertSpy = vi.spyOn(Task.prototype, "revert");
 
     const { wss, sendMsg } = makeWss(taskManager);
     await wss.handleIdleHello("w1", fakeWs());
 
-    expect(task.revert).toHaveBeenCalled();
+    expect(revertSpy).toHaveBeenCalled();
     const ack = helloAck(sendMsg);
     expect(ack?.status).toBe("idle");
     expect(Worker.get("w1")?.status).toBe("idle");
   });
 
   it("revert failure is logged and worker is NOT registered (task stays assigned, worker retries)", async () => {
-    const task = addTask({
+    await seedTask({
       task_id: "10",
       issue_number: 10,
       worker_id: "w1",
       assigned_at: new Date().toISOString(),
     });
-    vi.mocked(task.revert).mockRejectedValueOnce(new Error("DB down"));
+    vi.spyOn(Task.prototype, "revert").mockRejectedValueOnce(new Error("DB down"));
 
     const { wss, sendMsg } = makeWss(taskManager);
     const logSpy = vi.spyOn(utils, "log").mockImplementation(() => {});
@@ -229,13 +232,13 @@ describe("handleIdleHello", () => {
   });
 
   it("revert failure sends foreman_error (non-fatal) to the worker ws", async () => {
-    const task = addTask({
+    await seedTask({
       task_id: "10",
       issue_number: 10,
       worker_id: "w1",
       assigned_at: new Date().toISOString(),
     });
-    vi.mocked(task.revert).mockRejectedValueOnce(new Error("DB down"));
+    vi.spyOn(Task.prototype, "revert").mockRejectedValueOnce(new Error("DB down"));
 
     const { wss } = makeWss(taskManager);
     vi.spyOn(utils, "log").mockImplementation(() => {});
@@ -262,7 +265,7 @@ describe("handleIdleHello", () => {
 
 describe("handleBusyHello — error handling", () => {
   it("sends foreman_error (non-fatal) when Task.get throws (DB read failure)", async () => {
-    vi.mocked(Task.get).mockRejectedValueOnce(new Error("DB connection lost"));
+    vi.spyOn(Task, "get").mockRejectedValueOnce(new Error("DB connection lost"));
 
     const { wss } = makeWss(taskManager);
     vi.spyOn(utils, "log").mockImplementation(() => {});
@@ -281,7 +284,7 @@ describe("handleBusyHello — error handling", () => {
 
   it("sends foreman_error (non-fatal) when Task.upsert throws during placeholder creation", async () => {
     // Task.get returns null (unknown task), numeric taskId, upsert fails
-    vi.mocked(Task.upsert).mockRejectedValueOnce(new Error("DB write failed"));
+    vi.spyOn(Task, "upsert").mockRejectedValueOnce(new Error("DB write failed"));
 
     const { wss } = makeWss(taskManager);
     vi.spyOn(utils, "log").mockImplementation(() => {});
@@ -299,13 +302,13 @@ describe("handleBusyHello — error handling", () => {
   });
 
   it("sends foreman_error (non-fatal) when task.assign throws during reclaim", async () => {
-    const task = addTask({
+    await seedTask({
       task_id: "10",
       issue_number: 10,
       worker_id: "w1",
       assigned_at: new Date().toISOString(),
     });
-    vi.mocked(task.assign).mockRejectedValueOnce(new Error("DB write failed"));
+    vi.spyOn(Task.prototype, "assign").mockRejectedValueOnce(new Error("DB write failed"));
 
     const { wss } = makeWss(taskManager);
     vi.spyOn(utils, "log").mockImplementation(() => {});
@@ -332,7 +335,7 @@ describe("handleBusyHello — error handling", () => {
 
 describe("handleIdleHello — error handling", () => {
   it("sends foreman_error (non-fatal) when Task.getByWorker throws (DB read failure)", async () => {
-    vi.mocked(Task.getByWorker).mockRejectedValueOnce(new Error("DB connection lost"));
+    vi.spyOn(Task, "getByWorker").mockRejectedValueOnce(new Error("DB connection lost"));
 
     const { wss } = makeWss(taskManager);
     vi.spyOn(utils, "log").mockImplementation(() => {});
@@ -350,7 +353,7 @@ describe("handleIdleHello — error handling", () => {
   });
 
   it("does not register worker when Task.getByWorker throws", async () => {
-    vi.mocked(Task.getByWorker).mockRejectedValueOnce(new Error("DB connection lost"));
+    vi.spyOn(Task, "getByWorker").mockRejectedValueOnce(new Error("DB connection lost"));
 
     const { wss, sendMsg } = makeWss(taskManager);
     vi.spyOn(utils, "log").mockImplementation(() => {});
@@ -367,13 +370,13 @@ describe("handleIdleHello — error handling", () => {
 
 describe("sendError — ForemanMessage.log() is called", () => {
   it("persists foreman_error to activity log when handleIdleHello revert fails", async () => {
-    const task = addTask({
+    await seedTask({
       task_id: "10",
       issue_number: 10,
       worker_id: "w1",
       assigned_at: new Date().toISOString(),
     });
-    vi.mocked(task.revert).mockRejectedValueOnce(new Error("DB down"));
+    vi.spyOn(Task.prototype, "revert").mockRejectedValueOnce(new Error("DB down"));
 
     const logSpy = vi.spyOn(ForemanMessage, "log").mockResolvedValue(undefined);
     vi.spyOn(utils, "log").mockImplementation(() => {});
@@ -390,13 +393,13 @@ describe("sendError — ForemanMessage.log() is called", () => {
   });
 
   it("persists foreman_error to activity log when handleBusyHello throws", async () => {
-    const task = addTask({
+    await seedTask({
       task_id: "10",
       issue_number: 10,
       worker_id: "w1",
       assigned_at: new Date().toISOString(),
     });
-    vi.mocked(task.assign).mockRejectedValueOnce(new Error("DB write failed"));
+    vi.spyOn(Task.prototype, "assign").mockRejectedValueOnce(new Error("DB write failed"));
 
     const logSpy = vi.spyOn(ForemanMessage, "log").mockResolvedValue(undefined);
     vi.spyOn(utils, "log").mockImplementation(() => {});

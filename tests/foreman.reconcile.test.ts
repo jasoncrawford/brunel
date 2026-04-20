@@ -4,7 +4,7 @@ import { Worker } from "../src/foreman/models/worker.js";
 import { ForemanWss } from "../src/foreman/controllers/wss.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
-import { setupInMemoryTasks } from "./helpers/task.js";
+import { resetDb } from "./helpers/task.js";
 import { loadDefaultConfig } from "../src/config.js";
 const defaultCfg = await loadDefaultConfig();
 import * as Wire from "../shared/wire.js";
@@ -21,7 +21,7 @@ let foremanWss: ForemanWss;
 beforeEach(() => {
   Worker._reset();
   taskManager = new TaskManager();
-  setupInMemoryTasks(taskManager);
+  resetDb();
   const server = http.createServer();
   foremanWss = new ForemanWss({ taskManager, server, config: { ...defaultCfg, taskLabel: TASK_LABEL } });
 });
@@ -146,9 +146,8 @@ describe("issues/closed — task lifecycle", () => {
   });
 
   it("calls task.close for a pending task when its issue is closed", async () => {
-    const { addTask } = setupInMemoryTasks(taskManager);
-    const task = addTask({ task_id: "42", issue_number: 42, repo: "test/repo", title: "T", body: "b", labels: [] });
-    const spyClose = vi.spyOn(task, "close");
+    await Task.upsert("42", 42, "test/repo", "T", "b", []);
+    const spyClose = vi.spyOn(Task.prototype, "close");
 
     taskManager.trackIssue(42);
     taskManager.markBlockersLoaded(42);

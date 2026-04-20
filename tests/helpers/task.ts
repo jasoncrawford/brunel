@@ -1,118 +1,47 @@
-import { vi } from "vitest";
+import { initDb, db } from "../../src/foreman/clients/db-client.js";
+import { createMemoryTaskDb } from "./memory-db.js";
 import { Task } from "../../src/foreman/models/task.js";
-import { Worker } from "../../src/foreman/models/worker.js";
+import type { Database } from "../../src/database.types.js";
+
+type DbRow = Database["public"]["Tables"]["tasks"]["Row"];
 
 /**
- * Sets up vi.spyOn on all Task static methods backed by an in-memory Map.
- * Returns helpers for seeding and inspecting the mock store.
- *
- * Call this in beforeEach. vi.restoreAllMocks() in afterEach will undo spies.
+ * Resets the in-memory DB to a fresh, empty state.
+ * Call in beforeEach for per-test task isolation when using the DB shim.
  */
-export function setupInMemoryTasks(emitter?: { emit: (event: string) => void }) {
-  const tasks = new Map<string, Task>();
+export function resetDb(): void {
+  initDb(createMemoryTaskDb());
+}
 
-  function notifyChange() {
-    Task.events.emit("changed");
-  }
-
-  function spyInstanceMethods(task: Task) {
-    vi.spyOn(task, "assign").mockImplementation(async (worker: Worker) => {
-      task.workerId = worker.workerId;
-      task.assignedAt = new Date().toISOString();
-      notifyChange();
-    });
-    vi.spyOn(task, "complete").mockImplementation(async () => {
-      task.completedAt = new Date().toISOString();
-      notifyChange();
-    });
-    vi.spyOn(task, "revert").mockImplementation(async () => {
-      task.workerId = null;
-      notifyChange();
-    });
-    vi.spyOn(task, "close").mockImplementation(async () => {
-      task.issueClosedAt = new Date().toISOString();
-      notifyChange();
-    });
-    vi.spyOn(task, "reopen").mockImplementation(async () => {
-      task.issueClosedAt = null;
-      notifyChange();
-    });
-    vi.spyOn(task, "registerPr").mockImplementation(async (prNumber: number, branch: string | null) => {
-      task.prNumber = prNumber;
-      task.branch = branch;
-      notifyChange();
-    });
-    vi.spyOn(task, "unregisterPr").mockImplementation(async () => {
-      task.prNumber = null;
-      task.branch = null;
-      notifyChange();
-    });
-    vi.spyOn(task, "mergePr").mockImplementation(async () => {
-      task.prMergedAt = new Date().toISOString();
-      notifyChange();
-    });
-    vi.spyOn(task, "updateContent").mockImplementation(async (title: string, body: string, labels: string[]) => {
-      task.title = title;
-      task.body = body;
-      task.labels = labels;
-      notifyChange();
-    });
-    vi.spyOn(task, "delete").mockImplementation(async () => {
-      tasks.delete(task.taskId);
-      notifyChange();
-    });
-    vi.spyOn(task, "deleteIfUnassigned").mockImplementation(async () => {
-      if (task.assignedAt === null) {
-        tasks.delete(task.taskId);
-      }
-      notifyChange();
-    });
-  }
-
-  vi.spyOn(Task, "get").mockImplementation(async (id) => tasks.get(id) ?? null);
-  vi.spyOn(Task, "getByIssue").mockImplementation(async (n) =>
-    [...tasks.values()].find(t => t.issueNumber === n) ?? null
-  );
-  vi.spyOn(Task, "getByPr").mockImplementation(async (n) =>
-    [...tasks.values()].find(t => t.prNumber === n) ?? null
-  );
-  vi.spyOn(Task, "getByWorker").mockImplementation(async (w) =>
-    [...tasks.values()].find(t => t.workerId === w && !t.completedAt) ?? null
-  );
-  vi.spyOn(Task, "list").mockImplementation(async (opts) => {
-    let result = [...tasks.values()];
-    if (opts?.cancelable) {
-      result = result.filter(t =>
-        t.workerId === null && !t.completedAt && !t.issueClosedAt && !t.prMergedAt
-      );
-    }
-    return result.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, opts?.limit ?? 200);
-  });
-  vi.spyOn(Task, "upsert").mockImplementation(async (taskId, issueNumber, repo, title, body, labels) => {
-    const existing = tasks.get(taskId);
-    if (existing) {
-      // On conflict: only update content fields — preserve all status/assignment fields.
-      // Mirrors the real Task.upsert() which omits status fields from the ON CONFLICT DO UPDATE.
-      existing.title = title;
-      existing.body = body;
-      existing.labels = labels;
-      notifyChange();
-      return existing;
-    }
-    const task = Task.fromTest({ task_id: taskId, issue_number: issueNumber, repo, title, body, labels });
-    spyInstanceMethods(task);
-    tasks.set(taskId, task);
-    notifyChange();
-    return task;
-  });
-
-  /** Helper: seed a task directly without calling upsert */
-  function addTask(fields: Parameters<typeof Task.fromTest>[0]): Task {
-    const task = Task.fromTest(fields);
-    spyInstanceMethods(task);
-    tasks.set(task.taskId, task);
-    return task;
-  }
-
-  return { tasks, addTask };
+/**
+ * Seeds a task directly into the DB shim with arbitrary field values,
+ * including status fields like worker_id, assigned_at, completed_at, etc.
+ * Returns the Task instance retrieved from the DB after insertion.
+ *
+ * Use this in tests that need tasks pre-populated with specific state
+ * that can't be set through the public Task API alone (e.g., an
+ * already-assigned or already-completed task). Call resetDb() in
+ * beforeEach before using seedTask() to ensure per-test isolation.
+ */
+export async function seedTask(
+  fields: Partial<DbRow> & { task_id: string; issue_number: number },
+): Promise<Task> {
+  await db.from("tasks").upsert({
+    repo: "",
+    title: "",
+    body: "",
+    labels: [],
+    worker_id: null,
+    pr_number: null,
+    branch: null,
+    assigned_at: null,
+    completed_at: null,
+    issue_closed_at: null,
+    pr_merged_at: null,
+    ...fields,
+  } as any, { onConflict: "task_id" }).select().maybeSingle();
+  Task.events.emit("changed");
+  const task = await Task.get(fields.task_id);
+  if (!task) throw new Error(`seedTask: failed to find task ${fields.task_id} after insert`);
+  return task;
 }

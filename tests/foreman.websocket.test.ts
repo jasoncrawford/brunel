@@ -7,7 +7,7 @@ import { Worker } from "../src/foreman/models/worker.js";
 import { ForemanWss } from "../src/foreman/controllers/wss.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
-import { setupInMemoryTasks } from "./helpers/task.js";
+import { resetDb } from "./helpers/task.js";
 import { loadDefaultConfig } from "../src/config.js";
 const defaultCfg = await loadDefaultConfig();
 import * as Wire from "../shared/wire.js";
@@ -87,7 +87,7 @@ function connect(): Promise<WebSocket> {
 beforeEach(() => {
   Worker._reset();
   taskManager = new TaskManager();
-  setupInMemoryTasks(taskManager);
+  resetDb();
   httpServer = http.createServer();
   foremanWss = new ForemanWss({ taskManager, server: httpServer, config: defaultCfg });
   ({ wss } = foremanWss);
@@ -615,7 +615,6 @@ describe("worker secret enforcement", () => {
   async function makeSecretServer(secret: string): Promise<{ server: http.Server; secretWss: WebSocketServer; port: number }> {
     const server = http.createServer();
     const tm = new TaskManager();
-    setupInMemoryTasks(tm);
     const { wss: secretWss } = new ForemanWss({ taskManager: tm, server, config: { ...defaultCfg, workerSecret: secret } });
     const p = await new Promise<number>((r) => server.listen(0, () => r((server.address() as AddressInfo).port)));
     return { server, secretWss, port: p };
@@ -657,7 +656,6 @@ describe("worker WebSocket connection", () => {
   it("worker client connects to foreman successfully", async () => {
     const server = http.createServer();
     const tm = new TaskManager();
-    setupInMemoryTasks(tm);
     const { wss } = new ForemanWss({ taskManager: tm, server, config: defaultCfg });
     const testPort = await new Promise<number>((resolve) => {
       server.listen(0, () => resolve((server.address() as AddressInfo).port));
@@ -683,7 +681,6 @@ describe("worker WebSocket connection", () => {
   it("foreman rejects connections not at /worker path (regression guard)", async () => {
     const server = http.createServer();
     const tm = new TaskManager();
-    setupInMemoryTasks(tm);
     const { wss } = new ForemanWss({ taskManager: tm, server, config: defaultCfg });
     const testPort = await new Promise<number>((resolve) => {
       server.listen(0, () => resolve((server.address() as AddressInfo).port));
@@ -707,7 +704,6 @@ describe("worker disconnect DB logging", () => {
 
     const server = http.createServer();
     const localTm = new TaskManager();
-    setupInMemoryTasks(localTm);
     const { wss: testWss } = new ForemanWss({ taskManager: localTm, server, config: defaultCfg });
     const testPort = await new Promise<number>((r) => server.listen(0, () => r((server.address() as AddressInfo).port)));
 
@@ -740,7 +736,6 @@ describe("worker disconnect DB logging", () => {
     const logSpy = vi.spyOn(ForemanMessage, "log").mockReturnValue(undefined);
 
     const localTm = new TaskManager();
-    setupInMemoryTasks(localTm);
     await Task.upsert("42", 42, "owner/repo", "Some task", "Body", []);
     localTm.trackIssue(42);
     localTm.markBlockersLoaded(42);
@@ -1020,7 +1015,6 @@ describe("worker_hello — reclaim complete task for finalization work", () => {
 describe("keepalive ping", () => {
   it("sends WebSocket ping to connected clients on interval", async () => {
     const tm = new TaskManager();
-    setupInMemoryTasks(tm);
     const srv = http.createServer();
     const { wss: testWss } = new ForemanWss({ taskManager: tm, server: srv, config: { ...defaultCfg, pingIntervalMs: 50 } });
     await new Promise<void>((resolve) => srv.listen(0, resolve));
@@ -1094,7 +1088,6 @@ describe("graceful shutdown", () => {
     const logSpy = vi.spyOn(ForemanMessage, "log").mockReturnValue(undefined);
     const srv = http.createServer();
     const localTm = new TaskManager();
-    setupInMemoryTasks(localTm);
     const localForemanWss = new ForemanWss({ taskManager: localTm, server: srv, config: defaultCfg });
     const { wss: testWss } = localForemanWss;
     const testPort = await new Promise<number>((r) => srv.listen(0, () => r((srv.address() as AddressInfo).port)));

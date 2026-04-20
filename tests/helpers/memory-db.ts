@@ -109,6 +109,7 @@ export function createMemoryTaskDb(): SupabaseClient<Database> {
           const existing = store.get(rowData.task_id);
           const now = new Date().toISOString();
           const row: DbRow = {
+            // Defaults for new rows:
             repo: "",
             title: "",
             body: "",
@@ -120,8 +121,15 @@ export function createMemoryTaskDb(): SupabaseClient<Database> {
             completed_at: null,
             issue_closed_at: null,
             pr_merged_at: null,
-            created_at: existing?.created_at ?? now,
+            created_at: now,
+            // Preserve all existing field values (mirrors ON CONFLICT DO UPDATE
+            // which only updates the columns listed in the UPDATE SET — all other
+            // columns retain their existing values).
+            ...(existing ?? {}),
+            // Apply only the fields explicitly provided in rowData.
             ...(rowData as Partial<DbRow>),
+            // Always preserve the original created_at.
+            created_at: existing?.created_at ?? now,
           } as DbRow;
           store.set(row.task_id, row);
           const result = store.get(row.task_id)!;

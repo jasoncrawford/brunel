@@ -9,7 +9,7 @@ import { Worker } from "../src/foreman/models/worker.js";
 import { ForemanWss } from "../src/foreman/controllers/wss.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
-import { setupInMemoryTasks } from "./helpers/task.js";
+import { resetDb } from "./helpers/task.js";
 import { loadDefaultConfig } from "../src/config.js";
 const defaultCfg = await loadDefaultConfig();
 import * as Wire from "../shared/wire.js";
@@ -93,7 +93,7 @@ beforeEach(() => {
   });
 
   taskManager = new TaskManager();
-  setupInMemoryTasks(taskManager);
+  resetDb();
   httpServer = http.createServer();
   foremanWss = new ForemanWss({ taskManager, server: httpServer, config: defaultCfg });
   ({ wss } = foremanWss);

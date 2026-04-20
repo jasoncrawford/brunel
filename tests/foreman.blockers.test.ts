@@ -3,7 +3,7 @@ import { Worker } from "../src/foreman/models/worker.js";
 import { ForemanWss } from "../src/foreman/controllers/wss.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
-import { setupInMemoryTasks } from "./helpers/task.js";
+import { resetDb } from "./helpers/task.js";
 import { loadDefaultConfig } from "../src/config.js";
 import http from "http";
 
@@ -17,7 +17,7 @@ describe("foreman — blocker transitions via routeEvent", () => {
   beforeEach(() => {
     Worker._reset();
     taskManager = new TaskManager();
-    setupInMemoryTasks(taskManager);
+    resetDb();
   });
 
   afterEach(() => {
