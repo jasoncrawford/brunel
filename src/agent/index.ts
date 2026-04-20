@@ -262,7 +262,13 @@ export class BrunelAgent {
       const event = await nextRoutingEvent();
 
       if (event.type === "session") {
-        // input.cancel() was already called when this event was enqueued.
+        // Always cancel the active ask() here. When "prompts_ready" fires while the
+        // routing loop is executing (not sleeping in nextRoutingEvent), cancel() in the
+        // session event handler is a no-op because ask() hasn't started yet. The event
+        // lands in routingQueue. Later, listenForInput() starts a new ask(), then
+        // nextRoutingEvent() returns the stale event immediately — without this call,
+        // that ask() would never be cancelled, creating orphaned stdin listeners.
+        this.input.cancel();
         await drainPendingPrompts(); // no-op for "fatal"
         continue;
       }

@@ -49,6 +49,22 @@ const fakeWorkspace = vi.hoisted(() => {
   return ws;
 });
 
+// Captures the WorkerSession created by startWorkerMode so tests can emit session
+// events directly (e.g. "prompts_ready") without a real foreman connection.
+const capturedSession = vi.hoisted(() => ({ current: null as import("../src/agent/controllers/worker-controller.js").WorkerSession | null }));
+
+vi.mock("../src/agent/controllers/worker-controller.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/agent/controllers/worker-controller.js")>();
+  return {
+    ...actual,
+    startWorkerMode: async (...args: Parameters<typeof actual.startWorkerMode>) => {
+      const result = await actual.startWorkerMode(...args);
+      capturedSession.current = result.session;
+      return result;
+    },
+  };
+});
+
 vi.mock("../src/agent/models/workspace.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/agent/models/workspace.js")>();
   // Use a regular function (not arrow) so it can be called with `new`.
@@ -281,5 +297,120 @@ describe("workerMain exit behavior", () => {
 
     // destroy should have been called exactly once, not twice
     expect(fakeWorkspace.destroy).toHaveBeenCalledOnce();
+  });
+});
+
+describe("workerMain input cancel discipline", () => {
+  let chdirSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    makeMockInput();
+    chdirSpy = vi.spyOn(process, "chdir").mockImplementation(() => {});
+    vi.mocked(confirmIfUnsafe).mockResolvedValue(true);
+    fakeWorkspace.isCreated = false;
+    vi.mocked(fakeWorkspace.destroy).mockResolvedValue(undefined);
+    vi.mocked(fakeWorkspace.checkSafety).mockResolvedValue({ uncommittedFiles: [], unpushedCommits: [], noUpstream: false });
+    vi.mocked(fakeWorkspace.create).mockImplementation(async () => { fakeWorkspace.isCreated = true; });
+    capturedSession.current = null;
+  });
+
+  afterEach(() => {
+    chdirSpy.mockRestore();
+    vi.clearAllMocks();
+  });
+
+  it("does not send user input to the agent multiple times when session events were queued during a query", async () => {
+    // Regression test for issue #761.
+    //
+    // The bug: when "prompts_ready" fires while the routing loop is executing (not
+    // sleeping in nextRoutingEvent), cancel() in the event handler is a no-op because
+    // ask() hasn't started yet. The event lands in routingQueue. Later, listenForInput()
+    // starts a new ask(), nextRoutingEvent() returns the stale event immediately, and
+    // the routing loop processes it WITHOUT cancelling the newly-started ask(). That
+    // ask() becomes orphaned — it stays pending, keeping an active stdin listener. When
+    // the user types something next, every orphaned listener fires, causing runQuery to
+    // be invoked once per orphaned ask instead of once.
+    //
+    // The mock tracks ALL pending ask() resolvers. Resolving every resolver simultaneously
+    // mirrors how real stdin data events are delivered to every active readline listener.
+
+    // All currently-pending ask() resolvers.
+    const pendingResolvers: Array<(val: string | null) => void> = [];
+    let askCallCount = 0;
+    let currentResolve: ((val: string | null) => void) | null = null;
+
+    mockInput.ask.mockImplementation(() => {
+      askCallCount++;
+      if (askCallCount === 1) return Promise.resolve("do some work");
+      return new Promise<string | null>((resolve) => {
+        pendingResolvers.push(resolve);
+        currentResolve = resolve;
+      });
+    });
+
+    // cancel() resolves the most recent ask with null and removes it, mirroring
+    // real cancel() which only cancels the currently-active ask (not prior ones).
+    mockInput.cancel.mockImplementation(() => {
+      if (pendingResolvers.length === 0) return;
+      const r = pendingResolvers.pop()!;
+      currentResolve = pendingResolvers.at(-1) ?? null;
+      r(null);
+    });
+
+    const runQueryFn = vi.fn().mockImplementation(async () => {
+      if (runQueryFn.mock.calls.length === 1) {
+        // Simulate two foreman events arriving while the query runs.
+        // enqueuePrompt emits "prompts_ready", which calls cancel() (no-op — no ask is
+        // pending yet) and pushes a session event to routingQueue.
+        (capturedSession.current as any).enqueuePrompt("foreman event A", false);
+        (capturedSession.current as any).enqueuePrompt("foreman event B", false);
+      }
+    });
+
+    installMocks(runQueryFn);
+
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => {
+      throw new Error("__process_exit__");
+    }) as unknown as ReturnType<typeof vi.spyOn>;
+
+    let agentError: unknown;
+    const agentDone = new BrunelAgent(getConfig()).start(true).then(
+      () => {},
+      (err: unknown) => {
+        if (!(err instanceof Error && err.message === "__process_exit__")) agentError = err;
+      },
+    );
+
+    // Wait for ask#4 — both queued session events have been processed by this point:
+    //   ask#1 → runQuery("do some work") → 2 session events queued → drain (runQuery×2)
+    //   → ask#2 → stale event1 processed → [with fix: cancel ask#2] → ask#3
+    //   → stale event2 processed → [with fix: cancel ask#3] → ask#4 (blocking)
+    await vi.waitFor(() => expect(askCallCount).toBeGreaterThanOrEqual(4));
+
+    // With the fix: 1 pending ask (each session event cancelled the previous one).
+    // Without the fix: 3 pending asks (ask#2 and ask#3 were never cancelled).
+    // The number of pending asks directly determines how many times the next user
+    // input invokes runQuery.
+    const pendingAtSteadyState = pendingResolvers.length;
+    expect(pendingAtSteadyState).toBe(1);
+
+    // Deliver one user input to all currently-pending asks simultaneously,
+    // mirroring how a stdin data event reaches every active readline listener at once.
+    const toFire = pendingResolvers.splice(0);
+    currentResolve = null;
+    for (const r of toFire) r("user-input");
+
+    // Wait for the routing loop to process all resulting line events (one per fired ask).
+    await vi.waitFor(() => expect(askCallCount).toBeGreaterThanOrEqual(4 + toFire.length));
+
+    // With the fix: runQuery is called exactly once for "user-input".
+    // Without the fix: runQuery would be called 3 times (once per pending ask).
+    expect(runQueryFn.mock.calls.filter(([p]) => p === "user-input").length).toBe(1);
+
+    // Exit cleanly.
+    currentResolve?.("__eof__");
+    await agentDone;
+    exitSpy.mockRestore();
+    if (agentError) throw agentError;
   });
 });
