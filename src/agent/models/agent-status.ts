@@ -1,5 +1,4 @@
 import { EventEmitter } from "node:events";
-import { shortWorkerId } from "../../../shared/utils.js";
 import type { Settings } from "./settings.js";
 import type { EffortValue } from "./settings.js";
 
@@ -106,33 +105,6 @@ export class AgentStatus extends EventEmitter {
         this._countdownTimer = null;
       }
     }
-  }
-
-  /**
-   * Format the current worker status as a plain-text string (no ANSI codes,
-   * no width padding). Used by WorkerSession.getStatusText() and tests.
-   * For the full terminal-rendered version, see Renderer.fmtStatusBar().
-   */
-  getStatusText(): string {
-    const retryInSeconds = this._reconnectAt != null
-      ? Math.max(0, Math.ceil((this._reconnectAt - Date.now()) / 1000))
-      : undefined;
-    const rightText =
-      this._connectionStatus === "connected"    ? "Connected" :
-      this._connectionStatus === "handshaking"  ? "Handshaking..." :
-      this._connectionStatus === "reconnecting" ? "Reconnecting..." :
-      retryInSeconds != null                    ? `Disconnected. Retrying in ${retryInSeconds}s` :
-                                                  "Disconnected";
-
-    const modelName = (!this._model || this._model === "default") ? "sonnet" : this._model;
-    const effortStr = this._effort ? ` (${this._effort})` : "";
-    const parts: string[] = [`worker ${shortWorkerId(this.agentId)}`, `${modelName}${effortStr}`];
-    if (this._taskNumber != null) parts.push(`task #${this._taskNumber}`);
-    else parts.push("no current task");
-    if (this._prNumber != null) parts.push(`PR #${this._prNumber}`);
-    if (this._branch) parts.push(this._branch);
-
-    return parts.join(" ∙ ") + " | " + rightText;
   }
 
   // ── Tool result callback ───────────────────────────────────────────────────

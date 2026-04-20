@@ -2,8 +2,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "events";
 import { WorkerSession } from "../src/agent/controllers/worker-controller.js";
 import { AgentStatus } from "../src/agent/models/agent-status.js";
+import { Display } from "../src/agent/views/display.js";
 import * as Wire from "../shared/wire.js";
 import { stripAnsi } from "./helpers.js";
+import { getConfig } from "../src/config.js";
 
 // ── Fake WebSocket ─────────────────────────────────────────────────────────────
 
@@ -35,6 +37,10 @@ function makeEvent(name = "push"): Wire.WebhookEvent {
 
 function sendMsg(ws: FakeWs, msg: Wire.ForemanMessage) {
   ws.emit("message", Buffer.from(JSON.stringify(msg)));
+}
+
+function fmtStatus(status: AgentStatus): string {
+  return stripAnsi(new Display(getConfig(), status).renderer.fmtStatusBar(status, 100));
 }
 
 // ── Test harness ──────────────────────────────────────────────────────────────
@@ -411,23 +417,23 @@ describe("connection status bar", () => {
     vi.useFakeTimers();
     fakeWs.emit("open");
     fakeWs.emit("close", 1006, Buffer.from(""));
-    expect(stripAnsi(session.getStatusText())).toContain("Disconnected");
+    expect(fmtStatus(sb)).toContain("Disconnected");
     vi.useRealTimers();
   });
 
   it("shows Handshaking... in status text after open (pre-hello_ack)", () => {
     fakeWs.emit("open");
-    expect(stripAnsi(session.getStatusText())).toContain("Handshaking...");
+    expect(fmtStatus(sb)).toContain("Handshaking...");
   });
 
   it("shows Connected in status text after hello_ack", () => {
     fakeWs.emit("open");
     sendMsg(fakeWs, { type: "hello_ack", status: "idle" });
-    expect(stripAnsi(session.getStatusText())).toContain("Connected");
+    expect(fmtStatus(sb)).toContain("Connected");
   });
 
   it("shows Reconnecting in status text on initial connect", () => {
-    expect(stripAnsi(session.getStatusText())).toContain("Reconnecting");
+    expect(fmtStatus(sb)).toContain("Reconnecting");
   });
 
   it("registers a tool result callback on start()", () => {
@@ -475,13 +481,13 @@ describe("connection status bar", () => {
     fakeWs.emit("open");
     fakeWs.emit("close", 1006, Buffer.from(""));
     // After close we are Disconnected; the timer hasn't fired yet.
-    expect(stripAnsi(session.getStatusText())).toContain("Disconnected");
+    expect(fmtStatus(sb)).toContain("Disconnected");
     // Advance time past the reconnect delay to trigger connect().
     vi.advanceTimersByTime(6000);
     // connect() should have been called (wsFactory called a second time) and
     // the status should now show Reconnecting before the new socket opens.
     expect(wsFactory).toHaveBeenCalledTimes(2);
-    expect(stripAnsi(session.getStatusText())).toContain("Reconnecting");
+    expect(fmtStatus(sb)).toContain("Reconnecting");
     vi.useRealTimers();
   });
 
@@ -490,7 +496,7 @@ describe("connection status bar", () => {
     fakeWs.emit("open");
     fakeWs.emit("close", 1006, Buffer.from(""));
     // After close we are Disconnected; the timer hasn't fired yet.
-    expect(stripAnsi(session.getStatusText())).toContain("Disconnected");
+    expect(fmtStatus(sb)).toContain("Disconnected");
     vi.useRealTimers();
   });
 
@@ -505,19 +511,19 @@ describe("connection status bar", () => {
 
 describe("status bar content", () => {
   it("shows worker ID prefix in status text", () => {
-    const text = stripAnsi(session.getStatusText());
+    const text = fmtStatus(sb);
     expect(text).toContain(`worker ${AGENT_ID.slice(0, 8)}`);
   });
 
   it("shows no current task when no task assigned", () => {
-    const text = stripAnsi(session.getStatusText());
+    const text = fmtStatus(sb);
     expect(text).toContain("no current task");
   });
 
   it("shows task number after task_assigned", () => {
     const issue = makeIssue(42);
     sendMsg(fakeWs, { type: "task_assigned", taskId: "t42", issue });
-    const text = stripAnsi(session.getStatusText());
+    const text = fmtStatus(sb);
     expect(text).toContain("task #42");
   });
 
@@ -531,7 +537,7 @@ describe("status bar content", () => {
       payload: { action: "opened", pull_request: { number: 99, title: "My PR" } },
     };
     sendMsg(fakeWs, { type: "event_notification", taskId: "t1", event: prEvent });
-    const text = stripAnsi(session.getStatusText());
+    const text = fmtStatus(sb);
     expect(text).toContain("PR #99");
   });
 
@@ -546,7 +552,7 @@ describe("status bar content", () => {
       payload: { action: "opened", pull_request: { number: 55, title: "PR" } },
     };
     sendMsg(fakeWs, { type: "event_notification", taskId: "t1", event: prEvent });
-    expect(stripAnsi(session.getStatusText())).toContain("PR #55");
+    expect(fmtStatus(sb)).toContain("PR #55");
 
     // Complete task and assign new task
     session.takeNextPrompt();
@@ -554,7 +560,7 @@ describe("status bar content", () => {
     const issue2 = makeIssue(2);
     sendMsg(fakeWs, { type: "task_assigned", taskId: "t2", issue: issue2 });
 
-    expect(stripAnsi(session.getStatusText())).not.toContain("PR #");
+    expect(fmtStatus(sb)).not.toContain("PR #");
   });
 
   it("clears PR number from status bar when pull_request/closed without merging is received", () => {
@@ -568,7 +574,7 @@ describe("status bar content", () => {
       payload: { action: "opened", pull_request: { number: 77, merged: false } },
     };
     sendMsg(fakeWs, { type: "event_notification", taskId: "t1", event: prOpenedEvent });
-    expect(stripAnsi(session.getStatusText())).toContain("PR #77");
+    expect(fmtStatus(sb)).toContain("PR #77");
 
     // Now close the PR without merging
     const prClosedEvent: Wire.WebhookEvent = {
@@ -577,7 +583,7 @@ describe("status bar content", () => {
       payload: { action: "closed", pull_request: { number: 77, merged: false } },
     };
     sendMsg(fakeWs, { type: "event_notification", taskId: "t1", event: prClosedEvent });
-    expect(stripAnsi(session.getStatusText())).not.toContain("PR #");
+    expect(fmtStatus(sb)).not.toContain("PR #");
   });
 
   it("keeps PR number in status bar when pull_request/closed with merge is received", () => {
@@ -590,7 +596,7 @@ describe("status bar content", () => {
       payload: { action: "opened", pull_request: { number: 88, merged: false } },
     };
     sendMsg(fakeWs, { type: "event_notification", taskId: "t1", event: prOpenedEvent });
-    expect(stripAnsi(session.getStatusText())).toContain("PR #88");
+    expect(fmtStatus(sb)).toContain("PR #88");
 
     // Close via merge — PR should stay shown until task completes
     const prMergedEvent: Wire.WebhookEvent = {
@@ -599,7 +605,7 @@ describe("status bar content", () => {
       payload: { action: "closed", pull_request: { number: 88, merged: true } },
     };
     sendMsg(fakeWs, { type: "event_notification", taskId: "t1", event: prMergedEvent });
-    expect(stripAnsi(session.getStatusText())).toContain("PR #88");
+    expect(fmtStatus(sb)).toContain("PR #88");
   });
 });
 
@@ -1524,12 +1530,12 @@ describe("heartbeat", () => {
     const { ws, s } = makeHeartbeatSession(100);
     ws.emit("open");
     sendMsg(ws, { type: "hello_ack", status: "idle" });
-    expect(stripAnsi(s.getStatusText())).toContain("Connected");
+    expect(fmtStatus(s.agentStatus)).toContain("Connected");
 
     vi.advanceTimersByTime(100); // ping sent
     vi.advanceTimersByTime(100); // no pong → terminate → close fires
 
-    expect(stripAnsi(s.getStatusText())).toContain("Disconnected");
+    expect(fmtStatus(s.agentStatus)).toContain("Disconnected");
   });
 
   it("reconnects after heartbeat timeout", () => {

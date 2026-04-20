@@ -38,7 +38,8 @@ describe("AgentStatus getStatusText", () => {
   it("shows worker id and no current task when idle", () => {
     const status = new AgentStatus({ agentId: "7c254628-abcd-1234-efgh-000000000000" });
     status.update({ connectionStatus: "connected" });
-    const result = stripAnsi(status.getStatusText());
+    const display = new Display(getConfig(), status);
+    const result = stripAnsi(display.renderer.fmtStatusBar(status, 119));
     expect(result).toContain("worker 7c254628");
     expect(result).toContain("no current task");
     expect(result).toContain("Connected");
@@ -66,7 +67,8 @@ describe("AgentStatus getStatusText", () => {
   it("shows task, PR, and branch when set", () => {
     const status = new AgentStatus({ agentId: "7c254628-abcd-1234-efgh-000000000000" });
     status.update({ taskNumber: 374, prNumber: 406, branch: "db-single-source-of-truth", connectionStatus: "connected" });
-    const result = stripAnsi(status.getStatusText());
+    const display = new Display(getConfig(), status);
+    const result = stripAnsi(display.renderer.fmtStatusBar(status, 119));
     expect(result).toContain("task #374");
     expect(result).toContain("PR #406");
     expect(result).toContain("db-single-source-of-truth");

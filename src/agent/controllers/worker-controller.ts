@@ -162,7 +162,7 @@ export class WorkerSession extends EventEmitter {
   private bufferedMessages: BufferableMessage[] = [];
 
   constructor(
-    private agentStatus: AgentStatus,
+    readonly agentStatus: AgentStatus,
     private wsFactory: WsFactory,
     private display: WorkerDisplay,
     private options: WorkerSessionOptions = {},
@@ -171,11 +171,6 @@ export class WorkerSession extends EventEmitter {
   }
 
   get agentId(): string { return this.agentStatus.agentId; }
-
-  /** Returns the formatted worker status bar text. Used by tests. */
-  getStatusText(): string {
-    return this.agentStatus.getStatusText();
-  }
 
   private async refreshBranch(): Promise<void> {
     let branch = "";
