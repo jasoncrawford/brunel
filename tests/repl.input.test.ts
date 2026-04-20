@@ -925,6 +925,95 @@ describe("pickMultiple() - multi-selection picker", () => {
   });
 });
 
+describe("ask() - cancel() auto-stash", () => {
+  it("cancel() with non-empty buffer stashes the buffer for next ask()", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = testInput.ask("> ", () => []);
+      stdin.push("hello world");
+      // Give the data event a chance to process
+      await new Promise(r => setTimeout(r, 0));
+      testInput.cancel();
+      await p;
+
+      // Next ask() should be pre-populated with the stashed text
+      const p2 = testInput.ask("> ", () => []);
+      stdin.push("\r");
+      const result = await p2;
+      expect(result).toBe("hello world");
+    });
+  });
+
+  it("cancel() with empty buffer does NOT stash anything", async () => {
+    await withFakeStdin(async (stdin) => {
+      const p = testInput.ask("> ", () => []);
+      testInput.cancel();
+      await p;
+
+      // Next ask() should start empty (no stash)
+      const p2 = testInput.ask("> ", () => []);
+      stdin.push("\r");
+      const result = await p2;
+      expect(result).toBe("");
+    });
+  });
+
+  it("cancel() with non-empty buffer writes a stash notification", async () => {
+    const writeSpy = vi.mocked(process.stdout.write);
+
+    await withFakeStdin(async (stdin) => {
+      const p = testInput.ask("> ", () => []);
+      stdin.push("test");
+      await new Promise(r => setTimeout(r, 0));
+      writeSpy.mockClear();
+      testInput.cancel();
+      await p;
+    });
+
+    const out = writeSpy.mock.calls.map((c) => String(c[0])).join("");
+    expect(out).toContain("stashed");
+  });
+
+  it("cancel() with empty buffer does NOT write a stash notification", async () => {
+    const writeSpy = vi.mocked(process.stdout.write);
+
+    await withFakeStdin(async (_stdin) => {
+      const p = testInput.ask("> ", () => []);
+      writeSpy.mockClear();
+      testInput.cancel();
+      await p;
+    });
+
+    const out = writeSpy.mock.calls.map((c) => String(c[0])).join("");
+    expect(out).not.toContain("stashed");
+  });
+
+  it("cancel() auto-stash overwrites existing stash with full buffer", async () => {
+    await withFakeStdin(async (stdin) => {
+      // First ask: manually stash "old"
+      const p1 = testInput.ask("> ", () => []);
+      stdin.push("old");
+      await new Promise(r => setTimeout(r, 0));
+      stdin.push("\x13"); // ^S stash "old"
+      stdin.push("\r");
+      await p1;
+
+      // Second ask: stash "old" is restored into the buffer; user appends "new"
+      // making the buffer "oldnew"; then cancel auto-stashes the full buffer
+      const p2 = testInput.ask("> ", () => []);
+      stdin.push("new"); // buffer becomes "oldnew" (appended to restored stash)
+      await new Promise(r => setTimeout(r, 0));
+      testInput.cancel();
+      await p2;
+
+      // Third ask: should restore "oldnew" (the full buffer at cancel time)
+      const p3 = testInput.ask("> ", () => []);
+      stdin.push("\r");
+      const result = await p3;
+      expect(result).toBe("oldnew");
+    });
+  });
+});
+
 describe("ask() - stash (^S)", () => {
   it("^S with non-empty buffer clears buffer so ask resolves to ''", async () => {
     await withFakeStdin(async (stdin) => {
