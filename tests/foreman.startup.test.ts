@@ -3,7 +3,7 @@ import { Worker } from "../src/foreman/models/worker.js";
 import { ForemanWss } from "../src/foreman/controllers/wss.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
-import { setupInMemoryTasks } from "./helpers/task.js";
+import { resetDb } from "./helpers/task.js";
 import { loadDefaultConfig } from "../src/config.js";
 
 const defaultCfg = await loadDefaultConfig();
@@ -85,7 +85,7 @@ beforeEach(() => {
   Worker._reset();
   httpServer = http.createServer();
   taskManager = new TaskManager();
-  setupInMemoryTasks(taskManager);
+  resetDb();
 });
 
 afterEach(() => {
@@ -138,9 +138,8 @@ describe("tryAssignWork — assign persistence", () => {
   it("reverts task to pending if assign fails", async () => {
     await registerReady(taskManager, "42", 42, "owner/repo", "Test task", "body", []);
 
-    // Spy on task.assign to make it fail
-    const task = await Task.get("42");
-    vi.spyOn(task!, "assign").mockRejectedValue(new Error("db down"));
+    // Spy on the prototype so the mock applies to any Task instance returned from the DB
+    vi.spyOn(Task.prototype, "assign").mockRejectedValue(new Error("db down"));
 
     ({ wss } = new ForemanWss({ taskManager, server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } }));
 
@@ -229,7 +228,7 @@ describe("PR tracking persistence", () => {
     const t = await Task.get("42");
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
     await t!.assign(Worker.register("w1", fakeWs));
-    const spyRegisterPr = vi.spyOn(t!, "registerPr");
+    const spyRegisterPr = vi.spyOn(Task.prototype, "registerPr");
 
     const result = new ForemanWss({ taskManager, server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } });
     ({ wss } = result);
@@ -251,7 +250,7 @@ describe("PR tracking persistence", () => {
     const t = await Task.get("42");
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
     await t!.assign(Worker.register("w1", fakeWs));
-    const spyRegisterPr = vi.spyOn(t!, "registerPr");
+    const spyRegisterPr = vi.spyOn(Task.prototype, "registerPr");
 
     const result = new ForemanWss({ taskManager, server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } });
     ({ wss } = result);
@@ -540,9 +539,8 @@ describe("task_complete marks task complete", () => {
 
     await waitUntil(() => Worker.get("w1")?.status === "busy");
 
-    // Get fresh task reference and spy on complete
-    const t2 = await Task.get("42");
-    const spyComplete = vi.spyOn(t2!, "complete");
+    // Spy on the prototype so we capture the call regardless of which instance is used
+    const spyComplete = vi.spyOn(Task.prototype, "complete");
 
     ws.send(JSON.stringify({ type: "task_complete", workerId: "w1", taskId: "42" }));
     await waitUntil(() => Worker.get("w1")?.status === "idle");

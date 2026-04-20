@@ -15,7 +15,7 @@ import type { AddressInfo } from "net";
 import { createHttpServer } from "../src/foreman/controllers/http-server.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
-import { setupInMemoryTasks } from "./helpers/task.js";
+import { resetDb } from "./helpers/task.js";
 
 vi.mock("../src/foreman/models/activity-log.js", () => ({
   queryActivityLog: vi.fn().mockResolvedValue([]),
@@ -188,7 +188,7 @@ describe("GET /api/tasks", () => {
 
   it("returns active tasks with derived status and date fields, excluding complete", async () => {
     const tm = new TaskManager();
-    setupInMemoryTasks(tm);
+    resetDb();
 
     await Task.upsert("1", 1, "test/repo", "Pending bug", "Description", []);
     const t2 = await Task.upsert("2", 2, "test/repo", "Done bug", "Description", []);
@@ -217,7 +217,7 @@ describe("GET /api/tasks", () => {
 
   it("returns complete tasks when ?status=complete is requested", async () => {
     const tm = new TaskManager();
-    setupInMemoryTasks(tm);
+    resetDb();
 
     const t = await Task.upsert("42", 42, "test/repo", "Fix bug", "Description", []);
     await t.complete();
@@ -238,7 +238,7 @@ describe("GET /api/tasks", () => {
 
   it("filters tasks by status in memory", async () => {
     const tm = new TaskManager();
-    setupInMemoryTasks(tm);
+    resetDb();
 
     const t1 = await Task.upsert("1", 1, "test/repo", "T1", "b", []);
     await t1.complete();

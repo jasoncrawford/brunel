@@ -20,7 +20,7 @@ import { Worker } from "../src/foreman/models/worker.js";
 import { ForemanWss } from "../src/foreman/controllers/wss.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
-import { setupInMemoryTasks } from "./helpers/task.js";
+import { resetDb } from "./helpers/task.js";
 import { loadDefaultConfig } from "../src/config.js";
 const defaultCfg = await loadDefaultConfig();
 import type { AdminWss, AdminSnapshot, LogEntry } from "../src/foreman/controllers/admin-ws.js";
@@ -86,7 +86,7 @@ beforeEach(() => {
   process.env.GITHUB_TOKEN = "token";
 
   taskManager = new TaskManager();
-  setupInMemoryTasks(taskManager);
+  resetDb();
 
   adminWss = makeMockAdminWss();
   httpServer = http.createServer();
