@@ -320,7 +320,7 @@ describe("workerMain input cancel discipline", () => {
   });
 
   it("does not send user input to the agent multiple times when session events were queued during a query", async () => {
-    // Regression test for issue #761.
+    // Regression test for issues #761 and #770 (triple input after PR merged).
     //
     // The bug: when "prompts_ready" fires while the routing loop is executing (not
     // sleeping in nextRoutingEvent), cancel() in the event handler is a no-op because
@@ -328,7 +328,8 @@ describe("workerMain input cancel discipline", () => {
     // starts a new ask(), nextRoutingEvent() returns the stale event immediately, and
     // the routing loop processes it WITHOUT cancelling the newly-started ask(). That
     // ask() becomes orphaned — it stays pending, keeping an active stdin listener. When
-    // the user types something next, every orphaned listener fires, causing runQuery to
+    // the user types something next, every orphaned listener fires, causing the typed
+    // characters to be inserted once per listener (triplicating them) and runQuery to
     // be invoked once per orphaned ask instead of once.
     //
     // The mock tracks ALL pending ask() resolvers. Resolving every resolver simultaneously
