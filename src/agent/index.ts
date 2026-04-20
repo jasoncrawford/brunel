@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "url";
 import { Display } from "./views/display.js";
 import { c, hr } from "./views/style.js";
-import { AgentStatus } from "./views/agent-status.js";
+import { AgentStatus } from "./models/agent-status.js";
 import { Input } from "./views/input.js";
 import { Picker } from "./views/picker.js";
 import { registerWorkerCommands, startWorkerMode, WorkerSession } from "./controllers/worker-controller.js";

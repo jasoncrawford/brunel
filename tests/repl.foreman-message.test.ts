@@ -5,7 +5,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from "vitest";
 import { getConfig } from "../src/config.js";
 import { Display } from "../src/agent/views/display.js";
-import { AgentStatus } from "../src/agent/views/agent-status.js";
+import { AgentStatus } from "../src/agent/models/agent-status.js";
 import { stripAnsi } from "./helpers.js";
 import * as Wire from "../shared/wire.js";
 

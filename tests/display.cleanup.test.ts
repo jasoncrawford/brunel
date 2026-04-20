@@ -4,7 +4,7 @@ import { getConfig } from "../src/config.js";
 import { fmtTime } from "../shared/formatters.js";
 import { s } from "../src/agent/views/style.js";
 import { Display } from "../src/agent/views/display.js";
-import { AgentStatus } from "../src/agent/views/agent-status.js";
+import { AgentStatus } from "../src/agent/models/agent-status.js";
 
 let testDisplay: Display;
 

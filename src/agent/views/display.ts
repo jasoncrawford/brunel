@@ -8,7 +8,7 @@ import type {
   ToolResultBlock,
   ContentBlock,
 } from "./renderer.js";
-import { AgentStatus } from "./agent-status.js";
+import { AgentStatus } from "../models/agent-status.js";
 
 // ── Display class ──────────────────────────────────────────────────────────
 
@@ -287,7 +287,7 @@ export class Display {
   startPersistentBar(): void {
     this.clearBar();
     this.persistentActive = true;
-    this._persistentText = this.agentStatus.getStatusText((this.getColumns() ?? W) - 1);
+    this._persistentText = this.renderer.fmtStatusBar(this.agentStatus, (this.getColumns() ?? W) - 1);
     this.drawBar();
     if (!this._resizeHandler) {
       this._resizeHandler = () => this._handleResize();
@@ -312,7 +312,7 @@ export class Display {
     if (!this.persistentActive && !this.active) return;
     this.clearBar();
     if (this._getText) this._text = this._getText();
-    this._persistentText = this.agentStatus.getStatusText((this.getColumns() ?? W) - 1);
+    this._persistentText = this.renderer.fmtStatusBar(this.agentStatus, (this.getColumns() ?? W) - 1);
     this.drawBar();
   }
 
@@ -320,7 +320,7 @@ export class Display {
   private _updatePersistent(): void {
     if (!this.persistentActive) return;
     this.clearBar();
-    this._persistentText = this.agentStatus.getStatusText((this.getColumns() ?? W) - 1);
+    this._persistentText = this.renderer.fmtStatusBar(this.agentStatus, (this.getColumns() ?? W) - 1);
     this.drawBar();
   }
 }

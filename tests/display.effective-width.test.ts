@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { stripAnsi } from "./helpers.js";
 import { Display } from "../src/agent/views/display.js";
-import { AgentStatus } from "../src/agent/views/agent-status.js";
+import { AgentStatus } from "../src/agent/models/agent-status.js";
 import { getConfig } from "../src/config.js";
 import { W } from "../src/agent/views/style.js";
 

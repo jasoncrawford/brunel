@@ -4,6 +4,7 @@
  * No I/O — callers pass results to display.print().
  */
 import * as Wire from "../../../shared/wire.js";
+import type { AgentStatus } from "../models/agent-status.js";
 import { c, s, W } from "./style.js";
 import {
   trunc,
@@ -15,6 +16,7 @@ import {
   fmtArgs,
   toRelativePath,
 } from "../../../shared/formatters.js";
+import { shortWorkerId } from "../../../shared/utils.js";
 import type { Display } from "./display.js";
 
 // ── Content block types ────────────────────────────────────────────────────
@@ -565,5 +567,47 @@ export class Renderer {
   /** Format a foreman→worker wire message. */
   formatForemanMessage(msg: Wire.ForemanMessage): string | null {
     return this._resolve(this.FOREMAN_MESSAGE_FMT, msg.type, msg);
+  }
+
+  /**
+   * Format the worker status bar as a terminal-ready string: ANSI-colored,
+   * width-padded, ready to be written to stdout.
+   * Called by Display._updatePersistent() and Display._handleResize().
+   */
+  fmtStatusBar(status: AgentStatus, width: number): string {
+    // Right side: connection status
+    const retryInSeconds = status.reconnectAt != null
+      ? Math.max(0, Math.ceil((status.reconnectAt - Date.now()) / 1000))
+      : undefined;
+    const codeStr = this.display.verbose && status.disconnectCode != null
+      ? ` (${status.disconnectCode})`
+      : "";
+    const rightText =
+      status.connectionStatus === "connected"    ? "Connected" :
+      status.connectionStatus === "handshaking"  ? "Handshaking..." :
+      status.connectionStatus === "reconnecting" ? "Reconnecting..." :
+      retryInSeconds != null                     ? `Disconnected${codeStr}. Retrying in ${retryInSeconds}s` :
+                                                   `Disconnected${codeStr}`;
+
+    // Left side: worker {id8} ∙ {model} ∙ {task info}
+    const modelName = (!status.model || status.model === "default") ? "sonnet" : status.model;
+    const effortStr = status.effort ? ` (${status.effort})` : "";
+    const parts: string[] = [`worker ${shortWorkerId(status.agentId)}`, `${modelName}${effortStr}`];
+    if (status.taskNumber != null) parts.push(`task #${status.taskNumber}`);
+    else parts.push("no current task");
+    if (status.prNumber != null) parts.push(`PR #${status.prNumber}`);
+    if (status.branch) parts.push(status.branch);
+    let leftText = parts.join(" ∙ ");
+
+    // Truncate left side if needed to leave room for right side with a gap of 1
+    const maxLeftLen = Math.max(0, width - rightText.length - 1);
+    if (leftText.length > maxLeftLen) {
+      leftText = leftText.slice(0, Math.max(0, maxLeftLen - 1)) + "…";
+    }
+
+    const gap = Math.max(1, width - leftText.length - rightText.length);
+    // Dim sage-green background + bright-white text. No trailing reset: drawRaw()
+    // appends \x1b[K (fills remaining width with the same background) then \x1b[0m.
+    return `\x1b[48;5;22m\x1b[97m${leftText + " ".repeat(gap) + rightText}`;
   }
 }

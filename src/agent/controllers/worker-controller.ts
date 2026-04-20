@@ -4,7 +4,7 @@ import { EventEmitter } from "node:events";
 import { promisify } from "node:util";
 import { WebSocket } from "ws";
 import { c } from "../views/style.js";
-import { AgentStatus } from "../views/agent-status.js";
+import { AgentStatus } from "../models/agent-status.js";
 import type { Display } from "../views/display.js";
 import { buildInitialPrompt, buildEventPrompt } from "../worker-prompts.js";
 import type { EffortValue } from "../models/settings.js";

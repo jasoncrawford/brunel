@@ -21,7 +21,7 @@ import { Settings } from "../src/agent/models/settings.js";
 import { Input } from "../src/agent/views/input.js";
 import { Picker } from "../src/agent/views/picker.js";
 import { Display } from "../src/agent/views/display.js";
-import { AgentStatus } from "../src/agent/views/agent-status.js";
+import { AgentStatus } from "../src/agent/models/agent-status.js";
 
 let testDisplay: Display;
 let testSettings: Settings;

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PassThrough } from "stream";
 import { Input } from "../src/agent/views/input.js";
 import { Display } from "../src/agent/views/display.js";
-import { AgentStatus } from "../src/agent/views/agent-status.js";
+import { AgentStatus } from "../src/agent/models/agent-status.js";
 import { getConfig } from "../src/config.js";
 
 function makeStdin() {

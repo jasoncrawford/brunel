@@ -1,9 +1,7 @@
 import { EventEmitter } from "node:events";
 import { shortWorkerId } from "../../../shared/utils.js";
-import { getConfig } from "../../config.js";
-import type { Settings } from "../models/settings.js";
-import type { EffortValue } from "../models/settings.js";
-import { W } from "./style.js";
+import type { Settings } from "./settings.js";
+import type { EffortValue } from "./settings.js";
 
 // ── Worker status types ────────────────────────────────────────────────────────
 
@@ -110,27 +108,22 @@ export class AgentStatus extends EventEmitter {
     }
   }
 
-  /** Format the current worker status as a single terminal line.
-   * Pass the available width (terminal columns minus 1) for accurate truncation;
-   * defaults to W-1 when width is not supplied (e.g. in tests). */
-  getStatusText(width = W - 1): string {
-    return this._fmtWorkerStatus(width);
-  }
-
-  private _fmtWorkerStatus(width: number): string {
-    // Right side: connection status
+  /**
+   * Format the current worker status as a plain-text string (no ANSI codes,
+   * no width padding). Used by WorkerSession.getStatusText() and tests.
+   * For the full terminal-rendered version, see Renderer.fmtStatusBar().
+   */
+  getStatusText(): string {
     const retryInSeconds = this._reconnectAt != null
       ? Math.max(0, Math.ceil((this._reconnectAt - Date.now()) / 1000))
       : undefined;
-    const codeStr = getConfig().verbose && this._disconnectCode != null ? ` (${this._disconnectCode})` : "";
     const rightText =
       this._connectionStatus === "connected"    ? "Connected" :
       this._connectionStatus === "handshaking"  ? "Handshaking..." :
       this._connectionStatus === "reconnecting" ? "Reconnecting..." :
-      retryInSeconds != null                    ? `Disconnected${codeStr}. Retrying in ${retryInSeconds}s` :
-                                                  `Disconnected${codeStr}`;
+      retryInSeconds != null                    ? `Disconnected. Retrying in ${retryInSeconds}s` :
+                                                  "Disconnected";
 
-    // Left side: worker {id8} ∙ {model} ∙ {task info}
     const modelName = (!this._model || this._model === "default") ? "sonnet" : this._model;
     const effortStr = this._effort ? ` (${this._effort})` : "";
     const parts: string[] = [`worker ${shortWorkerId(this.agentId)}`, `${modelName}${effortStr}`];
@@ -138,18 +131,8 @@ export class AgentStatus extends EventEmitter {
     else parts.push("no current task");
     if (this._prNumber != null) parts.push(`PR #${this._prNumber}`);
     if (this._branch) parts.push(this._branch);
-    let leftText = parts.join(" ∙ ");
 
-    // Truncate left side if needed to leave room for right side with a gap of 1
-    const maxLeftLen = Math.max(0, width - rightText.length - 1);
-    if (leftText.length > maxLeftLen) {
-      leftText = leftText.slice(0, Math.max(0, maxLeftLen - 1)) + "…";
-    }
-
-    const gap = Math.max(1, width - leftText.length - rightText.length);
-    // Dim sage-green background + bright-white text. No trailing reset: drawRaw()
-    // appends \x1b[K (fills remaining width with the same background) then \x1b[0m.
-    return `\x1b[48;5;22m\x1b[97m${leftText + " ".repeat(gap) + rightText}`;
+    return parts.join(" ∙ ") + " | " + rightText;
   }
 
   // ── Tool result callback ───────────────────────────────────────────────────

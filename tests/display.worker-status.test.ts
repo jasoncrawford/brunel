@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { AgentStatus } from "../src/agent/views/agent-status.js";
+import { AgentStatus } from "../src/agent/models/agent-status.js";
 import { Display } from "../src/agent/views/display.js";
 import { getConfig } from "../src/config.js";
 
@@ -8,7 +8,7 @@ function stripAnsi(s: string): string {
   return s.replace(/\x1b\[[0-9;]*m/g, "");
 }
 
-/** Helper: create an AgentStatus with given state and return its status text. */
+/** Helper: create an AgentStatus with given state and return its rendered status text. */
 function getStatusText(opts: {
   agentId: string;
   connectionStatus: "connected" | "disconnected" | "reconnecting" | "handshaking";
@@ -34,7 +34,8 @@ function getStatusText(opts: {
     disconnectCode: opts.disconnectCode,
     reconnectAt: opts.reconnectAt,
   });
-  return stripAnsi(status.getStatusText(opts.width));
+  const display = new Display(getConfig(), status);
+  return stripAnsi(display.renderer.fmtStatusBar(status, opts.width ?? 119));
 }
 
 describe("AgentStatus status text", () => {

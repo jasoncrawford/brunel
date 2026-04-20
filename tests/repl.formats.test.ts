@@ -4,7 +4,7 @@ import { Display } from "../src/agent/views/display.js";
 import { resolve } from "../src/agent/views/renderer.js";
 import type { FmtTable } from "../src/agent/views/renderer.js";
 import { getConfig } from "../src/config.js";
-import { AgentStatus } from "../src/agent/views/agent-status.js";
+import { AgentStatus } from "../src/agent/models/agent-status.js";
 
 let testDisplay: Display;
 
