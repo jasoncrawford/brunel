@@ -439,21 +439,21 @@ describe("connection status bar", () => {
     const cb = (sb.setOnToolResult as ReturnType<typeof vi.spyOn>).mock.calls[0][0] as (toolName: string) => void;
     (sb.update as ReturnType<typeof vi.spyOn>).mockClear();
     cb("Bash");
-    // refreshBranch() is async; wait for it to call agentStatus.update({ branch: ... })
+    // refreshBranch() is async; wait for it to call agentStatus.update({ branch: ... }).
+    // vi.waitFor only retries on throw, so use expect() inside to get retry-on-failure.
     await vi.waitFor(() => {
-      const calls = (sb.update as ReturnType<typeof vi.spyOn>).mock.calls;
-      return calls.some(([patch]) => "branch" in patch);
+      expect((sb.update as ReturnType<typeof vi.spyOn>).mock.calls.some(([p]) => "branch" in p)).toBe(true);
     });
   });
 
   it("tool result callback does not refresh branch for non-Bash tools", async () => {
     const cb = (sb.setOnToolResult as ReturnType<typeof vi.spyOn>).mock.calls[0][0] as (toolName: string) => void;
-    // Wait for startup refreshBranch() to settle (async from start())
+    // Wait for startup refreshBranch() to settle (async from start()).
+    // vi.waitFor only retries on throw, so use expect() inside to get retry-on-failure.
     await vi.waitFor(() => {
-      const calls = (sb.update as ReturnType<typeof vi.spyOn>).mock.calls;
-      return calls.some(([patch]) => "branch" in patch);
+      expect((sb.update as ReturnType<typeof vi.spyOn>).mock.calls.some(([p]) => "branch" in p)).toBe(true);
     });
-    // Count branch calls before cb("Read") — any startup activity has settled
+    // Count branch calls before cb("Read") — startup activity has now settled
     const countBranchCalls = () =>
       (sb.update as ReturnType<typeof vi.spyOn>).mock.calls.filter(([p]) => "branch" in p).length;
     const before = countBranchCalls();
