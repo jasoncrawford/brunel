@@ -240,8 +240,12 @@ export class BrunelAgent {
 
     // One round of readline: shows the prompt and pushes to the channel when the
     // user submits real input. Fire-and-forget — the loop calls this when ready.
+    // In worker mode with no active task, use an empty prompt so stdin remains
+    // active (^D / ^C still work) but no "[agent] > " is displayed while waiting.
     const listenForInput = (): void => {
-      const promptStr = session ? "\n[agent] > " : "\n> ";
+      const promptStr = session
+        ? (session.hasTask() ? "\n[agent] > " : "")
+        : "\n> ";
       void this.input.ask(promptStr, () => this.controller.listCommands()).then((line) => {
         if (line !== null) enqueueRoutingEvent({ type: "line", value: line });
       });

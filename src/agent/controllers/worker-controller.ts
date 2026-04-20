@@ -235,6 +235,11 @@ export class WorkerSession extends EventEmitter {
     return this.pendingPrompts.length > 0;
   }
 
+  /** Returns true if a task is currently assigned to this worker. */
+  hasTask(): boolean {
+    return this.currentTaskId !== undefined;
+  }
+
   /** Dequeues and returns the next prompt, or undefined if empty. */
   takeNextPrompt(): QueuedPrompt | undefined {
     return this.pendingPrompts.shift();
