@@ -448,17 +448,20 @@ describe("connection status bar", () => {
 
   it("tool result callback does not refresh branch for non-Bash tools", async () => {
     const cb = (sb.setOnToolResult as ReturnType<typeof vi.spyOn>).mock.calls[0][0] as (toolName: string) => void;
-    // Drain startup refreshBranch() call (async from start())
+    // Wait for startup refreshBranch() to settle (async from start())
     await vi.waitFor(() => {
       const calls = (sb.update as ReturnType<typeof vi.spyOn>).mock.calls;
       return calls.some(([patch]) => "branch" in patch);
     });
-    (sb.update as ReturnType<typeof vi.spyOn>).mockClear();
+    // Count branch calls before cb("Read") — any startup activity has settled
+    const countBranchCalls = () =>
+      (sb.update as ReturnType<typeof vi.spyOn>).mock.calls.filter(([p]) => "branch" in p).length;
+    const before = countBranchCalls();
     cb("Read");
     // Give a tick for any potential async work
     await new Promise((r) => setTimeout(r, 10));
-    const branchCalls = (sb.update as ReturnType<typeof vi.spyOn>).mock.calls.filter(([p]) => "branch" in p);
-    expect(branchCalls.length).toBe(0);
+    // Verify cb("Read") did not trigger any additional branch updates
+    expect(countBranchCalls()).toBe(before);
   });
 
   it("updates connection status to handshaking after open", () => {
