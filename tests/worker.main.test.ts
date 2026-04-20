@@ -300,6 +300,94 @@ describe("workerMain exit behavior", () => {
   });
 });
 
+describe("workerMain prompt suppression while waiting for task", () => {
+  let chdirSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    makeMockInput();
+    chdirSpy = vi.spyOn(process, "chdir").mockImplementation(() => {});
+    vi.mocked(confirmIfUnsafe).mockResolvedValue(true);
+    fakeWorkspace.isCreated = false;
+    vi.mocked(fakeWorkspace.destroy).mockResolvedValue(undefined);
+    vi.mocked(fakeWorkspace.checkSafety).mockResolvedValue({ uncommittedFiles: [], unpushedCommits: [], noUpstream: false });
+    vi.mocked(fakeWorkspace.create).mockImplementation(async () => { fakeWorkspace.isCreated = true; });
+    capturedSession.current = null;
+  });
+
+  afterEach(() => {
+    chdirSpy.mockRestore();
+    vi.clearAllMocks();
+  });
+
+  it("uses empty prompt string while waiting for a task, not '[agent] > '", async () => {
+    // Regression test for issue #774.
+    //
+    // The bug: after completing a task (or before any task is assigned), the routing
+    // loop used "\n[agent] > " as the prompt string unconditionally, displaying the
+    // interactive prompt even though the worker was idle and waiting for a task.
+    //
+    // The fix: use an empty prompt string when session.hasTask() is false. stdin
+    // remains active (^D / ^C still work) but no "[agent] > " is shown.
+
+    const promptsUsed: string[] = [];
+    const pendingResolvers: Array<(val: string | null) => void> = [];
+
+    mockInput.ask.mockImplementation((promptStr: string) => {
+      promptsUsed.push(promptStr);
+      return new Promise<string | null>((resolve) => pendingResolvers.push(resolve));
+    });
+    mockInput.cancel.mockImplementation(() => {
+      if (pendingResolvers.length > 0) pendingResolvers.pop()!(null);
+    });
+
+    const runQueryFn = vi.fn().mockResolvedValue(undefined);
+    installMocks(runQueryFn);
+
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => {
+      throw new Error("__process_exit__");
+    }) as unknown as ReturnType<typeof vi.spyOn>;
+
+    let agentError: unknown;
+    const agentDone = new BrunelAgent(getConfig()).start(true).then(
+      () => {},
+      (err: unknown) => { if (!(err instanceof Error && err.message === "__process_exit__")) agentError = err; },
+    );
+
+    // Wait for the first ask() call — the routing loop starts immediately.
+    await vi.waitFor(() => expect(promptsUsed.length).toBeGreaterThanOrEqual(1));
+
+    // With the fix: prompt should be empty string (no task assigned yet).
+    expect(promptsUsed[0]).toBe("");
+
+    // Now assign a task so hasTask() returns true, then wake the routing loop via
+    // prompts_ready (cancel the current empty-prompt ask, loop continues, calls
+    // listenForInput() again with the real prompt).
+    const session = capturedSession.current!;
+    (session as any).currentTaskId = "task-123";
+    (session as any).currentIssue = { number: 42, title: "Test task", body: "", labels: [], repoUrl: "" };
+    session.emit("prompts_ready"); // cancel() + enqueueRoutingEvent handled by session listener
+
+    // Wait for the next ask() call — now with task active, prompt should be "[agent] > ".
+    await vi.waitFor(() => expect(promptsUsed.length).toBeGreaterThanOrEqual(2));
+    expect(promptsUsed[1]).toBe("\n[agent] > ");
+
+    // Complete the task — user types /worker:complete (clears currentTaskId).
+    pendingResolvers.pop()!("/worker:complete");
+    await vi.waitFor(() => expect(session.hasTask()).toBe(false));
+
+    // The loop should issue another ask() with empty prompt (no task again).
+    await vi.waitFor(() => expect(promptsUsed.length).toBeGreaterThanOrEqual(3));
+    expect(promptsUsed[2]).toBe("");
+
+    // Exit cleanly via __eof__ on the current (empty-prompt) ask.
+    pendingResolvers.pop()!("__eof__");
+
+    await agentDone;
+    exitSpy.mockRestore();
+    if (agentError) throw agentError;
+  });
+});
+
 describe("workerMain input cancel discipline", () => {
   let chdirSpy: ReturnType<typeof vi.spyOn>;
 

@@ -1730,3 +1730,23 @@ describe("confirmTaskQuit", () => {
     expect(options).toHaveLength(3);
   });
 });
+
+// ── hasTask ───────────────────────────────────────────────────────────────────
+
+describe("hasTask", () => {
+  it("returns false when no task is assigned", () => {
+    expect(session.hasTask()).toBe(false);
+  });
+
+  it("returns true after task_assigned", () => {
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
+    expect(session.hasTask()).toBe(true);
+  });
+
+  it("returns false after completeCurrentTask", async () => {
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
+    expect(session.hasTask()).toBe(true);
+    await session.completeCurrentTask();
+    expect(session.hasTask()).toBe(false);
+  });
+});
