@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { stripAnsi } from "./helpers.js";
 import { getConfig } from "../src/config.js";
 import { Display } from "../src/agent/views/display.js";
-import { StatusBar } from "../src/agent/views/status-bar.js";
+import { AgentStatus } from "../src/agent/models/agent-status.js";
 
 let testDisplay: Display;
 
@@ -27,15 +27,15 @@ async function captureOutputAsync(fn: () => Promise<void>): Promise<string> {
 }
 
 beforeEach(() => {
-  testDisplay = new Display(getConfig(), new StatusBar({ agentId: "test-agent" }));
+  testDisplay = new Display(getConfig(), new AgentStatus({ agentId: "test-agent" }));
   testDisplay.toolUseNames.clear();
-  testDisplay.statusBar.stop();
+  testDisplay.stopBar();
   getConfig().verbose = false;
 });
 
 afterEach(() => {
   testDisplay.toolUseNames.clear();
-  testDisplay.statusBar.stop();
+  testDisplay.stopBar();
   getConfig().verbose = false;
   vi.restoreAllMocks();
 });
@@ -334,7 +334,7 @@ describe("print()", () => {
 
   it("print(text) with inputPrintCallback set: clears current line before logging", () => {
     const cb = vi.fn();
-    testDisplay.statusBar.inputPrint = cb;
+    testDisplay.inputPrint = cb;
     try {
       const output = captureOutput(() => {
         testDisplay.print("hello");
@@ -345,7 +345,7 @@ describe("print()", () => {
       expect(clearIdx).toBeGreaterThan(-1);
       expect(helloIdx).toBeGreaterThan(clearIdx);
     } finally {
-      testDisplay.statusBar.inputPrint = null;
+      testDisplay.inputPrint = null;
     }
   });
 
@@ -472,27 +472,27 @@ describe("printBlock - Edit diff styling", () => {
 
 describe("Status line", () => {
   afterEach(() => {
-    testDisplay.statusBar.stop();
+    testDisplay.stopBar();
     vi.restoreAllMocks();
   });
 
   it("startStatus and stopStatus run without error", () => {
     vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-    testDisplay.statusBar.start(() => "Working...");
-    testDisplay.statusBar.stop();
+    testDisplay.startBar(() => "Working...");
+    testDisplay.stopBar();
   });
 
   it("stopStatus sets _statusActive=false", () => {
     vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-    testDisplay.statusBar.start(() => "Working...");
-    testDisplay.statusBar.stop();
+    testDisplay.startBar(() => "Working...");
+    testDisplay.stopBar();
     // Calling stopStatus again should not crash (idempotent)
-    testDisplay.statusBar.stop();
+    testDisplay.stopBar();
   });
 
   it("calling stopStatus twice: no crash", () => {
     vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-    testDisplay.statusBar.stop();
-    testDisplay.statusBar.stop();
+    testDisplay.stopBar();
+    testDisplay.stopBar();
   });
 });

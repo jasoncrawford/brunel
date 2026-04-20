@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { Display } from "../src/agent/views/display.js";
-import { StatusBar } from "../src/agent/views/status-bar.js";
+import { AgentStatus } from "../src/agent/models/agent-status.js";
 import { getConfig } from "../src/config.js";
 import { W } from "../src/agent/views/style.js";
 
@@ -12,7 +12,7 @@ function strip(s: string) {
 let display: Display;
 
 beforeEach(() => {
-  display = new Display(getConfig(), new StatusBar({ agentId: "test" }));
+  display = new Display(getConfig(), new AgentStatus({ agentId: "test" }));
 });
 
 describe("clearBreak", () => {

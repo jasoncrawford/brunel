@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { StatusBar as AgentStatus } from "../src/agent/views/status-bar.js";
+import { AgentStatus } from "../src/agent/models/agent-status.js";
+import { Display } from "../src/agent/views/display.js";
+import { getConfig } from "../src/config.js";
 import { stripAnsi } from "./helpers.js";
+
+function fmtStatus(status: AgentStatus): string {
+  return stripAnsi(new Display(getConfig(), status).renderer.fmtStatusBar(status, 100));
+}
 
 describe("AgentStatus", () => {
   afterEach(() => {
@@ -125,38 +131,38 @@ describe("AgentStatus", () => {
 
   it("getStatusText includes worker ID prefix", () => {
     const model = new AgentStatus({ agentId: "abcdef12-rest-of-id" });
-    const text = stripAnsi(model.getStatusText());
+    const text = fmtStatus(model);
     expect(text).toContain("worker abcdef12");
   });
 
   it("getStatusText shows connection status", () => {
     const model = new AgentStatus({ agentId: "test-worker-id" });
     model.update({ connectionStatus: "connected" });
-    expect(stripAnsi(model.getStatusText())).toContain("Connected");
+    expect(fmtStatus(model)).toContain("Connected");
   });
 
   it("getStatusText shows task number when set", () => {
     const model = new AgentStatus({ agentId: "test-worker-id" });
     model.update({ taskNumber: 42 });
-    expect(stripAnsi(model.getStatusText())).toContain("task #42");
+    expect(fmtStatus(model)).toContain("task #42");
   });
 
   it("getStatusText shows 'no current task' when task is unset", () => {
     const model = new AgentStatus({ agentId: "test-worker-id" });
-    expect(stripAnsi(model.getStatusText())).toContain("no current task");
+    expect(fmtStatus(model)).toContain("no current task");
   });
 
   it("getStatusText shows PR number when set", () => {
     const model = new AgentStatus({ agentId: "test-worker-id" });
     model.update({ prNumber: 77 });
-    expect(stripAnsi(model.getStatusText())).toContain("PR #77");
+    expect(fmtStatus(model)).toContain("PR #77");
   });
 
   it("getStatusText shows retry countdown when disconnected with reconnectAt", () => {
     vi.useFakeTimers();
     const model = new AgentStatus({ agentId: "test-worker-id" });
     model.update({ connectionStatus: "disconnected", reconnectAt: Date.now() + 4000 });
-    expect(stripAnsi(model.getStatusText())).toContain("Retrying in 4s");
+    expect(fmtStatus(model)).toContain("Retrying in 4s");
   });
 
   it("has undefined model and effort by default", () => {
@@ -191,18 +197,18 @@ describe("AgentStatus", () => {
 
   it("getStatusText shows sonnet when model is undefined", () => {
     const model = new AgentStatus({ agentId: "test-worker-id" });
-    expect(stripAnsi(model.getStatusText())).toContain("sonnet");
+    expect(fmtStatus(model)).toContain("sonnet");
   });
 
   it("getStatusText shows model name when set", () => {
     const model = new AgentStatus({ agentId: "test-worker-id" });
     model.update({ model: "opus" });
-    expect(stripAnsi(model.getStatusText())).toContain("opus");
+    expect(fmtStatus(model)).toContain("opus");
   });
 
   it("getStatusText shows effort in parens when set", () => {
     const model = new AgentStatus({ agentId: "test-worker-id" });
     model.update({ model: "opus", effort: "medium" });
-    expect(stripAnsi(model.getStatusText())).toContain("opus (medium)");
+    expect(fmtStatus(model)).toContain("opus (medium)");
   });
 });

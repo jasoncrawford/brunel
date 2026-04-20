@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { StatusBar } from "../src/agent/views/status-bar.js";
+import { AgentStatus } from "../src/agent/models/agent-status.js";
+import { Display } from "../src/agent/views/display.js";
 import { getConfig } from "../src/config.js";
 
 // Strip ANSI codes for assertion
@@ -7,8 +8,8 @@ function stripAnsi(s: string): string {
   return s.replace(/\x1b\[[0-9;]*m/g, "");
 }
 
-/** Helper: create a StatusBar with given state and return its status text. */
-function getStatus(opts: {
+/** Helper: create an AgentStatus with given state and return its rendered status text. */
+function getStatusText(opts: {
   agentId: string;
   connectionStatus: "connected" | "disconnected" | "reconnecting" | "handshaking";
   taskNumber?: number;
@@ -19,11 +20,11 @@ function getStatus(opts: {
   disconnectCode?: number;
   reconnectAt?: number;
   verbose?: boolean;
-  getColumns?: () => number | undefined;
+  width?: number;
 }): string {
-  const bar = new StatusBar({ agentId: opts.agentId, getColumns: opts.getColumns });
+  const status = new AgentStatus({ agentId: opts.agentId });
   if (opts.verbose !== undefined) getConfig().verbose = opts.verbose;
-  bar.update({
+  status.update({
     connectionStatus: opts.connectionStatus,
     taskNumber: opts.taskNumber,
     prNumber: opts.prNumber,
@@ -33,17 +34,18 @@ function getStatus(opts: {
     disconnectCode: opts.disconnectCode,
     reconnectAt: opts.reconnectAt,
   });
-  return stripAnsi(bar.getStatusText());
+  const display = new Display(getConfig(), status);
+  return stripAnsi(display.renderer.fmtStatusBar(status, opts.width ?? 119));
 }
 
-describe("StatusBar status text", () => {
+describe("AgentStatus status text", () => {
   afterEach(() => {
     getConfig().verbose = false;
     vi.useRealTimers();
   });
 
   it("idle with no task shows worker id and no current task", () => {
-    const result = getStatus({
+    const result = getStatusText({
       agentId: "7c254628-abcd-1234-efgh-000000000000",
       connectionStatus: "connected",
     });
@@ -53,13 +55,13 @@ describe("StatusBar status text", () => {
   });
 
   it("with task, PR, and branch", () => {
-    const result = getStatus({
+    const result = getStatusText({
       agentId: "7c254628-abcd-1234-efgh-000000000000",
       taskNumber: 374,
       prNumber: 406,
       branch: "db-single-source-of-truth",
       connectionStatus: "connected",
-      getColumns: () => 120,
+      width: 119,  // 120 columns - 1
     });
     expect(result).toContain("worker 7c254628");
     expect(result).toContain("task #374");
@@ -69,7 +71,7 @@ describe("StatusBar status text", () => {
   });
 
   it("disconnected shows Disconnected on right", () => {
-    const result = getStatus({
+    const result = getStatusText({
       agentId: "abc12345-0000-0000-0000-000000000000",
       connectionStatus: "disconnected",
     });
@@ -79,7 +81,7 @@ describe("StatusBar status text", () => {
 
   it("disconnected with reconnectAt shows Retrying in", () => {
     vi.useFakeTimers();
-    const result = getStatus({
+    const result = getStatusText({
       agentId: "abc12345-0000-0000-0000-000000000000",
       connectionStatus: "disconnected",
       reconnectAt: Date.now() + 3000,
@@ -88,7 +90,7 @@ describe("StatusBar status text", () => {
   });
 
   it("reconnecting shows Reconnecting... on right", () => {
-    const result = getStatus({
+    const result = getStatusText({
       agentId: "abc12345-0000-0000-0000-000000000000",
       connectionStatus: "reconnecting",
     });
@@ -96,7 +98,7 @@ describe("StatusBar status text", () => {
   });
 
   it("handshaking shows Handshaking... on right", () => {
-    const result = getStatus({
+    const result = getStatusText({
       agentId: "abc12345-0000-0000-0000-000000000000",
       connectionStatus: "handshaking",
     });
@@ -104,7 +106,7 @@ describe("StatusBar status text", () => {
   });
 
   it("disconnected with disconnectCode omits code in non-verbose mode", () => {
-    const result = getStatus({
+    const result = getStatusText({
       agentId: "abc12345-0000-0000-0000-000000000000",
       connectionStatus: "disconnected",
       disconnectCode: 1006,
@@ -116,7 +118,7 @@ describe("StatusBar status text", () => {
 
   it("disconnected with disconnectCode shows code in verbose mode when reconnectAt given", () => {
     vi.useFakeTimers();
-    const result = getStatus({
+    const result = getStatusText({
       agentId: "abc12345-0000-0000-0000-000000000000",
       connectionStatus: "disconnected",
       disconnectCode: 1006,
@@ -127,7 +129,7 @@ describe("StatusBar status text", () => {
   });
 
   it("omits task when taskNumber is undefined", () => {
-    const result = getStatus({
+    const result = getStatusText({
       agentId: "abc12345-0000-0000-0000-000000000000",
       connectionStatus: "connected",
     });
@@ -135,7 +137,7 @@ describe("StatusBar status text", () => {
   });
 
   it("omits PR when prNumber is undefined", () => {
-    const result = getStatus({
+    const result = getStatusText({
       agentId: "abc12345-0000-0000-0000-000000000000",
       taskNumber: 5,
       connectionStatus: "connected",
@@ -144,7 +146,7 @@ describe("StatusBar status text", () => {
   });
 
   it("omits branch when branch is empty string", () => {
-    const result = getStatus({
+    const result = getStatusText({
       agentId: "abc12345-0000-0000-0000-000000000000",
       taskNumber: 5,
       branch: "",
@@ -156,19 +158,19 @@ describe("StatusBar status text", () => {
   });
 
   it("result fits within terminal width", () => {
-    const result = getStatus({
+    const result = getStatusText({
       agentId: "7c254628-abcd-1234-efgh-000000000000",
       taskNumber: 374,
       prNumber: 406,
       branch: "my-very-long-branch-name-that-is-quite-verbose",
       connectionStatus: "connected",
-      getColumns: () => 80,
+      width: 79,  // 80 columns - 1
     });
-    expect(result.length).toBe(79); // width - 1 (last-column wrap avoidance)
+    expect(result.length).toBe(79); // width
   });
 
   it("shows 'sonnet' when model is undefined", () => {
-    const result = getStatus({
+    const result = getStatusText({
       agentId: "abc12345-0000-0000-0000-000000000000",
       connectionStatus: "connected",
     });
@@ -176,7 +178,7 @@ describe("StatusBar status text", () => {
   });
 
   it("shows 'sonnet' when model is 'default'", () => {
-    const result = getStatus({
+    const result = getStatusText({
       agentId: "abc12345-0000-0000-0000-000000000000",
       model: "default",
       connectionStatus: "connected",
@@ -186,7 +188,7 @@ describe("StatusBar status text", () => {
   });
 
   it("shows model name when model is set to non-default", () => {
-    const result = getStatus({
+    const result = getStatusText({
       agentId: "abc12345-0000-0000-0000-000000000000",
       model: "opus",
       connectionStatus: "connected",
@@ -195,7 +197,7 @@ describe("StatusBar status text", () => {
   });
 
   it("shows model after worker id and before task info", () => {
-    const result = getStatus({
+    const result = getStatusText({
       agentId: "abc12345-0000-0000-0000-000000000000",
       model: "haiku",
       taskNumber: 42,
@@ -209,7 +211,7 @@ describe("StatusBar status text", () => {
   });
 
   it("omits effort when effort is undefined", () => {
-    const result = getStatus({
+    const result = getStatusText({
       agentId: "abc12345-0000-0000-0000-000000000000",
       model: "opus",
       connectionStatus: "connected",
@@ -219,7 +221,7 @@ describe("StatusBar status text", () => {
   });
 
   it("shows effort in parentheses when effort is set", () => {
-    const result = getStatus({
+    const result = getStatusText({
       agentId: "abc12345-0000-0000-0000-000000000000",
       model: "opus",
       effort: "medium",
@@ -229,7 +231,7 @@ describe("StatusBar status text", () => {
   });
 
   it("shows effort with default sonnet model", () => {
-    const result = getStatus({
+    const result = getStatusText({
       agentId: "abc12345-0000-0000-0000-000000000000",
       effort: "high",
       connectionStatus: "connected",
@@ -238,7 +240,7 @@ describe("StatusBar status text", () => {
   });
 
   it("uses first 8 chars of workerId for legacy bare UUID IDs", () => {
-    const result = getStatus({
+    const result = getStatusText({
       agentId: "7c254628-1111-2222-3333-444444444444",
       connectionStatus: "connected",
     });
@@ -247,7 +249,7 @@ describe("StatusBar status text", () => {
   });
 
   it("shows name + first 8 chars of UUID for named worker IDs", () => {
-    const result = getStatus({
+    const result = getStatusText({
       agentId: "obadiah-7143f5cc-abf3-4b8a-bdb5-86989c54d3b2",
       connectionStatus: "connected",
     });
@@ -256,58 +258,122 @@ describe("StatusBar status text", () => {
   });
 });
 
-describe("persistent status bar", () => {
+describe("Display persistent status bar", () => {
   let stdoutWrite: ReturnType<typeof vi.spyOn>;
-  let statusBar: StatusBar;
+  let agentStatus: AgentStatus;
+  let display: Display;
 
   beforeEach(() => {
-    statusBar = new StatusBar({ agentId: "test-agent" });
+    agentStatus = new AgentStatus({ agentId: "test-agent" });
+    display = new Display(getConfig(), agentStatus);
     stdoutWrite = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     // Ensure clean state
-    statusBar.stop();
-    statusBar.stopPersistent();
+    display.stopBar();
+    display.stopPersistentBar();
   });
 
   afterEach(() => {
     stdoutWrite.mockRestore();
-    statusBar.stop();
-    statusBar.stopPersistent();
+    display.stopBar();
+    display.stopPersistentBar();
   });
 
-  it("startPersistent draws a status line", () => {
-    statusBar.update({ connectionStatus: "connected" });
-    statusBar.startPersistent();
+  it("startPersistentBar draws a status line", () => {
+    agentStatus.update({ connectionStatus: "connected" });
+    display.startPersistentBar();
     const writes = stdoutWrite.mock.calls.map(a => String(a[0]));
     const combined = writes.join("");
     expect(combined).toContain("Connected");
   });
 
-  it("stopPersistent clears the status line", () => {
-    statusBar.startPersistent();
+  it("stopPersistentBar clears the status line", () => {
+    display.startPersistentBar();
     stdoutWrite.mockClear();
-    statusBar.stopPersistent();
+    display.stopPersistentBar();
     const writes = stdoutWrite.mock.calls.map(a => String(a[0]));
     // Should have written escape sequences to clear
     expect(writes.some(w => w.includes("\x1b[K"))).toBe(true);
   });
 
-  it("start and startPersistent coexist", () => {
-    statusBar.update({ connectionStatus: "connected" });
-    statusBar.startPersistent();
-    statusBar.start(() => "Working… 5s");
+  it("startBar and startPersistentBar coexist", () => {
+    agentStatus.update({ connectionStatus: "connected" });
+    display.startPersistentBar();
+    display.startBar(() => "Working… 5s");
     const writes = stdoutWrite.mock.calls.map(a => String(a[0]));
     const combined = writes.join("");
     expect(combined).toContain("Working… 5s");
     expect(combined).toContain("Connected");
   });
 
-  it("stop leaves persistent status active", () => {
-    statusBar.startPersistent();
-    statusBar.start(() => "Working…");
+  it("stopBar leaves persistent status active", () => {
+    display.startPersistentBar();
+    display.startBar(() => "Working…");
     stdoutWrite.mockClear();
-    statusBar.stop();
+    display.stopBar();
     // persistent status is still active
-    expect(statusBar.persistentActive).toBe(true);
-    expect(statusBar.active).toBe(false);
+    expect(display.persistentActive).toBe(true);
+    expect(display.active).toBe(false);
+  });
+
+  it("agentStatus change triggers persistent bar redraw", () => {
+    agentStatus.update({ connectionStatus: "connected" });
+    display.startPersistentBar();
+    stdoutWrite.mockClear();
+    // Trigger a change via update()
+    agentStatus.update({ connectionStatus: "reconnecting" });
+    const combined = stdoutWrite.mock.calls.map(a => String(a[0])).join("");
+    expect(combined).toContain("Reconnecting");
+  });
+
+  it("redraws on resize with updated width", () => {
+    agentStatus.update({ connectionStatus: "connected" });
+    display.startPersistentBar();
+    stdoutWrite.mockClear();
+
+    display.getColumns = () => 40;
+    process.stdout.emit("resize");
+    const writes = stdoutWrite.mock.calls.map(a => String(a[0]));
+    expect(writes.length).toBeGreaterThan(0);
+    expect(writes.join("")).toContain("Connected");
+  });
+
+  it("does not register multiple resize listeners on repeated startPersistentBar calls", () => {
+    display.startPersistentBar();
+    display.startPersistentBar(); // second call should not add a second listener
+    stdoutWrite.mockClear();
+    process.stdout.emit("resize");
+    // If there were two listeners, clear+draw would be called twice; just check it doesn't throw
+    const writes = stdoutWrite.mock.calls.map(a => String(a[0]));
+    expect(writes.length).toBeGreaterThan(0);
+  });
+
+  it("stops listening for resize after stopPersistentBar", () => {
+    agentStatus.update({ connectionStatus: "connected" });
+    display.startPersistentBar();
+    display.stopPersistentBar();
+    stdoutWrite.mockClear();
+    process.stdout.emit("resize");
+    // No redraws should happen after stopPersistentBar
+    expect(stdoutWrite.mock.calls.length).toBe(0);
+  });
+
+  it("persistentActive is true after startPersistentBar", () => {
+    display.startPersistentBar();
+    expect(display.persistentActive).toBe(true);
+  });
+
+  it("persistentActive is false after stopPersistentBar", () => {
+    display.startPersistentBar();
+    display.stopPersistentBar();
+    expect(display.persistentActive).toBe(false);
+  });
+
+  it("active is false by default", () => {
+    expect(display.active).toBe(false);
+  });
+
+  it("stopBar sets active to false", () => {
+    display.stopBar();
+    expect(display.active).toBe(false);
   });
 });

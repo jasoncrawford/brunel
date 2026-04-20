@@ -4,7 +4,7 @@ import { Input } from "../src/agent/views/input.js";
 import { Picker } from "../src/agent/views/picker.js";
 import type { PickQuestionResult } from "../src/agent/views/picker.js";
 import { Display } from "../src/agent/views/display.js";
-import { StatusBar } from "../src/agent/views/status-bar.js";
+import { AgentStatus } from "../src/agent/models/agent-status.js";
 import { getConfig } from "../src/config.js";
 
 function makeStdin() {
@@ -30,7 +30,7 @@ let testInput: Input;
 let testPicker: Picker;
 
 beforeEach(() => {
-  testDisplay = new Display(getConfig(), new StatusBar({ agentId: "test-agent" }));
+  testDisplay = new Display(getConfig(), new AgentStatus({ agentId: "test-agent" }));
   testInput = new Input(testDisplay);
   testPicker = new Picker();
   origStdin = process.stdin;
@@ -631,11 +631,11 @@ describe("ask() - status bar repositioning on start (issue #757)", () => {
     // overwrites its beginning.  ask() must call _fullRedraw() unconditionally (not
     // only when the buffer is pre-populated from stash) so that drawRaw() is called
     // and the bar is repositioned below the fresh prompt.
-    const statusBar = new StatusBar({ agentId: "test-agent" });
-    statusBar.persistentActive = true; // simulate post-query state with bar active
-    const display = new Display(getConfig(), statusBar);
+    const agentStatus = new AgentStatus({ agentId: "test-agent" });
+    const display = new Display(getConfig(), agentStatus);
+    display.persistentActive = true; // simulate post-query state with bar active
     const input = new Input(display);
-    const drawRawSpy = vi.spyOn(statusBar, "drawRaw");
+    const drawRawSpy = vi.spyOn(display, "drawRaw");
     const writeSpy = vi.mocked(process.stdout.write);
     writeSpy.mockClear();
 
@@ -654,10 +654,10 @@ describe("ask() - status bar repositioning on start (issue #757)", () => {
   it("ask() with no active status bar still works correctly (drawRaw no-ops)", async () => {
     // With no active bars drawRaw() returns 0 without writing; calling it is
     // harmless, but the prompt should still render correctly.
-    const statusBar = new StatusBar({ agentId: "test-agent" }); // persistentActive defaults false
-    const display = new Display(getConfig(), statusBar);
+    const agentStatus = new AgentStatus({ agentId: "test-agent" }); // persistentActive defaults false
+    const display = new Display(getConfig(), agentStatus);
     const input = new Input(display);
-    const drawRawSpy = vi.spyOn(statusBar, "drawRaw");
+    const drawRawSpy = vi.spyOn(display, "drawRaw");
 
     await withFakeStdin(async (stdin) => {
       const p = input.ask("\n[agent] > ");

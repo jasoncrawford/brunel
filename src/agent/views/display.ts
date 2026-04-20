@@ -1,5 +1,4 @@
 import type * as Wire from "../../../shared/wire.js";
-import type { StatusBar } from "./status-bar.js";
 import type { BrunelConfig } from "../../config.js";
 import { fmtTime, fmtArgs } from "../../../shared/formatters.js";
 import { c, s, W } from "./style.js";
@@ -9,6 +8,7 @@ import type {
   ToolResultBlock,
   ContentBlock,
 } from "./renderer.js";
+import { AgentStatus } from "../models/agent-status.js";
 
 // ── Display class ──────────────────────────────────────────────────────────
 
@@ -16,12 +16,21 @@ import type {
 const VERBOSE_PREFIX_LEN = 9;
 
 /**
- * View class for terminal I/O. Receives config in its constructor so config
- * is injected rather than globally accessed.
+ * View class for terminal I/O. Receives config and agentStatus in its
+ * constructor so both are injected rather than globally accessed.
  *
  * Renderer (renderer.ts) produces strings; Display is the single doorway
  * through which everything reaches stdout. It clears the status bar before
  * printing, redraws it after, and handles verbose-mode line prefixing.
+ *
+ * Display owns all status bar rendering: startBar()/stopBar() for the
+ * animated query-progress bar and startPersistentBar()/stopPersistentBar()
+ * for the persistent worker status bar. It subscribes to agentStatus
+ * "change" events for reactive redraws.
+ *
+ * Redraw coordination callbacks (inputPrint, inputClear, inputStatus) live
+ * here because they coordinate between Input and Display — not the state
+ * model.
  */
 export class Display {
   /** The color object, exposed as an instance property for convenience. */
@@ -41,8 +50,39 @@ export class Display {
    */
   getColumns: () => number | undefined = () => process.stdout.columns;
 
-  constructor(readonly config: BrunelConfig, readonly statusBar: StatusBar) {
+  // ── Primary (animated query-progress) bar ──────────────────────────────────
+  /** Whether the primary animated status bar is currently active. */
+  active = false;
+  private _text = "";
+  private _getText: (() => string) | null = null;
+  private _interval: ReturnType<typeof setInterval> | null = null;
+
+  // ── Persistent (worker) bar ────────────────────────────────────────────────
+  /** Whether the persistent worker status bar is currently active. */
+  persistentActive = false;
+  private _persistentText = "";
+  private _resizeHandler: (() => void) | null = null;
+
+  // ── Redraw coordination callbacks ──────────────────────────────────────────
+  // Registered by ask() while it is active. print() routes through these so
+  // output doesn't corrupt the interactive prompt/suggestion area.
+
+  // Fired after a tool result is printed (tool has just finished running).
+  // Cursor is at a fresh new line after print().
+  inputPrint: (() => void) | null = null;
+  // Called while cursor is in the buffer area — navigates back to prompt
+  // line then redraws with status bars below.
+  inputStatus: (() => void) | null = null;
+  // Registered by ask(). Called by print() BEFORE writing output to clear the
+  // prompt area including any leading blank line (see issue #418).
+  inputClear: (() => void) | null = null;
+
+  constructor(readonly config: BrunelConfig, readonly agentStatus: AgentStatus) {
     this.renderer = new Renderer(this);
+    // Subscribe to agentStatus changes for reactive status bar redraws.
+    agentStatus.on("change", () => {
+      this._updatePersistent();
+    });
   }
 
   /** Public accessor for tests to clear tool-use state between tests. */
@@ -68,12 +108,12 @@ export class Display {
   /** Print a line to stdout, routing through the status-bar-aware renderer. */
   print(line: string | null): void {
     if (line === null) return;
-    const inputPrint = this.statusBar.inputPrint;
+    const inputPrint = this.inputPrint;
     if (inputPrint) {
       // ask() is active: erase from current cursor position to end of screen
       // (clears the prompt, suggestion row, and status bars), write the new
       // content line, then let drawFresh redraw the prompt + status bars below.
-      const inputClear = this.statusBar.inputClear;
+      const inputClear = this.inputClear;
       if (inputClear) {
         inputClear();
       } else {
@@ -83,9 +123,9 @@ export class Display {
       inputPrint();
       return;
     }
-    this.statusBar.clear();
+    this.clearBar();
     this._printLine(line);
-    this.statusBar.draw();
+    this.drawBar();
   }
 
   /** Print a single content block from an assistant/user message. */
@@ -103,7 +143,7 @@ export class Display {
       const _input = this._toolUseInputs.get(tr.tool_use_id);
       this.print(this.renderer.formatToolResult({ ...tr, _input }, name, msg));
       // Fire after the tool result is printed — tool has just finished running.
-      this.statusBar.fireOnToolResult(name);
+      this.agentStatus.fireOnToolResult(name);
       return;
     }
     this.print(this.renderer.formatContentBlock(b, role, !!(msg?.isSynthetic), this.config.thinkOutLoud));
@@ -138,5 +178,149 @@ export class Display {
   /** Print a foreman→worker wire message. */
   printForemanMessage(msg: Wire.ForemanMessage): void {
     this.print(this.renderer.formatForemanMessage(msg));
+  }
+
+  // ── Internal rendering helpers ─────────────────────────────────────────────
+
+  private _lineCount(): number {
+    const n = (this.active ? 1 : 0) + (this.persistentActive ? 1 : 0);
+    return n === 2 ? 3 : n; // blank separator between the two bars when both active
+  }
+
+  /**
+   * Clear all active status bar rows. No-ops when ask() owns the screen
+   * (it handles its own redraws via the input callbacks).
+   */
+  clearBar(): void {
+    if (this.inputPrint || this.inputStatus) return; // ask() owns the screen
+    const n = this._lineCount();
+    if (n === 0) return;
+    // Cursor rests on the blank separator row above the status lines.
+    // Move down through each status line erasing it, then return to the
+    // blank separator row and restore the cursor.
+    let seq = "";
+    for (let i = 0; i < n; i++) seq += "\x1b[B\r\x1b[K";
+    seq += `\x1b[${n}A\r`;
+    seq += "\x1b[?25h";  // show cursor
+    process.stdout.write(seq);
+  }
+
+  /**
+   * Draw all active status bar rows. Routes through input callbacks when
+   * ask() is active so the prompt area is updated without misaligning the cursor.
+   */
+  drawBar(): void {
+    if (this.inputStatus) {
+      // ask() is active and cursor is in the buffer area — use the status-aware
+      // redraw that navigates back to the prompt line before redrawing.
+      this.inputStatus();
+      return;
+    }
+    if (this.inputPrint) {
+      // ask() is active after display.print() — cursor is at a fresh new line.
+      this.inputPrint();
+      return;
+    }
+    const n = this._lineCount();
+    if (n === 0) return;
+    // Cursor is on the blank separator row. Draw each status line below it,
+    // then return cursor to the blank separator row and hide it.
+    let seq = "";
+    if (this.active) seq += `\n\r${this._text}\x1b[K\x1b[0m`;
+    if (this.active && this.persistentActive) seq += `\n\r\x1b[K`; // blank line between bars
+    if (this.persistentActive) seq += `\n\r${this._persistentText}\x1b[K\x1b[0m`;
+    seq += `\x1b[${n}A\r`;
+    seq += "\x1b[?25l";  // hide cursor
+    process.stdout.write(seq);
+  }
+
+  /**
+   * Write the status bar rows starting from the current cursor position (no
+   * leading blank separator). Returns the total number of extra rows written
+   * (0 if no bars are active, or 1+n for blank-separator + n bar rows).
+   * Called by ask() to integrate status bars into the prompt+suggestion area.
+   */
+  drawRaw(): number {
+    const n = this._lineCount();
+    if (n === 0) return 0;
+    let seq = "\r\n\x1b[K"; // blank separator row
+    if (this.active) seq += `\r\n${this._text}\x1b[K\x1b[0m`;
+    if (this.active && this.persistentActive) seq += `\r\n\x1b[K`;
+    if (this.persistentActive) seq += `\r\n${this._persistentText}\x1b[K\x1b[0m`;
+    process.stdout.write(seq);
+    return 1 + n; // blank separator + n bar rows
+  }
+
+  // ── Primary (animated) status bar ─────────────────────────────────────────
+
+  /** Start the animated query-progress bar, polling getText() every 500ms. */
+  startBar(getText: () => string): void {
+    this.clearBar();
+    this.active = true;
+    this._getText = getText;
+    this._text = getText();
+    this.drawBar();
+    this._interval = setInterval(() => {
+      this.clearBar();
+      this._text = getText();
+      this.drawBar();
+    }, 500);
+  }
+
+  /** Stop the animated bar and redraw any persistent bar. */
+  stopBar(): void {
+    if (this._interval) { clearInterval(this._interval); this._interval = null; }
+    this.clearBar();
+    this.active = false;
+    this._getText = null;
+    this._text = "";
+    this.drawBar();
+  }
+
+  // ── Persistent (worker) status bar ────────────────────────────────────────
+
+  /**
+   * Show the worker status bar. Renders immediately using the current state
+   * and redraws automatically whenever agentStatus emits "change" or the
+   * terminal is resized.
+   */
+  startPersistentBar(): void {
+    this.clearBar();
+    this.persistentActive = true;
+    this._persistentText = this.renderer.fmtStatusBar(this.agentStatus, (this.getColumns() ?? W) - 1);
+    this.drawBar();
+    if (!this._resizeHandler) {
+      this._resizeHandler = () => this._handleResize();
+      process.stdout.on("resize", this._resizeHandler);
+    }
+  }
+
+  /** Stop the persistent bar and redraw the primary bar if still active. */
+  stopPersistentBar(): void {
+    if (this._resizeHandler) {
+      process.stdout.off("resize", this._resizeHandler);
+      this._resizeHandler = null;
+    }
+    this.clearBar();
+    this.persistentActive = false;
+    this._persistentText = "";
+    this.drawBar();
+  }
+
+  /** Handle terminal resize: recompute and redraw all active bars. */
+  private _handleResize(): void {
+    if (!this.persistentActive && !this.active) return;
+    this.clearBar();
+    if (this._getText) this._text = this._getText();
+    this._persistentText = this.renderer.fmtStatusBar(this.agentStatus, (this.getColumns() ?? W) - 1);
+    this.drawBar();
+  }
+
+  /** Refresh the persistent status line text and redraw. Called on agentStatus "change". */
+  private _updatePersistent(): void {
+    if (!this.persistentActive) return;
+    this.clearBar();
+    this._persistentText = this.renderer.fmtStatusBar(this.agentStatus, (this.getColumns() ?? W) - 1);
+    this.drawBar();
   }
 }

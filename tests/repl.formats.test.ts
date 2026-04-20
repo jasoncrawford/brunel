@@ -4,7 +4,7 @@ import { Display } from "../src/agent/views/display.js";
 import { resolve } from "../src/agent/views/renderer.js";
 import type { FmtTable } from "../src/agent/views/renderer.js";
 import { getConfig } from "../src/config.js";
-import { StatusBar } from "../src/agent/views/status-bar.js";
+import { AgentStatus } from "../src/agent/models/agent-status.js";
 
 let testDisplay: Display;
 
@@ -25,15 +25,15 @@ function captureRaw(fn: () => void): string {
 }
 
 beforeEach(() => {
-  testDisplay = new Display(getConfig(), new StatusBar({ agentId: "test-agent" }));
+  testDisplay = new Display(getConfig(), new AgentStatus({ agentId: "test-agent" }));
   testDisplay.toolUseNames.clear();
-  testDisplay.statusBar.stop();
+  testDisplay.stopBar();
   getConfig().verbose = false;
 });
 
 afterEach(() => {
   testDisplay.toolUseNames.clear();
-  testDisplay.statusBar.stop();
+  testDisplay.stopBar();
   getConfig().verbose = false;
   vi.restoreAllMocks();
 });

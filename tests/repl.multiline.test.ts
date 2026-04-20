@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PassThrough } from "stream";
 import { Input } from "../src/agent/views/input.js";
 import { Display } from "../src/agent/views/display.js";
-import { StatusBar } from "../src/agent/views/status-bar.js";
+import { AgentStatus } from "../src/agent/models/agent-status.js";
 import { getConfig } from "../src/config.js";
 
 function makeStdin() {
@@ -34,7 +34,7 @@ let testDisplay: Display;
 let testInput: Input;
 
 beforeEach(() => {
-  testDisplay = new Display(getConfig(), new StatusBar({ agentId: "test-agent" }));
+  testDisplay = new Display(getConfig(), new AgentStatus({ agentId: "test-agent" }));
   testInput = new Input(testDisplay);
   origStdin = process.stdin;
   vi.spyOn(process.stdout, "write").mockImplementation(() => true);
@@ -274,7 +274,8 @@ describe("ask() - status update during multiline input (issue #486)", () => {
     setColumns(10);
     const writeSpy = vi.mocked(process.stdout.write);
 
-    testDisplay.statusBar.startPersistent(() => "status");
+    testDisplay.startPersistentBar();
+    testDisplay.startBar(() => "status");
 
     await withFakeStdin(async (stdin) => {
       const p = testInput.ask("> ", () => []);
@@ -283,7 +284,7 @@ describe("ask() - status update during multiline input (issue #486)", () => {
 
       // Simulate a status update (e.g. branch refresh, WS reconnect) while
       // the cursor is sitting on row 1 of the multiline buffer.
-      testDisplay.statusBar.updatePersistent();
+      testDisplay.agentStatus.update({});
 
       // The redraw must start by going up 1 row (\x1b[1A) to reach the prompt
       // line (row 0), then write the prompt "> ".  Without the fix, drawFresh()
@@ -301,7 +302,7 @@ describe("ask() - status update during multiline input (issue #486)", () => {
       expect(await p).toBe("123456789");
     });
 
-    testDisplay.statusBar.stopPersistent();
+    testDisplay.stopPersistentBar();
   });
 
   it("status update while cursor is on row 0 does not emit spurious cursor-up", async () => {
@@ -310,14 +311,15 @@ describe("ask() - status update during multiline input (issue #486)", () => {
     setColumns(10);
     const writeSpy = vi.mocked(process.stdout.write);
 
-    testDisplay.statusBar.startPersistent(() => "status");
+    testDisplay.startPersistentBar();
+    testDisplay.startBar(() => "status");
 
     await withFakeStdin(async (stdin) => {
       const p = testInput.ask("> ", () => []);
       stdin.push("hello"); // 5 chars, stays on row 0
       writeSpy.mockClear();
 
-      testDisplay.statusBar.updatePersistent();
+      testDisplay.agentStatus.update({});
 
       const output = collectOutput(writeSpy);
       // A \x1b[0A is a no-op (guard in fullRedraw), so we just verify the
@@ -331,7 +333,7 @@ describe("ask() - status update during multiline input (issue #486)", () => {
       expect(await p).toBe("hello");
     });
 
-    testDisplay.statusBar.stopPersistent();
+    testDisplay.stopPersistentBar();
   });
 });
 
@@ -340,18 +342,18 @@ describe("ask() - status update during multiline input (issue #486)", () => {
 describe("testDisplay.print() callback for ask() redraw", () => {
   it("setInputPrintCallback registers a callback called on testDisplay.print()", () => {
     const callback = vi.fn();
-    testDisplay.statusBar.inputPrint = callback;
+    testDisplay.inputPrint = callback;
     // Spy on console.log to prevent actual output
     vi.spyOn(console, "log").mockImplementation(() => {});
     testDisplay.print("test message");
     expect(callback).toHaveBeenCalled();
-    testDisplay.statusBar.inputPrint = null;
+    testDisplay.inputPrint = null;
   });
 
   it("callback is not called after it is cleared", () => {
     const callback = vi.fn();
-    testDisplay.statusBar.inputPrint = callback;
-    testDisplay.statusBar.inputPrint = null;
+    testDisplay.inputPrint = callback;
+    testDisplay.inputPrint = null;
     vi.spyOn(console, "log").mockImplementation(() => {});
     testDisplay.print("test message");
     expect(callback).not.toHaveBeenCalled();
