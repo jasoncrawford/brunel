@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "url";
 import { Display } from "./views/display.js";
 import { c, hr } from "./views/style.js";
-import { StatusBar } from "./views/status-bar.js";
+import { AgentStatus } from "./views/agent-status.js";
 import { Input } from "./views/input.js";
 import { Picker } from "./views/picker.js";
 import { registerWorkerCommands, startWorkerMode, WorkerSession } from "./controllers/worker-controller.js";
@@ -31,7 +31,7 @@ export class BrunelAgent {
   readonly display: Display;
   private readonly settings: Settings;
   private readonly permConfig: AgentPermConfig;
-  private readonly statusBar: StatusBar;
+  private readonly agentStatus: AgentStatus;
   private readonly input: Input;
   private readonly picker: Picker;
   private readonly agentController: AgentController;
@@ -42,8 +42,8 @@ export class BrunelAgent {
 
   constructor(config: BrunelConfig) {
     this.settings = new Settings({ model: config.model, effort: config.effort });
-    this.statusBar = new StatusBar({ agentId: WorkerSession.generateAgentId(), settings: this.settings });
-    this.display = new Display(config, this.statusBar);
+    this.agentStatus = new AgentStatus({ agentId: WorkerSession.generateAgentId(), settings: this.settings });
+    this.display = new Display(config, this.agentStatus);
     this.permConfig = {
       permissionMode: config.permissionMode,
       allowDangerouslySkipPermissions: config.allowDangerouslySkipPermissions,
@@ -54,7 +54,7 @@ export class BrunelAgent {
 
     const originalCwd = process.cwd();
     const confirm = async (msg: string): Promise<boolean> => {
-      this.statusBar.stop();
+      this.display.stopBar();
       this.display.print(c.amber(`\n⚠ Potential data loss:\n${msg}`));
       const idx = await this.picker.pick(["Yes, proceed", "No, cancel"]);
       return idx === 0;
@@ -72,7 +72,7 @@ export class BrunelAgent {
     // clones the repo and changes the working directory. In REPL mode it is
     // available for manual /workspace:* commands but not auto-cloned.
     const workspace = workspaceCfg
-      ? new Workspace(workspaceCfg.workspaceDir, this.statusBar.agentId, workspaceCfg.repoUrl, originalCwd, confirm)
+      ? new Workspace(workspaceCfg.workspaceDir, this.agentStatus.agentId, workspaceCfg.repoUrl, originalCwd, confirm)
       : undefined;
     this.workspaceController = new WorkspaceController(workspace, this.display);
 
@@ -93,7 +93,7 @@ export class BrunelAgent {
     // Worker mode setup: subscribe to workspace events, create the clone,
     // configure the WorkerSession, and install signal handlers.
     const workerCtx = runWorkerMode
-      ? await startWorkerMode(this.display, this.statusBar, this.picker, this.workspaceController)
+      ? await startWorkerMode(this.display, this.picker, this.workspaceController)
       : undefined;
     const session = workerCtx?.session;
     const workerCleanup = workerCtx?.cleanup;

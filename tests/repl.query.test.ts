@@ -21,7 +21,7 @@ import { Settings } from "../src/agent/models/settings.js";
 import { Input } from "../src/agent/views/input.js";
 import { Picker } from "../src/agent/views/picker.js";
 import { Display } from "../src/agent/views/display.js";
-import { StatusBar } from "../src/agent/views/status-bar.js";
+import { AgentStatus } from "../src/agent/views/agent-status.js";
 
 let testDisplay: Display;
 let testSettings: Settings;
@@ -69,9 +69,9 @@ function captureConsole() {
 }
 
 beforeEach(() => {
-  testDisplay = new Display(getConfig(), new StatusBar({ agentId: "test-agent" }));
+  testDisplay = new Display(getConfig(), new AgentStatus({ agentId: "test-agent" }));
   testDisplay.toolUseNames.clear();
-  testDisplay.statusBar.stop();
+  testDisplay.stopBar();
   mockPicker = {
     pick: vi.fn().mockResolvedValue(0),
     pickMultiple: vi.fn().mockResolvedValue([]),
@@ -84,7 +84,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  testDisplay.statusBar.stop();
+  testDisplay.stopBar();
   vi.restoreAllMocks();
 });
 

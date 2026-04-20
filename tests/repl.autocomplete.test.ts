@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PassThrough } from "stream";
 import { Input } from "../src/agent/views/input.js";
 import { Display } from "../src/agent/views/display.js";
-import { StatusBar } from "../src/agent/views/status-bar.js";
+import { AgentStatus } from "../src/agent/views/agent-status.js";
 import { getConfig } from "../src/config.js";
 import { CommandRegistry, CommandController, type ListDir, type CommandSuggestion } from "../src/agent/controllers/command-controller.js";
 import { registerTestCommands } from "./helpers.js";
@@ -18,7 +18,7 @@ function makeStdin() {
 
 let origStdin: NodeJS.ReadStream;
 let registry: CommandController;
-let testStatusBar: StatusBar;
+let testAgentStatus: AgentStatus;
 let testInput: Input;
 
 function withFakeStdin(fn: (stdin: PassThrough) => Promise<void>): Promise<void> {
@@ -33,8 +33,8 @@ beforeEach(() => {
   origStdin = process.stdin;
   vi.spyOn(process.stdout, "write").mockImplementation(() => true);
   registry = new CommandController(new CommandRegistry());
-  testStatusBar = new StatusBar({ agentId: "test-agent" });
-  testInput = new Input(new Display(getConfig(), testStatusBar));
+  testAgentStatus = new AgentStatus({ agentId: "test-agent" });
+  testInput = new Input(new Display(getConfig(), testAgentStatus));
 });
 
 afterEach(() => {

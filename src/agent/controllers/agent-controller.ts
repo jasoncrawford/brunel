@@ -83,19 +83,18 @@ export class AgentController {
   ): Promise<string | undefined> {
     logFull("QUERY", { prompt, sessionId });
     const { display, permConfig } = this;
-    const statusBar = display.statusBar;
-    // Save and clear the input print callback while the query runs. In worker
+    // Save and clear the input callbacks while the query runs. In worker
     // mode, ask() registers drawFresh() as the callback so the prompt redraws
     // after background WebSocket messages — but during a query run the callback
     // fires on every display.print() call, adding an extra \r\n after each piece
     // of output and causing double-spacing. After the query finishes we restore
     // and invoke the callback so the prompt redraws once (fixes issue #108).
-    const savedInputCallback = statusBar.inputPrint;
-    const savedStatusCallback = statusBar.inputStatus;
-    const savedClearCallback = statusBar.inputClear;
-    statusBar.inputPrint = null;
-    statusBar.inputStatus = null;
-    statusBar.inputClear = null;
+    const savedInputCallback = display.inputPrint;
+    const savedStatusCallback = display.inputStatus;
+    const savedClearCallback = display.inputClear;
+    display.inputPrint = null;
+    display.inputStatus = null;
+    display.inputClear = null;
     if (savedInputCallback) {
       // ask() was active when this query started (e.g., debounce-triggered while the
       // worker prompt was showing). Clear from cursor to end of screen so the prompt
@@ -105,7 +104,7 @@ export class AgentController {
 
     const stats = new QueryStats();
     const getStatusText = () => c.darkGray(stats.getStatusText());
-    statusBar.start(getStatusText);
+    display.startBar(getStatusText);
 
     const canUseTool: CanUseTool = async (toolName, input) => {
       if (toolName === "AskUserQuestion") {
@@ -172,7 +171,7 @@ export class AgentController {
 
         if (message.type === "result") {
           resultReceived = true;
-          statusBar.stop();
+          display.stopBar();
         }
 
         display.printMessage(message);
@@ -183,15 +182,15 @@ export class AgentController {
       process.stdin.removeListener("data", onInterrupt);
     }
 
-    statusBar.stop();
+    display.stopBar();
 
     if (!resultReceived) {
       display.print(c.darkGray("\nInterrupted. What should the agent do instead?"));
     }
 
-    statusBar.inputPrint = savedInputCallback;
-    statusBar.inputStatus = savedStatusCallback;
-    statusBar.inputClear = savedClearCallback;
+    display.inputPrint = savedInputCallback;
+    display.inputStatus = savedStatusCallback;
+    display.inputClear = savedClearCallback;
     savedInputCallback?.();
 
     return capturedSessionId;
@@ -204,7 +203,7 @@ export class AgentController {
     getStatusText: () => string,
   ): Promise<PermissionResult> {
     const { display } = this;
-    display.statusBar.stop();
+    display.stopBar();
     const questions = (input.questions as Question[]) ?? [];
     const answers: Record<string, string> = {};
 
@@ -217,14 +216,14 @@ export class AgentController {
       } else {
         const result: PickQuestionResult = await this.picker.pickQuestion(q.options);
         if (result.type === "discuss") {
-          display.statusBar.start(getStatusText);
+          display.startBar(getStatusText);
           return { behavior: "deny", message: "The user would like to discuss more before answering. Prompt them to begin the discussion." };
         }
         answers[q.question] = result.type === "answer" ? result.value : result.text;
       }
     }
 
-    display.statusBar.start(getStatusText);
+    display.startBar(getStatusText);
     return { behavior: "allow", updatedInput: { ...input, answers } };
   }
 
@@ -234,10 +233,10 @@ export class AgentController {
     getStatusText: () => string,
   ): Promise<PermissionResult> {
     const { display } = this;
-    display.statusBar.stop();
+    display.stopBar();
     display.print(c.amber(`\n⚠ ${toolName}(${display.fmtArgs(input)})`));
     const idx = await this.picker.pick(["Allow", "Deny"]);
-    display.statusBar.start(getStatusText);
+    display.startBar(getStatusText);
     if (idx === 0) return { behavior: "allow", updatedInput: input };
     return { behavior: "deny", message: "User denied tool request" };
   }

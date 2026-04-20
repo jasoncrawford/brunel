@@ -109,9 +109,9 @@ export class Input {
 
       // Register the fresh-redraw hook so print() can notify us.
       if (this._promptLine) {
-        this.display.statusBar.inputClear = () => this._clearForPrint();
-        this.display.statusBar.inputPrint = () => this._drawFresh();
-        this.display.statusBar.inputStatus = () => this._redrawFromCurrent();
+        this.display.inputClear = () => this._clearForPrint();
+        this.display.inputPrint = () => this._drawFresh();
+        this.display.inputStatus = () => this._redrawFromCurrent();
       }
 
       this._dataListener = (chunk: string) => this._onData(chunk);
@@ -172,7 +172,6 @@ export class Input {
   // After the redraw the terminal cursor is positioned at the current cursor.
 
   private _fullRedraw(prevRow: number, suggestions: CommandSuggestion[]) {
-    const statusBar = this.display.statusBar;
     // 1. Move to start of prompt (row 0, col 0)
     if (prevRow > 0) process.stdout.write(`\x1b[${prevRow}A`);
     process.stdout.write("\r");
@@ -207,7 +206,7 @@ export class Input {
 
     // 5. Draw status bars below suggestion rows (if any are active).
     //    Returns 0 when no bars are active, or 1+n for blank-separator + n bar rows.
-    this._totalDrawnRows += statusBar.drawRaw();
+    this._totalDrawnRows += this.display.drawRaw();
 
     // 6. Go from last drawn row back to prompt row 0.
     // Guard: \x1b[0A is treated as \x1b[1A in most terminals, so skip it when already at row 0.
@@ -229,7 +228,6 @@ export class Input {
 
   private _drawFresh() {
     if (this._done) return;
-    const statusBar = this.display.statusBar;
     this._totalDrawnRows = 0; // reset: we're drawing from a new position
     const displayStr = this._buffer.replace(/\n/g, "\r\n    ");
     // print() already moved the cursor to a new line via console.log's
@@ -252,7 +250,7 @@ export class Input {
     this._totalDrawnRows = sugLastRow;
 
     // Draw status bars below suggestion rows (if any are active).
-    this._totalDrawnRows += statusBar.drawRaw();
+    this._totalDrawnRows += this.display.drawRaw();
 
     // Guard: \x1b[0A is treated as \x1b[1A in most terminals, so skip it when already at row 0.
     if (this._totalDrawnRows > 0) process.stdout.write(`\x1b[${this._totalDrawnRows}A`);
@@ -296,10 +294,9 @@ export class Input {
   }
 
   private _cleanup() {
-    const statusBar = this.display.statusBar;
-    statusBar.inputPrint = null;
-    statusBar.inputClear = null;
-    statusBar.inputStatus = null;
+    this.display.inputPrint = null;
+    this.display.inputClear = null;
+    this.display.inputStatus = null;
     this._resolve = null;
     if (this._dataListener) {
       process.stdin.removeListener("data", this._dataListener);

@@ -4,18 +4,18 @@ import { getConfig } from "../src/config.js";
 import { fmtTime } from "../shared/formatters.js";
 import { s } from "../src/agent/views/style.js";
 import { Display } from "../src/agent/views/display.js";
-import { StatusBar } from "../src/agent/views/status-bar.js";
+import { AgentStatus } from "../src/agent/views/agent-status.js";
 
 let testDisplay: Display;
 
 beforeEach(() => {
-  testDisplay = new Display(getConfig(), new StatusBar({ agentId: "test-agent" }));
-  testDisplay.statusBar.stop();
+  testDisplay = new Display(getConfig(), new AgentStatus({ agentId: "test-agent" }));
+  testDisplay.stopBar();
   getConfig().verbose = false;
 });
 
 afterEach(() => {
-  testDisplay.statusBar.stop();
+  testDisplay.stopBar();
   getConfig().verbose = false;
   vi.restoreAllMocks();
 });
@@ -56,10 +56,10 @@ function captureOutput(fn: () => void): string {
 describe("print() via _inputPrintCallback path - verbose timestamp", () => {
   it("verbose=true: callback path still prepends HH:MM:SS timestamp", () => {
     const cb = vi.fn();
-    testDisplay.statusBar.inputPrint = cb;
+    testDisplay.inputPrint = cb;
     getConfig().verbose = true;
     const output = captureOutput(() => testDisplay.print("hello"));
-    testDisplay.statusBar.inputPrint = null;
+    testDisplay.inputPrint = null;
 
     const plain = stripAnsi(output);
     expect(plain).toMatch(/\d{2}:\d{2}:\d{2}/);
@@ -69,10 +69,10 @@ describe("print() via _inputPrintCallback path - verbose timestamp", () => {
 
   it("verbose=false: callback path does not prepend timestamp", () => {
     const cb = vi.fn();
-    testDisplay.statusBar.inputPrint = cb;
+    testDisplay.inputPrint = cb;
     getConfig().verbose = false;
     const output = captureOutput(() => testDisplay.print("world"));
-    testDisplay.statusBar.inputPrint = null;
+    testDisplay.inputPrint = null;
 
     const plain = stripAnsi(output);
     expect(plain).not.toMatch(/\d{2}:\d{2}:\d{2}/);
@@ -81,10 +81,10 @@ describe("print() via _inputPrintCallback path - verbose timestamp", () => {
 
   it("verbose=true: multi-line output in callback path gets timestamp on each line", () => {
     const cb = vi.fn();
-    testDisplay.statusBar.inputPrint = cb;
+    testDisplay.inputPrint = cb;
     getConfig().verbose = true;
     const output = captureOutput(() => testDisplay.print("line one\nline two"));
-    testDisplay.statusBar.inputPrint = null;
+    testDisplay.inputPrint = null;
 
     const plain = stripAnsi(output);
     const matches = plain.match(/\d{2}:\d{2}:\d{2}/g);
