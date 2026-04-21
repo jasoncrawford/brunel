@@ -35,7 +35,7 @@ test("task detail page: shows correct task ID in heading", async ({ page }) => {
       body: "",
       labels: [{ name: "brunel:ready" }],
     },
-    repository: { html_url: "https://github.com/test/repo" },
+    repository: { full_name: "owner/repo" },
   });
 
   await page.goto("/tasks/4001");
@@ -56,7 +56,7 @@ test("task detail page: live events appear as webhooks arrive for that task", as
       body: "",
       labels: [{ name: "brunel:ready" }],
     },
-    repository: { html_url: "https://github.com/test/repo" },
+    repository: { full_name: "owner/repo" },
   });
 
   // Set up admin WS listener BEFORE navigating — same pattern as worker-detail
@@ -84,7 +84,7 @@ test("task detail page: live events appear as webhooks arrive for that task", as
     comment: {
       body: "LGTM",
     },
-    repository: { full_name: "test/repo" },
+    repository: { full_name: "owner/repo" },
     sender: { login: "reviewer" },
   });
 

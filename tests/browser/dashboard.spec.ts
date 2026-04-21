@@ -53,7 +53,7 @@ test("initial load: task list and worker list are visible", async ({ page }) => 
       body: "",
       labels: [{ name: "brunel:ready" }],
     },
-    repository: { html_url: "https://github.com/test/repo" },
+    repository: { full_name: "owner/repo" },
   });
 
   // Seed: connect an idle worker so the workers section is non-empty
@@ -103,7 +103,7 @@ test("live task assignment: dashboard updates without page reload", async ({
         body: "",
         labels: [{ name: "brunel:ready" }],
       },
-      repository: { html_url: "https://github.com/test/repo" },
+      repository: { full_name: "owner/repo" },
     });
 
     // Task row should appear and transition to "assigned" in real time.
@@ -138,7 +138,7 @@ test("log stream: webhook events appear in recent events with correct summaries"
   await postWebhook("push", {
     ref: "refs/heads/main",
     commits: [{ id: "abc123" }],
-    repository: { full_name: "test/repo" },
+    repository: { full_name: "owner/repo" },
     sender: { login: "dev" },
   });
 
@@ -156,7 +156,7 @@ test("log stream: webhook events appear in recent events with correct summaries"
       body: "",
       labels: [{ name: "brunel:ready" }],
     },
-    repository: { full_name: "test/repo" },
+    repository: { full_name: "owner/repo" },
     sender: { login: "dev" },
   });
 

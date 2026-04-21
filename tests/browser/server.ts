@@ -43,6 +43,7 @@ import { Task } from "../../src/foreman/models/task.js";
 import { initDb } from "../../src/foreman/clients/db-client.js";
 import { createMemoryTaskDb } from "../helpers/memory-db.js";
 import { createTestTaskManager } from "../helpers/task.js";
+import { TaskManager } from "../../src/foreman/models/task-manager.js";
 import { createAdminWss } from "../../src/foreman/controllers/admin-ws.js";
 import { loadDefaultConfig } from "../../src/config.js";
 
@@ -53,7 +54,7 @@ const cfg = await loadDefaultConfig();
 // ── Foreman state ─────────────────────────────────────────────────────────────
 
 initDb(createMemoryTaskDb());
-const taskModel = await createTestTaskManager();
+const taskModel = await createTestTaskManager("owner/repo");
 
 // Mock workers managed by /test/connect-worker and /test/workers/:id
 const mockWorkers = new Map<string, WebSocket>();
@@ -140,7 +141,7 @@ async function handleTestRoute(
 // ── Admin WebSocket ───────────────────────────────────────────────────────────
 
 const adminWss = createAdminWss(server, async () => ({
-  tasks: await taskModel.getTasksForBroadcast(),
+  tasks: (await Promise.all(TaskManager.all().map(tm => tm.getTasksForBroadcast()))).flat(),
   workers: Worker.all().map((w) => w.toWire()),
 }));
 
