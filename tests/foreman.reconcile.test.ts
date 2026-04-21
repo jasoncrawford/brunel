@@ -4,7 +4,7 @@ import { Worker } from "../src/foreman/models/worker.js";
 import { ForemanWss } from "../src/foreman/controllers/wss.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
-import { resetDb } from "./helpers/task.js";
+import { resetDb, createTestTaskManager } from "./helpers/task.js";
 import { loadDefaultConfig } from "../src/config.js";
 const defaultCfg = await loadDefaultConfig();
 import * as Wire from "../shared/wire.js";
@@ -18,12 +18,12 @@ function makeIssue(n: number): Wire.TaskIssue {
 let taskManager: TaskManager;
 let foremanWss: ForemanWss;
 
-beforeEach(() => {
+beforeEach(async () => {
   Worker._reset();
-  taskManager = new TaskManager();
   resetDb();
+  taskManager = await createTestTaskManager();
   const server = http.createServer();
-  foremanWss = new ForemanWss({ taskManager, server, config: { ...defaultCfg, taskLabel: TASK_LABEL } });
+  foremanWss = new ForemanWss({ server, config: { ...defaultCfg, taskLabel: TASK_LABEL } });
 });
 
 afterEach(() => {

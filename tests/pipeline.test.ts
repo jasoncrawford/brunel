@@ -25,6 +25,7 @@ import { Task } from "../src/foreman/models/task.js";
 import { initDb } from "../src/foreman/clients/db-client.js";
 import { loadDefaultConfig } from "../src/config.js";
 import { createTestSupabase } from "./helpers/db.js";
+import { createTestTaskManager } from "./helpers/task.js";
 
 // ── One-time setup ────────────────────────────────────────────────────────────
 
@@ -201,7 +202,7 @@ function stubFetchNoBlockers() {
  * Builds a foreman + HTTP server pair.  Returns a cleanup function.
  * The caller is responsible for closing any open WebSocket clients first.
  */
-function buildForeman(): {
+async function buildForeman(): Promise<{
   taskModel: TaskManager;
   httpServer: http.Server;
   foremanWss: ForemanWss;
@@ -210,13 +211,13 @@ function buildForeman(): {
   openClients: WebSocket[];
   connect: () => Promise<WebSocket>;
   teardown: () => Promise<void>;
-} {
+}> {
   Worker._reset();
-  const taskModel = new TaskManager();
+  const taskModel = await createTestTaskManager("owner/repo");
   const httpServer = http.createServer();
   const openClients: WebSocket[] = [];
 
-  const foremanWss = new ForemanWss({ taskManager: taskModel, server: httpServer, config: {
+  const foremanWss = new ForemanWss({ server: httpServer, config: {
     ...defaultCfg,
     githubRepo: "owner/repo",
     githubToken: "token",
@@ -272,7 +273,7 @@ function buildForeman(): {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("pipeline: happy path and queued-then-assigned", () => {
-  let foreman: ReturnType<typeof buildForeman>;
+  let foreman: Awaited<ReturnType<typeof buildForeman>>;
 
   beforeEach(async () => {
     stubFetchNoBlockers();
@@ -283,7 +284,7 @@ describe("pipeline: happy path and queued-then-assigned", () => {
       supabase.from("foreman_messages").delete().in("task_id", ["42", "55"]),
       supabase.from("webhook_events").delete().in("task_id", ["42", "55"]),
     ]);
-    foreman = buildForeman();
+    foreman = await buildForeman();
     await new Promise<void>((resolve) =>
       foreman.httpServer.once("listening", resolve),
     );
@@ -372,7 +373,7 @@ describe("pipeline: happy path and queued-then-assigned", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("pipeline: worker disconnect/reclaim", () => {
-  let foreman: ReturnType<typeof buildForeman>;
+  let foreman: Awaited<ReturnType<typeof buildForeman>>;
 
   beforeEach(async () => {
     stubFetchNoBlockers();
@@ -383,7 +384,7 @@ describe("pipeline: worker disconnect/reclaim", () => {
       supabase.from("foreman_messages").delete().in("task_id", ["70"]),
       supabase.from("webhook_events").delete().in("task_id", ["70"]),
     ]);
-    foreman = buildForeman();
+    foreman = await buildForeman();
     await new Promise<void>((resolve) =>
       foreman.httpServer.once("listening", resolve),
     );
@@ -447,7 +448,7 @@ describe("pipeline: worker disconnect/reclaim", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("pipeline: dependency blocking", () => {
-  let foreman: ReturnType<typeof buildForeman>;
+  let foreman: Awaited<ReturnType<typeof buildForeman>>;
 
   beforeEach(async () => {
     // Stub fetch: native blocker query returns empty; issue-state query for #91 returns open.
@@ -476,7 +477,7 @@ describe("pipeline: dependency blocking", () => {
       supabase.from("foreman_messages").delete().in("task_id", ["91", "92"]),
       supabase.from("webhook_events").delete().in("task_id", ["91", "92"]),
     ]);
-    foreman = buildForeman();
+    foreman = await buildForeman();
     await new Promise<void>((resolve) =>
       foreman.httpServer.once("listening", resolve),
     );
@@ -532,7 +533,7 @@ describe("pipeline: dependency blocking", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("pipeline: PR events forwarded and logged to DB", () => {
-  let foreman: ReturnType<typeof buildForeman>;
+  let foreman: Awaited<ReturnType<typeof buildForeman>>;
 
   beforeEach(async () => {
     stubFetchNoBlockers();
@@ -543,7 +544,7 @@ describe("pipeline: PR events forwarded and logged to DB", () => {
       supabase.from("webhook_events").delete().in("delivery_id", ["evt-1", "evt-pr", "evt-cr"]),
       supabase.from("foreman_messages").delete().eq("worker_id", "w-pr"),
     ]);
-    foreman = buildForeman();
+    foreman = await buildForeman();
     await new Promise<void>((resolve) =>
       foreman.httpServer.once("listening", resolve),
     );

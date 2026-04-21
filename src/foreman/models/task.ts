@@ -1,12 +1,14 @@
 import { EventEmitter } from "node:events";
 import type { TaskStatus } from "../../../shared/wire.js";
 import type { Worker } from "./worker.js";
+import type { WebhookEvent } from "./webhook-event.js";
 import type { Database } from "../../database.types.js";
 import * as Wire from "../../../shared/wire.js";
 import { fetchNativeBlockers } from "../clients/github.js";
 import { db } from "../clients/db-client.js";
 import { ActiveRecord } from "./active-record.js";
 import { Repo } from "./repo.js";
+import { TaskManager } from "./task-manager.js";
 
 type DbRow = Database["public"]["Tables"]["tasks"]["Row"];
 
@@ -101,6 +103,21 @@ export class Task extends ActiveRecord {
       labels: this.labels,
       repoUrl: this.repoUrl,
     };
+  }
+
+  /** The per-repo TaskManager that owns this task's ephemeral state. */
+  get manager(): TaskManager {
+    return TaskManager.forRepoId(this.repoId);
+  }
+
+  /** Queue a webhook event for later delivery (worker disconnected or unassigned). */
+  queueEvent(event: WebhookEvent): void {
+    this.manager.queueEvent(this, event);
+  }
+
+  /** Drain all queued events for this task (on reconnect or assignment). */
+  drainEvents(): WebhookEvent[] {
+    return this.manager.drainEvents(this);
   }
 
   static fromTest(fields: Partial<DbRow> & { task_id: string; issue_number: number }): Task {

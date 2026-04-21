@@ -6,22 +6,65 @@ import { EventQueue } from "./event-queue.js";
 import { Task } from "./task.js";
 import { Worker } from "./worker.js";
 import { fmtError, log } from "../../utils.js";
-import { getConfig } from "../../config.js";
+import type { Repo } from "./repo.js";
 
 
 // ── TaskManager ────────────────────────────────────────────────────────────────
-// Owns all ephemeral in-memory state (event queues, branch mappings, open-issue
-// tracking, blocker state) that has no DB backing.  DB reads/writes go through
-// Task statics and instance methods.
+// One instance per repo. Owns all ephemeral in-memory state (event queues,
+// branch mappings, open-issue tracking, blocker state) scoped to a single repo.
+// DB reads/writes go through Task statics and instance methods.
 //
 // Emits "changed" after every Task mutation (by subscribing to Task.events)
 // and after every worker registry change so the admin dashboard can refresh.
+// Static `events` emitter aggregates all per-instance events for cross-repo
+// subscribers (e.g. admin dashboard, work assignment).
 
 export type AssignOutcome =
   | { ok: true; task: Task; queued: WebhookEvent[]; worker: Worker }
   | { ok: false; worker: Worker; err: unknown };
 
 export class TaskManager extends EventEmitter {
+  // ── Static registry ──────────────────────────────────────────────────────
+  private static registry = new Map<number, TaskManager>();
+  static readonly events = new EventEmitter();
+
+  /** Find or create the TaskManager for a given repo. */
+  static forRepo(repo: Repo): TaskManager {
+    let tm = TaskManager.registry.get(repo.id);
+    if (!tm) {
+      tm = new TaskManager(repo);
+      TaskManager.registry.set(repo.id, tm);
+    }
+    return tm;
+  }
+
+  /** Look up the TaskManager for a repo ID. Throws if not registered — used by Task.manager
+   *  where the TaskManager is guaranteed to exist (tasks can only be created via a TaskManager). */
+  static forRepoId(repoId: number): TaskManager {
+    const tm = TaskManager.registry.get(repoId);
+    if (!tm) throw new Error(`No TaskManager registered for repo ID ${repoId}`);
+    return tm;
+  }
+
+  /** All active TaskManager instances (one per known repo). */
+  static all(): TaskManager[] {
+    return Array.from(TaskManager.registry.values());
+  }
+
+  /** Aggregate active tasks from all repos for admin broadcast. */
+  static async getAllTasksForBroadcast(): Promise<Wire.Task[]> {
+    return (await Promise.all(TaskManager.all().map(tm => tm.getTasksForBroadcast()))).flat();
+  }
+
+  /** Reset the registry — for tests only. */
+  static _resetRegistry(): void {
+    TaskManager.registry.clear();
+    TaskManager.events.removeAllListeners();
+  }
+
+  // ── Instance state ───────────────────────────────────────────────────────
+  readonly repo: Repo;
+
   // ── Ephemeral in-memory state (no DB backing) ────────────────────────────
   private eventQueue = new EventQueue();
   private branchToTaskId = new Map<string, string>();
@@ -37,12 +80,16 @@ export class TaskManager extends EventEmitter {
   private _blockers: Map<number, number[]>;
   private _blockersLoaded: Set<number>;
 
-  constructor() {
+  constructor(repo: Repo) {
     super();
+    this.repo = repo;
     this._openIssues = new Set();
     this._blockers = new Map();
     this._blockersLoaded = new Set();
     Task.events.on("changed", () => this.emit("changed"));
+    // Forward instance events to static aggregator
+    this.on("changed", () => TaskManager.events.emit("changed"));
+    this.on("deps_loaded", () => TaskManager.events.emit("deps_loaded", this));
   }
 
   // ── Read operations (async — always reads from Task statics) ──────────────
@@ -256,8 +303,7 @@ export class TaskManager extends EventEmitter {
       log(`[task #${issueNumber}] labeled: ignoring — issue is closed`);
       return null;
     }
-    const { githubRepo: repo } = getConfig();
-    const task = await this.enqueueIssue(String(issueNumber), issueNumber, repo, title, body, labels);
+    const task = await this.enqueueIssue(String(issueNumber), issueNumber, this.repo.fullName, title, body, labels);
     this.startDepsLoad(issueNumber, body);
     return task;
   }

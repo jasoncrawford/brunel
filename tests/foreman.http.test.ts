@@ -13,9 +13,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import http from "http";
 import type { AddressInfo } from "net";
 import { createHttpServer } from "../src/foreman/controllers/http-server.js";
-import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
-import { resetDb } from "./helpers/task.js";
+import { resetDb, createTestTaskManager } from "./helpers/task.js";
 
 vi.mock("../src/foreman/models/activity-log.js", () => ({
   queryActivityLog: vi.fn().mockResolvedValue([]),
@@ -187,14 +186,14 @@ describe("GET /api/tasks", () => {
   });
 
   it("returns active tasks with derived status and date fields, excluding complete", async () => {
-    const tm = new TaskManager();
     resetDb();
+    const tm = await createTestTaskManager();
 
     await Task.upsert("1", 1, "test/repo", "Pending bug", "Description", []);
     const t2 = await Task.upsert("2", 2, "test/repo", "Done bug", "Description", []);
     await t2.complete();
 
-    const s = createHttpServer({ webhooks: null, routeEvent: vi.fn(), taskManager: tm });
+    const s = createHttpServer({ webhooks: null, routeEvent: vi.fn() });
     const p = await startServer(s);
     try {
       const res = await request(p, "GET", "/api/tasks");
@@ -216,13 +215,13 @@ describe("GET /api/tasks", () => {
   });
 
   it("returns complete tasks when ?status=complete is requested", async () => {
-    const tm = new TaskManager();
     resetDb();
+    const tm = await createTestTaskManager();
 
     const t = await Task.upsert("42", 42, "test/repo", "Fix bug", "Description", []);
     await t.complete();
 
-    const s = createHttpServer({ webhooks: null, routeEvent: vi.fn(), taskManager: tm });
+    const s = createHttpServer({ webhooks: null, routeEvent: vi.fn() });
     const p = await startServer(s);
     try {
       const res = await request(p, "GET", "/api/tasks?status=complete");
@@ -237,14 +236,14 @@ describe("GET /api/tasks", () => {
   });
 
   it("filters tasks by status in memory", async () => {
-    const tm = new TaskManager();
     resetDb();
+    const tm = await createTestTaskManager();
 
     const t1 = await Task.upsert("1", 1, "test/repo", "T1", "b", []);
     await t1.complete();
     await Task.upsert("2", 2, "test/repo", "T2", "b", []);
 
-    const s = createHttpServer({ webhooks: null, routeEvent: vi.fn(), taskManager: tm });
+    const s = createHttpServer({ webhooks: null, routeEvent: vi.fn() });
     const p = await startServer(s);
     try {
       const res = await request(p, "GET", "/api/tasks?status=complete");

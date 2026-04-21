@@ -18,7 +18,8 @@ function ghHeaders(token: string) {
 export async function loadIssuesToQueue(
   taskModel: TaskManager,
 ): Promise<void> {
-  const { githubRepo: repo, githubToken: token, taskLabel, githubApiUrl: apiUrl = "https://api.github.com" } = getConfig();
+  const { githubToken: token, taskLabel, githubApiUrl: apiUrl = "https://api.github.com" } = getConfig();
+  const repo = taskModel.repo.fullName;
   const [owner, repoName] = repo.split("/");
   const url = `${apiUrl}/repos/${owner}/${repoName}/issues?labels=${encodeURIComponent(taskLabel)}&state=open&per_page=100`;
   const res = await fetch(url, { headers: ghHeaders(token) });

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Task } from "../src/foreman/models/task.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
-import { resetDb } from "./helpers/task.js";
+import { resetDb, createTestTaskManager } from "./helpers/task.js";
 import { getConfig } from "../src/config.js";
 
 describe("Task.parseBodyBlockers", () => {
@@ -61,8 +61,8 @@ describe("Task.parseBodyBlockers", () => {
 describe("TaskManager — setBlockers / isBlocked", () => {
   let tm: TaskManager;
 
-  beforeEach(() => {
-    tm = new TaskManager();
+  beforeEach(async () => {
+    tm = await createTestTaskManager();
     resetDb();
   });
 

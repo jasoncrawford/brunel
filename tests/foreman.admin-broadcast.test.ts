@@ -20,7 +20,7 @@ import { Worker } from "../src/foreman/models/worker.js";
 import { ForemanWss } from "../src/foreman/controllers/wss.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
-import { resetDb } from "./helpers/task.js";
+import { resetDb, createTestTaskManager } from "./helpers/task.js";
 import { loadDefaultConfig } from "../src/config.js";
 const defaultCfg = await loadDefaultConfig();
 import type { AdminWss, AdminSnapshot, LogEntry } from "../src/foreman/controllers/admin-ws.js";
@@ -79,18 +79,18 @@ function connect(): Promise<WebSocket> {
   return connectWorker(port).then((ws) => { openClients.push(ws); return ws; });
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   Worker._reset();
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
   process.env.GITHUB_REPO = "owner/repo";
   process.env.GITHUB_TOKEN = "token";
 
-  taskManager = new TaskManager();
   resetDb();
+  taskManager = await createTestTaskManager("owner/repo");
 
   adminWss = makeMockAdminWss();
   httpServer = http.createServer();
-  foremanWss = new ForemanWss({ taskManager, server: httpServer, config: defaultCfg, adminWss });
+  foremanWss = new ForemanWss({ server: httpServer, config: defaultCfg, adminWss });
   ({ wss } = foremanWss);
 
   return new Promise<void>((resolve) => {

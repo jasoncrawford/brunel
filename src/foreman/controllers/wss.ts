@@ -7,7 +7,8 @@ import type { AdminWss } from "./admin-ws.js";
 import { fmtError, log } from "../../utils.js";
 import { shortWorkerId } from "../../../shared/utils.js";
 import type { BrunelConfig } from "../../config.js";
-import type { TaskManager } from "../models/task-manager.js";
+import { TaskManager } from "../models/task-manager.js";
+import { Repo } from "../models/repo.js";
 import { Task } from "../models/task.js";
 import { Worker } from "../models/worker.js";
 
@@ -45,28 +46,25 @@ function routeResult(task: { taskId: string; workerId: string | null } | null | 
 
 type ForemanWssOptions = {
   config: Pick<BrunelConfig, "taskLabel" | "githubRepo" | "githubToken" | "githubApiUrl" | "workerSecret" | "pingIntervalMs">;
-  taskManager: TaskManager;
   server: http.Server;
   adminWss?: AdminWss;
 };
 
 export class ForemanWss {
   readonly wss: WebSocketServer;
-  private readonly taskManager: TaskManager;
   private readonly config: Pick<BrunelConfig, "taskLabel" | "githubRepo" | "githubToken" | "githubApiUrl" | "workerSecret" | "pingIntervalMs">;
   private readonly adminWss?: AdminWss;
   private nextBroadcastId = 1;
 
-  constructor({ config, server, taskManager, adminWss }: ForemanWssOptions) {
-    this.taskManager = taskManager;
+  constructor({ config, server, adminWss }: ForemanWssOptions) {
     this.config = config;
     this.adminWss = adminWss;
 
     const debouncedBroadcast = debounce(() => this.broadcastSnapshot(), 10);
-    taskManager.on("changed", debouncedBroadcast);
+    TaskManager.events.on("changed", debouncedBroadcast);
     Worker.events.on("changed", debouncedBroadcast);
-    taskManager.on("deps_loaded", () => {
-      this.assignWork().catch((err) => log(`ERROR assignWork after deps_loaded: ${fmtError(err)}`));
+    TaskManager.events.on("deps_loaded", (taskManager: TaskManager) => {
+      this.assignWorkForRepo(taskManager).catch((err) => log(`ERROR assignWork after deps_loaded: ${fmtError(err)}`));
     });
 
     const wss = new WebSocketServer({ noServer: true });
@@ -283,7 +281,7 @@ export class ForemanWss {
   private async broadcastSnapshot(): Promise<void> {
     if (!this.adminWss) return;
     this.adminWss.broadcastSnapshot({
-      tasks: await this.taskManager.getTasksForBroadcast(),
+      tasks: await TaskManager.getAllTasksForBroadcast(),
       workers: Worker.all().map((w) => w.toWire()),
     });
   }
@@ -309,7 +307,7 @@ export class ForemanWss {
   // ── Hello handlers ───────────────────────────────────────────────────────────
 
   private flushQueuedEvents(worker: Worker, task: Task): void {
-    for (const evt of this.taskManager.drainEvents(task)) {
+    for (const evt of task.drainEvents()) {
       this.sendMsg(worker, { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload() });
       this.workerLog(worker.workerId, `→ event_notification #${task.issueNumber} ${evt.eventName} (queued)`);
     }
@@ -425,7 +423,7 @@ export class ForemanWss {
         return;
       }
       if (worker?.status === "disconnected") {
-        this.taskManager.queueEvent(task, evt);
+        task.queueEvent(evt);
         log(`[task ${ref}] ${evt.eventName} queued (worker ${shortWorkerId(task.workerId)} disconnected)`);
       } else if (worker) {
         this.sendMsg(worker, { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload() });
@@ -434,13 +432,19 @@ export class ForemanWss {
         log(`[task ${ref}] ${evt.eventName} DROPPED — worker ${shortWorkerId(task.workerId)} not in registry (disconnected?)`);
       }
     } else if (task.status === "pending" || task.status === "blocked") {
-      this.taskManager.queueEvent(task, evt);
+      task.queueEvent(evt);
       log(`[task ${ref}] ${evt.eventName} queued (no worker assigned)`);
     }
   }
 
   async assignWork(): Promise<void> {
-    for (const outcome of await this.taskManager.assignIdleWorkers()) {
+    for (const taskManager of TaskManager.all()) {
+      await this.assignWorkForRepo(taskManager);
+    }
+  }
+
+  private async assignWorkForRepo(taskManager: TaskManager): Promise<void> {
+    for (const outcome of await taskManager.assignIdleWorkers()) {
       if (!outcome.ok) {
         log(`ERROR Failed to persist assignment: ${fmtError(outcome.err)}`);
         log(`[worker ${shortWorkerId(outcome.worker.workerId)}] → idle (DB write failed)`);
@@ -460,6 +464,12 @@ export class ForemanWss {
     }
   }
 
+  /** Resolve the Repo from a webhook payload's repository.full_name, creating it if needed. */
+  private async resolveRepo(p: R): Promise<Repo> {
+    const repoFullName = strProp(p.repository, "full_name") ?? this.config.githubRepo;
+    return Repo.findOrCreate(repoFullName);
+  }
+
   async routePrEvent(p: R, evt: WebhookEvent): Promise<RouteResult> {
     const pr = p.pull_request as R | undefined;
     const prNumber = numProp(pr, "number");
@@ -467,14 +477,17 @@ export class ForemanWss {
 
     if (p.action === "synchronize") return routeResult(await Task.getByPr(prNumber));
 
+    const repo = await this.resolveRepo(p);
+    const manager = repo.taskManager;
+
     if (p.action === "opened" && pr) {
-      const task = await this.taskManager.handlePrOpenedEvent(prNumber, String(pr.body ?? ""), strProp(pr.head, "ref"));
+      const task = await manager.handlePrOpenedEvent(prNumber, String(pr.body ?? ""), strProp(pr.head, "ref"));
       if (task) this.forwardEvent(task, evt, `PR #${prNumber}`);
       return routeResult(task);
     }
 
     if (p.action === "closed" && pr) {
-      const task = await this.taskManager.handlePrClosedEvent(prNumber, !!pr.merged);
+      const task = await manager.handlePrClosedEvent(prNumber, !!pr.merged);
       if (task) this.forwardEvent(task, evt, `PR #${prNumber}`);
       return routeResult(task);
     }
@@ -483,7 +496,7 @@ export class ForemanWss {
       const changes = p.changes as R | undefined;
       let task: Task | null = null;
       if (changes?.body) {
-        task = await this.taskManager.handlePrEditedEvent(prNumber, String(pr.body ?? ""), strProp(pr.head, "ref"));
+        task = await manager.handlePrEditedEvent(prNumber, String(pr.body ?? ""), strProp(pr.head, "ref"));
       }
       if (!task) task = await Task.getByPr(prNumber);
       if (task) this.forwardEvent(task, evt, `PR #${prNumber}`);
@@ -511,7 +524,8 @@ export class ForemanWss {
       ? strProp(inner?.check_suite, "head_branch") ?? ""
       : strProp(inner, "head_branch") ?? "";
 
-    const found = await this.taskManager.getTaskForCheckEvent(
+    const repo = await this.resolveRepo(p);
+    const found = await repo.taskManager.getTaskForCheckEvent(
       prs?.map((pr) => pr.number) ?? [],
       headBranch,
     );
@@ -532,6 +546,8 @@ export class ForemanWss {
     if (!task) task = await Task.getByPr(issueNumber);
 
     const action = p.action as string | undefined;
+    const repo = await this.resolveRepo(p);
+    const manager = repo.taskManager;
 
     if (!task) {
       // Check if this webhook should enqueue a new task.
@@ -544,7 +560,7 @@ export class ForemanWss {
 
       if (labeledNow || openedWithLabel) {
         const labels = (issue.labels as Array<{ name: string }> | undefined)?.map((l) => l.name) ?? [];
-        const enqueued = await this.taskManager.handleIssueLabeledEvent(
+        const enqueued = await manager.handleIssueLabeledEvent(
           issueNumber,
           String(issue.title ?? ""),
           String(issue.body ?? ""),
@@ -567,7 +583,7 @@ export class ForemanWss {
       (p.label as R | undefined)?.name === this.config.taskLabel
     ) {
       try {
-        await this.taskManager.dequeueIssue(issueNumber);
+        await manager.dequeueIssue(issueNumber);
         log(`[task #${issueNumber}] dequeued (label removed)`);
       } catch (err) {
         log(`ERROR Failed to dequeue task #${issueNumber}: ${fmtError(err)}`);
@@ -579,7 +595,7 @@ export class ForemanWss {
 
     if (action === "closed") {
       try {
-        await this.taskManager.closeIssue(issueNumber);
+        await manager.closeIssue(issueNumber);
       } catch (err) {
         log(`ERROR Failed to close issue #${issueNumber}: ${fmtError(err)}`);
         return null; // error: skip notification to avoid inconsistency
@@ -589,7 +605,7 @@ export class ForemanWss {
 
     if (action === "reopened") {
       try {
-        await this.taskManager.reopenIssue(issueNumber);
+        await manager.reopenIssue(issueNumber);
       } catch (err) {
         log(`ERROR Failed to reopen issue #${issueNumber}: ${fmtError(err)}`);
         return null; // error: skip notification to avoid inconsistency
@@ -600,7 +616,7 @@ export class ForemanWss {
     if (action === "edited") {
       const changes = p.changes as R | undefined;
       if (changes?.body && task) {
-        this.taskManager.handleIssueBodyEditedEvent(
+        manager.handleIssueBodyEditedEvent(
           issueNumber,
           String(issue.body ?? ""),
         );

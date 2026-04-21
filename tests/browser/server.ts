@@ -39,10 +39,11 @@ import { WebSocket } from "ws";
 import { Worker } from "../../src/foreman/models/worker.js";
 import { ForemanWss } from "../../src/foreman/controllers/wss.js";
 import { createHttpServer } from "../../src/foreman/controllers/http-server.js";
-import { TaskManager } from "../../src/foreman/models/task-manager.js";
 import { Task } from "../../src/foreman/models/task.js";
 import { initDb } from "../../src/foreman/clients/db-client.js";
 import { createMemoryTaskDb } from "../helpers/memory-db.js";
+import { createTestTaskManager } from "../helpers/task.js";
+import { TaskManager } from "../../src/foreman/models/task-manager.js";
 import { createAdminWss } from "../../src/foreman/controllers/admin-ws.js";
 import { loadDefaultConfig } from "../../src/config.js";
 
@@ -52,9 +53,8 @@ const cfg = await loadDefaultConfig();
 
 // ── Foreman state ─────────────────────────────────────────────────────────────
 
-const taskModel = new TaskManager();
 initDb(createMemoryTaskDb());
-Task.events.on("changed", () => taskModel.emit("changed"));
+const taskModel = await createTestTaskManager("owner/repo");
 
 // Mock workers managed by /test/connect-worker and /test/workers/:id
 const mockWorkers = new Map<string, WebSocket>();
@@ -141,13 +141,13 @@ async function handleTestRoute(
 // ── Admin WebSocket ───────────────────────────────────────────────────────────
 
 const adminWss = createAdminWss(server, async () => ({
-  tasks: await taskModel.getTasksForBroadcast(),
+  tasks: await TaskManager.getAllTasksForBroadcast(),
   workers: Worker.all().map((w) => w.toWire()),
 }));
 
 // ── Foreman WebSocket ─────────────────────────────────────────────────────────
 
-foremanWss = new ForemanWss({ taskManager: taskModel, server, config: cfg, adminWss });
+foremanWss = new ForemanWss({ server, config: cfg, adminWss });
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 

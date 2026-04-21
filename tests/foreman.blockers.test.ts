@@ -3,7 +3,7 @@ import { Worker } from "../src/foreman/models/worker.js";
 import { ForemanWss } from "../src/foreman/controllers/wss.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
-import { resetDb } from "./helpers/task.js";
+import { resetDb, createTestTaskManager } from "./helpers/task.js";
 import { loadDefaultConfig } from "../src/config.js";
 import http from "http";
 
@@ -14,10 +14,10 @@ const defaultCfg = await loadDefaultConfig();
 describe("foreman — blocker transitions via routeEvent", () => {
   let taskManager: TaskManager;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     Worker._reset();
-    taskManager = new TaskManager();
     resetDb();
+    taskManager = await createTestTaskManager("owner/repo");
   });
 
   afterEach(() => {
@@ -33,7 +33,7 @@ describe("foreman — blocker transitions via routeEvent", () => {
     taskManager.markBlockersLoaded(10);
     taskManager.setIssueOpenState(5, true); // blocker is open
 
-    const { wss } = new ForemanWss({ taskManager, server, config: { ...defaultCfg, taskLabel: "brunel:ready", workerReclaimTimeoutMs: 300_000 } });
+    const { wss } = new ForemanWss({ server, config: { ...defaultCfg, taskLabel: "brunel:ready", workerReclaimTimeoutMs: 300_000 } });
     wss.close();
 
     const snapshots = await taskManager.getTasksForBroadcast();
@@ -49,7 +49,7 @@ describe("foreman — blocker transitions via routeEvent", () => {
     taskManager.markBlockersLoaded(10);
     taskManager.setIssueOpenState(5, true);
 
-    const foremanWss = new ForemanWss({ taskManager, server, config: { ...defaultCfg, taskLabel: "brunel:ready" } });
+    const foremanWss = new ForemanWss({ server, config: { ...defaultCfg, taskLabel: "brunel:ready" } });
     const { wss } = foremanWss;
     wss.close();
 
@@ -79,7 +79,7 @@ describe("foreman — blocker transitions via routeEvent", () => {
     taskManager.setIssueOpenState(5, true);
     taskManager.setIssueOpenState(6, true);
 
-    const foremanWss = new ForemanWss({ taskManager, server, config: { ...defaultCfg, taskLabel: "brunel:ready" } });
+    const foremanWss = new ForemanWss({ server, config: { ...defaultCfg, taskLabel: "brunel:ready" } });
     const { wss } = foremanWss;
     wss.close();
 
