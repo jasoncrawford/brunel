@@ -265,7 +265,6 @@ async function run(): Promise<void> {
     },
     repository: {
       html_url: "https://github.com/test/test",
-      full_name: "test/test",
     },
   });
 
