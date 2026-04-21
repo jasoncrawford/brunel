@@ -5,7 +5,6 @@ import { join, extname } from "path";
 import { fileURLToPath } from "url";
 import { Hono } from "hono";
 import { getRequestListener } from "@hono/node-server";
-import type { TaskManager } from "../models/task-manager.js";
 import { Task } from "../models/task.js";
 import { queryActivityLog } from "../models/activity-log.js";
 import type { TaskStatus } from "../../../shared/wire.js";
@@ -14,10 +13,9 @@ import { fmtError, log } from "../../utils.js";
 export interface HttpServerOptions {
   webhooks: InstanceType<typeof Webhooks> | null;
   routeEvent: (id: string, name: string, payload: unknown) => void | Promise<void>;
-  taskManager?: TaskManager;
 }
 
-export function createHttpServer({ webhooks, routeEvent, taskManager }: HttpServerOptions): http.Server {
+export function createHttpServer({ webhooks, routeEvent }: HttpServerOptions): http.Server {
   const app = new Hono();
 
   // ── Webhook ────────────────────────────────────────────────────────────────
@@ -94,7 +92,7 @@ export function createHttpServer({ webhooks, routeEvent, taskManager }: HttpServ
   app.get("/api/tasks", async (c) => {
     try {
       const statusFilter = c.req.query("status") as TaskStatus | undefined;
-      const tasks = taskManager ? await Task.list() : [];
+      const tasks = await Task.list();
       const filtered = statusFilter
         ? tasks.filter((t) => t.status === statusFilter)
         : tasks.filter((t) => t.status !== "complete");

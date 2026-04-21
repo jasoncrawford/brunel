@@ -1,16 +1,36 @@
 import { initDb, db } from "../../src/foreman/clients/db-client.js";
 import { createMemoryTaskDb } from "./memory-db.js";
 import { Task } from "../../src/foreman/models/task.js";
+import { Repo } from "../../src/foreman/models/repo.js";
+import { TaskManager } from "../../src/foreman/models/task-manager.js";
 import type { Database } from "../../src/database.types.js";
 
 type DbRow = Database["public"]["Tables"]["tasks"]["Row"];
 
 /**
- * Resets the in-memory DB to a fresh, empty state.
+ * Resets the in-memory DB and TaskManager registry to a fresh, empty state.
  * Call in beforeEach for per-test task isolation when using the DB shim.
  */
 export function resetDb(): void {
   initDb(createMemoryTaskDb());
+  TaskManager._resetRegistry();
+}
+
+/**
+ * Creates (or finds) a Repo in the in-memory DB. Useful for test setup
+ * when you need a Repo instance to create a TaskManager.
+ */
+export async function createTestRepo(fullName = "test/repo"): Promise<Repo> {
+  return Repo.findOrCreate(fullName);
+}
+
+/**
+ * Creates a per-repo TaskManager backed by a test Repo from the in-memory DB.
+ * Shorthand for `(await createTestRepo(fullName)).taskManager`.
+ */
+export async function createTestTaskManager(fullName = "test/repo"): Promise<TaskManager> {
+  const repo = await createTestRepo(fullName);
+  return repo.taskManager;
 }
 
 /**

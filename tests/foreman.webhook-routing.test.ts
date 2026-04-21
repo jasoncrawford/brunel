@@ -13,7 +13,7 @@ import { Worker } from "../src/foreman/models/worker.js";
 import { ForemanWss } from "../src/foreman/controllers/wss.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
-import { resetDb } from "./helpers/task.js";
+import { resetDb, createTestTaskManager } from "./helpers/task.js";
 import { loadDefaultConfig } from "../src/config.js";
 const defaultCfg = await loadDefaultConfig();
 import * as Wire from "../shared/wire.js";
@@ -235,17 +235,17 @@ function connect(): Promise<WebSocket> {
   return connectWorker(port).then((ws) => { openClients.push(ws); return ws; });
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   Worker._reset();
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ data: { repository: { issue: { blockedBy: { nodes: [] } } } } }) }));
   process.env.GITHUB_REPO = "owner/repo";
   process.env.GITHUB_TOKEN = "token";
   process.env.TASK_LABEL = "brunel:ready";
 
-  taskManager = new TaskManager();
   resetDb();
+  taskManager = await createTestTaskManager("owner/repo");
   httpServer = http.createServer();
-  foremanWss = new ForemanWss({ taskManager, server: httpServer, config: defaultCfg });
+  foremanWss = new ForemanWss({ server: httpServer, config: defaultCfg });
   ({ wss } = foremanWss);
 
   return new Promise<void>((resolve) => {

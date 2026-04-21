@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
 import { Worker } from "../src/foreman/models/worker.js";
-import { resetDb } from "./helpers/task.js";
+import { resetDb, createTestTaskManager } from "./helpers/task.js";
 import { WebhookEvent } from "../src/foreman/models/webhook-event.js";
 
 const repoSlug = "test/repo";
@@ -18,9 +18,9 @@ async function registerBase(overrides: { taskId?: string; issueNumber?: number; 
 
 describe("TaskManager — queue operations", () => {
   let m: TaskManager;
-  beforeEach(() => {
+  beforeEach(async () => {
     Worker._reset();
-    m = new TaskManager();
+    m = await createTestTaskManager();
     resetDb();
   });
   afterEach(() => { vi.restoreAllMocks(); });
@@ -154,8 +154,8 @@ describe("TaskManager — queue operations", () => {
 
 describe("TaskManager — derived blocked status", () => {
   let m: TaskManager;
-  beforeEach(() => {
-    m = new TaskManager();
+  beforeEach(async () => {
+    m = await createTestTaskManager();
     resetDb();
   });
   afterEach(() => { vi.restoreAllMocks(); });
@@ -205,9 +205,9 @@ describe("TaskManager — derived blocked status", () => {
 
 describe("TaskManager — cancel (delete behavior)", () => {
   let m: TaskManager;
-  beforeEach(() => {
+  beforeEach(async () => {
     Worker._reset();
-    m = new TaskManager();
+    m = await createTestTaskManager();
     resetDb();
   });
   afterEach(() => { vi.restoreAllMocks(); });
@@ -241,8 +241,8 @@ describe("TaskManager — cancel (delete behavior)", () => {
 
 describe("TaskManager — nextPending with predicate", () => {
   let m: TaskManager;
-  beforeEach(() => {
-    m = new TaskManager();
+  beforeEach(async () => {
+    m = await createTestTaskManager();
     resetDb();
   });
   afterEach(() => { vi.restoreAllMocks(); });
@@ -270,9 +270,9 @@ describe("TaskManager — nextPending with predicate", () => {
 
 describe("TaskManager changed events", () => {
   let m: TaskManager;
-  beforeEach(() => {
+  beforeEach(async () => {
     Worker._reset();
-    m = new TaskManager();
+    m = await createTestTaskManager();
     resetDb();
   });
   afterEach(() => { vi.restoreAllMocks(); });

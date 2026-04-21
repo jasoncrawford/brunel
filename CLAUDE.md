@@ -14,7 +14,7 @@ Two independent processes: **foreman** (server) and **worker** (agent). They com
 
 MVC structure. Models own state; controllers handle external inputs.
 
-- **Models** (`models/`) — `ActiveRecord` is the abstract base class for all DB-backed models. `Task`, `WebhookEvent`, `ForemanMessage`, and `Repo` are the main active-record models. `TaskManager` owns ephemeral in-memory state (event queues, branch mappings, blocker state) and encapsulates all issue/PR event lifecycle logic. `Worker` is the in-memory model for connected workers (not DB-backed).
+- **Models** (`models/`) — `ActiveRecord` is the abstract base class for all DB-backed models. `Task`, `WebhookEvent`, `ForemanMessage`, and `Repo` are the main active-record models. `TaskManager` owns ephemeral in-memory state (event queues, branch mappings, blocker state) and encapsulates all issue/PR event lifecycle logic — one instance per repo, managed via a static registry (`TaskManager.forRepo(repo)`). `Repo` provides a convenience `get taskManager()` getter. `Worker` is the in-memory model for connected workers (not DB-backed).
 - **Controllers** (`controllers/`) — `http-server.ts` handles webhooks + REST + SPA. `wss.ts` (`ForemanWss`) is the WebSocket protocol layer for worker↔foreman communication. `admin-ws.ts` broadcasts to the admin dashboard.
 - **Clients** (`clients/`) — `db-client.ts` wires the shared Supabase client. `github.ts` wraps GitHub API calls.
 
@@ -95,5 +95,5 @@ See **`docs/type-system.md`** for the full design. In brief: one server model cl
 - **Real-time UIs**: prefer event-based designs — a model holds state and emits on change; the UI subscribes once rather than scattering manual refresh calls.
 - **Pass model objects, not IDs**: controllers look up model objects from wire message IDs first, then pass the objects to helpers.
 - **Wire types**: all live in `shared/wire.ts`, imported as `import * as Wire from "../../shared/wire.js"`.
-- **Tests**: the DB is initialised globally with an in-memory shim via `tests/setup.ts`. See test helper files in `tests/helpers/` for utilities like `seedTask()`, `resetDb()`, and `registerTestCommands()`.
+- **Tests**: the DB is initialised globally with an in-memory shim via `tests/setup.ts`. See test helper files in `tests/helpers/` for utilities like `seedTask()`, `resetDb()`, `createTestRepo()`, `createTestTaskManager()`, and `registerTestCommands()`. `resetDb()` also clears the TaskManager registry.
 - **Browser tests**: the server is shared across all tests — use unique issue numbers per test rather than resetting server state.

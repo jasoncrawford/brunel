@@ -11,7 +11,7 @@ import { Worker } from "../src/foreman/models/worker.js";
 import { Task } from "../src/foreman/models/task.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { ForemanMessage } from "../src/foreman/models/foreman-message.js";
-import { resetDb, seedTask } from "./helpers/task.js";
+import { resetDb, seedTask, createTestTaskManager } from "./helpers/task.js";
 import * as utils from "../src/utils.js";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -23,7 +23,6 @@ function fakeWs() {
 function makeWss(taskManager: TaskManager) {
   const wss = new ForemanWss({
     config: { taskLabel: "brunel:ready", githubRepo: "owner/repo", githubToken: "token", workerSecret: undefined, pingIntervalMs: 1e9 },
-    taskManager,
     server: http.createServer(),
   });
   const sendMsg = vi.spyOn(wss, "sendMsg").mockImplementation(() => {});
@@ -40,10 +39,10 @@ function helloAck(sendMsg: ReturnType<typeof vi.spyOn>) {
 
 let taskManager: TaskManager;
 
-beforeEach(() => {
+beforeEach(async () => {
   Worker._reset();
   resetDb();
-  taskManager = new TaskManager();
+  taskManager = await createTestTaskManager();
 });
 
 afterEach(() => {
@@ -162,6 +161,7 @@ describe("handleBusyHello", () => {
       const task = await seedTask({
         task_id: "10",
         issue_number: 10,
+        repo_id: taskManager.repo.id,
         worker_id: "w1",
         assigned_at: new Date().toISOString(),
       });

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
 import { Worker } from "../src/foreman/models/worker.js";
-import { resetDb } from "./helpers/task.js";
+import { resetDb, createTestTaskManager } from "./helpers/task.js";
 
 const REPO = "test/repo";
 
@@ -13,8 +13,8 @@ describe("Task.complete", () => {
 
   beforeEach(async () => {
     Worker._reset();
-    manager = new TaskManager();
     resetDb();
+    manager = await createTestTaskManager();
     await Task.upsert("42", 42, REPO, "Fix the bug", "It is broken", ["brunel:ready"]);
     const t = await Task.get("42");
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
@@ -44,8 +44,8 @@ describe("Task.revert", () => {
 
   beforeEach(async () => {
     Worker._reset();
-    manager = new TaskManager();
     resetDb();
+    manager = await createTestTaskManager();
     await Task.upsert("42", 42, REPO, "Fix the bug", "It is broken", ["brunel:ready"]);
     const t = await Task.get("42");
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
@@ -293,10 +293,10 @@ describe("Task.status (derived)", () => {
 describe("TaskManager.assignIdleWorkers", () => {
   let manager: TaskManager;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     Worker._reset();
-    manager = new TaskManager();
     resetDb();
+    manager = await createTestTaskManager();
   });
 
   afterEach(() => {
@@ -393,10 +393,10 @@ describe("TaskManager.assignIdleWorkers", () => {
 describe("TaskManager.handleIssueLabeledEvent", () => {
   let manager: TaskManager;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     Worker._reset();
-    manager = new TaskManager();
     resetDb();
+    manager = await createTestTaskManager();
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ data: { repository: { issue: { blockedBy: { nodes: [] } } } } }),
@@ -435,10 +435,10 @@ describe("TaskManager.handleIssueLabeledEvent", () => {
 describe("TaskManager.handleIssueBodyEditedEvent", () => {
   let manager: TaskManager;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     Worker._reset();
-    manager = new TaskManager();
     resetDb();
+    manager = await createTestTaskManager();
     manager.setBlockers(42, [10]);
     manager.markBlockersLoaded(42);
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
@@ -474,8 +474,8 @@ describe("TaskManager.handlePrOpenedEvent", () => {
 
   beforeEach(async () => {
     Worker._reset();
-    manager = new TaskManager();
     resetDb();
+    manager = await createTestTaskManager();
     await Task.upsert("42", 42, REPO, "Fix the bug", "Body", ["brunel:ready"]);
   });
 
@@ -516,8 +516,8 @@ describe("TaskManager.handlePrClosedEvent", () => {
 
   beforeEach(async () => {
     Worker._reset();
-    manager = new TaskManager();
     resetDb();
+    manager = await createTestTaskManager();
     await Task.upsert("42", 42, REPO, "Fix the bug", "Body", ["brunel:ready"]);
     const t = await Task.get("42");
     await t!.registerPr(10, "fix-branch");
@@ -554,8 +554,8 @@ describe("TaskManager.getTaskForCheckEvent", () => {
 
   beforeEach(async () => {
     Worker._reset();
-    manager = new TaskManager();
     resetDb();
+    manager = await createTestTaskManager();
     await Task.upsert("42", 42, REPO, "Fix the bug", "Body", ["brunel:ready"]);
     const t = await Task.get("42");
     await t!.registerPr(10, "fix-branch");

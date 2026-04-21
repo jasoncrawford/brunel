@@ -6,6 +6,7 @@ import type { Database } from "../database.types.js";
 import { Webhooks } from "@octokit/webhooks";
 import { loadConfig } from "../config.js";
 import { TaskManager } from "./models/task-manager.js";
+import { Repo } from "./models/repo.js";
 import { initDb } from "./clients/db-client.js";
 import { Worker } from "./models/worker.js";
 import { createHttpServer } from "./controllers/http-server.js";
@@ -23,25 +24,24 @@ if (isMain) {
     ? new Webhooks({ secret: config.webhookSecret })
     : null;
 
-  // Setup DB and task manager (share the same Supabase client)
+  // Setup DB (share the same Supabase client)
   if (!config.supabaseUrl || !config.supabaseSecretKey) {
     log("ERROR Supabase is required. Set BRUNEL_SUPABASE_URL and BRUNEL_SUPABASE_SECRET_KEY.");
     process.exit(1);
   }
   const supabase = createClient<Database>(config.supabaseUrl, config.supabaseSecretKey);
-  const taskManager = new TaskManager();
   initDb(supabase);
 
   let foremanWss: ForemanWss;
-  const server = createHttpServer({ webhooks, routeEvent: (id, name, payload) => foremanWss.routeEvent(id, name, payload), taskManager });
+  const server = createHttpServer({ webhooks, routeEvent: (id, name, payload) => foremanWss.routeEvent(id, name, payload) });
 
-  // Admin WebSocket broadcaster
+  // Admin WebSocket broadcaster — aggregates tasks from all per-repo TaskManagers
   const adminWss = createAdminWss(server, async () => ({
-    tasks: await taskManager.getTasksForBroadcast(),
+    tasks: (await Promise.all(TaskManager.all().map(tm => tm.getTasksForBroadcast()))).flat(),
     workers: Worker.all().map((w) => w.toWire()),
   }));
 
-  foremanWss = new ForemanWss({ config, taskManager, server, adminWss });
+  foremanWss = new ForemanWss({ config, server, adminWss });
 
   if (webhooks) {
     webhooks.onAny(async ({ id, name, payload }) => {
@@ -51,10 +51,13 @@ if (isMain) {
 
   // Load all state before accepting WebSocket connections.
 
-  // Step 1: Load active tasks from DB (primary source of truth).
+  // Step 1: Bootstrap per-repo TaskManagers from known repos, then load active tasks.
   log("[startup] step 1: loading active tasks from DB...");
   try {
-    await taskManager.loadActiveTasksFromDb();
+    const repos = await Repo.list();
+    for (const repo of repos) {
+      await repo.taskManager.loadActiveTasksFromDb();
+    }
   } catch (err) {
     log(`ERROR Failed to load tasks from DB: ${fmtError(err)}`);
     process.exit(1);
@@ -63,7 +66,9 @@ if (isMain) {
   // Step 2: Fetch brunel:ready issues from GitHub for reconciliation.
   log("[startup] step 2: fetching brunel:ready issues from GitHub for reconciliation...");
   try {
-    await taskManager.loadIssuesFromGithub();
+    for (const tm of TaskManager.all()) {
+      await tm.loadIssuesFromGithub();
+    }
     await foremanWss.reconcile();
   } catch (err) {
     log(`ERROR Failed to load issues from GitHub: ${fmtError(err)}`);

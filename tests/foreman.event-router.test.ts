@@ -10,9 +10,11 @@
 import http from "http";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ForemanWss } from "../src/foreman/controllers/wss.js";
+import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
 import { Worker } from "../src/foreman/models/worker.js";
 import { WebhookEvent } from "../src/foreman/models/webhook-event.js";
+import { resetDb, createTestRepo } from "./helpers/task.js";
 import * as utils from "../src/utils.js";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -25,10 +27,9 @@ function makeEvent(name = "issue_comment"): WebhookEvent {
   return WebhookEvent.fromIncoming("evt-1", name, {});
 }
 
-function makeWss(taskManager: any): { wss: ForemanWss; sendMsg: ReturnType<typeof vi.fn> } {
+function makeWss(_taskManager?: any): { wss: ForemanWss; sendMsg: ReturnType<typeof vi.fn> } {
   const wss = new ForemanWss({
     config: { taskLabel: "brunel:ready", githubRepo: "owner/repo", githubToken: "token", workerSecret: undefined, pingIntervalMs: 1e9 },
-    taskManager,
     server: http.createServer(),
   });
   const sendMsg = vi.spyOn(wss, "sendMsg").mockImplementation(() => {});
@@ -36,9 +37,15 @@ function makeWss(taskManager: any): { wss: ForemanWss; sendMsg: ReturnType<typeo
 }
 
 let logSpy: ReturnType<typeof vi.spyOn>;
+let testRepoId: number;
 
-beforeEach(() => {
+beforeEach(async () => {
   Worker._reset();
+  resetDb();
+  const repo = await createTestRepo("owner/repo");
+  testRepoId = repo.id;
+  // Ensure TaskManager is registered for this repo
+  repo.taskManager;
   logSpy = vi.spyOn(utils, "log").mockImplementation(() => {});
 });
 
@@ -164,14 +171,15 @@ describe("forwardEvent — active tasks still receive events", () => {
   });
 
   it("queues event for a pending task with no worker", () => {
-    const task = Task.fromTest({ task_id: "42", issue_number: 42 });
+    const task = Task.fromTest({ task_id: "42", issue_number: 42, repo_id: testRepoId });
     task.blockersLoaded = true; // no open blockers → status is "pending"
-    const taskManager = { queueEvent: vi.fn(), assignIdleWorkers: vi.fn().mockResolvedValue([]), on: vi.fn() };
-    const { wss, sendMsg } = makeWss(taskManager);
+    const tm = TaskManager.getByRepoId(testRepoId)!;
+    const queueSpy = vi.spyOn(tm, "queueEvent");
+    const { wss, sendMsg } = makeWss();
 
     wss.forwardEvent(task, makeEvent(), "#42");
 
-    expect(taskManager.queueEvent).toHaveBeenCalledOnce();
+    expect(queueSpy).toHaveBeenCalledOnce();
     expect(sendMsg).not.toHaveBeenCalled();
   });
 });

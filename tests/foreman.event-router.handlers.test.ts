@@ -5,10 +5,11 @@
 import http from "http";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ForemanWss } from "../src/foreman/controllers/wss.js";
+import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
 import { Worker } from "../src/foreman/models/worker.js";
 import { WebhookEvent } from "../src/foreman/models/webhook-event.js";
-import { resetDb, seedTask } from "./helpers/task.js";
+import { resetDb, seedTask, createTestRepo } from "./helpers/task.js";
 import * as utils from "../src/utils.js";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -25,38 +26,25 @@ interface TestDeps {
   wss: ForemanWss;
   sendMsg: ReturnType<typeof vi.fn>;
   forwardEvent: ReturnType<typeof vi.spyOn>;
-  taskManager: {
-    queueEvent: ReturnType<typeof vi.fn>;
-    dequeueIssue: ReturnType<typeof vi.fn>;
-    closeIssue: ReturnType<typeof vi.fn>;
-    reopenIssue: ReturnType<typeof vi.fn>;
-    assignIdleWorkers: ReturnType<typeof vi.fn>;
-    handleIssueLabeledEvent: ReturnType<typeof vi.fn>;
-    handleIssueBodyEditedEvent: ReturnType<typeof vi.fn>;
-    handlePrOpenedEvent: ReturnType<typeof vi.fn>;
-    handlePrClosedEvent: ReturnType<typeof vi.fn>;
-    getTaskForCheckEvent: ReturnType<typeof vi.fn>;
-    on: ReturnType<typeof vi.fn>;
-  };
+  taskManager: TaskManager;
 }
 
-function makeDeps(): TestDeps {
-  const taskManager = {
-    queueEvent: vi.fn(),
-    dequeueIssue: vi.fn().mockResolvedValue(undefined),
-    closeIssue: vi.fn().mockResolvedValue(undefined),
-    reopenIssue: vi.fn().mockResolvedValue(undefined),
-    assignIdleWorkers: vi.fn().mockResolvedValue([]),
-    handleIssueLabeledEvent: vi.fn().mockResolvedValue(null),
-    handleIssueBodyEditedEvent: vi.fn(),
-    handlePrOpenedEvent: vi.fn().mockResolvedValue(null),
-    handlePrClosedEvent: vi.fn().mockResolvedValue(null),
-    getTaskForCheckEvent: vi.fn().mockResolvedValue(null),
-    on: vi.fn(),
-  };
+async function makeDeps(): Promise<TestDeps> {
+  const repo = await createTestRepo("owner/repo");
+  const taskManager = repo.taskManager;
+  // Spy on all TaskManager methods so the tests can assert calls without side effects
+  vi.spyOn(taskManager, "queueEvent").mockImplementation(() => {});
+  vi.spyOn(taskManager, "dequeueIssue").mockResolvedValue(undefined);
+  vi.spyOn(taskManager, "closeIssue").mockResolvedValue(undefined);
+  vi.spyOn(taskManager, "reopenIssue").mockResolvedValue(undefined);
+  vi.spyOn(taskManager, "assignIdleWorkers").mockResolvedValue([]);
+  vi.spyOn(taskManager, "handleIssueLabeledEvent").mockResolvedValue(null);
+  vi.spyOn(taskManager, "handleIssueBodyEditedEvent").mockImplementation(() => {});
+  vi.spyOn(taskManager, "handlePrOpenedEvent").mockResolvedValue(null);
+  vi.spyOn(taskManager, "handlePrClosedEvent").mockResolvedValue(null);
+  vi.spyOn(taskManager, "getTaskForCheckEvent").mockResolvedValue(null);
   const wss = new ForemanWss({
     config: { taskLabel: "brunel:ready", githubRepo: "owner/repo", githubToken: "token", workerSecret: undefined, pingIntervalMs: 1e9 },
-    taskManager: taskManager as any,
     server: http.createServer(),
   });
   const sendMsg = vi.spyOn(wss, "sendMsg").mockImplementation(() => {});
@@ -80,7 +68,7 @@ afterEach(() => {
 
 describe("routePrEvent — missing PR number", () => {
   it("returns null task when pull_request has no number", async () => {
-    const { wss, forwardEvent } = makeDeps();
+    const { wss, forwardEvent } = await makeDeps();
     const result = await wss.routePrEvent({ pull_request: {} }, makeEvent());
     expect(result).toEqual({ taskId: null, workerId: null });
     expect(forwardEvent).not.toHaveBeenCalled();
@@ -90,7 +78,7 @@ describe("routePrEvent — missing PR number", () => {
 describe("routePrEvent — synchronize", () => {
   it("returns the task without forwarding when action is synchronize", async () => {
     await seedTask({ task_id: "42", issue_number: 42, pr_number: 99 });
-    const { wss, sendMsg, forwardEvent } = makeDeps();
+    const { wss, sendMsg, forwardEvent } = await makeDeps();
     const result = await wss.routePrEvent(
       { action: "synchronize", pull_request: { number: 99 } },
       makeEvent(),
@@ -106,7 +94,7 @@ describe("routePrEvent — opened", () => {
     const w = Worker.register("worker-1", fakeWs());
     const task = await seedTask({ task_id: "42", issue_number: 42, worker_id: "worker-1", assigned_at: new Date().toISOString() });
     w.assign(task);
-    const { wss, sendMsg, forwardEvent, taskManager } = makeDeps();
+    const { wss, sendMsg, forwardEvent, taskManager } = await makeDeps();
     taskManager.handlePrOpenedEvent.mockResolvedValue(task);
     const result = await wss.routePrEvent(
       {
@@ -126,7 +114,7 @@ describe("routePrEvent — opened", () => {
   });
 
   it("returns null when handlePrOpenedEvent finds no linked issue", async () => {
-    const { wss, sendMsg, forwardEvent, taskManager } = makeDeps();
+    const { wss, sendMsg, forwardEvent, taskManager } = await makeDeps();
     taskManager.handlePrOpenedEvent.mockResolvedValue(null);
     const result = await wss.routePrEvent(
       { action: "opened", pull_request: { number: 99, body: "no link here", head: { ref: "branch" } } },
@@ -143,7 +131,7 @@ describe("routePrEvent — closed without merge", () => {
     const w = Worker.register("worker-1", fakeWs());
     const task = await seedTask({ task_id: "42", issue_number: 42, pr_number: 99, worker_id: "worker-1", assigned_at: new Date().toISOString() });
     w.assign(task);
-    const { wss, sendMsg, forwardEvent, taskManager } = makeDeps();
+    const { wss, sendMsg, forwardEvent, taskManager } = await makeDeps();
     taskManager.handlePrClosedEvent.mockResolvedValue(task);
     const result = await wss.routePrEvent(
       { action: "closed", pull_request: { number: 99, merged: false } },
@@ -156,7 +144,7 @@ describe("routePrEvent — closed without merge", () => {
   });
 
   it("returns null when no task owns the PR", async () => {
-    const { wss, forwardEvent, taskManager } = makeDeps();
+    const { wss, forwardEvent, taskManager } = await makeDeps();
     taskManager.handlePrClosedEvent.mockResolvedValue(null);
     const result = await wss.routePrEvent(
       { action: "closed", pull_request: { number: 99, merged: false } },
@@ -172,7 +160,7 @@ describe("routePrEvent — closed with merge", () => {
     const w = Worker.register("worker-1", fakeWs());
     const task = await seedTask({ task_id: "42", issue_number: 42, pr_number: 99, worker_id: "worker-1", assigned_at: new Date().toISOString() });
     w.assign(task);
-    const { wss, sendMsg, forwardEvent, taskManager } = makeDeps();
+    const { wss, sendMsg, forwardEvent, taskManager } = await makeDeps();
     taskManager.handlePrClosedEvent.mockResolvedValue(task);
     const result = await wss.routePrEvent(
       { action: "closed", pull_request: { number: 99, merged: true } },
@@ -185,7 +173,7 @@ describe("routePrEvent — closed with merge", () => {
   });
 
   it("returns null when no task owns the PR", async () => {
-    const { wss, forwardEvent } = makeDeps();
+    const { wss, forwardEvent } = await makeDeps();
     const result = await wss.routePrEvent(
       { action: "closed", pull_request: { number: 99, merged: true } },
       makeEvent(),
@@ -200,7 +188,7 @@ describe("routePrEvent — passthrough", () => {
     const w = Worker.register("worker-1", fakeWs());
     const task = await seedTask({ task_id: "42", issue_number: 42, pr_number: 99, worker_id: "worker-1", assigned_at: new Date().toISOString() });
     w.assign(task);
-    const { wss, sendMsg, forwardEvent } = makeDeps();
+    const { wss, sendMsg, forwardEvent } = await makeDeps();
     const result = await wss.routePrEvent(
       { action: "labeled", pull_request: { number: 99 } },
       makeEvent(),
@@ -211,7 +199,7 @@ describe("routePrEvent — passthrough", () => {
   });
 
   it("returns null task when no task owns the PR", async () => {
-    const { wss, forwardEvent } = makeDeps();
+    const { wss, forwardEvent } = await makeDeps();
     const result = await wss.routePrEvent(
       { action: "labeled", pull_request: { number: 99 } },
       makeEvent(),
@@ -225,7 +213,7 @@ describe("routePrEvent — passthrough", () => {
 
 describe("routePrReviewEvent", () => {
   it("returns null when PR number is missing", async () => {
-    const { wss, forwardEvent } = makeDeps();
+    const { wss, forwardEvent } = await makeDeps();
     const result = await wss.routePrReviewEvent({ pull_request: {} }, makeEvent("pull_request_review"));
     expect(result).toEqual({ taskId: null, workerId: null });
     expect(forwardEvent).not.toHaveBeenCalled();
@@ -235,7 +223,7 @@ describe("routePrReviewEvent", () => {
     const w = Worker.register("worker-1", fakeWs());
     const task = await seedTask({ task_id: "42", issue_number: 42, pr_number: 99, worker_id: "worker-1", assigned_at: new Date().toISOString() });
     w.assign(task);
-    const { wss, sendMsg, forwardEvent } = makeDeps();
+    const { wss, sendMsg, forwardEvent } = await makeDeps();
     const result = await wss.routePrReviewEvent(
       { pull_request: { number: 99 } },
       makeEvent("pull_request_review"),
@@ -246,7 +234,7 @@ describe("routePrReviewEvent", () => {
   });
 
   it("returns null when no task owns the reviewed PR", async () => {
-    const { wss, forwardEvent } = makeDeps();
+    const { wss, forwardEvent } = await makeDeps();
     const result = await wss.routePrReviewEvent(
       { pull_request: { number: 99 } },
       makeEvent("pull_request_review"),
@@ -263,7 +251,7 @@ describe("routeCheckEvent — via PR number", () => {
     const w = Worker.register("worker-1", fakeWs());
     const task = await seedTask({ task_id: "42", issue_number: 42, pr_number: 99, worker_id: "worker-1", assigned_at: new Date().toISOString() });
     w.assign(task);
-    const { wss, sendMsg, forwardEvent, taskManager } = makeDeps();
+    const { wss, sendMsg, forwardEvent, taskManager } = await makeDeps();
     taskManager.getTaskForCheckEvent.mockResolvedValue({ task, ref: "PR #99" });
     const result = await wss.routeCheckEvent(
       { check_run: { pull_requests: [{ number: 99 }] } },
@@ -280,7 +268,7 @@ describe("routeCheckEvent — via PR number", () => {
     const w = Worker.register("worker-1", fakeWs());
     const task = await seedTask({ task_id: "42", issue_number: 42, pr_number: 99, worker_id: "worker-1", assigned_at: new Date().toISOString() });
     w.assign(task);
-    const { wss, sendMsg, forwardEvent, taskManager } = makeDeps();
+    const { wss, sendMsg, forwardEvent, taskManager } = await makeDeps();
     taskManager.getTaskForCheckEvent.mockResolvedValue({ task, ref: "PR #99" });
     const result = await wss.routeCheckEvent(
       { check_suite: { pull_requests: [{ number: 99 }] } },
@@ -299,7 +287,7 @@ describe("routeCheckEvent — via branch name", () => {
     const w = Worker.register("worker-1", fakeWs());
     const task = await seedTask({ task_id: "42", issue_number: 42, worker_id: "worker-1", assigned_at: new Date().toISOString() });
     w.assign(task);
-    const { wss, sendMsg, forwardEvent, taskManager } = makeDeps();
+    const { wss, sendMsg, forwardEvent, taskManager } = await makeDeps();
     taskManager.getTaskForCheckEvent.mockResolvedValue({ task, ref: "branch feature-branch" });
     const result = await wss.routeCheckEvent(
       { check_run: { pull_requests: [], check_suite: { head_branch: "feature-branch" } } },
@@ -316,7 +304,7 @@ describe("routeCheckEvent — via branch name", () => {
     const w = Worker.register("worker-1", fakeWs());
     const task = await seedTask({ task_id: "42", issue_number: 42, worker_id: "worker-1", assigned_at: new Date().toISOString() });
     w.assign(task);
-    const { wss, sendMsg, forwardEvent, taskManager } = makeDeps();
+    const { wss, sendMsg, forwardEvent, taskManager } = await makeDeps();
     taskManager.getTaskForCheckEvent.mockResolvedValue({ task, ref: "branch feature-branch" });
     const result = await wss.routeCheckEvent(
       { check_suite: { pull_requests: [], head_branch: "feature-branch" } },
@@ -330,7 +318,7 @@ describe("routeCheckEvent — via branch name", () => {
   });
 
   it("returns null when getTaskForCheckEvent finds nothing", async () => {
-    const { wss, forwardEvent } = makeDeps();
+    const { wss, forwardEvent } = await makeDeps();
     const result = await wss.routeCheckEvent(
       { check_run: { pull_requests: [], check_suite: { head_branch: "unknown-branch" } } },
       makeEvent("check_run"),
@@ -346,7 +334,7 @@ describe("routeCheckEvent — via branch name", () => {
 describe("routeIssueEvent — enqueue on labeled", () => {
   it("calls handleIssueLabeledEvent and returns the enqueued task", async () => {
     const task = Task.fromTest({ task_id: "42", issue_number: 42 });
-    const { wss, forwardEvent, taskManager } = makeDeps();
+    const { wss, forwardEvent, taskManager } = await makeDeps();
     taskManager.handleIssueLabeledEvent.mockResolvedValue(task);
     const issue = { number: 42, title: "Do something", body: "details", state: "open", labels: [{ name: "brunel:ready" }] };
     const result = await wss.routeIssueEvent(
@@ -366,7 +354,7 @@ describe("routeIssueEvent — enqueue on labeled", () => {
   });
 
   it("returns null when handleIssueLabeledEvent returns null (e.g. closed issue)", async () => {
-    const { wss, forwardEvent, taskManager } = makeDeps();
+    const { wss, forwardEvent, taskManager } = await makeDeps();
     taskManager.handleIssueLabeledEvent.mockResolvedValue(null);
     const issue = { number: 42, title: "Do something", body: "", state: "closed", labels: [{ name: "brunel:ready" }] };
     const result = await wss.routeIssueEvent(
@@ -381,7 +369,7 @@ describe("routeIssueEvent — enqueue on labeled", () => {
   });
 
   it("ignores a labeled event for a different label", async () => {
-    const { wss, forwardEvent, taskManager } = makeDeps();
+    const { wss, forwardEvent, taskManager } = await makeDeps();
     const issue = { number: 42, title: "Do something", body: "", state: "open", labels: [] };
     const result = await wss.routeIssueEvent(
       { action: "labeled", label: { name: "other-label" } },
@@ -398,7 +386,7 @@ describe("routeIssueEvent — enqueue on labeled", () => {
 describe("routeIssueEvent — enqueue on opened", () => {
   it("calls handleIssueLabeledEvent when opened with the task label already attached", async () => {
     const task = Task.fromTest({ task_id: "42", issue_number: 42 });
-    const { wss, forwardEvent, taskManager } = makeDeps();
+    const { wss, forwardEvent, taskManager } = await makeDeps();
     taskManager.handleIssueLabeledEvent.mockResolvedValue(task);
     const issue = { number: 42, title: "Do something", body: "details", state: "open", labels: [{ name: "brunel:ready" }] };
     const result = await wss.routeIssueEvent(
@@ -413,7 +401,7 @@ describe("routeIssueEvent — enqueue on opened", () => {
   });
 
   it("does not call handleIssueLabeledEvent when opened without the task label", async () => {
-    const { wss, forwardEvent, taskManager } = makeDeps();
+    const { wss, forwardEvent, taskManager } = await makeDeps();
     const issue = { number: 42, title: "Do something", body: "", state: "open", labels: [] };
     const result = await wss.routeIssueEvent(
       { action: "opened" },
@@ -430,7 +418,7 @@ describe("routeIssueEvent — enqueue on opened", () => {
 describe("routeIssueEvent — unlabeled (dequeue)", () => {
   it("dequeues the task when the task label is removed", async () => {
     await seedTask({ task_id: "42", issue_number: 42 });
-    const { wss, forwardEvent, taskManager } = makeDeps();
+    const { wss, forwardEvent, taskManager } = await makeDeps();
     const issue = { number: 42 };
     await wss.routeIssueEvent(
       { action: "unlabeled", label: { name: "brunel:ready" } },
@@ -446,7 +434,7 @@ describe("routeIssueEvent — unlabeled (dequeue)", () => {
 
   it("does not dequeue when a different label is removed", async () => {
     await seedTask({ task_id: "42", issue_number: 42 });
-    const { wss, forwardEvent, taskManager } = makeDeps();
+    const { wss, forwardEvent, taskManager } = await makeDeps();
     const issue = { number: 42 };
     await wss.routeIssueEvent(
       { action: "unlabeled", label: { name: "other-label" } },
@@ -462,7 +450,7 @@ describe("routeIssueEvent — unlabeled (dequeue)", () => {
 
 describe("routeIssueEvent — closed", () => {
   it("calls closeIssue when an issue is closed", async () => {
-    const { wss, forwardEvent, taskManager } = makeDeps();
+    const { wss, forwardEvent, taskManager } = await makeDeps();
     const issue = { number: 42 };
     await wss.routeIssueEvent(
       { action: "closed" },
@@ -477,7 +465,7 @@ describe("routeIssueEvent — closed", () => {
 
   it("calls forwardEvent when a tracked task exists", async () => {
     await seedTask({ task_id: "42", issue_number: 42 });
-    const { wss, forwardEvent, taskManager } = makeDeps();
+    const { wss, forwardEvent, taskManager } = await makeDeps();
     const issue = { number: 42 };
     await wss.routeIssueEvent(
       { action: "closed" },
@@ -492,7 +480,7 @@ describe("routeIssueEvent — closed", () => {
 
 describe("routeIssueEvent — reopened", () => {
   it("calls reopenIssue when an issue is reopened", async () => {
-    const { wss, forwardEvent, taskManager } = makeDeps();
+    const { wss, forwardEvent, taskManager } = await makeDeps();
     const issue = { number: 42 };
     await wss.routeIssueEvent(
       { action: "reopened" },
@@ -507,7 +495,7 @@ describe("routeIssueEvent — reopened", () => {
 
   it("calls forwardEvent when a tracked task exists", async () => {
     await seedTask({ task_id: "42", issue_number: 42 });
-    const { wss, forwardEvent, taskManager } = makeDeps();
+    const { wss, forwardEvent, taskManager } = await makeDeps();
     const issue = { number: 42 };
     await wss.routeIssueEvent(
       { action: "reopened" },
@@ -523,7 +511,7 @@ describe("routeIssueEvent — reopened", () => {
 describe("routeIssueEvent — edited", () => {
   it("calls handleIssueBodyEditedEvent when the issue body is edited for a tracked task", async () => {
     await seedTask({ task_id: "42", issue_number: 42 });
-    const { wss, forwardEvent, taskManager } = makeDeps();
+    const { wss, forwardEvent, taskManager } = await makeDeps();
     const issue = { number: 42, body: "updated body" };
     await wss.routeIssueEvent(
       { action: "edited", changes: { body: { from: "old body" } } },
@@ -539,7 +527,7 @@ describe("routeIssueEvent — edited", () => {
 
   it("does not call handleIssueBodyEditedEvent when the body was not changed", async () => {
     await seedTask({ task_id: "42", issue_number: 42 });
-    const { wss, forwardEvent, taskManager } = makeDeps();
+    const { wss, forwardEvent, taskManager } = await makeDeps();
     const issue = { number: 42, title: "updated title" };
     await wss.routeIssueEvent(
       { action: "edited", changes: { title: { from: "old title" } } },
@@ -553,7 +541,7 @@ describe("routeIssueEvent — edited", () => {
   });
 
   it("does not call handleIssueBodyEditedEvent when the issue is not tracked", async () => {
-    const { wss, forwardEvent, taskManager } = makeDeps();
+    const { wss, forwardEvent, taskManager } = await makeDeps();
     const issue = { number: 42, body: "updated body" };
     await wss.routeIssueEvent(
       { action: "edited", changes: { body: { from: "old body" } } },
@@ -571,7 +559,7 @@ describe("routeIssueEvent — passthrough forwarding", () => {
     const w = Worker.register("worker-1", fakeWs());
     const task = await seedTask({ task_id: "42", issue_number: 42, worker_id: "worker-1", assigned_at: new Date().toISOString() });
     w.assign(task);
-    const { wss, sendMsg, forwardEvent } = makeDeps();
+    const { wss, sendMsg, forwardEvent } = await makeDeps();
     const issue = { number: 42 };
     const result = await wss.routeIssueEvent(
       { action: "assigned" },
@@ -588,7 +576,7 @@ describe("routeIssueEvent — passthrough forwarding", () => {
     const w = Worker.register("worker-1", fakeWs());
     const task = await seedTask({ task_id: "42", issue_number: 42, pr_number: 99, worker_id: "worker-1", assigned_at: new Date().toISOString() });
     w.assign(task);
-    const { wss, sendMsg, forwardEvent } = makeDeps();
+    const { wss, sendMsg, forwardEvent } = await makeDeps();
     const issue = { number: 99 }; // PR number in issue.number
     const result = await wss.routeIssueEvent(
       { action: "created" },
