@@ -197,7 +197,30 @@ export class ForemanWss {
     const evt = WebhookEvent.fromIncoming(id, name, p);
     if (!evt.isMuted()) log(evt.summary());
 
-    const { taskId, workerId } = await this.applyRouting(name, p, evt);
+    // Find or create a Repo record for every webhook that carries a repository.
+    // Routing always proceeds regardless of repo status — events must still be
+    // forwarded to any worker that has a task assigned from this repo.
+    const repoFullName = strProp(p.repository, "full_name");
+    if (repoFullName) {
+      await Repo.findOrCreate(repoFullName);
+    }
+
+    let taskId: string | null = null;
+    let workerId: string | null = null;
+
+    if (name === "pull_request") {
+      ({ taskId, workerId } = await this.routePrEvent(p, evt));
+    } else if (name === "pull_request_review" || name === "pull_request_review_comment") {
+      ({ taskId, workerId } = await this.routePrReviewEvent(p, evt));
+    } else if (name === "check_run" || name === "check_suite") {
+      ({ taskId, workerId } = await this.routeCheckEvent(p, evt, name));
+    } else {
+      const issue = p.issue as R | undefined;
+      const issueNumber = numProp(issue, "number");
+      if (issueNumber !== null) {
+        ({ taskId, workerId } = await this.routeIssueEvent(p, evt, issue!, issueNumber));
+      }
+    }
 
     const action = typeof p.action === "string" ? p.action : null;
     const webhookIssueNumber = typeof (p.issue as R | undefined)?.number === "number" ? (p.issue as R).number as number : null;
@@ -223,40 +246,6 @@ export class ForemanWss {
       workerId,
       summary: evt.format(),
     });
-  }
-
-  /** Applies repo filtering and dispatches the event to the appropriate route handler.
-   *  Returns { taskId: null, workerId: null } when the event is filtered out (non-active
-   *  repo or DB error); the caller always logs/broadcasts regardless of this result. */
-  private async applyRouting(name: string, p: R, evt: WebhookEvent): Promise<RouteResult> {
-    const repoFullName = strProp(p.repository, "full_name");
-    if (repoFullName) {
-      try {
-        const repo = await Repo.findOrCreate(repoFullName);
-        if (repo.status !== "active") {
-          log(`[repo ${repoFullName}] ignoring event — repo is not active`);
-          return routeResult(null);
-        }
-      } catch (err) {
-        log(`ERROR Failed to find or create repo ${repoFullName}: ${fmtError(err)}`);
-        return routeResult(null);
-      }
-    }
-
-    if (name === "pull_request") {
-      return this.routePrEvent(p, evt);
-    } else if (name === "pull_request_review" || name === "pull_request_review_comment") {
-      return this.routePrReviewEvent(p, evt);
-    } else if (name === "check_run" || name === "check_suite") {
-      return this.routeCheckEvent(p, evt, name);
-    } else {
-      const issue = p.issue as R | undefined;
-      const issueNumber = numProp(issue, "number");
-      if (issueNumber !== null) {
-        return this.routeIssueEvent(p, evt, issue!, issueNumber);
-      }
-    }
-    return routeResult(null);
   }
 
   async reconcile(): Promise<void> {

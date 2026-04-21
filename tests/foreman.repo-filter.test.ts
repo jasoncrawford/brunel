@@ -1,11 +1,10 @@
 /**
- * Tests for per-repo event filtering in routeEvent.
+ * Tests for Repo.findOrCreate being called in routeEvent.
  *
- * When a webhook arrives with a repository.full_name, the foreman should:
- * 1. Find or create a Repo record for that full_name.
- * 2. Skip all task processing (and return early) if the repo is not 'active'.
- * 3. Proceed with normal routing if the repo is 'active'.
- * 4. Proceed with normal routing if the payload has no repository.full_name.
+ * When a webhook arrives with a repository.full_name, the foreman should
+ * call Repo.findOrCreate() to register the repo in the database.
+ * Routing always proceeds regardless of repo status — events must still
+ * be forwarded to any worker that has a task from that repo.
  */
 import http from "http";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -62,62 +61,11 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// ── Non-active repo: skip processing ─────────────────────────────────────────
+// ── Repo.findOrCreate is called when full_name is present ─────────────────────
 
-describe("routeEvent — non-active repo", () => {
-  it("skips issue routing when repo status is 'new'", async () => {
+describe("routeEvent — repository.full_name present", () => {
+  it("calls Repo.findOrCreate with the full_name", async () => {
     findOrCreate.mockResolvedValue(fakeRepo("new"));
-    const taskManager = makeTaskManager();
-    const { wss, routeIssueEvent } = makeWss(taskManager);
-
-    await wss.routeEvent("evt-1", "issues", {
-      action: "labeled",
-      label: { name: "brunel:ready" },
-      issue: { number: 42, title: "Task", body: "", state: "open", labels: [] },
-      repository: { full_name: "owner/repo" },
-    });
-
-    expect(findOrCreate).toHaveBeenCalledWith("owner/repo");
-    expect(routeIssueEvent).not.toHaveBeenCalled();
-    expect(taskManager.handleIssueLabeledEvent).not.toHaveBeenCalled();
-  });
-
-  it("skips PR routing when repo status is 'new'", async () => {
-    findOrCreate.mockResolvedValue(fakeRepo("new"));
-    const taskManager = makeTaskManager();
-    const { wss, routePrEvent } = makeWss(taskManager);
-
-    await wss.routeEvent("evt-1", "pull_request", {
-      action: "opened",
-      pull_request: { number: 10, body: "Closes #42", head: { ref: "branch" } },
-      repository: { full_name: "owner/repo" },
-    });
-
-    expect(findOrCreate).toHaveBeenCalledWith("owner/repo");
-    expect(routePrEvent).not.toHaveBeenCalled();
-  });
-
-  it("logs that the repo is not active", async () => {
-    findOrCreate.mockResolvedValue(fakeRepo("new"));
-    const taskManager = makeTaskManager();
-    const { wss } = makeWss(taskManager);
-
-    await wss.routeEvent("evt-1", "issues", {
-      action: "labeled",
-      label: { name: "brunel:ready" },
-      issue: { number: 42, title: "Task", body: "", state: "open", labels: [] },
-      repository: { full_name: "owner/repo" },
-    });
-
-    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("not active"));
-  });
-});
-
-// ── Active repo: proceed normally ─────────────────────────────────────────────
-
-describe("routeEvent — active repo", () => {
-  it("routes issue events normally when repo status is 'active'", async () => {
-    findOrCreate.mockResolvedValue(fakeRepo("active"));
     const taskManager = makeTaskManager();
     const { wss, routeIssueEvent } = makeWss(taskManager);
     routeIssueEvent.mockResolvedValue({ taskId: null, workerId: null });
@@ -130,10 +78,25 @@ describe("routeEvent — active repo", () => {
     });
 
     expect(findOrCreate).toHaveBeenCalledWith("owner/repo");
+  });
+
+  it("routes the event even when repo status is 'new'", async () => {
+    findOrCreate.mockResolvedValue(fakeRepo("new"));
+    const taskManager = makeTaskManager();
+    const { wss, routeIssueEvent } = makeWss(taskManager);
+    routeIssueEvent.mockResolvedValue({ taskId: null, workerId: null });
+
+    await wss.routeEvent("evt-1", "issues", {
+      action: "labeled",
+      label: { name: "brunel:ready" },
+      issue: { number: 42, title: "Task", body: "", state: "open", labels: [] },
+      repository: { full_name: "owner/repo" },
+    });
+
     expect(routeIssueEvent).toHaveBeenCalledOnce();
   });
 
-  it("routes PR events normally when repo status is 'active'", async () => {
+  it("routes the event when repo status is 'active'", async () => {
     findOrCreate.mockResolvedValue(fakeRepo("active"));
     const taskManager = makeTaskManager();
     const { wss, routePrEvent } = makeWss(taskManager);
@@ -150,9 +113,9 @@ describe("routeEvent — active repo", () => {
   });
 });
 
-// ── No repository in payload: proceed normally ────────────────────────────────
+// ── No repository in payload: no findOrCreate call ───────────────────────────
 
-describe("routeEvent — no repository in payload", () => {
+describe("routeEvent — no repository.full_name in payload", () => {
   it("does not call Repo.findOrCreate and still routes the event", async () => {
     const taskManager = makeTaskManager();
     const { wss, routePrEvent } = makeWss(taskManager);
@@ -181,25 +144,5 @@ describe("routeEvent — no repository in payload", () => {
 
     expect(findOrCreate).not.toHaveBeenCalled();
     expect(routeIssueEvent).toHaveBeenCalledOnce();
-  });
-});
-
-// ── Repo.findOrCreate error handling ─────────────────────────────────────────
-
-describe("routeEvent — Repo.findOrCreate error", () => {
-  it("skips processing and logs error when findOrCreate throws", async () => {
-    findOrCreate.mockRejectedValue(new Error("DB connection failed"));
-    const taskManager = makeTaskManager();
-    const { wss, routeIssueEvent } = makeWss(taskManager);
-
-    await wss.routeEvent("evt-1", "issues", {
-      action: "labeled",
-      issue: { number: 42, title: "Task", body: "", state: "open", labels: [] },
-      repository: { full_name: "owner/repo" },
-    });
-
-    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("ERROR"));
-    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("owner/repo"));
-    expect(routeIssueEvent).not.toHaveBeenCalled();
   });
 });
