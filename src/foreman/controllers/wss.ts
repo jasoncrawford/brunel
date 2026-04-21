@@ -11,6 +11,7 @@ import { TaskManager } from "../models/task-manager.js";
 import { Repo } from "../models/repo.js";
 import { Task } from "../models/task.js";
 import { Worker } from "../models/worker.js";
+import { Repo } from "../models/repo.js";
 
 type R = Record<string, unknown>;
 
@@ -198,6 +199,44 @@ export class ForemanWss {
 
     let taskId: string | null = null;
     let workerId: string | null = null;
+
+    // Find or create a Repo record for every webhook that carries a repository.
+    // Skip all task processing if the repo is not yet active.
+    const repoFullName = strProp(p.repository, "full_name");
+    if (repoFullName) {
+      try {
+        const repo = await Repo.findOrCreate(repoFullName);
+        if (repo.status !== "active") {
+          log(`[repo ${repoFullName}] ignoring event — repo is not active`);
+          // Fall through to webhook logging below (taskId/workerId remain null).
+          void WebhookEvent.log({
+            deliveryId: id,
+            eventName: name,
+            action: typeof p.action === "string" ? p.action : null,
+            repo: repoFullName,
+            sender: strProp(p.sender, "login"),
+            issueNumber: numProp(p.issue as R | undefined, "number"),
+            prNumber: numProp(p.pull_request as R | undefined, "number"),
+            branch: null,
+            taskId: null,
+            workerId: null,
+            payload: p,
+          });
+          this.adminWss?.broadcastLogEvent({
+            kind: "webhook",
+            id: this.nextBroadcastId++,
+            timestamp: new Date().toISOString(),
+            taskId: null,
+            workerId: null,
+            summary: evt.format(),
+          });
+          return;
+        }
+      } catch (err) {
+        log(`ERROR Failed to find or create repo ${repoFullName}: ${fmtError(err)}`);
+        return;
+      }
+    }
 
     if (name === "pull_request") {
       ({ taskId, workerId } = await this.routePrEvent(p, evt));
