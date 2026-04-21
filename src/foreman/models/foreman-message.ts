@@ -15,6 +15,7 @@ export class ForemanMessage extends ActiveRecord {
   readonly direction: string;
   readonly workerId: string | null;
   readonly taskId: string | null;
+  readonly repoId: number | null;
   readonly msgType: string;
   readonly payload: Record<string, unknown>;
 
@@ -25,6 +26,7 @@ export class ForemanMessage extends ActiveRecord {
     this.direction = row.direction;
     this.workerId = row.worker_id;
     this.taskId = row.task_id;
+    this.repoId = row.repo_id;
     this.msgType = row.msg_type;
     this.payload = (row.payload as Record<string, unknown>) ?? {};
   }
@@ -36,6 +38,7 @@ export class ForemanMessage extends ActiveRecord {
     direction: "sent" | "received";
     workerId: string | null;
     taskId: string | null;
+    repoId?: number | null;
     msgType: string;
     payload: Record<string, unknown>;
   }): Promise<void> {
@@ -43,6 +46,7 @@ export class ForemanMessage extends ActiveRecord {
       direction: data.direction,
       worker_id: data.workerId,
       task_id: data.taskId,
+      repo_id: data.repoId ?? null,
       msg_type: data.msgType,
       payload: data.payload as Json,
     }).then(() => undefined).catch((err: unknown) => log(`[db] foreman_messages insert error: ${fmtError(err)}`));

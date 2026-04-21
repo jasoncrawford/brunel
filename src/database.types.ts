@@ -42,6 +42,7 @@ export type Database = {
           task_id: string | null
           msg_type: string
           payload: Json
+          repo_id: number | null
         }
         Insert: {
           id?: never
@@ -51,6 +52,7 @@ export type Database = {
           task_id?: string | null
           msg_type: string
           payload: Json
+          repo_id?: number | null
         }
         Update: {
           id?: never
@@ -60,6 +62,7 @@ export type Database = {
           task_id?: string | null
           msg_type?: string
           payload?: Json
+          repo_id?: number | null
         }
         Relationships: []
       }

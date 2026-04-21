@@ -151,10 +151,12 @@ export class ForemanWss {
           const rcvWorkerId = workerId || ((msg as { workerId?: string }).workerId ?? null);
           const rcvTaskId = (msg as { taskId?: string }).taskId ?? null;
           const rcvPayload = msg as unknown as Record<string, unknown>;
+          const rcvRepoId = rcvWorkerId ? Worker.get(rcvWorkerId)?.repo?.id ?? null : null;
           void ForemanMessage.log({
             direction: "received",
             workerId: rcvWorkerId,
             taskId: rcvTaskId,
+            repoId: rcvRepoId,
             msgType: msg.type,
             payload: rcvPayload,
           });
@@ -184,6 +186,7 @@ export class ForemanWss {
             direction: "received",
             workerId,
             taskId,
+            repoId: currentWorker?.repo?.id ?? null,
             msgType: "worker_disconnected",
             payload: disconnPayload,
           });
@@ -282,11 +285,11 @@ export class ForemanWss {
   sendMsg(worker: Worker, msg: Wire.ForemanMessage, logTaskId?: string): void {
     const taskId = logTaskId ?? (("taskId" in msg ? msg.taskId : null) ?? null);
     worker.send(msg);
-    this.logAndBroadcastSent(worker.workerId, taskId, msg.type, msg as unknown as Record<string, unknown>);
+    this.logAndBroadcastSent(worker.workerId, taskId, msg.type, msg as unknown as Record<string, unknown>, worker.repo?.id ?? null);
   }
 
-  private logAndBroadcastSent(workerId: string | null, taskId: string | null, msgType: string, payload: Record<string, unknown>): void {
-    void ForemanMessage.log({ direction: "sent", workerId, taskId, msgType, payload });
+  private logAndBroadcastSent(workerId: string | null, taskId: string | null, msgType: string, payload: Record<string, unknown>, repoId: number | null = null): void {
+    void ForemanMessage.log({ direction: "sent", workerId, taskId, repoId, msgType, payload });
     this.broadcastMessageEvent({ direction: "sent", workerId, taskId, msgType, payload });
   }
 
@@ -326,7 +329,8 @@ export class ForemanWss {
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(payload));
     }
-    this.logAndBroadcastSent(workerId, taskId, payload.type, payload as unknown as Record<string, unknown>);
+    const repoId = workerId ? Worker.get(workerId)?.repo?.id ?? null : null;
+    this.logAndBroadcastSent(workerId, taskId, payload.type, payload as unknown as Record<string, unknown>, repoId);
   }
 
   // ── Hello handlers ───────────────────────────────────────────────────────────
