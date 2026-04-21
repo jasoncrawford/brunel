@@ -28,6 +28,7 @@ export async function seedTask(
 ): Promise<Task> {
   await db.from("tasks").upsert({
     repo: "",
+    repo_id: 0,
     title: "",
     body: "",
     labels: [],

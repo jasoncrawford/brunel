@@ -6,6 +6,7 @@ import * as Wire from "../../../shared/wire.js";
 import { fetchNativeBlockers } from "../clients/github.js";
 import { db } from "../clients/db-client.js";
 import { ActiveRecord } from "./active-record.js";
+import { Repo } from "./repo.js";
 
 type DbRow = Database["public"]["Tables"]["tasks"]["Row"];
 
@@ -17,6 +18,7 @@ export class Task extends ActiveRecord {
 
   readonly taskId: string;
   issueNumber: number;
+  repoId: number;
   repo: string;
   title: string;
   body: string;
@@ -44,6 +46,7 @@ export class Task extends ActiveRecord {
     super();
     this.taskId = row.task_id;
     this.issueNumber = row.issue_number;
+    this.repoId = row.repo_id;
     this.repo = row.repo;
     this.title = row.title;
     this.body = row.body;
@@ -103,6 +106,7 @@ export class Task extends ActiveRecord {
   static fromTest(fields: Partial<DbRow> & { task_id: string; issue_number: number }): Task {
     const row: DbRow = {
       repo: "",
+      repo_id: 0,
       title: "",
       body: "",
       labels: [],
@@ -203,12 +207,14 @@ export class Task extends ActiveRecord {
   }
 
   static async upsert(taskId: string, issueNumber: number, repo: string, title: string, body: string, labels: string[]): Promise<Task> {
-    // On conflict (task already exists), only update content fields (title, body, labels, repo, issue_number).
+    // Ensure the repo exists and get its id.
+    const repoRecord = await Repo.findOrCreate(repo);
+    // On conflict (task already exists), only update content fields (title, body, labels, repo, repo_id, issue_number).
     // Status fields (worker_id, assigned_at, completed_at, issue_closed_at, pr_merged_at) are intentionally
     // omitted so that existing assignments and status are preserved — e.g. during startup sync.
     // For new tasks, those columns default to null in the DB schema.
     const { data, error } = await db.from("tasks").upsert(
-      { task_id: taskId, issue_number: issueNumber, repo, title, body, labels },
+      { task_id: taskId, issue_number: issueNumber, repo_id: repoRecord.id, repo, title, body, labels },
       { onConflict: "task_id" },
     ).select().maybeSingle();
     if (error) throw error;

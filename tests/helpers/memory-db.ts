@@ -1,12 +1,13 @@
 /**
  * In-memory Supabase client shim for use when Supabase is not configured.
- * Implements just the query patterns that Task (task.ts) uses.
+ * Implements just the query patterns that Task (task.ts) and Repo (repo.ts) use.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "../../src/database.types.js";
 
 type DbRow = Database["public"]["Tables"]["tasks"]["Row"];
+type RepoRow = Database["public"]["Tables"]["repos"]["Row"];
 type Filters = Array<{ col: keyof DbRow; op: "eq" | "is"; val: unknown }>;
 
 function applyFilters(rows: DbRow[], filters: Filters): DbRow[] {
@@ -27,6 +28,43 @@ function ok<T>(data: T): Promise<{ data: T; error: null }> {
 /** Returns a fake Supabase client backed by an in-memory Map. */
 export function createMemoryTaskDb(): SupabaseClient<Database> {
   const store = new Map<string, DbRow>();
+
+  // ── Repos store ───────────────────────────────────────────────────────────
+  const reposStore = new Map<string, RepoRow>();
+  let nextRepoId = 1;
+
+  function buildReposTable() {
+    return {
+      upsert(rowData: { full_name: string; status?: string }, _opts?: unknown) {
+        if (!reposStore.has(rowData.full_name)) {
+          reposStore.set(rowData.full_name, {
+            id: nextRepoId++,
+            full_name: rowData.full_name,
+            status: rowData.status ?? "new",
+            created_at: new Date().toISOString(),
+          });
+        }
+        const result = reposStore.get(rowData.full_name)!;
+        const sb = {
+          select() { return sb; },
+          single() { return ok(result); },
+          maybeSingle() { return ok(result); },
+        };
+        return sb;
+      },
+      select(_cols?: string) {
+        const rows = [...reposStore.values()];
+        const sb = {
+          eq(_col: string, _val: unknown) { return sb; },
+          order(_col: string, _opts?: unknown) { return sb; },
+          limit(n: number) { return ok(rows.slice(0, n)); },
+          maybeSingle() { return ok(rows[0] ?? null); },
+          single() { return ok(rows[0] ?? null); },
+        };
+        return sb;
+      },
+    };
+  }
 
   function buildSelectQuery(filters: Filters) {
     const sb = {
@@ -98,6 +136,9 @@ export function createMemoryTaskDb(): SupabaseClient<Database> {
 
   return {
     from(table: string) {
+      if (table === "repos") {
+        return buildReposTable();
+      }
       if (table !== "tasks") {
         return emptyBuilder;
       }
@@ -111,6 +152,7 @@ export function createMemoryTaskDb(): SupabaseClient<Database> {
           const row: DbRow = {
             // Defaults for new rows:
             repo: "",
+            repo_id: 0,
             title: "",
             body: "",
             labels: [],
