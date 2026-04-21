@@ -43,9 +43,14 @@ export class TaskManager extends EventEmitter {
     return Array.from(TaskManager.registry.values());
   }
 
-  /** Look up a TaskManager by repo ID (returns undefined if not registered). */
+  /** Look up a TaskManager by repo ID. Used internally by Task.manager. */
   static getByRepoId(repoId: number): TaskManager | undefined {
     return TaskManager.registry.get(repoId);
+  }
+
+  /** Aggregate active tasks from all repos for admin broadcast. */
+  static async getAllTasksForBroadcast(): Promise<Wire.Task[]> {
+    return (await Promise.all(TaskManager.all().map(tm => tm.getTasksForBroadcast()))).flat();
   }
 
   /** Reset the registry — for tests only. */
@@ -81,7 +86,7 @@ export class TaskManager extends EventEmitter {
     Task.events.on("changed", () => this.emit("changed"));
     // Forward instance events to static aggregator
     this.on("changed", () => TaskManager.events.emit("changed"));
-    this.on("deps_loaded", () => TaskManager.events.emit("deps_loaded"));
+    this.on("deps_loaded", () => TaskManager.events.emit("deps_loaded", this));
   }
 
   // ── Read operations (async — always reads from Task statics) ──────────────

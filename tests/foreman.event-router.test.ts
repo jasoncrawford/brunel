@@ -173,8 +173,7 @@ describe("forwardEvent — active tasks still receive events", () => {
   it("queues event for a pending task with no worker", () => {
     const task = Task.fromTest({ task_id: "42", issue_number: 42, repo_id: testRepoId });
     task.blockersLoaded = true; // no open blockers → status is "pending"
-    const tm = TaskManager.getByRepoId(testRepoId)!;
-    const queueSpy = vi.spyOn(tm, "queueEvent");
+    const queueSpy = vi.spyOn(task.manager, "queueEvent");
     const { wss, sendMsg } = makeWss();
 
     wss.forwardEvent(task, makeEvent(), "#42");

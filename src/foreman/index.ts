@@ -37,7 +37,7 @@ if (isMain) {
 
   // Admin WebSocket broadcaster — aggregates tasks from all per-repo TaskManagers
   const adminWss = createAdminWss(server, async () => ({
-    tasks: (await Promise.all(TaskManager.all().map(tm => tm.getTasksForBroadcast()))).flat(),
+    tasks: await TaskManager.getAllTasksForBroadcast(),
     workers: Worker.all().map((w) => w.toWire()),
   }));
 
