@@ -20,8 +20,8 @@ describe("TaskManager — queue operations", () => {
   let m: TaskManager;
   beforeEach(async () => {
     Worker._reset();
-    m = await createTestTaskManager();
     resetDb();
+    m = await createTestTaskManager();
   });
   afterEach(() => { vi.restoreAllMocks(); });
 
@@ -155,8 +155,8 @@ describe("TaskManager — queue operations", () => {
 describe("TaskManager — derived blocked status", () => {
   let m: TaskManager;
   beforeEach(async () => {
-    m = await createTestTaskManager();
     resetDb();
+    m = await createTestTaskManager();
   });
   afterEach(() => { vi.restoreAllMocks(); });
 
@@ -207,8 +207,8 @@ describe("TaskManager — cancel (delete behavior)", () => {
   let m: TaskManager;
   beforeEach(async () => {
     Worker._reset();
-    m = await createTestTaskManager();
     resetDb();
+    m = await createTestTaskManager();
   });
   afterEach(() => { vi.restoreAllMocks(); });
 
@@ -242,8 +242,8 @@ describe("TaskManager — cancel (delete behavior)", () => {
 describe("TaskManager — nextPending with predicate", () => {
   let m: TaskManager;
   beforeEach(async () => {
-    m = await createTestTaskManager();
     resetDb();
+    m = await createTestTaskManager();
   });
   afterEach(() => { vi.restoreAllMocks(); });
 
@@ -272,8 +272,8 @@ describe("TaskManager changed events", () => {
   let m: TaskManager;
   beforeEach(async () => {
     Worker._reset();
-    m = await createTestTaskManager();
     resetDb();
+    m = await createTestTaskManager();
   });
   afterEach(() => { vi.restoreAllMocks(); });
 

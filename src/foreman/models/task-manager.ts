@@ -58,6 +58,9 @@ export class TaskManager extends EventEmitter {
 
   /** Reset the registry — for tests only. */
   static _resetRegistry(): void {
+    for (const tm of TaskManager.registry.values()) {
+      Task.events.off("changed", tm._onTaskChanged);
+    }
     TaskManager.registry.clear();
     TaskManager.events.removeAllListeners();
   }
@@ -80,13 +83,15 @@ export class TaskManager extends EventEmitter {
   private _blockers: Map<number, number[]>;
   private _blockersLoaded: Set<number>;
 
+  private _onTaskChanged = () => this.emit("changed");
+
   constructor(repo: Repo) {
     super();
     this.repo = repo;
     this._openIssues = new Set();
     this._blockers = new Map();
     this._blockersLoaded = new Set();
-    Task.events.on("changed", () => this.emit("changed"));
+    Task.events.on("changed", this._onTaskChanged);
     // Forward instance events to static aggregator
     this.on("changed", () => TaskManager.events.emit("changed"));
     this.on("deps_loaded", () => TaskManager.events.emit("deps_loaded", this));
