@@ -23,7 +23,7 @@ describe("WebhookEvent.log", () => {
       deliveryId: "abc",
       eventName: "issues",
       action: "labeled",
-      repo: "owner/repo",
+      repoId: null,
       sender: "alice",
       issueNumber: 42,
       prNumber: null,
@@ -38,13 +38,13 @@ describe("WebhookEvent.log", () => {
 
     const { data } = await supabase
       .from("webhook_events")
-      .select("event_name, action, repo, sender, issue_number, task_id, payload")
+      .select("event_name, action, repo_id, sender, issue_number, task_id, payload")
       .eq("delivery_id", "abc");
     expect(data).toHaveLength(1);
     expect(data![0]).toMatchObject({
       event_name: "issues",
       action: "labeled",
-      repo: "owner/repo",
+      repo_id: null,
       sender: "alice",
       issue_number: 42,
       task_id: "42",
@@ -58,7 +58,7 @@ describe("WebhookEvent.log", () => {
         deliveryId: null,
         eventName: "push",
         action: null,
-        repo: null,
+        repoId: null,
         sender: null,
         issueNumber: null,
         prNumber: null,
@@ -238,7 +238,7 @@ describe("queryActivityLog", () => {
   it("filters by taskId", async () => {
     await WebhookEvent.log({
       deliveryId: null, eventName: "issues", action: "labeled",
-      repo: null, sender: null, issueNumber: 42,
+      repoId: null, sender: null, issueNumber: 42,
       prNumber: null, branch: null, taskId: "42", workerId: "worker-1", payload: {},
     });
 
@@ -250,7 +250,7 @@ describe("queryActivityLog", () => {
     await Promise.all([
       WebhookEvent.log({
         deliveryId: null, eventName: "issues", action: "labeled",
-        repo: null, sender: null, issueNumber: 42,
+        repoId: null, sender: null, issueNumber: 42,
         prNumber: null, branch: null, taskId: "42", workerId: "w1", payload: {},
       }),
       ForemanMessage.log({
@@ -269,12 +269,12 @@ describe("queryActivityLog", () => {
     await Promise.all([
       WebhookEvent.log({
         deliveryId: null, eventName: "push", action: null,
-        repo: null, sender: null, issueNumber: null,
+        repoId: null, sender: null, issueNumber: null,
         prNumber: null, branch: null, taskId: null, workerId: "w1", payload: {},
       }),
       WebhookEvent.log({
         deliveryId: null, eventName: "push", action: null,
-        repo: null, sender: null, issueNumber: null,
+        repoId: null, sender: null, issueNumber: null,
         prNumber: null, branch: null, taskId: null, workerId: "w2", payload: {},
       }),
     ]);
@@ -288,7 +288,7 @@ describe("queryActivityLog", () => {
   it("returns entries with workerId from webhook rows in queryLog", async () => {
     await WebhookEvent.log({
       deliveryId: null, eventName: "push", action: null,
-      repo: null, sender: null, issueNumber: null,
+      repoId: null, sender: null, issueNumber: null,
       prNumber: null, branch: null, taskId: null, workerId: "worker-2", payload: {},
     });
 
