@@ -312,20 +312,22 @@ describe("Task issue and PR lifecycle (Supabase)", () => {
   });
 });
 
-// ── Tests: Task.getByIssue, Task.getByPr, Task.getByWorker ────────────────────
+// ── Tests: Task.getByRepoIssue, Task.getByRepoPr, Task.getByWorker ──────────
 
 describe("Task lookup methods (Supabase)", () => {
-  it("getByIssue finds task by issue number", async () => {
+  it("getByRepoIssue finds task by repo and issue number", async () => {
     await insertProtected("dbt-42", 9042, "r/r", "title");
-    const task = await Task.getByIssue(9042);
+    const repo = await Repo.findOrCreate("r/r");
+    const task = await Task.getByRepoIssue(repo.id, 9042);
     expect(task?.taskId).toBe("dbt-42");
   });
 
-  it("getByPr finds task by PR number", async () => {
+  it("getByRepoPr finds task by repo and PR number", async () => {
     await insertProtected("dbt-42", 9042, "r/r", "title");
+    const repo = await Repo.findOrCreate("r/r");
     const t = await Task.get("dbt-42");
     await t!.registerPr(10, "fix");
-    const task = await Task.getByPr(10);
+    const task = await Task.getByRepoPr(repo.id, 10);
     expect(task?.taskId).toBe("dbt-42");
   });
 

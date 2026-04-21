@@ -40,8 +40,8 @@ describe("loadIssuesToQueue", () => {
       expect.stringContaining("owner/repo/issues"),
       expect.objectContaining({ headers: expect.objectContaining({ Authorization: "Bearer token123" }) }),
     );
-    expect((await Task.getByIssue(1))?.title).toBe("First issue");
-    expect((await Task.getByIssue(2))?.body).toBe(""); // null coerced to ""
+    expect((await Task.getByRepoIssue(taskManager.repo.id,1))?.title).toBe("First issue");
+    expect((await Task.getByRepoIssue(taskManager.repo.id,2))?.body).toBe(""); // null coerced to ""
   });
 
   it("throws on non-ok response", async () => {
@@ -66,7 +66,7 @@ describe("loadIssuesToQueue", () => {
 
     // Task #1 already exists and is assigned to a worker (simulates foreman restart)
     await Task.upsert("1", 1, "owner/repo", "Original title", "Original body", ["brunel:ready"]);
-    const t = await Task.getByIssue(1);
+    const t = await Task.getByRepoIssue(taskManager.repo.id,1);
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
     await t!.assign(Worker.register("worker-abc", fakeWs));
     expect(t!.workerId).toBe("worker-abc");
@@ -75,7 +75,7 @@ describe("loadIssuesToQueue", () => {
     await loadIssuesToQueue(taskManager);
 
     // Content should be updated, but assignment must be preserved
-    const task = await Task.getByIssue(1);
+    const task = await Task.getByRepoIssue(taskManager.repo.id,1);
     expect(task?.title).toBe("Updated title");
     expect(task?.body).toBe("Updated body");
     expect(task?.workerId).toBe("worker-abc"); // MUST NOT be reset to null

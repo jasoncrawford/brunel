@@ -21,7 +21,7 @@ let foremanWss: ForemanWss;
 beforeEach(async () => {
   Worker._reset();
   resetDb();
-  taskManager = await createTestTaskManager();
+  taskManager = await createTestTaskManager("owner/repo");
   const server = http.createServer();
   foremanWss = new ForemanWss({ server, config: { ...defaultCfg, taskLabel: TASK_LABEL } });
 });
@@ -39,7 +39,7 @@ describe("reconcile()", () => {
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
     Worker.register("w1", fakeWs);
 
-    await Task.upsert("42", 42, "test/repo", "T", "b", []);
+    await Task.upsert("42", 42, "owner/repo", "T", "b", []);
     taskManager.trackIssue(42); // blockersLoaded defaults to false — NOT calling markBlockersLoaded
     await foremanWss.reconcile();
 
@@ -52,7 +52,7 @@ describe("reconcile()", () => {
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
     Worker.register("w1", fakeWs);
 
-    await Task.upsert("42", 42, "test/repo", "T", "b", []);
+    await Task.upsert("42", 42, "owner/repo", "T", "b", []);
     taskManager.trackIssue(42);
     taskManager.markBlockersLoaded(42);
     await foremanWss.reconcile();
@@ -65,7 +65,7 @@ describe("reconcile()", () => {
   });
 
   it("does NOT remove an assigned task (reconcile never deletes)", async () => {
-    await Task.upsert("9", 9, "test/repo", "T", "b", []);
+    await Task.upsert("9", 9, "owner/repo", "T", "b", []);
     const t = await Task.get("9");
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
     await t!.assign(Worker.register("worker-1", fakeWs));
@@ -75,7 +75,7 @@ describe("reconcile()", () => {
   });
 
   it("does NOT remove a complete task (reconcile never deletes)", async () => {
-    await Task.upsert("9", 9, "test/repo", "T", "b", []);
+    await Task.upsert("9", 9, "owner/repo", "T", "b", []);
     const t = await Task.get("9");
     await t!.complete();
     await foremanWss.reconcile();
@@ -88,7 +88,7 @@ describe("issues/closed — task lifecycle", () => {
   it("marks an assigned task closed when its issue is closed", async () => {
     taskManager.trackIssue(142);
     taskManager.markBlockersLoaded(142);
-    await Task.upsert("142", 142, "test/repo", "T", "b", []);
+    await Task.upsert("142", 142, "owner/repo", "T", "b", []);
     const t = await Task.get("142");
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
     await t!.assign(Worker.register("worker-1", fakeWs));
@@ -104,7 +104,7 @@ describe("issues/closed — task lifecycle", () => {
   it("leaves a complete task complete when its issue is closed again", async () => {
     taskManager.trackIssue(143);
     taskManager.markBlockersLoaded(143);
-    await Task.upsert("143", 143, "test/repo", "T", "b", []);
+    await Task.upsert("143", 143, "owner/repo", "T", "b", []);
     const t = await Task.get("143");
     await t!.complete();
 
@@ -119,7 +119,7 @@ describe("issues/closed — task lifecycle", () => {
   it("deletes a pending task when its issue is closed and no worker is assigned", async () => {
     taskManager.trackIssue(144);
     taskManager.markBlockersLoaded(144);
-    await Task.upsert("144", 144, "test/repo", "T", "b", []);
+    await Task.upsert("144", 144, "owner/repo", "T", "b", []);
 
     await foremanWss.routeEvent("evt-1", "issues", {
       action: "closed",
@@ -132,7 +132,7 @@ describe("issues/closed — task lifecycle", () => {
   it("marks an assigned task closed when its issue is closed (preserved for worker)", async () => {
     taskManager.trackIssue(145);
     taskManager.markBlockersLoaded(145);
-    await Task.upsert("145", 145, "test/repo", "T", "b", []);
+    await Task.upsert("145", 145, "owner/repo", "T", "b", []);
     const t = await Task.get("145");
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
     await t!.assign(Worker.register("worker-1", fakeWs));
@@ -146,7 +146,7 @@ describe("issues/closed — task lifecycle", () => {
   });
 
   it("calls task.close for a pending task when its issue is closed", async () => {
-    await Task.upsert("42", 42, "test/repo", "T", "b", []);
+    await Task.upsert("42", 42, "owner/repo", "T", "b", []);
     const spyClose = vi.spyOn(Task.prototype, "close");
 
     taskManager.trackIssue(42);

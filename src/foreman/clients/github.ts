@@ -37,7 +37,7 @@ export async function loadIssuesToQueue(
     const repoUrl = `https://github.com/${owner}/${repoName}`;
 
     // Log if this task is already assigned so it's visible in startup logs that we're preserving it.
-    const existingTask = await Task.getByIssue(issue.number).catch(() => null);
+    const existingTask = await Task.getByRepoIssue(taskModel.repo.id, issue.number).catch(() => null);
     if (existingTask?.workerId) {
       console.log(`[startup] task #${issue.number} already assigned to worker ${existingTask.workerId} — preserving assignment`);
     }

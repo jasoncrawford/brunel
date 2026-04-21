@@ -345,7 +345,7 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
     }];
     await restoreTasksFromDb(rows, taskManager);
 
-    expect((await Task.getByPr(10))?.taskId).toBe("42");
+    expect((await Task.getByRepoPr(taskManager.repo.id,10))?.taskId).toBe("42");
     expect((await taskManager.getTaskForBranch("fix-42"))?.taskId).toBe("42");
   });
 
