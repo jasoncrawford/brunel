@@ -54,9 +54,27 @@ All interaction happens through the agent, not the dashboard. Flow:
 
 `Worker` (in-memory foreman model) gets a `repo: Repo` field — a model object, not a string, consistent with the project convention of passing model objects rather than IDs. Set from the `worker_hello` message.
 
+### Per-repo TaskManager
+
+TaskManager holds in-memory state that is fundamentally per-repo: `_openIssues` (issue numbers), `_blockers` (issue number → blocker issue numbers), `_blockersLoaded` (issue numbers), `branchToTaskId` (branch name → task ID). All of these are keyed by bare numbers or branch names — if two repos share an issue number or branch name, the data collides and corrupts.
+
+The fix: **one TaskManager instance per repo**, with a static registry.
+
+- `TaskManager` has a static `Map<repoId, TaskManager>` internally
+- `TaskManager.forRepo(repo: Repo): TaskManager` — static method, finds or creates the instance for a repo
+- Each instance holds `repo: Repo` and all the per-repo in-memory state
+- `Repo` gets a convenience getter `get taskManager(): TaskManager` that calls `TaskManager.forRepo(this)`
+- `Repo` itself stays a plain ActiveRecord with no singleton/long-lived behavior — the lifecycle responsibility lives on TaskManager's static registry
+- The assignment lock becomes per-repo (each repo is a silo)
+- `EventQueue` is keyed by `taskId` (globally unique) — can live on the per-repo instance without issue
+
+The current singleton TaskManager created in `src/foreman/index.ts` goes away. Callers use `repo.taskManager` or `TaskManager.forRepo(repo)`.
+
+**Future consideration:** ActiveRecord identity-map interning (ensuring only one `Repo` instance per ID at a time) is a potential future improvement but out of scope for this milestone.
+
 ### Task assignment scoping
 
-`TaskManager.tryAssignWork(worker)` filters candidate tasks to those whose `repo_id` matches `worker.repo.id`, and skips workers whose repo is not `'active'`.
+`repo.taskManager.tryAssignWork(worker)` assigns from the repo's pending tasks. Skips repos whose status is not `'active'`.
 
 ### Repo removed from config
 
