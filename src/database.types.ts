@@ -68,6 +68,7 @@ export type Database = {
           task_id: string
           issue_number: number
           repo: string
+          repo_id: number
           title: string
           body: string
           labels: string[]
@@ -84,6 +85,7 @@ export type Database = {
           task_id: string
           issue_number: number
           repo: string
+          repo_id: number
           title: string
           body?: string
           labels?: string[]
@@ -100,6 +102,7 @@ export type Database = {
           task_id?: string
           issue_number?: number
           repo?: string
+          repo_id?: number
           title?: string
           body?: string
           labels?: string[]
@@ -112,7 +115,15 @@ export type Database = {
           issue_closed_at?: string | null
           pr_merged_at?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "tasks_repo_id_fkey"
+            columns: ["repo_id"]
+            isOneToOne: false
+            referencedRelation: "repos"
+            referencedColumns: ["id"]
+          }
+        ]
       }
       webhook_events: {
         Row: {

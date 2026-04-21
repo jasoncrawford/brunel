@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Task } from "../src/foreman/models/task.js";
+import { Repo } from "../src/foreman/models/repo.js";
 import { Worker } from "../src/foreman/models/worker.js";
 import { initDb } from "../src/foreman/clients/db-client.js";
 import { createTestSupabase } from "./helpers/db.js";
@@ -29,8 +30,9 @@ function own(tasks: Task[]) {
  * Use this for tests that need a stable row but aren't testing upsert itself.
  */
 async function insertProtected(taskId: string, issueNumber: number, repo: string, title: string, extra: Record<string, unknown> = {}) {
+  const repoRecord = await Repo.findOrCreate(repo);
   const { error } = await supabase.from("tasks").upsert({
-    task_id: taskId, issue_number: issueNumber, repo, title,
+    task_id: taskId, issue_number: issueNumber, repo, repo_id: repoRecord.id, title,
     body: "", labels: [],
     assigned_at: "2026-01-01T00:00:00Z",
     ...extra,
@@ -164,20 +166,21 @@ describe("Task.list (Supabase)", () => {
   it("returns rows in descending created_at order", async () => {
     // Insert with explicit timestamps so order is predictable.
     // Set assigned_at to protect from parallel reconcile in pipeline.test.ts.
+    const rrRepo = await Repo.findOrCreate("r/r");
     await supabase.from("tasks").insert({
-      task_id: "dbt-1", issue_number: 9001, repo: "r/r", title: "First",
+      task_id: "dbt-1", issue_number: 9001, repo: "r/r", repo_id: rrRepo.id, title: "First",
       body: "", labels: [],
       created_at: "2026-03-27T01:00:00Z",
       assigned_at: "2026-01-01T00:00:00Z",
     });
     await supabase.from("tasks").insert({
-      task_id: "dbt-2", issue_number: 9002, repo: "r/r", title: "Second",
+      task_id: "dbt-2", issue_number: 9002, repo: "r/r", repo_id: rrRepo.id, title: "Second",
       body: "", labels: [],
       created_at: "2026-03-27T03:00:00Z",
       assigned_at: "2026-01-01T00:00:00Z",
     });
     await supabase.from("tasks").insert({
-      task_id: "dbt-3", issue_number: 9003, repo: "r/r", title: "Third",
+      task_id: "dbt-3", issue_number: 9003, repo: "r/r", repo_id: rrRepo.id, title: "Third",
       body: "", labels: [],
       created_at: "2026-03-27T02:00:00Z",
       assigned_at: "2026-01-01T00:00:00Z",
@@ -333,5 +336,27 @@ describe("Task lookup methods (Supabase)", () => {
     await t!.assign(Worker.register("w1", fakeWs));
     const task = await Task.getByWorker("w1");
     expect(task?.taskId).toBe("dbt-42");
+  });
+});
+
+// ── Tests: UNIQUE(issue_number, repo_id) constraint ───────────────────────────
+
+describe("Task.upsert UNIQUE(issue_number, repo_id)", () => {
+  const EXTRA_IDS = ["dbt-r1-9042", "dbt-r2-9042"];
+
+  beforeEach(async () => {
+    await supabase.from("tasks").delete().in("task_id", EXTRA_IDS);
+  });
+
+  it("allows the same issue_number in two different repos", async () => {
+    await Task.upsert("dbt-r1-9042", 9042, "dbt-owner/repo-1", "Title 1", "", []);
+    await expect(
+      Task.upsert("dbt-r2-9042", 9042, "dbt-owner/repo-2", "Title 2", "", []),
+    ).resolves.toBeDefined();
+  });
+
+  it("stores repoId on the task", async () => {
+    const task = await Task.upsert("dbt-42", 9042, "owner/repo", "Title", "", []);
+    expect(task.repoId).toBeGreaterThan(0);
   });
 });
