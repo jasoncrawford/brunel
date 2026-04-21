@@ -183,7 +183,7 @@ export class TaskManager extends EventEmitter {
     this._openIssues.delete(issueNumber);
     this._blockers.delete(issueNumber);
     this._blockersLoaded.delete(issueNumber);
-    const task = await Task.getByRepoIssue(this.repo.id, issueNumber);
+    const task = await this.repo.getTaskByIssue(issueNumber);
     if (task) await task.deleteIfUnassigned();
   }
 
@@ -192,7 +192,7 @@ export class TaskManager extends EventEmitter {
    *  Tasks that were never assigned are deleted — deleteIfUnassigned() is a no-op when assigned_at is set. */
   async closeIssue(issueNumber: number): Promise<void> {
     this._openIssues.delete(issueNumber);
-    const task = await Task.getByRepoIssue(this.repo.id, issueNumber);
+    const task = await this.repo.getTaskByIssue(issueNumber);
     if (!task || task.status === "complete") return;
     await task.close();
     await task.deleteIfUnassigned(); // no-op if ever assigned (assigned_at IS NOT NULL)
@@ -201,7 +201,7 @@ export class TaskManager extends EventEmitter {
   /** Called when issues/reopened fires: mark the issue open again. */
   async reopenIssue(issueNumber: number): Promise<void> {
     this._openIssues.add(issueNumber);
-    const task = await Task.getByRepoIssue(this.repo.id, issueNumber);
+    const task = await this.repo.getTaskByIssue(issueNumber);
     if (task) {
       await task.reopen();
     }
@@ -334,7 +334,7 @@ export class TaskManager extends EventEmitter {
   async handlePrOpenedEvent(prNumber: number, body: string, branch: string | null): Promise<Task | null> {
     const linkedIssue = TaskManager.extractLinkedIssueNumber(body);
     if (linkedIssue === null) return null;
-    const task = await Task.getByRepoIssue(this.repo.id, linkedIssue);
+    const task = await this.repo.getTaskByIssue(linkedIssue);
     if (!task) return null;
     if (branch) this.registerBranch(branch, task);
     await task.registerPr(prNumber, branch).catch((err: unknown) =>
@@ -349,7 +349,7 @@ export class TaskManager extends EventEmitter {
   async handlePrEditedEvent(prNumber: number, body: string, branch: string | null): Promise<Task | null> {
     const linkedIssue = TaskManager.extractLinkedIssueNumber(body);
     if (linkedIssue === null) return null;
-    const task = await Task.getByRepoIssue(this.repo.id, linkedIssue);
+    const task = await this.repo.getTaskByIssue(linkedIssue);
     if (!task) return null;
     if (branch) this.registerBranch(branch, task);
     await task.registerPr(prNumber, branch).catch((err: unknown) =>
@@ -362,7 +362,7 @@ export class TaskManager extends EventEmitter {
   /** Handle pull_request/closed: unregister or record the merge on the linked task.
    *  Returns the task, or null if no task owns the PR. */
   async handlePrClosedEvent(prNumber: number, merged: boolean): Promise<Task | null> {
-    const task = await Task.getByRepoPr(this.repo.id, prNumber);
+    const task = await this.repo.getTaskByPr(prNumber);
     if (!task) return null;
     if (merged) {
       log(`[task #${task.issueNumber}] PR #${prNumber} merged`);
@@ -385,7 +385,7 @@ export class TaskManager extends EventEmitter {
    *  Returns the task and a display ref string, or null if not found. */
   async getTaskForCheckEvent(prNumbers: number[], headBranch: string): Promise<{ task: Task; ref: string } | null> {
     if (prNumbers.length > 0) {
-      const task = await Task.getByRepoPr(this.repo.id, prNumbers[0]);
+      const task = await this.repo.getTaskByPr(prNumbers[0]);
       if (task) return { task, ref: `PR #${prNumbers[0]}` };
     }
     if (headBranch) {
