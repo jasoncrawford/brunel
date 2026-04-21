@@ -38,14 +38,17 @@ export class TaskManager extends EventEmitter {
     return tm;
   }
 
+  /** Look up the TaskManager for a repo ID. Throws if not registered — used by Task.manager
+   *  where the TaskManager is guaranteed to exist (tasks can only be created via a TaskManager). */
+  static forRepoId(repoId: number): TaskManager {
+    const tm = TaskManager.registry.get(repoId);
+    if (!tm) throw new Error(`No TaskManager registered for repo ID ${repoId}`);
+    return tm;
+  }
+
   /** All active TaskManager instances (one per known repo). */
   static all(): TaskManager[] {
     return Array.from(TaskManager.registry.values());
-  }
-
-  /** Look up a TaskManager by repo ID. Used internally by Task.manager. */
-  static getByRepoId(repoId: number): TaskManager | undefined {
-    return TaskManager.registry.get(repoId);
   }
 
   /** Aggregate active tasks from all repos for admin broadcast. */

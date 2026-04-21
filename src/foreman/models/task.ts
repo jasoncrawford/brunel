@@ -107,7 +107,7 @@ export class Task extends ActiveRecord {
 
   /** The per-repo TaskManager that owns this task's ephemeral state. */
   get manager(): TaskManager {
-    return TaskManager.getByRepoId(this.repoId)!;
+    return TaskManager.forRepoId(this.repoId);
   }
 
   /** Queue a webhook event for later delivery (worker disconnected or unassigned). */
