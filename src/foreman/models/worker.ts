@@ -18,8 +18,8 @@ export class Worker {
   status: "idle" | "busy" | "disconnected" = "idle";
   currentTask?: Task;
   disconnectedAt?: Date;
-  /** The repo this worker declared in its worker_hello. Set on first hello_ack. */
-  repo?: Repo;
+  /** The repo this worker declared in its worker_hello. Always set at registration. */
+  repo!: Repo;
 
   get currentTaskId(): string | undefined {
     return this.currentTask?.taskId;
@@ -27,7 +27,7 @@ export class Worker {
 
   // Static registry operations
 
-  static register(workerId: string, ws: WsSocket, repo?: Repo): Worker {
+  static register(workerId: string, ws: WsSocket, repo: Repo): Worker {
     const worker = new Worker(workerId, ws);
     worker.repo = repo;
     registry.set(workerId, worker);

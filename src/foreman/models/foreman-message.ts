@@ -38,7 +38,7 @@ export class ForemanMessage extends ActiveRecord {
     direction: "sent" | "received";
     workerId: string | null;
     taskId: string | null;
-    repoId?: number | null;
+    repoId: number | null;
     msgType: string;
     payload: Record<string, unknown>;
   }): Promise<void> {
@@ -46,7 +46,7 @@ export class ForemanMessage extends ActiveRecord {
       direction: data.direction,
       worker_id: data.workerId,
       task_id: data.taskId,
-      repo_id: data.repoId ?? null,
+      repo_id: data.repoId,
       msg_type: data.msgType,
       payload: data.payload as Json,
     }).then(() => undefined).catch((err: unknown) => log(`[db] foreman_messages insert error: ${fmtError(err)}`));

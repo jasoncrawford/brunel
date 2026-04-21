@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { loadIssuesToQueue, fetchIssueStates, fetchNativeBlockers } from "../src/foreman/clients/github.js";
 import { Task } from "../src/foreman/models/task.js";
 import { Worker } from "../src/foreman/models/worker.js";
-import { resetDb, createTestTaskManager } from "./helpers/task.js";
+import { fakeRepo, resetDb, createTestTaskManager } from "./helpers/task.js";
 import { getConfig } from "../src/config.js";
 
 const mockIssues = [
@@ -68,7 +68,7 @@ describe("loadIssuesToQueue", () => {
     await Task.upsert("1", 1, "owner/repo", "Original title", "Original body", ["brunel:ready"]);
     const t = await Task.getByRepoIssue(taskManager.repo.id,1);
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    await t!.assign(Worker.register("worker-abc", fakeWs));
+    await t!.assign(Worker.register("worker-abc", fakeWs, fakeRepo()));
     expect(t!.workerId).toBe("worker-abc");
 
     // loadIssuesToQueue runs during startup and calls upsert for the same issue

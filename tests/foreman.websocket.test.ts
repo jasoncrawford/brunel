@@ -7,7 +7,7 @@ import { Worker } from "../src/foreman/models/worker.js";
 import { ForemanWss } from "../src/foreman/controllers/wss.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
-import { resetDb, createTestTaskManager } from "./helpers/task.js";
+import { fakeRepo, resetDb, createTestTaskManager } from "./helpers/task.js";
 import { loadDefaultConfig } from "../src/config.js";
 const defaultCfg = await loadDefaultConfig();
 import * as Wire from "../shared/wire.js";
@@ -353,7 +353,7 @@ describe("foreman WebSocket protocol", () => {
     await makeTask(taskManager, 1);
     const t = await Task.get("1");
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    const w1 = Worker.register("w1", fakeWs);
+    const w1 = Worker.register("w1", fakeWs, fakeRepo());
     await t!.assign(w1);
     w1.remove(); // deregister so waitUntil below detects the real reconnect
     await t!.complete();
@@ -464,7 +464,7 @@ describe("hello_ack handshake", () => {
     await makeTask(taskManager, 1);
     const t = await Task.get("1");
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    await t!.assign(Worker.register("w1", fakeWs));
+    await t!.assign(Worker.register("w1", fakeWs, fakeRepo()));
     await t!.complete();
 
     const ws = await connect();
@@ -480,8 +480,8 @@ describe("hello_ack handshake", () => {
     await makeTask(taskManager, 1);
     const t = await Task.get("1");
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    await t!.assign(Worker.register("w1", fakeWs));
-    await t!.assign(Worker.register("w2", fakeWs));
+    await t!.assign(Worker.register("w1", fakeWs, fakeRepo()));
+    await t!.assign(Worker.register("w2", fakeWs, fakeRepo()));
 
     const ws = await connect();
     const ackPromise = nextMsg(ws);
@@ -495,7 +495,7 @@ describe("hello_ack handshake", () => {
     await makeTask(taskManager, 1);
     const t = await Task.get("1");
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    { const w = Worker.register("w1", fakeWs); await t!.assign(w); w.assign(t!); w.markDisconnected(); }
+    { const w = Worker.register("w1", fakeWs, fakeRepo()); await t!.assign(w); w.assign(t!); w.markDisconnected(); }
     await foremanWss.routeEvent("evt-1", "issue_comment", { issue: { number: 1 } });
 
     const ws = await connect();
@@ -994,7 +994,7 @@ describe("issues/closed — close persistence", () => {
     await Task.upsert("1", 1, "test/repo", "T", "b", []);
     const t = await Task.get("1");
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    await t!.assign(Worker.register("w1", fakeWs));
+    await t!.assign(Worker.register("w1", fakeWs, fakeRepo()));
     const spyClose = vi.spyOn(t!, "close");
     vi.spyOn(Task, "getByRepoIssue").mockResolvedValue(t!);
 
@@ -1013,7 +1013,7 @@ describe("worker_hello — reclaim complete task for finalization work", () => {
     await Task.upsert("1", 1, "test/repo", "T", "b", []);
     const t = await Task.get("1");
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    await t!.assign(Worker.register("w1", fakeWs));
+    await t!.assign(Worker.register("w1", fakeWs, fakeRepo()));
     await t!.complete();
 
     const ws = await connect();

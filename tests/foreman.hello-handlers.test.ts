@@ -12,12 +12,8 @@ import { Task } from "../src/foreman/models/task.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { ForemanMessage } from "../src/foreman/models/foreman-message.js";
 import { Repo } from "../src/foreman/models/repo.js";
-import { resetDb, seedTask, createTestTaskManager } from "./helpers/task.js";
+import { fakeRepo, resetDb, seedTask, createTestTaskManager } from "./helpers/task.js";
 import * as utils from "../src/utils.js";
-
-function fakeRepo(fullName = "owner/repo"): Repo {
-  return { fullName } as unknown as Repo;
-}
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -60,7 +56,7 @@ describe("handleBusyHello", () => {
   describe("unknown task", () => {
     it("numeric taskId — creates placeholder and sends busy ack", async () => {
       const { wss, sendMsg } = makeWss(taskManager);
-      await wss.handleBusyHello("w1", "42", fakeWs());
+      await wss.handleBusyHello("w1", "42", fakeWs(), fakeRepo());
 
       const ack = helloAck(sendMsg);
       expect(ack?.status).toBe("busy");
@@ -69,7 +65,7 @@ describe("handleBusyHello", () => {
 
     it("non-numeric taskId — sends cancelled ack", async () => {
       const { wss, sendMsg } = makeWss(taskManager);
-      await wss.handleBusyHello("w1", "not-a-number", fakeWs());
+      await wss.handleBusyHello("w1", "not-a-number", fakeWs(), fakeRepo());
 
       const ack = helloAck(sendMsg);
       expect(ack?.status).toBe("cancelled");
@@ -88,7 +84,7 @@ describe("handleBusyHello", () => {
       const assignSpy = vi.spyOn(Task.prototype, "assign");
 
       const { wss, sendMsg } = makeWss(taskManager);
-      await wss.handleBusyHello("w1", "10", fakeWs());
+      await wss.handleBusyHello("w1", "10", fakeWs(), fakeRepo());
 
       const ack = helloAck(sendMsg);
       expect(ack?.status).toBe("busy");
@@ -107,7 +103,7 @@ describe("handleBusyHello", () => {
       });
 
       const { wss, sendMsg } = makeWss(taskManager);
-      await wss.handleBusyHello("w1", "10", fakeWs());
+      await wss.handleBusyHello("w1", "10", fakeWs(), fakeRepo());
 
       const ack = helloAck(sendMsg);
       expect(ack?.status).toBe("cancelled");
@@ -124,7 +120,7 @@ describe("handleBusyHello", () => {
       });
 
       const { wss, sendMsg } = makeWss(taskManager);
-      await wss.handleBusyHello("w1", "10", fakeWs());
+      await wss.handleBusyHello("w1", "10", fakeWs(), fakeRepo());
 
       const ack = helloAck(sendMsg);
       expect(ack?.status).toBe("cancelled");
@@ -140,7 +136,7 @@ describe("handleBusyHello", () => {
       const assignSpy = vi.spyOn(Task.prototype, "assign");
 
       const { wss, sendMsg } = makeWss(taskManager);
-      await wss.handleBusyHello("w1", "10", fakeWs());
+      await wss.handleBusyHello("w1", "10", fakeWs(), fakeRepo());
 
       const ack = helloAck(sendMsg);
       expect(ack?.status).toBe("busy");
@@ -153,7 +149,7 @@ describe("handleBusyHello", () => {
       const assignSpy = vi.spyOn(Task.prototype, "assign");
 
       const { wss, sendMsg } = makeWss(taskManager);
-      await wss.handleBusyHello("w1", "10", fakeWs());
+      await wss.handleBusyHello("w1", "10", fakeWs(), fakeRepo());
 
       const ack = helloAck(sendMsg);
       expect(ack?.status).toBe("busy");
@@ -175,7 +171,7 @@ describe("handleBusyHello", () => {
       taskManager.queueEvent(task, { toWorkerPayload: () => ({ name: "issue_comment", payload: {} }), eventName: "issue_comment" } as any);
 
       const { wss, sendMsg } = makeWss(taskManager);
-      await wss.handleBusyHello("w1", "10", fakeWs());
+      await wss.handleBusyHello("w1", "10", fakeWs(), fakeRepo());
 
       const eventNotifs = sendMsg.mock.calls.filter(
         ([, msg]) => (msg as { type: string }).type === "event_notification"
@@ -190,7 +186,7 @@ describe("handleBusyHello", () => {
 describe("handleIdleHello", () => {
   it("no prior task — registers worker and sends idle ack", async () => {
     const { wss, sendMsg } = makeWss(taskManager);
-    await wss.handleIdleHello("w1", fakeWs());
+    await wss.handleIdleHello("w1", fakeWs(), fakeRepo());
 
     const ack = helloAck(sendMsg);
     expect(ack?.status).toBe("idle");
@@ -207,7 +203,7 @@ describe("handleIdleHello", () => {
     const revertSpy = vi.spyOn(Task.prototype, "revert");
 
     const { wss, sendMsg } = makeWss(taskManager);
-    await wss.handleIdleHello("w1", fakeWs());
+    await wss.handleIdleHello("w1", fakeWs(), fakeRepo());
 
     expect(revertSpy).toHaveBeenCalled();
     const ack = helloAck(sendMsg);
@@ -226,7 +222,7 @@ describe("handleIdleHello", () => {
 
     const { wss, sendMsg } = makeWss(taskManager);
     const logSpy = vi.spyOn(utils, "log").mockImplementation(() => {});
-    await expect(wss.handleIdleHello("w1", fakeWs())).resolves.toBeUndefined();
+    await expect(wss.handleIdleHello("w1", fakeWs(), fakeRepo())).resolves.toBeUndefined();
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("ERROR"));
     // Worker must NOT be registered — allowing a new assignment would leave two tasks
     // pointing at this worker in the DB.
@@ -248,7 +244,7 @@ describe("handleIdleHello", () => {
     const { wss } = makeWss(taskManager);
     vi.spyOn(utils, "log").mockImplementation(() => {});
     const ws = fakeWs();
-    await wss.handleIdleHello("w1", ws);
+    await wss.handleIdleHello("w1", ws, fakeRepo());
 
     const errorCall = ws.send.mock.calls.find(([data]: [string]) => {
       const msg = JSON.parse(data);
@@ -279,12 +275,6 @@ describe("repo stored on Worker", () => {
     expect(Worker.get("w1")?.repo).toBe(repo);
   });
 
-  it("handleIdleHello with no repo leaves Worker.repo undefined", async () => {
-    const { wss } = makeWss(taskManager);
-    await wss.handleIdleHello("w1", fakeWs());
-    expect(Worker.get("w1")?.repo).toBeUndefined();
-  });
-
   it("Repo.findOrCreate is called with msg.repo from worker_hello", async () => {
     const findOrCreateSpy = vi.spyOn(Repo, "findOrCreate").mockResolvedValue(fakeRepo("owner/repo") as unknown as Repo);
     // Trigger via the full WS message path by calling handleWorkerHello-equivalent logic
@@ -309,7 +299,7 @@ describe("handleBusyHello — error handling", () => {
     const { wss } = makeWss(taskManager);
     vi.spyOn(utils, "log").mockImplementation(() => {});
     const ws = fakeWs();
-    await wss.handleBusyHello("w1", "10", ws);
+    await wss.handleBusyHello("w1", "10", ws, fakeRepo());
 
     const errorCall = ws.send.mock.calls.find(([data]: [string]) => {
       const msg = JSON.parse(data);
@@ -328,7 +318,7 @@ describe("handleBusyHello — error handling", () => {
     const { wss } = makeWss(taskManager);
     vi.spyOn(utils, "log").mockImplementation(() => {});
     const ws = fakeWs();
-    await wss.handleBusyHello("w1", "42", ws);
+    await wss.handleBusyHello("w1", "42", ws, fakeRepo());
 
     const errorCall = ws.send.mock.calls.find(([data]: [string]) => {
       const msg = JSON.parse(data);
@@ -352,7 +342,7 @@ describe("handleBusyHello — error handling", () => {
     const { wss } = makeWss(taskManager);
     vi.spyOn(utils, "log").mockImplementation(() => {});
     const ws = fakeWs();
-    await wss.handleBusyHello("w1", "10", ws);
+    await wss.handleBusyHello("w1", "10", ws, fakeRepo());
 
     const errorCall = ws.send.mock.calls.find(([data]: [string]) => {
       const msg = JSON.parse(data);
@@ -379,7 +369,7 @@ describe("handleIdleHello — error handling", () => {
     const { wss } = makeWss(taskManager);
     vi.spyOn(utils, "log").mockImplementation(() => {});
     const ws = fakeWs();
-    await wss.handleIdleHello("w1", ws);
+    await wss.handleIdleHello("w1", ws, fakeRepo());
 
     const errorCall = ws.send.mock.calls.find(([data]: [string]) => {
       const msg = JSON.parse(data);
@@ -396,7 +386,7 @@ describe("handleIdleHello — error handling", () => {
 
     const { wss, sendMsg } = makeWss(taskManager);
     vi.spyOn(utils, "log").mockImplementation(() => {});
-    await wss.handleIdleHello("w1", fakeWs());
+    await wss.handleIdleHello("w1", fakeWs(), fakeRepo());
 
     expect(Worker.get("w1")).toBeUndefined();
     const ackCall = sendMsg.mock.calls.find(([, msg]) => (msg as { type: string }).type === "hello_ack");
@@ -421,7 +411,7 @@ describe("sendError — ForemanMessage.log() is called", () => {
     vi.spyOn(utils, "log").mockImplementation(() => {});
 
     const { wss } = makeWss(taskManager);
-    await wss.handleIdleHello("w1", fakeWs());
+    await wss.handleIdleHello("w1", fakeWs(), fakeRepo());
 
     const errorLogCall = logSpy.mock.calls.find(([data]) => data.msgType === "foreman_error");
     expect(errorLogCall).toBeDefined();
@@ -444,7 +434,7 @@ describe("sendError — ForemanMessage.log() is called", () => {
     vi.spyOn(utils, "log").mockImplementation(() => {});
 
     const { wss } = makeWss(taskManager);
-    await wss.handleBusyHello("w1", "10", fakeWs());
+    await wss.handleBusyHello("w1", "10", fakeWs(), fakeRepo());
 
     const errorLogCall = logSpy.mock.calls.find(([data]) => data.msgType === "foreman_error");
     expect(errorLogCall).toBeDefined();

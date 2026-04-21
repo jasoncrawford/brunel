@@ -33,6 +33,11 @@ export async function createTestTaskManager(fullName = "test/repo"): Promise<Tas
   return repo.taskManager;
 }
 
+/** Returns a fake Repo object suitable for Worker.register() in tests. */
+export function fakeRepo(fullName = "owner/repo", id = 1): Repo {
+  return { id, fullName } as unknown as Repo;
+}
+
 /**
  * Seeds a task directly into the DB shim with arbitrary field values,
  * including status fields like worker_id, assigned_at, completed_at, etc.
