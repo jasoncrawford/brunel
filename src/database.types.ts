@@ -132,7 +132,7 @@ export type Database = {
           delivery_id: string | null
           event_name: string
           action: string | null
-          repo: string | null
+          repo_id: number | null
           sender: string | null
           issue_number: number | null
           pr_number: number | null
@@ -147,7 +147,7 @@ export type Database = {
           delivery_id?: string | null
           event_name: string
           action?: string | null
-          repo?: string | null
+          repo_id?: number | null
           sender?: string | null
           issue_number?: number | null
           pr_number?: number | null
@@ -162,7 +162,7 @@ export type Database = {
           delivery_id?: string | null
           event_name?: string
           action?: string | null
-          repo?: string | null
+          repo_id?: number | null
           sender?: string | null
           issue_number?: number | null
           pr_number?: number | null
@@ -171,7 +171,15 @@ export type Database = {
           payload?: Json
           worker_id?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "webhook_events_repo_id_fkey"
+            columns: ["repo_id"]
+            isOneToOne: false
+            referencedRelation: "repos"
+            referencedColumns: ["id"]
+          }
+        ]
       }
     }
     Views: {

@@ -17,7 +17,7 @@ export class WebhookEvent extends ActiveRecord {
   readonly deliveryId: string | null;
   readonly eventName: string;
   readonly action: string | null;
-  readonly repo: string | null;
+  readonly repoId: number | null;
   readonly sender: string | null;
   readonly issueNumber: number | null;
   readonly prNumber: number | null;
@@ -33,7 +33,7 @@ export class WebhookEvent extends ActiveRecord {
     this.deliveryId = row.delivery_id;
     this.eventName = row.event_name;
     this.action = row.action;
-    this.repo = row.repo;
+    this.repoId = row.repo_id;
     this.sender = row.sender;
     this.issueNumber = row.issue_number;
     this.prNumber = row.pr_number;
@@ -50,8 +50,6 @@ export class WebhookEvent extends ActiveRecord {
   static fromIncoming(deliveryId: string, eventName: string, payload: Record<string, unknown>): WebhookEvent {
     type R = Record<string, unknown>;
     const action = typeof payload.action === "string" ? payload.action : null;
-    const repo = typeof (payload.repository as R | undefined)?.full_name === "string"
-      ? (payload.repository as R).full_name as string : null;
     const issueNumber = typeof (payload.issue as R | undefined)?.number === "number"
       ? (payload.issue as R).number as number : null;
     const prNumber = typeof (payload.pull_request as R | undefined)?.number === "number"
@@ -62,7 +60,7 @@ export class WebhookEvent extends ActiveRecord {
       delivery_id: deliveryId,
       event_name: eventName,
       action,
-      repo,
+      repo_id: null,
       sender,
       issue_number: issueNumber,
       pr_number: prNumber,
@@ -81,7 +79,7 @@ export class WebhookEvent extends ActiveRecord {
     deliveryId: string | null;
     eventName: string;
     action: string | null;
-    repo: string | null;
+    repoId: number | null;
     sender: string | null;
     issueNumber: number | null;
     prNumber: number | null;
@@ -94,7 +92,7 @@ export class WebhookEvent extends ActiveRecord {
       delivery_id: data.deliveryId,
       event_name: data.eventName,
       action: data.action,
-      repo: data.repo,
+      repo_id: data.repoId,
       sender: data.sender,
       issue_number: data.issueNumber,
       pr_number: data.prNumber,

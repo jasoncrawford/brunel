@@ -201,8 +201,9 @@ export class ForemanWss {
     // Routing always proceeds regardless of repo status — events must still be
     // forwarded to any worker that has a task assigned from this repo.
     const repoFullName = strProp(p.repository, "full_name");
+    let repoId: number | null = null;
     if (repoFullName) {
-      await Repo.findOrCreate(repoFullName);
+      repoId = (await Repo.findOrCreate(repoFullName)).id;
     }
 
     let taskId: string | null = null;
@@ -229,7 +230,7 @@ export class ForemanWss {
       deliveryId: id,
       eventName: name,
       action,
-      repo: typeof (p.repository as R | undefined)?.full_name === "string" ? (p.repository as R).full_name as string : null,
+      repoId,
       sender: typeof (p.sender as R | undefined)?.login === "string" ? (p.sender as R).login as string : null,
       issueNumber: webhookIssueNumber,
       prNumber: webhookPrNumber,
