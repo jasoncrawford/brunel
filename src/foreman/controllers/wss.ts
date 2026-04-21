@@ -89,13 +89,19 @@ export class ForemanWss {
 
         workerId = msg.workerId;
 
-        let repo: Repo | undefined;
-        if (msg.repo) {
-          try {
-            repo = await Repo.findOrCreate(msg.repo);
-          } catch (err) {
-            log(`WARN Could not find/create repo ${msg.repo}: ${fmtError(err)}`);
-          }
+        if (!msg.repo) {
+          log(`[worker ${shortWorkerId(workerId)}] worker_hello missing required repo field — rejecting`);
+          this.sendError(ws, "worker_hello must include a repo field", true, workerId);
+          return;
+        }
+
+        let repo: Repo;
+        try {
+          repo = await Repo.findOrCreate(msg.repo);
+        } catch (err) {
+          log(`[worker ${shortWorkerId(workerId)}] failed to resolve repo ${msg.repo}: ${fmtError(err)}`);
+          this.sendError(ws, `Failed to resolve repo ${msg.repo}: ${fmtError(err)}`, true, workerId);
+          return;
         }
 
         if (msg.status === "busy" && msg.taskId) {

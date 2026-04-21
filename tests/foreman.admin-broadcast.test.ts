@@ -160,7 +160,7 @@ describe("foreman admin broadcast — reactive snapshot pipeline", () => {
     adminWss.broadcastSnapshot = (snapshot) => snapshots.push(snapshot);
 
     const ws = await connect();
-    send(ws, { type: "worker_hello", workerId: "worker-abc", status: "idle" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "worker-abc", status: "idle" });
     await waitUntil(() => snapshots.some((s) => s.workers.some((w) => w.workerId === "worker-abc")));
 
     const last = snapshots[snapshots.length - 1];
@@ -202,7 +202,7 @@ describe("foreman admin broadcast — hello_ack log event summary", () => {
     adminWss.broadcastLogEvent = (entry) => logEntries.push(entry);
 
     const ws = await connect();
-    send(ws, { type: "worker_hello", workerId: "worker-abc", status: "idle" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "worker-abc", status: "idle" });
     await waitUntil(() => logEntries.some((e) => e.summary.includes("hello_ack")));
 
     const entry = logEntries.find((e) => e.summary.includes("hello_ack"));
@@ -219,7 +219,7 @@ describe("foreman admin broadcast — hello_ack log event summary", () => {
     adminWss.broadcastLogEvent = (entry) => logEntries.push(entry);
 
     const ws = await connect();
-    send(ws, { type: "worker_hello", workerId: "worker-abc", status: "busy", taskId: "42" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "worker-abc", status: "busy", taskId: "42" });
     await waitUntil(() => logEntries.some((e) => e.summary.includes("hello_ack")));
 
     const entry = logEntries.find((e) => e.summary.includes("hello_ack"));
@@ -238,7 +238,7 @@ describe("foreman admin broadcast — hello_ack log event summary", () => {
     adminWss.broadcastLogEvent = (entry) => logEntries.push(entry);
 
     const ws = await connect();
-    send(ws, { type: "worker_hello", workerId: "worker-xyz", status: "busy", taskId: "42" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "worker-xyz", status: "busy", taskId: "42" });
     await waitUntil(() => logEntries.some((e) => e.summary.includes("hello_ack")));
 
     const entry = logEntries.find((e) => e.summary.includes("hello_ack"));

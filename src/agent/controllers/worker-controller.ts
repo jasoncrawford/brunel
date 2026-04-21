@@ -646,6 +646,7 @@ export async function startWorkerMode(
   display: Display,
   picker: Picker,
   workspaceController: WorkspaceController | undefined,
+  repo: string,
 ): Promise<{
   session: WorkerSession;
   cleanup: () => Promise<void>;
@@ -659,16 +660,13 @@ export async function startWorkerMode(
   const wsFactory: WsFactory = (agentId, taskId) => {
     const ws = new WebSocket(`${getConfig().foremanUrl}/worker`);
     ws.on("open", () => {
-      void (async () => {
-        const repo = await WorkerSession.getRemoteRepo();
-        ws.send(JSON.stringify({
-          type: "worker_hello",
-          workerId: agentId,
-          repo,
-          taskId,
-          status: taskId ? "busy" : "idle",
-        }));
-      })();
+      ws.send(JSON.stringify({
+        type: "worker_hello",
+        workerId: agentId,
+        repo,
+        taskId,
+        status: taskId ? "busy" : "idle",
+      }));
     });
     return ws;
   };
