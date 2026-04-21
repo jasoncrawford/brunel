@@ -24,6 +24,10 @@ Schema: `id`, `full_name` (owner/name), `status` (`'new' | 'active'`), `created_
 - **`webhook_events`**: add `repo_id` FK, replace existing `repo text` column. Same rename-safety argument.
 - **`foreman_messages`**: add `repo_id` FK. Not every message has a task (`worker_hello`, `hello_ack`, `worker_idle`, etc.), so joining through `task_id` is insufficient; a direct FK is needed to scope all messages to a repo.
 
+### Repo-scoped Task lookups
+
+All Task lookups by issue number or PR number must become repo-scoped. Static methods like `Task.getByIssueNumber(n)` and `Task.getByPr(n)` are ambiguous in a multi-repo world. Preferred approach: make these methods on `Repo` (e.g. `repo.getTaskByIssueNumber(n)`, `repo.getTaskByPr(n)`) so the scoping is enforced by the type system and impossible to forget.
+
 ### Repo find-or-create
 
 The foreman calls `Repo.findOrCreate(fullName)` whenever a repo is first seen — on webhook arrival or on worker `hello`. This is automatic and silent; the repo is created with `status = 'new'`.
