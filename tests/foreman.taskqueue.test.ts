@@ -81,14 +81,14 @@ describe("TaskManager — queue operations", () => {
 
   it("Task.getByIssue looks up by issueNumber", async () => {
     await registerBase();
-    expect((await Task.getByIssue(42))?.taskId).toBe("42");
+    expect((await Task.getByRepoIssue(m.repo.id,42))?.taskId).toBe("42");
   });
 
   it("registerPr + Task.getByPr looks up task by PR number", async () => {
     await registerBase();
     const t = await Task.get("42");
     await t!.registerPr(10, null);
-    expect((await Task.getByPr(10))?.taskId).toBe("42");
+    expect((await Task.getByRepoPr(m.repo.id,10))?.taskId).toBe("42");
   });
 
   it("registerPr stores prNumber on the task", async () => {
@@ -99,7 +99,7 @@ describe("TaskManager — queue operations", () => {
   });
 
   it("Task.getByPr returns null for unknown PR number", async () => {
-    expect(await Task.getByPr(999)).toBeNull();
+    expect(await Task.getByRepoPr(m.repo.id,999)).toBeNull();
   });
 
   it("registerBranch + getTaskForBranch looks up task by branch name", async () => {
@@ -217,7 +217,7 @@ describe("TaskManager — cancel (delete behavior)", () => {
     const t = await Task.get("42");
     await t!.deleteIfUnassigned();
     expect(await Task.get("42")).toBeNull();
-    expect(await Task.getByIssue(42)).toBeNull();
+    expect(await Task.getByRepoIssue(m.repo.id,42)).toBeNull();
     expect(await m.nextPending()).toBeNull();
   });
 
@@ -358,7 +358,7 @@ describe("TaskManager changed events", () => {
     const t = await Task.get("42");
     await t!.registerPr(10, null);
     await t!.unregisterPr();
-    expect(await Task.getByPr(10)).toBeNull();
+    expect(await Task.getByRepoPr(m.repo.id,10)).toBeNull();
   });
 
   it("unregisterPr emits changed", async () => {

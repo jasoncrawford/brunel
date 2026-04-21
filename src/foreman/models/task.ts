@@ -197,12 +197,16 @@ export class Task extends ActiveRecord {
   // ── Static finders ──────────────────────────────────────────────────────────
   // Task.get(id) is inherited from ActiveRecord — finds by task_id (primaryKey).
 
-  static async getByIssue(issueNumber: number): Promise<Task | null> {
-    return Task.getBy("issue_number", issueNumber);
+  static async getByRepoIssue(repoId: number, issueNumber: number): Promise<Task | null> {
+    const { data, error } = await Task.select().eq("repo_id", repoId).eq("issue_number", issueNumber).maybeSingle();
+    if (error) throw error;
+    return data ? new Task(data) : null;
   }
 
-  static async getByPr(prNumber: number): Promise<Task | null> {
-    return Task.getBy("pr_number", prNumber);
+  static async getByRepoPr(repoId: number, prNumber: number): Promise<Task | null> {
+    const { data, error } = await Task.select().eq("repo_id", repoId).eq("pr_number", prNumber).maybeSingle();
+    if (error) throw error;
+    return data ? new Task(data) : null;
   }
 
   static async getByWorker(workerId: string): Promise<Task | null> {

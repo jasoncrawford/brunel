@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import type { Database } from "../../database.types.js";
 import { db } from "../clients/db-client.js";
 import { ActiveRecord } from "./active-record.js";
+import { Task } from "./task.js";
 import { TaskManager } from "./task-manager.js";
 
 type DbRow = Database["public"]["Tables"]["repos"]["Row"];
@@ -42,6 +43,14 @@ export class Repo extends ActiveRecord {
   /** Convenience accessor — returns the per-repo TaskManager instance. */
   get taskManager(): TaskManager {
     return TaskManager.forRepo(this);
+  }
+
+  async getTaskByIssue(issueNumber: number): Promise<Task | null> {
+    return Task.getByRepoIssue(this.id, issueNumber);
+  }
+
+  async getTaskByPr(prNumber: number): Promise<Task | null> {
+    return Task.getByRepoPr(this.id, prNumber);
   }
 
   /**

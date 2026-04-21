@@ -475,10 +475,10 @@ export class ForemanWss {
     const prNumber = numProp(pr, "number");
     if (prNumber === null) return routeResult(null);
 
-    if (p.action === "synchronize") return routeResult(await Task.getByPr(prNumber));
-
     const repo = await this.resolveRepo(p);
     const manager = repo.taskManager;
+
+    if (p.action === "synchronize") return routeResult(await repo.getTaskByPr(prNumber));
 
     if (p.action === "opened" && pr) {
       const task = await manager.handlePrOpenedEvent(prNumber, String(pr.body ?? ""), strProp(pr.head, "ref"));
@@ -498,12 +498,12 @@ export class ForemanWss {
       if (changes?.body) {
         task = await manager.handlePrEditedEvent(prNumber, String(pr.body ?? ""), strProp(pr.head, "ref"));
       }
-      if (!task) task = await Task.getByPr(prNumber);
+      if (!task) task = await repo.getTaskByPr(prNumber);
       if (task) this.forwardEvent(task, evt, `PR #${prNumber}`);
       return routeResult(task);
     }
 
-    const task = await Task.getByPr(prNumber);
+    const task = await repo.getTaskByPr(prNumber);
     if (task) this.forwardEvent(task, evt, `PR #${prNumber}`);
     return routeResult(task);
   }
@@ -512,7 +512,8 @@ export class ForemanWss {
     const pr = p.pull_request as R | undefined;
     const prNumber = numProp(pr, "number");
     if (prNumber === null) return routeResult(null);
-    const task = await Task.getByPr(prNumber);
+    const repo = await this.resolveRepo(p);
+    const task = await repo.getTaskByPr(prNumber);
     if (task) this.forwardEvent(task, evt, `PR #${prNumber}`);
     return routeResult(task);
   }
@@ -541,13 +542,14 @@ export class ForemanWss {
    * notifying the worker of state the foreman failed to record.
    */
   private async applyIssueEffects(p: R, issue: R, issueNumber: number): Promise<Task | null> {
-    let task = await Task.getByIssue(issueNumber);
-    // GitHub issue_comment events on PRs have the PR number in issue.number.
-    if (!task) task = await Task.getByPr(issueNumber);
-
-    const action = p.action as string | undefined;
     const repo = await this.resolveRepo(p);
     const manager = repo.taskManager;
+
+    let task = await repo.getTaskByIssue(issueNumber);
+    // GitHub issue_comment events on PRs have the PR number in issue.number.
+    if (!task) task = await repo.getTaskByPr(issueNumber);
+
+    const action = p.action as string | undefined;
 
     if (!task) {
       // Check if this webhook should enqueue a new task.

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
+import { Repo } from "../src/foreman/models/repo.js";
 import { Worker } from "../src/foreman/models/worker.js";
 import { resetDb, createTestTaskManager } from "./helpers/task.js";
 
@@ -209,7 +210,8 @@ describe("Task.registerPr / getByPr", () => {
   it("registers PR and looks up task by PR number", async () => {
     const t = await Task.get("42");
     await t!.registerPr(10, "fix-branch");
-    const byPr = await Task.getByPr(10);
+    const repo = await Repo.findOrCreate(REPO);
+    const byPr = await Task.getByRepoPr(repo.id, 10);
     expect(byPr?.taskId).toBe("42");
   });
 
@@ -233,13 +235,15 @@ describe("Task.unregisterPr", () => {
   });
 
   it("unregisters PR so getByPr returns null", async () => {
-    const t = await Task.getByPr(10);
+    const repo = await Repo.findOrCreate(REPO);
+    const t = await Task.getByRepoPr(repo.id, 10);
     await t!.unregisterPr();
-    expect(await Task.getByPr(10)).toBeNull();
+    expect(await Task.getByRepoPr(repo.id, 10)).toBeNull();
   });
 
   it("propagates errors to the caller", async () => {
-    const t = await Task.getByPr(10);
+    const repo = await Repo.findOrCreate(REPO);
+    const t = await Task.getByRepoPr(repo.id, 10);
     vi.spyOn(t!, "unregisterPr").mockRejectedValue(new Error("DB down"));
     await expect(t!.unregisterPr()).rejects.toThrow("DB down");
   });
@@ -412,13 +416,13 @@ describe("TaskManager.handleIssueLabeledEvent", () => {
     const task = await manager.handleIssueLabeledEvent(42, "Fix it", "Body", ["brunel:ready"], "open");
     expect(task).not.toBeNull();
     expect(task?.taskId).toBe("42");
-    expect(await Task.getByIssue(42)).not.toBeNull();
+    expect(await Task.getByRepoIssue(manager.repo.id,42)).not.toBeNull();
   });
 
   it("returns null and does not enqueue when issue is closed", async () => {
     const task = await manager.handleIssueLabeledEvent(42, "Fix it", "Body", [], "closed");
     expect(task).toBeNull();
-    expect(await Task.getByIssue(42)).toBeNull();
+    expect(await Task.getByRepoIssue(manager.repo.id,42)).toBeNull();
   });
 
   it("emits deps_loaded after fetching deps", async () => {
@@ -488,13 +492,13 @@ describe("TaskManager.handlePrOpenedEvent", () => {
     expect(task?.taskId).toBe("42");
     expect(task?.prNumber).toBe(10);
     expect(task?.branch).toBe("fix-branch");
-    expect(await Task.getByPr(10)).not.toBeNull();
+    expect(await Task.getByRepoPr(manager.repo.id,10)).not.toBeNull();
   });
 
   it("returns null when no linked issue in body", async () => {
     const task = await manager.handlePrOpenedEvent(10, "no link", "branch");
     expect(task).toBeNull();
-    expect(await Task.getByPr(10)).toBeNull();
+    expect(await Task.getByRepoPr(manager.repo.id,10)).toBeNull();
   });
 
   it("returns null when linked issue has no corresponding task", async () => {
@@ -531,14 +535,14 @@ describe("TaskManager.handlePrClosedEvent", () => {
     const task = await manager.handlePrClosedEvent(10, false);
     expect(task?.taskId).toBe("42");
     expect(task?.prNumber).toBeNull();
-    expect(await Task.getByPr(10)).toBeNull();
+    expect(await Task.getByRepoPr(manager.repo.id,10)).toBeNull();
   });
 
   it("records merge when merged=true and keeps PR association", async () => {
     const task = await manager.handlePrClosedEvent(10, true);
     expect(task?.taskId).toBe("42");
     expect(task?.prMergedAt).toBeTruthy();
-    expect(await Task.getByPr(10)).not.toBeNull();
+    expect(await Task.getByRepoPr(manager.repo.id,10)).not.toBeNull();
   });
 
   it("returns null when no task owns the PR", async () => {

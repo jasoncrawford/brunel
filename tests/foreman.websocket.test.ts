@@ -982,7 +982,7 @@ describe("issues/closed — close persistence", () => {
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
     await t!.assign(Worker.register("w1", fakeWs));
     const spyClose = vi.spyOn(t!, "close");
-    vi.spyOn(Task, "getByIssue").mockResolvedValue(t!);
+    vi.spyOn(Task, "getByRepoIssue").mockResolvedValue(t!);
 
     taskManager.trackIssue(1);
     taskManager.markBlockersLoaded(1);
