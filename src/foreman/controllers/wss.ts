@@ -11,6 +11,7 @@ import { TaskManager } from "../models/task-manager.js";
 import { Repo } from "../models/repo.js";
 import { Task } from "../models/task.js";
 import { Worker } from "../models/worker.js";
+import { Repo } from "../models/repo.js";
 
 type R = Record<string, unknown>;
 
@@ -88,10 +89,19 @@ export class ForemanWss {
 
         workerId = msg.workerId;
 
+        let repo: Repo | undefined;
+        if (msg.repo) {
+          try {
+            repo = await Repo.findOrCreate(msg.repo);
+          } catch (err) {
+            log(`WARN Could not find/create repo ${msg.repo}: ${fmtError(err)}`);
+          }
+        }
+
         if (msg.status === "busy" && msg.taskId) {
-          await this.handleBusyHello(workerId, msg.taskId, ws);
+          await this.handleBusyHello(workerId, msg.taskId, ws, repo);
         } else {
-          await this.handleIdleHello(workerId, ws);
+          await this.handleIdleHello(workerId, ws, repo);
         }
       };
 
@@ -348,10 +358,10 @@ export class ForemanWss {
    * 5. Live task, different worker → cancel
    * 6. Otherwise (live task, same or no worker) → reclaim
    */
-  async handleBusyHello(workerId: string, claimedTaskId: string, ws: WebSocket): Promise<void> {
+  async handleBusyHello(workerId: string, claimedTaskId: string, ws: WebSocket, repo?: Repo): Promise<void> {
     try {
       const existing = await Task.get(claimedTaskId);
-      const worker = Worker.register(workerId, ws);
+      const worker = Worker.register(workerId, ws, repo);
 
       if (!existing) {
         this.workerLog(workerId, `hello busy task=#${claimedTaskId} — unknown task, respecting busy status`);
@@ -393,7 +403,7 @@ export class ForemanWss {
    * fresh (or restarting without a task). Reverts any stale prior assignment,
    * registers the worker, and sends an idle hello_ack.
    */
-  async handleIdleHello(workerId: string, ws: WebSocket): Promise<void> {
+  async handleIdleHello(workerId: string, ws: WebSocket, repo?: Repo): Promise<void> {
     try {
       // DB error here is transient — recoverable: worker retries on reconnect.
       const priorTask = await Task.getByWorker(workerId);
@@ -412,7 +422,7 @@ export class ForemanWss {
       } else {
         this.workerLog(workerId, "hello idle");
       }
-      const w = Worker.register(workerId, ws);
+      const w = Worker.register(workerId, ws, repo);
       this.sendMsg(w, { type: "hello_ack", workerId: w.workerId, status: "idle" });
     } catch (err) {
       log(`ERROR handleIdleHello ${workerId}: ${fmtError(err)}`);

@@ -183,6 +183,22 @@ export class WorkerSession extends EventEmitter {
     this.agentStatus.update({ branch });
   }
 
+  /**
+   * Returns the repo in "owner/name" format by parsing the git remote origin URL.
+   * Handles both HTTPS (https://github.com/owner/repo.git) and SSH
+   * (git@github.com:owner/repo.git) URL formats. Returns "" on any error.
+   */
+  static async getRemoteRepo(): Promise<string> {
+    try {
+      const { stdout } = await execAsync("git remote get-url origin");
+      const url = stdout.trim();
+      const match = url.match(/[:/]([^/]+\/[^/]+?)(?:\.git)?$/);
+      return match ? match[1] : "";
+    } catch {
+      return "";
+    }
+  }
+
   start(): void {
     this.agentStatus.setOnToolResult((toolName) => {
       // Refresh the branch display after each Bash tool completes so the status
@@ -643,12 +659,16 @@ export async function startWorkerMode(
   const wsFactory: WsFactory = (agentId, taskId) => {
     const ws = new WebSocket(`${getConfig().foremanUrl}/worker`);
     ws.on("open", () => {
-      ws.send(JSON.stringify({
-        type: "worker_hello",
-        workerId: agentId,
-        taskId,
-        status: taskId ? "busy" : "idle",
-      }));
+      void (async () => {
+        const repo = await WorkerSession.getRemoteRepo();
+        ws.send(JSON.stringify({
+          type: "worker_hello",
+          workerId: agentId,
+          repo,
+          taskId,
+          status: taskId ? "busy" : "idle",
+        }));
+      })();
     });
     return ws;
   };
