@@ -615,3 +615,21 @@ describe("Task.toAssignmentPayload", () => {
     });
   });
 });
+
+describe("TaskManager listener cleanup", () => {
+  beforeEach(() => {
+    resetDb();
+  });
+
+  it("removes Task.events listeners when registry is reset", async () => {
+    const before = Task.events.listenerCount("changed");
+    // Create several TaskManagers to add listeners
+    for (let i = 0; i < 15; i++) {
+      await createTestTaskManager(`test/repo-${i}`);
+    }
+    expect(Task.events.listenerCount("changed")).toBe(before + 15);
+
+    resetDb();
+    expect(Task.events.listenerCount("changed")).toBe(0);
+  });
+});

@@ -62,8 +62,8 @@ describe("TaskManager — setBlockers / isBlocked", () => {
   let tm: TaskManager;
 
   beforeEach(async () => {
-    tm = await createTestTaskManager();
     resetDb();
+    tm = await createTestTaskManager();
   });
 
   afterEach(() => {
