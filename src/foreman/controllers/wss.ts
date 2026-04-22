@@ -196,6 +196,15 @@ export class ForemanWss {
     const evt = WebhookEvent.fromIncoming(id, name, p);
     if (!evt.isMuted()) log(evt.summary());
 
+    // Find or create a Repo record for every webhook that carries a repository.
+    // Routing always proceeds regardless of repo status — events must still be
+    // forwarded to any worker that has a task assigned from this repo.
+    const repoFullName = strProp(p.repository, "full_name");
+    let repoId: number | null = null;
+    if (repoFullName) {
+      repoId = (await Repo.findOrCreate(repoFullName)).id;
+    }
+
     let taskId: string | null = null;
     let workerId: string | null = null;
 
@@ -220,7 +229,7 @@ export class ForemanWss {
       deliveryId: id,
       eventName: name,
       action,
-      repo: typeof (p.repository as R | undefined)?.full_name === "string" ? (p.repository as R).full_name as string : null,
+      repoId,
       sender: typeof (p.sender as R | undefined)?.login === "string" ? (p.sender as R).login as string : null,
       issueNumber: webhookIssueNumber,
       prNumber: webhookPrNumber,
