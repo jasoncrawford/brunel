@@ -88,10 +88,25 @@ export class ForemanWss {
 
         workerId = msg.workerId;
 
+        if (!msg.repo) {
+          log(`[worker ${shortWorkerId(workerId)}] worker_hello missing required repo field — rejecting`);
+          this.sendError(ws, "worker_hello must include a repo field", true, workerId, null);
+          return;
+        }
+
+        let repo: Repo;
+        try {
+          repo = await Repo.findOrCreate(msg.repo);
+        } catch (err) {
+          log(`[worker ${shortWorkerId(workerId)}] failed to resolve repo ${msg.repo}: ${fmtError(err)}`);
+          this.sendError(ws, `Failed to resolve repo ${msg.repo}: ${fmtError(err)}`, true, workerId, null);
+          return;
+        }
+
         if (msg.status === "busy" && msg.taskId) {
-          await this.handleBusyHello(workerId, msg.taskId, ws);
+          await this.handleBusyHello(workerId, msg.taskId, ws, repo);
         } else {
-          await this.handleIdleHello(workerId, ws);
+          await this.handleIdleHello(workerId, ws, repo);
         }
       };
 
@@ -135,10 +150,12 @@ export class ForemanWss {
           const rcvWorkerId = workerId || ((msg as { workerId?: string }).workerId ?? null);
           const rcvTaskId = (msg as { taskId?: string }).taskId ?? null;
           const rcvPayload = msg as unknown as Record<string, unknown>;
+          const rcvRepoId = rcvWorkerId ? Worker.get(rcvWorkerId)?.repo.id ?? null : null;
           void ForemanMessage.log({
             direction: "received",
             workerId: rcvWorkerId,
             taskId: rcvTaskId,
+            repoId: rcvRepoId,
             msgType: msg.type,
             payload: rcvPayload,
           });
@@ -151,7 +168,7 @@ export class ForemanWss {
           await this.assignWork();
         })().catch(err => {
           log(`ERROR handling worker message: ${fmtError(err)}`);
-          this.sendError(ws, `Internal error: ${fmtError(err)}`, false, workerId || null);
+          this.sendError(ws, `Internal error: ${fmtError(err)}`, false, workerId || null, Worker.get(workerId)?.repo.id ?? null);
         });
       });
 
@@ -168,6 +185,7 @@ export class ForemanWss {
             direction: "received",
             workerId,
             taskId,
+            repoId: currentWorker?.repo.id ?? null,
             msgType: "worker_disconnected",
             payload: disconnPayload,
           });
@@ -266,11 +284,11 @@ export class ForemanWss {
   sendMsg(worker: Worker, msg: Wire.ForemanMessage, logTaskId?: string): void {
     const taskId = logTaskId ?? (("taskId" in msg ? msg.taskId : null) ?? null);
     worker.send(msg);
-    this.logAndBroadcastSent(worker.workerId, taskId, msg.type, msg as unknown as Record<string, unknown>);
+    this.logAndBroadcastSent(worker.workerId, taskId, msg.type, msg as unknown as Record<string, unknown>, worker.repo.id);
   }
 
-  private logAndBroadcastSent(workerId: string | null, taskId: string | null, msgType: string, payload: Record<string, unknown>): void {
-    void ForemanMessage.log({ direction: "sent", workerId, taskId, msgType, payload });
+  private logAndBroadcastSent(workerId: string | null, taskId: string | null, msgType: string, payload: Record<string, unknown>, repoId: number | null): void {
+    void ForemanMessage.log({ direction: "sent", workerId, taskId, repoId, msgType, payload });
     this.broadcastMessageEvent({ direction: "sent", workerId, taskId, msgType, payload });
   }
 
@@ -305,12 +323,12 @@ export class ForemanWss {
    * processing — gives the worker an explanation instead of a silent drop.
    * Also persists the error to foreman_messages so it appears in the activity log.
    */
-  private sendError(ws: WebSocket, message: string, fatal: boolean, workerId: string | null, taskId: string | null = null): void {
+  private sendError(ws: WebSocket, message: string, fatal: boolean, workerId: string | null, repoId: number | null, taskId: string | null = null): void {
     const payload: Wire.ForemanMessage = { type: "foreman_error", message, fatal };
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(payload));
     }
-    this.logAndBroadcastSent(workerId, taskId, payload.type, payload as unknown as Record<string, unknown>);
+    this.logAndBroadcastSent(workerId, taskId, payload.type, payload as unknown as Record<string, unknown>, repoId);
   }
 
   // ── Hello handlers ───────────────────────────────────────────────────────────
@@ -348,10 +366,10 @@ export class ForemanWss {
    * 5. Live task, different worker → cancel
    * 6. Otherwise (live task, same or no worker) → reclaim
    */
-  async handleBusyHello(workerId: string, claimedTaskId: string, ws: WebSocket): Promise<void> {
+  async handleBusyHello(workerId: string, claimedTaskId: string, ws: WebSocket, repo: Repo): Promise<void> {
     try {
       const existing = await Task.get(claimedTaskId);
-      const worker = Worker.register(workerId, ws);
+      const worker = Worker.register(workerId, ws, repo);
 
       if (!existing) {
         this.workerLog(workerId, `hello busy task=#${claimedTaskId} — unknown task, respecting busy status`);
@@ -384,7 +402,7 @@ export class ForemanWss {
       log(`ERROR handleBusyHello ${workerId}: ${fmtError(err)}`);
       // DB error during task lookup or reclaim — recoverable: DB may be temporarily down.
       // Worker retries on reconnect and the operation succeeds once the DB recovers.
-      this.sendError(ws, `Internal error during reconnection: ${fmtError(err)}`, false, workerId);
+      this.sendError(ws, `Internal error during reconnection: ${fmtError(err)}`, false, workerId, repo.id);
     }
   }
 
@@ -393,7 +411,7 @@ export class ForemanWss {
    * fresh (or restarting without a task). Reverts any stale prior assignment,
    * registers the worker, and sends an idle hello_ack.
    */
-  async handleIdleHello(workerId: string, ws: WebSocket): Promise<void> {
+  async handleIdleHello(workerId: string, ws: WebSocket, repo: Repo): Promise<void> {
     try {
       // DB error here is transient — recoverable: worker retries on reconnect.
       const priorTask = await Task.getByWorker(workerId);
@@ -406,19 +424,19 @@ export class ForemanWss {
           // DB error reverting prior task — recoverable: task stays assigned so the
           // failure is visible; a new idle assignment would create a double assignment.
           // Worker retries on reconnect and the revert succeeds once the DB recovers.
-          this.sendError(ws, `Failed to revert prior task to pending: ${fmtError(err)}`, false, workerId, priorTask.taskId);
+          this.sendError(ws, `Failed to revert prior task to pending: ${fmtError(err)}`, false, workerId, repo.id, priorTask.taskId);
           return; // don't register as idle — task stays assigned, worker retries on reconnect
         }
       } else {
         this.workerLog(workerId, "hello idle");
       }
-      const w = Worker.register(workerId, ws);
+      const w = Worker.register(workerId, ws, repo);
       this.sendMsg(w, { type: "hello_ack", workerId: w.workerId, status: "idle" });
     } catch (err) {
       log(`ERROR handleIdleHello ${workerId}: ${fmtError(err)}`);
       // DB error during worker lookup — recoverable: DB may be temporarily down.
       // Worker retries on reconnect and the operation succeeds once the DB recovers.
-      this.sendError(ws, `Internal error during idle hello: ${fmtError(err)}`, false, workerId);
+      this.sendError(ws, `Internal error during idle hello: ${fmtError(err)}`, false, workerId, repo.id);
     }
   }
 

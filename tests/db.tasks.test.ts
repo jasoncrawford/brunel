@@ -4,6 +4,7 @@ import { Repo } from "../src/foreman/models/repo.js";
 import { Worker } from "../src/foreman/models/worker.js";
 import { initDb } from "../src/foreman/clients/db-client.js";
 import { createTestSupabase } from "./helpers/db.js";
+import { fakeRepo } from "./helpers/task.js";
 
 const supabase = createTestSupabase();
 initDb(supabase);
@@ -81,7 +82,7 @@ describe("Task.upsert (Supabase)", () => {
     await Task.upsert("dbt-42", 9042, "owner/repo", "Original title", "Original body", ["v1"]);
     const t = await Task.get("dbt-42");
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    await t!.assign(Worker.register("worker-1", fakeWs));
+    await t!.assign(Worker.register("worker-1", fakeWs, fakeRepo()));
     await t!.complete();
 
     // Upsert again (e.g. startup sync): must update content but PRESERVE status fields.
@@ -106,7 +107,7 @@ describe("Task.assign (Supabase)", () => {
     await insertProtected("dbt-42", 9042, "owner/repo", "Fix the bug");
     const t = await Task.get("dbt-42");
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    await t!.assign(Worker.register("worker-1", fakeWs));
+    await t!.assign(Worker.register("worker-1", fakeWs, fakeRepo()));
 
     const task = await Task.get("dbt-42");
     expect(task!.workerId).toBe("worker-1");
@@ -119,7 +120,7 @@ describe("Task.complete (Supabase)", () => {
     await insertProtected("dbt-42", 9042, "owner/repo", "Fix the bug");
     const t = await Task.get("dbt-42");
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    await t!.assign(Worker.register("worker-1", fakeWs));
+    await t!.assign(Worker.register("worker-1", fakeWs, fakeRepo()));
     await t!.complete();
 
     const task = await Task.get("dbt-42");
@@ -132,7 +133,7 @@ describe("Task.revert (Supabase)", () => {
     await insertProtected("dbt-42", 9042, "owner/repo", "Fix the bug");
     const t = await Task.get("dbt-42");
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    await t!.assign(Worker.register("worker-1", fakeWs));
+    await t!.assign(Worker.register("worker-1", fakeWs, fakeRepo()));
     await t!.revert();
 
     const task = await Task.get("dbt-42");
@@ -203,7 +204,7 @@ describe("Task.list (Supabase)", () => {
     await insertProtected("dbt-2", 9002, "r/r", "Complete task");
     const t2 = await Task.get("dbt-2");
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    await t2!.assign(Worker.register("w1", fakeWs));
+    await t2!.assign(Worker.register("w1", fakeWs, fakeRepo()));
     await t2!.complete();
 
     const cancelable = own(await Task.list({ cancelable: true }));
@@ -221,7 +222,7 @@ describe("Task.list (Supabase)", () => {
     await insertProtected("dbt-2", 9002, "r/r", "Assigned");
     const t2 = await Task.get("dbt-2");
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    await t2!.assign(Worker.register("w1", fakeWs));
+    await t2!.assign(Worker.register("w1", fakeWs, fakeRepo()));
 
     const all = own(await Task.list());
     expect(all).toHaveLength(2);
@@ -262,7 +263,7 @@ describe("Task.deleteIfUnassigned (Supabase)", () => {
     await insertProtected("dbt-42", 9042, "owner/repo", "Fix");
     const t = await Task.get("dbt-42");
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    await t!.assign(Worker.register("worker-1", fakeWs));
+    await t!.assign(Worker.register("worker-1", fakeWs, fakeRepo()));
     await t!.revert(); // revert (e.g. worker_goodbye) — assigned_at stays set
 
     await t!.deleteIfUnassigned();
@@ -335,7 +336,7 @@ describe("Task lookup methods (Supabase)", () => {
     await insertProtected("dbt-42", 9042, "r/r", "title");
     const t = await Task.get("dbt-42");
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    await t!.assign(Worker.register("w1", fakeWs));
+    await t!.assign(Worker.register("w1", fakeWs, fakeRepo()));
     const task = await Task.getByWorker("w1");
     expect(task?.taskId).toBe("dbt-42");
   });

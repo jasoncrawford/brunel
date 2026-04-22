@@ -20,7 +20,7 @@ import { Worker } from "../src/foreman/models/worker.js";
 import { ForemanWss } from "../src/foreman/controllers/wss.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
-import { resetDb, createTestTaskManager } from "./helpers/task.js";
+import { fakeRepo, resetDb, createTestTaskManager } from "./helpers/task.js";
 import { loadDefaultConfig } from "../src/config.js";
 const defaultCfg = await loadDefaultConfig();
 import type { AdminWss, AdminSnapshot, LogEntry } from "../src/foreman/controllers/admin-ws.js";
@@ -160,7 +160,7 @@ describe("foreman admin broadcast — reactive snapshot pipeline", () => {
     adminWss.broadcastSnapshot = (snapshot) => snapshots.push(snapshot);
 
     const ws = await connect();
-    send(ws, { type: "worker_hello", workerId: "worker-abc", status: "idle" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "worker-abc", status: "idle" });
     await waitUntil(() => snapshots.some((s) => s.workers.some((w) => w.workerId === "worker-abc")));
 
     const last = snapshots[snapshots.length - 1];
@@ -202,7 +202,7 @@ describe("foreman admin broadcast — hello_ack log event summary", () => {
     adminWss.broadcastLogEvent = (entry) => logEntries.push(entry);
 
     const ws = await connect();
-    send(ws, { type: "worker_hello", workerId: "worker-abc", status: "idle" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "worker-abc", status: "idle" });
     await waitUntil(() => logEntries.some((e) => e.summary.includes("hello_ack")));
 
     const entry = logEntries.find((e) => e.summary.includes("hello_ack"));
@@ -213,13 +213,13 @@ describe("foreman admin broadcast — hello_ack log event summary", () => {
     await registerReady(taskManager, "42", 42, "owner/repo", "Fix the bug", "", []);
     const t = await Task.get("42");
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    await t!.assign(Worker.register("worker-abc", fakeWs));
+    await t!.assign(Worker.register("worker-abc", fakeWs, fakeRepo()));
 
     const logEntries: LogEntry[] = [];
     adminWss.broadcastLogEvent = (entry) => logEntries.push(entry);
 
     const ws = await connect();
-    send(ws, { type: "worker_hello", workerId: "worker-abc", status: "busy", taskId: "42" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "worker-abc", status: "busy", taskId: "42" });
     await waitUntil(() => logEntries.some((e) => e.summary.includes("hello_ack")));
 
     const entry = logEntries.find((e) => e.summary.includes("hello_ack"));
@@ -231,14 +231,14 @@ describe("foreman admin broadcast — hello_ack log event summary", () => {
     await registerReady(taskManager, "42", 42, "owner/repo", "Fix the bug", "", []);
     const t = await Task.get("42");
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    await t!.assign(Worker.register("worker-xyz", fakeWs));
-    await t!.assign(Worker.register("worker-abc", fakeWs));
+    await t!.assign(Worker.register("worker-xyz", fakeWs, fakeRepo()));
+    await t!.assign(Worker.register("worker-abc", fakeWs, fakeRepo()));
 
     const logEntries: LogEntry[] = [];
     adminWss.broadcastLogEvent = (entry) => logEntries.push(entry);
 
     const ws = await connect();
-    send(ws, { type: "worker_hello", workerId: "worker-xyz", status: "busy", taskId: "42" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "worker-xyz", status: "busy", taskId: "42" });
     await waitUntil(() => logEntries.some((e) => e.summary.includes("hello_ack")));
 
     const entry = logEntries.find((e) => e.summary.includes("hello_ack"));

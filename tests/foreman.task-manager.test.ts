@@ -3,7 +3,7 @@ import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
 import { Repo } from "../src/foreman/models/repo.js";
 import { Worker } from "../src/foreman/models/worker.js";
-import { resetDb, createTestTaskManager } from "./helpers/task.js";
+import { fakeRepo, resetDb, createTestTaskManager } from "./helpers/task.js";
 
 const REPO = "test/repo";
 
@@ -19,7 +19,7 @@ describe("Task.complete", () => {
     await Task.upsert("42", 42, REPO, "Fix the bug", "It is broken", ["brunel:ready"]);
     const t = await Task.get("42");
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    await t!.assign(Worker.register("w1", fakeWs));
+    await t!.assign(Worker.register("w1", fakeWs, fakeRepo()));
   });
 
   afterEach(() => {
@@ -50,7 +50,7 @@ describe("Task.revert", () => {
     await Task.upsert("42", 42, REPO, "Fix the bug", "It is broken", ["brunel:ready"]);
     const t = await Task.get("42");
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    await t!.assign(Worker.register("w1", fakeWs));
+    await t!.assign(Worker.register("w1", fakeWs, fakeRepo()));
   });
 
   afterEach(() => {
@@ -114,7 +114,7 @@ describe("Task assign", () => {
   it("marks task assigned on success", async () => {
     const t = await Task.get("42");
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    await t!.assign(Worker.register("w1", fakeWs));
+    await t!.assign(Worker.register("w1", fakeWs, fakeRepo()));
     const updated = await Task.get("42");
     expect(updated?.status).toBe("assigned");
     expect(updated?.workerId).toBe("w1");
@@ -127,7 +127,7 @@ describe("Task assign", () => {
       new Promise<void>((r) => setTimeout(() => { assignWritten = true; r(); }, 10))
     );
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    await t!.assign(Worker.register("w1", fakeWs));
+    await t!.assign(Worker.register("w1", fakeWs, fakeRepo()));
     expect(assignWritten).toBe(true);
   });
 
@@ -135,7 +135,7 @@ describe("Task assign", () => {
     const t = await Task.get("42");
     vi.spyOn(t!, "assign").mockRejectedValue(new Error("DB down"));
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    await expect(t!.assign(Worker.register("w1", fakeWs))).rejects.toThrow("DB down");
+    await expect(t!.assign(Worker.register("w1", fakeWs, fakeRepo()))).rejects.toThrow("DB down");
   });
 });
 
@@ -159,7 +159,7 @@ describe("Task.deleteIfUnassigned", () => {
   it("does not remove an assigned task (assignedAt set)", async () => {
     const t = await Task.get("42");
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    await t!.assign(Worker.register("w1", fakeWs));
+    await t!.assign(Worker.register("w1", fakeWs, fakeRepo()));
     await t!.deleteIfUnassigned();
     expect(await Task.get("42")).not.toBeNull();
   });
@@ -316,7 +316,7 @@ describe("TaskManager.assignIdleWorkers", () => {
 
   it("does nothing when there are no pending tasks", async () => {
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    Worker.register("worker-1", fakeWs);
+    Worker.register("worker-1", fakeWs, fakeRepo());
     const outcomes = await manager.assignIdleWorkers();
     expect(outcomes).toHaveLength(0);
   });
@@ -325,7 +325,7 @@ describe("TaskManager.assignIdleWorkers", () => {
     await Task.upsert("42", 42, REPO, "Fix the bug", "Body", ["brunel:ready"]);
     manager.markBlockersLoaded(42);
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    Worker.register("worker-1", fakeWs);
+    Worker.register("worker-1", fakeWs, fakeRepo());
 
     const outcomes = await manager.assignIdleWorkers();
 
@@ -342,7 +342,7 @@ describe("TaskManager.assignIdleWorkers", () => {
     await Task.upsert("42", 42, REPO, "Fix the bug", "Body", ["brunel:ready"]);
     manager.markBlockersLoaded(42);
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    const worker = Worker.register("worker-1", fakeWs);
+    const worker = Worker.register("worker-1", fakeWs, fakeRepo());
 
     await manager.assignIdleWorkers();
     expect(worker.currentTaskId).toBe("42");
@@ -352,8 +352,8 @@ describe("TaskManager.assignIdleWorkers", () => {
     await Task.upsert("42", 42, REPO, "Fix the bug", "Body", ["brunel:ready"]);
     manager.markBlockersLoaded(42);
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    Worker.register("worker-1", fakeWs);
-    Worker.register("worker-2", fakeWs);
+    Worker.register("worker-1", fakeWs, fakeRepo());
+    Worker.register("worker-2", fakeWs, fakeRepo());
 
     // Fire both concurrently — only one worker should win the task.
     const [r1, r2] = await Promise.all([manager.assignIdleWorkers(), manager.assignIdleWorkers()]);
@@ -364,7 +364,7 @@ describe("TaskManager.assignIdleWorkers", () => {
     await Task.upsert("42", 42, REPO, "Fix the bug", "Body", ["brunel:ready"]);
     manager.markBlockersLoaded(42);
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    Worker.register("worker-1", fakeWs);
+    Worker.register("worker-1", fakeWs, fakeRepo());
 
     vi.spyOn(Task.prototype, "assign").mockRejectedValue(new Error("DB down"));
 
@@ -382,7 +382,7 @@ describe("TaskManager.assignIdleWorkers", () => {
     await Task.upsert("42", 42, REPO, "Fix the bug", "Body", ["brunel:ready"]);
     manager.markBlockersLoaded(42);
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    Worker.register("worker-1", fakeWs);
+    Worker.register("worker-1", fakeWs, fakeRepo());
 
     vi.spyOn(Task.prototype, "assign").mockRejectedValue(new Error("DB down"));
 

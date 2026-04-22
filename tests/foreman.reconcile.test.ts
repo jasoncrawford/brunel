@@ -4,7 +4,7 @@ import { Worker } from "../src/foreman/models/worker.js";
 import { ForemanWss } from "../src/foreman/controllers/wss.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
-import { resetDb, createTestTaskManager } from "./helpers/task.js";
+import { fakeRepo, resetDb, createTestTaskManager } from "./helpers/task.js";
 import { loadDefaultConfig } from "../src/config.js";
 const defaultCfg = await loadDefaultConfig();
 import * as Wire from "../shared/wire.js";
@@ -37,7 +37,7 @@ describe("reconcile()", () => {
 
   it("does not assign a pending task when its blockersLoaded is false", async () => {
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    Worker.register("w1", fakeWs);
+    Worker.register("w1", fakeWs, fakeRepo());
 
     await Task.upsert("42", 42, "owner/repo", "T", "b", []);
     taskManager.trackIssue(42); // blockersLoaded defaults to false — NOT calling markBlockersLoaded
@@ -50,7 +50,7 @@ describe("reconcile()", () => {
 
   it("assigns a pending task to an idle worker when blockersLoaded is true", async () => {
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    Worker.register("w1", fakeWs);
+    Worker.register("w1", fakeWs, fakeRepo());
 
     await Task.upsert("42", 42, "owner/repo", "T", "b", []);
     taskManager.trackIssue(42);
@@ -68,7 +68,7 @@ describe("reconcile()", () => {
     await Task.upsert("9", 9, "owner/repo", "T", "b", []);
     const t = await Task.get("9");
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    await t!.assign(Worker.register("worker-1", fakeWs));
+    await t!.assign(Worker.register("worker-1", fakeWs, fakeRepo()));
     await foremanWss.reconcile();
     expect(await Task.get("9")).toBeDefined();
     expect((await Task.get("9"))?.status).toBe("assigned");
@@ -91,7 +91,7 @@ describe("issues/closed — task lifecycle", () => {
     await Task.upsert("142", 142, "owner/repo", "T", "b", []);
     const t = await Task.get("142");
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    await t!.assign(Worker.register("worker-1", fakeWs));
+    await t!.assign(Worker.register("worker-1", fakeWs, fakeRepo()));
 
     await foremanWss.routeEvent("evt-1", "issues", {
       action: "closed",
@@ -135,7 +135,7 @@ describe("issues/closed — task lifecycle", () => {
     await Task.upsert("145", 145, "owner/repo", "T", "b", []);
     const t = await Task.get("145");
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    await t!.assign(Worker.register("worker-1", fakeWs));
+    await t!.assign(Worker.register("worker-1", fakeWs, fakeRepo()));
 
     await foremanWss.routeEvent("evt-1", "issues", {
       action: "closed",

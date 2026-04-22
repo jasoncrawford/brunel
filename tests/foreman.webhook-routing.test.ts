@@ -291,7 +291,7 @@ describe("webhook-triggered task routing", () => {
   it("issues/labeled with task label assigns task to idle worker", async () => {
     // Worker connects idle (no tasks yet)
     const ws = await connect();
-    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
     await waitUntil(() => !!Worker.get("w1"));
 
     // Webhook fires: issue #42 gets labeled brunel:ready.
@@ -312,7 +312,7 @@ describe("webhook-triggered task routing", () => {
   it("issues/labeled with non-task label does not enqueue or assign", async () => {
     const ws = await connect();
     const ackP = nextMsg(ws);
-    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
     await ackP; // consume hello_ack (worker is now registered)
 
     // No message should arrive after an unrelated label event
@@ -351,7 +351,7 @@ describe("webhook-triggered task routing", () => {
     // Worker connects afterwards — use nextMsgWhere to skip hello_ack and get task_assigned
     const ws = await connect();
     const reply = nextMsgWhere(ws, (m) => m.type === "task_assigned");
-    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
 
     const msg = await reply;
     expect(msg.type).toBe("task_assigned");
@@ -374,7 +374,7 @@ describe("webhook-triggered task routing", () => {
 
   it("issues/opened with task label in issue labels assigns task to idle worker", async () => {
     const ws = await connect();
-    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
     await waitUntil(() => !!Worker.get("w1"));
 
     // Webhook fires: issue #99 opened with task label.
@@ -393,7 +393,7 @@ describe("webhook-triggered task routing", () => {
   it("issues/opened without task label does not enqueue", async () => {
     const ws = await connect();
     const ackP = nextMsg(ws);
-    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
     await ackP; // consume hello_ack
 
     foremanWss.routeEvent("evt-1", "issues", openedPayload(99, ["bug", "enhancement"]));
@@ -410,7 +410,7 @@ describe("webhook-triggered task routing", () => {
     // Give worker an existing task
     await registerReady(taskManager, "1", 1, "owner/repo", "First Issue", "Body", ["brunel:ready"]);
     const ws = await connect();
-    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
     await nextMsgWhere(ws, (m) => m.type === "task_assigned"); // task_assigned for issue 1
 
     // New issue arrives via webhook
@@ -435,7 +435,7 @@ describe("PR event forwarding to workers", () => {
 
     // Worker connects and receives the task
     const ws = await connect();
-    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
     await nextMsgWhere(ws, (m) => m.type === "task_assigned");
 
     // Worker opens a PR that closes issue #42
@@ -454,7 +454,7 @@ describe("PR event forwarding to workers", () => {
     await registerReady(taskManager, "42", 42, "owner/repo", "Issue 42", "Body", ["brunel:ready"]);
 
     const ws = await connect();
-    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
     await nextMsgWhere(ws, (m) => m.type === "task_assigned");
 
     await foremanWss.routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Closes #42"));
@@ -471,7 +471,7 @@ describe("PR event forwarding to workers", () => {
     await registerReady(taskManager, "42", 42, "owner/repo", "Issue 42", "Body", ["brunel:ready"]);
 
     const ws = await connect();
-    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
     await nextMsgWhere(ws, (m) => m.type === "task_assigned");
 
     await foremanWss.routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Resolves #42"));
@@ -488,7 +488,7 @@ describe("PR event forwarding to workers", () => {
     await registerReady(taskManager, "42", 42, "owner/repo", "Issue 42", "Body", ["brunel:ready"]);
 
     const ws = await connect();
-    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
     await nextMsgWhere(ws, (m) => m.type === "task_assigned");
 
     // PR with no linked issue — should be silently ignored
@@ -507,7 +507,7 @@ describe("PR event forwarding to workers", () => {
     await registerReady(taskManager, "42", 42, "owner/repo", "Issue 42", "Body", ["brunel:ready"]);
 
     const ws = await connect();
-    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
     await nextMsgWhere(ws, (m) => m.type === "task_assigned");
 
     // PR opened without closing keyword — not linked
@@ -531,7 +531,7 @@ describe("PR event forwarding to workers", () => {
     await registerReady(taskManager, "42", 42, "owner/repo", "Issue 42", "Body", ["brunel:ready"]);
 
     const ws = await connect();
-    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
     await nextMsgWhere(ws, (m) => m.type === "task_assigned");
 
     // PR opened without closing keyword — not linked
@@ -553,7 +553,7 @@ describe("PR event forwarding to workers", () => {
     await registerReady(taskManager, "42", 42, "owner/repo", "Issue 42", "Body", ["brunel:ready"]);
 
     const ws = await connect();
-    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
     await nextMsgWhere(ws, (m) => m.type === "task_assigned");
 
     // PR opened with closing keyword — linked
@@ -579,7 +579,7 @@ describe("PR event forwarding to workers", () => {
   it("check_run for unknown PR is silently dropped", async () => {
     const ws = await connect();
     const ackP = nextMsg(ws);
-    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
     await ackP; // consume hello_ack
 
     foremanWss.routeEvent("evt-cr", "check_run", checkRunPayload(999, "failure"));
@@ -594,7 +594,7 @@ describe("PR event forwarding to workers", () => {
     await registerReady(taskManager, "42", 42, "owner/repo", "Issue 42", "Body", ["brunel:ready"]);
 
     const ws = await connect();
-    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
     await nextMsgWhere(ws, (m) => m.type === "task_assigned");
 
     await foremanWss.routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Closes #42"));
@@ -610,7 +610,7 @@ describe("PR event forwarding to workers", () => {
   it("check_suite for unknown PR is silently dropped", async () => {
     const ws = await connect();
     const ackP = nextMsg(ws);
-    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
     await ackP; // consume hello_ack
 
     foremanWss.routeEvent("evt-cs", "check_suite", checkSuitePayload(999, "failure"));
@@ -624,7 +624,7 @@ describe("PR event forwarding to workers", () => {
   it("check_suite with empty pull_requests is routed by head_branch", async () => {
     await registerReady(taskManager, "42", 42, "owner/repo", "Issue 42", "Body", ["brunel:ready"]);
     const ws = await connect();
-    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
     await nextMsgWhere(ws, (m) => m.type === "task_assigned");
 
     await foremanWss.routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Closes #42", "fix-issue-42"));
@@ -640,7 +640,7 @@ describe("PR event forwarding to workers", () => {
   it("check_run with empty pull_requests is routed by head_branch", async () => {
     await registerReady(taskManager, "42", 42, "owner/repo", "Issue 42", "Body", ["brunel:ready"]);
     const ws = await connect();
-    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
     await nextMsgWhere(ws, (m) => m.type === "task_assigned");
 
     await foremanWss.routeEvent("evt-pr", "pull_request", prOpenedPayload(10, "Closes #42", "fix-issue-42"));
@@ -656,7 +656,7 @@ describe("PR event forwarding to workers", () => {
   it("check_suite with empty pull_requests and unknown branch is silently dropped", async () => {
     const ws = await connect();
     const ackP = nextMsg(ws);
-    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
     await ackP; // consume hello_ack
 
     foremanWss.routeEvent("evt-cs", "check_suite", checkSuitePayloadByBranch("unknown-branch", "failure"));
@@ -671,7 +671,7 @@ describe("PR event forwarding to workers", () => {
     await registerReady(taskManager, "42", 42, "owner/repo", "Issue 42", "Body", ["brunel:ready"]);
 
     const ws = await connect();
-    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
     await nextMsgWhere(ws, (m) => m.type === "task_assigned");
 
     foremanWss.routeEvent("evt-pr-open", "pull_request", prOpenedPayload(10, "Closes #42"));
@@ -691,7 +691,7 @@ describe("PR event forwarding to workers", () => {
     await registerReady(taskManager, "42", 42, "owner/repo", "Issue 42", "Body", ["brunel:ready"]);
 
     const ws = await connect();
-    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
     await nextMsgWhere(ws, (m) => m.type === "task_assigned");
 
     foremanWss.routeEvent("evt-pr-open", "pull_request", prOpenedPayload(10, "Closes #42"));
@@ -707,7 +707,7 @@ describe("PR event forwarding to workers", () => {
     await registerReady(taskManager, "42", 42, "owner/repo", "Issue 42", "Body", ["brunel:ready"]);
 
     const ws = await connect();
-    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
     await nextMsgWhere(ws, (m) => m.type === "task_assigned");
 
     foremanWss.routeEvent("evt-pr-open", "pull_request", prOpenedPayload(10, "Closes #42"));
@@ -728,7 +728,7 @@ describe("PR event forwarding to workers", () => {
     await registerReady(taskManager, "42", 42, "owner/repo", "Issue 42", "Body", ["brunel:ready"]);
 
     const ws = await connect();
-    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
     await nextMsgWhere(ws, (m) => m.type === "task_assigned");
 
     // Worker opens PR #10 that closes issue #42
@@ -748,7 +748,7 @@ describe("foreman event filtering", () => {
     await registerReady(taskManager, "42", 42, "owner/repo", "Issue 42", "Body", ["brunel:ready"]);
 
     const ws = await connect();
-    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
     await nextMsgWhere(ws, (m) => m.type === "task_assigned");
 
     // Register PR for the task (now also forwarded as event_notification — consume it)
@@ -791,7 +791,7 @@ describe("foreman event filtering", () => {
 
   it('issues/unlabeled with task label does not remove an already-assigned task', async () => {
     const ws = await connect();
-    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
     await waitUntil(() => !!Worker.get("w1"));
 
     const reply = nextMsgWhere(ws, (m) => m.type === "task_assigned");
@@ -857,7 +857,7 @@ describe("foreman event filtering", () => {
     await registerReady(taskManager, "42", 42, "owner/repo", "Issue 42", "Body", ["brunel:ready"]);
 
     const ws = await connect();
-    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
     await nextMsgWhere(ws, (m) => m.type === "task_assigned");
 
     const reply = nextMsgWhere(ws, m => m.type === "event_notification" && (m as any).event.name === "issues");
@@ -874,7 +874,7 @@ describe("foreman event filtering", () => {
     await registerReady(taskManager, "42", 42, "owner/repo", "Issue 42", "Body", ["brunel:ready"]);
 
     const ws = await connect();
-    send(ws, { type: "worker_hello", workerId: "w1", status: "idle" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
     await nextMsgWhere(ws, (m) => m.type === "task_assigned");
 
     const reply = nextMsgWhere(ws, m => m.type === "event_notification" && (m as any).event.name === "issues");

@@ -246,7 +246,7 @@ async function run(): Promise<void> {
   }
 
   // Send worker_hello and wait for hello_ack (status: "idle").
-  ws.send(JSON.stringify({ type: "worker_hello", workerId, status: "idle" }));
+  ws.send(JSON.stringify({ type: "worker_hello", repo: "owner/repo", workerId, status: "idle" }));
   const ack = await withTimeout(nextWsMsg(), TIMEOUT_MS, "hello_ack");
   if (ack.type !== "hello_ack" || ack.status !== "idle") {
     throw new Error(`Expected hello_ack idle, got: ${JSON.stringify(ack)}`);

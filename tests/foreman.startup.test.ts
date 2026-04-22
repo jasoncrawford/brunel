@@ -3,7 +3,7 @@ import { Worker } from "../src/foreman/models/worker.js";
 import { ForemanWss } from "../src/foreman/controllers/wss.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
-import { resetDb, createTestTaskManager } from "./helpers/task.js";
+import { fakeRepo, resetDb, createTestTaskManager } from "./helpers/task.js";
 import { loadDefaultConfig } from "../src/config.js";
 
 const defaultCfg = await loadDefaultConfig();
@@ -124,7 +124,7 @@ describe("tryAssignWork — assign persistence", () => {
     ({ wss } = new ForemanWss({ server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } }));
 
     port = await startServer();
-    const ws = await connect({ type: "worker_hello", workerId: "w1", status: "idle" });
+    const ws = await connect({ type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
     const q = makeQueue(ws);
     await q.next(); // hello_ack
     const msg = await q.next(); // task_assigned
@@ -144,7 +144,7 @@ describe("tryAssignWork — assign persistence", () => {
     ({ wss } = new ForemanWss({ server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } }));
 
     port = await startServer();
-    const ws = await connect({ type: "worker_hello", workerId: "w1", status: "idle" });
+    const ws = await connect({ type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
     await waitUntil(() => Worker.get("w1")?.status === "idle");
 
     expect((await Task.get("42"))?.status).toBe("pending");
@@ -155,7 +155,7 @@ describe("tryAssignWork — assign persistence", () => {
     ({ wss } = new ForemanWss({ server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } }));
 
     port = await startServer();
-    const ws = await connect({ type: "worker_hello", workerId: "w1", status: "idle" });
+    const ws = await connect({ type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
     const q = makeQueue(ws);
     await q.next(); // hello_ack
     const msg = await q.next(); // task_assigned
@@ -172,12 +172,12 @@ describe("startup reconnect behaviour", () => {
     await registerReady(taskManager, "42", 42, "owner/repo", "Test task", "body", []);
     const t = await Task.get("42");
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    await t!.assign(Worker.register("w1", fakeWs)); // simulate what main block does after startup restore
+    await t!.assign(Worker.register("w1", fakeWs, fakeRepo())); // simulate what main block does after startup restore
 
     ({ wss } = new ForemanWss({ server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } }));
 
     port = await startServer();
-    const ws = await connect({ type: "worker_hello", workerId: "w1", status: "idle" });
+    const ws = await connect({ type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
     const q = makeQueue(ws);
     await q.next(); // hello_ack
     const msg = await q.next(); // task_assigned
@@ -190,12 +190,12 @@ describe("startup reconnect behaviour", () => {
     await registerReady(taskManager, "42", 42, "owner/repo", "Test task", "body", []);
     const t = await Task.get("42");
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    await t!.assign(Worker.register("original-worker", fakeWs)); // simulate startup loading
+    await t!.assign(Worker.register("original-worker", fakeWs, fakeRepo())); // simulate startup loading
 
     ({ wss } = new ForemanWss({ server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } }));
 
     port = await startServer();
-    const ws = await connect({ type: "worker_hello", workerId: "new-worker", status: "idle" });
+    const ws = await connect({ type: "worker_hello", repo: "owner/repo", workerId: "new-worker", status: "idle" });
     await waitUntil(() => Worker.get("new-worker")?.status === "idle");
 
     // new-worker should NOT get task 42 — it belongs to original-worker
@@ -207,12 +207,12 @@ describe("startup reconnect behaviour", () => {
     await registerReady(taskManager, "42", 42, "owner/repo", "Test task", "body", []);
     const t = await Task.get("42");
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    await t!.assign(Worker.register("w1", fakeWs));
+    await t!.assign(Worker.register("w1", fakeWs, fakeRepo()));
 
     ({ wss } = new ForemanWss({ server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } }));
 
     port = await startServer();
-    await connect({ type: "worker_hello", workerId: "w1", status: "busy", taskId: "42" });
+    await connect({ type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "busy", taskId: "42" });
 
     await waitUntil(() => Worker.get("w1")?.status === "busy");
     expect((await Task.get("42"))?.status).toBe("assigned");
@@ -227,7 +227,7 @@ describe("PR tracking persistence", () => {
     await registerReady(taskManager, "42", 42, "owner/repo", "Test task", "body", []);
     const t = await Task.get("42");
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    await t!.assign(Worker.register("w1", fakeWs));
+    await t!.assign(Worker.register("w1", fakeWs, fakeRepo()));
     const spyRegisterPr = vi.spyOn(Task.prototype, "registerPr");
 
     const result = new ForemanWss({ server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } });
@@ -249,7 +249,7 @@ describe("PR tracking persistence", () => {
     await registerReady(taskManager, "42", 42, "owner/repo", "Test task", "body", []);
     const t = await Task.get("42");
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    await t!.assign(Worker.register("w1", fakeWs));
+    await t!.assign(Worker.register("w1", fakeWs, fakeRepo()));
     const spyRegisterPr = vi.spyOn(Task.prototype, "registerPr");
 
     const result = new ForemanWss({ server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } });
@@ -287,7 +287,7 @@ async function restoreTasksFromDb(rows: Array<{
     if (row.workerId) {
       const t = await Task.get(row.taskId);
       const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-      if (t) await t.assign(Worker.register(row.workerId, fakeWs));
+      if (t) await t.assign(Worker.register(row.workerId, fakeWs, fakeRepo()));
     }
     if (row.prNumber != null) {
       const t = await Task.get(row.taskId);
@@ -389,7 +389,7 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
     await localForemanWss.reconcile();
 
     // Step 4: worker connects and receives task_assigned with real body/labels
-    const ws = await connect({ type: "worker_hello", workerId: "w1", status: "idle" });
+    const ws = await connect({ type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
     const q = makeQueue(ws);
     await q.next(); // hello_ack
     const msg = await q.next() as { type: string; issue: { body: string; labels: string[] } };
@@ -413,7 +413,7 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
     await Task.upsert("42", 42, "owner/repo", "Test task", "", []);
     const t = await Task.get("42");
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    await t!.assign(Worker.register("original-worker", fakeWs));
+    await t!.assign(Worker.register("original-worker", fakeWs, fakeRepo()));
     taskManager.trackIssue(42);
     taskManager.markBlockersLoaded(42);
 
@@ -430,7 +430,7 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
     expect((await Task.get("42"))?.status).toBe("assigned");
 
     // Step 4: an idle worker connects — must NOT receive the already-assigned task
-    const ws = await connect({ type: "worker_hello", workerId: "new-worker", status: "idle" });
+    const ws = await connect({ type: "worker_hello", repo: "owner/repo", workerId: "new-worker", status: "idle" });
     await waitUntil(() => Worker.get("new-worker")?.status === "idle");
 
     expect((await Task.get("42"))?.workerId).toBe("original-worker");
@@ -481,7 +481,7 @@ describe("startup reconnect — worker reconnects to complete task", () => {
     await registerReady(taskManager, "42", 42, "owner/repo", "Test task", "body", []);
     const t = await Task.get("42");
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    const w1 = Worker.register("w1", fakeWs);
+    const w1 = Worker.register("w1", fakeWs, fakeRepo());
     await t!.assign(w1);
     w1.remove(); // deregister so waitUntil below detects the real reconnect
     await t!.complete(); // issue closed while worker was active
@@ -489,7 +489,7 @@ describe("startup reconnect — worker reconnects to complete task", () => {
     ({ wss } = new ForemanWss({ server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } }));
 
     port = await startServer();
-    await connect({ type: "worker_hello", workerId: "w1", status: "busy", taskId: "42" });
+    await connect({ type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "busy", taskId: "42" });
 
     await waitUntil(() => Worker.get("w1") !== undefined);
     // Worker should be reclaimed as busy to allow finalization work
@@ -502,13 +502,13 @@ describe("startup reconnect — worker reconnects to complete task", () => {
     await registerReady(taskManager, "42", 42, "owner/repo", "Test task", "body", []);
     const t = await Task.get("42");
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    await t!.assign(Worker.register("w1", fakeWs));
+    await t!.assign(Worker.register("w1", fakeWs, fakeRepo()));
     await t!.complete();
 
     ({ wss } = new ForemanWss({ server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } }));
 
     port = await startServer();
-    const ws = await connect({ type: "worker_hello", workerId: "w1", status: "busy", taskId: "42" });
+    const ws = await connect({ type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "busy", taskId: "42" });
 
     await waitUntil(() => Worker.get("w1") !== undefined);
     // Spy on complete after the task is already obtained
@@ -530,12 +530,12 @@ describe("task_complete marks task complete", () => {
     await registerReady(taskManager, "42", 42, "owner/repo", "Test task", "body", []);
     const t = await Task.get("42");
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    await t!.assign(Worker.register("w1", fakeWs));
+    await t!.assign(Worker.register("w1", fakeWs, fakeRepo()));
 
     ({ wss } = new ForemanWss({ server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } }));
 
     port = await startServer();
-    const ws = await connect({ type: "worker_hello", workerId: "w1", status: "busy", taskId: "42" });
+    const ws = await connect({ type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "busy", taskId: "42" });
 
     await waitUntil(() => Worker.get("w1")?.status === "busy");
 

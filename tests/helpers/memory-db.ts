@@ -66,6 +66,7 @@ export function createMemoryTaskDb(): SupabaseClient<Database> {
     };
   }
 
+
   function buildSelectQuery(filters: Filters) {
     const sb = {
       eq(col: string, val: unknown) {

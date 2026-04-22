@@ -90,10 +90,12 @@ export class BrunelAgent {
    * loop. In REPL mode the loop starts immediately with no foreman connection.
    */
   async start(runWorkerMode: boolean): Promise<void> {
-    // Worker mode setup: subscribe to workspace events, create the clone,
-    // configure the WorkerSession, and install signal handlers.
+    // Worker mode setup: discover the repo at startup, then subscribe to
+    // workspace events, create the clone, configure the WorkerSession, and
+    // install signal handlers.
+    const repo = runWorkerMode ? await WorkerSession.getRemoteRepo() : "";
     const workerCtx = runWorkerMode
-      ? await startWorkerMode(this.display, this.picker, this.workspaceController)
+      ? await startWorkerMode(this.display, this.picker, this.workspaceController, repo)
       : undefined;
     const session = workerCtx?.session;
     const workerCleanup = workerCtx?.cleanup;
