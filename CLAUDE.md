@@ -41,6 +41,8 @@ Status is **derived from timestamps**, not stored: `completedAt` → complete, `
 
 ## Worker/Foreman handshake
 
+Every `worker_hello` includes a `repo` field (owner/name parsed from `git remote get-url origin`). The foreman resolves this to a `Repo` via `Repo.findOrCreate()` and stores it on the `Worker` — every registered Worker always has a `Repo`. Missing or unresolvable repo is a fatal error.
+
 Every `worker_hello` gets a `hello_ack` with one of three statuses before any task is sent:
 - `idle` — worker is free, foreman may now assign
 - `busy` — reconnection accepted, worker may resume
