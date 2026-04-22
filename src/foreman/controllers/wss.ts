@@ -11,7 +11,6 @@ import { TaskManager } from "../models/task-manager.js";
 import { Repo } from "../models/repo.js";
 import { Task } from "../models/task.js";
 import { Worker } from "../models/worker.js";
-import { Repo } from "../models/repo.js";
 
 type R = Record<string, unknown>;
 
