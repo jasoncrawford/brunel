@@ -175,6 +175,9 @@ export class AgentController {
         if (message.type === "result") {
           resultReceived = true;
           display.stopBar();
+          if (message.total_cost_usd != null) {
+            stats.setCost(message.total_cost_usd);
+          }
         }
 
         display.printMessage(message);

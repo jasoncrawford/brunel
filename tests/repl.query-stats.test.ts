@@ -264,4 +264,35 @@ describe("QueryStats - integration with cost", () => {
     expect(text).toContain("tokens: 100 in / 250 out");
     expect(text).toContain("cost: $0.42");
   });
+
+  it("captures cost from result message during live stats", () => {
+    vi.useFakeTimers();
+    const start = Date.now();
+    const stats = new QueryStats(start);
+
+    // Simulate stream events
+    stats.update({ type: "message_start", message: { usage: { input_tokens: 50 } } });
+    stats.update({ type: "message_delta", usage: { output_tokens: 100 } });
+
+    // Before cost is set, status text should not contain cost
+    expect(stripAnsi(stats.getStatusText())).not.toContain("cost");
+
+    // Simulate result message arriving with cost (what AgentController does)
+    stats.setCost(0.25);
+
+    // After cost is set, status text should include it
+    const text = stripAnsi(stats.getStatusText());
+    expect(text).toContain("cost: $0.25");
+    expect(text).toContain("tokens: 50 in / 100 out");
+  });
+
+  it("emits change event when cost is set", () => {
+    const stats = new QueryStats();
+    const onChange = vi.fn();
+    stats.on("change", onChange);
+
+    stats.setCost(0.10);
+
+    expect(onChange).toHaveBeenCalledOnce();
+  });
 });
