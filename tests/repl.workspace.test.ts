@@ -15,11 +15,11 @@ const SESSION_ID = "test-session-uuid";
 const REPO_URL = "https://x@github.com/owner/repo.git";
 const ORIGINAL_CWD = "/original";
 
-let testDisplay: { print: ReturnType<typeof vi.fn>; printForemanMessage: ReturnType<typeof vi.fn> };
+let testDisplay: { print: ReturnType<typeof vi.fn>; printForemanMessage: ReturnType<typeof vi.fn>; clearBar: ReturnType<typeof vi.fn>; drawBar: ReturnType<typeof vi.fn> };
 let testConfig: { verbose: boolean };
 
 beforeEach(() => {
-  testDisplay = { print: vi.fn(), printForemanMessage: vi.fn() };
+  testDisplay = { print: vi.fn(), printForemanMessage: vi.fn(), clearBar: vi.fn(), drawBar: vi.fn() };
   testConfig = { verbose: false };
   vi.spyOn(process, "chdir").mockImplementation(() => undefined);
 });

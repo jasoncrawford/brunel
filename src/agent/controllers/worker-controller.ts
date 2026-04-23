@@ -33,6 +33,8 @@ function fmtTaskStats(inputTokens: number, outputTokens: number, costUsd: number
 export interface WorkerDisplay {
   print(line: string | null): void;
   printForemanMessage(msg: Wire.ForemanMessage): void;
+  clearBar(): void;
+  drawBar(): void;
 }
 
 // ── Agent ID generation ────────────────────────────────────────────────────────
@@ -325,13 +327,17 @@ export class WorkerSession extends EventEmitter {
   ): Promise<"quit" | "complete-and-quit" | "cancel"> {
     if (info.issueClosed) {
       this.display.print(c.amber(`\nTask #${info.taskNumber} is closed but not complete. Complete it before exiting?`));
+      this.display.clearBar();
       const idx = await pickFn(["Yes, complete before exiting", "No, just exit", "Don't exit"]);
+      this.display.drawBar();
       if (idx === 0) return "complete-and-quit";
       if (idx === 1) return "quit";
       return "cancel";
     } else {
       this.display.print(c.amber(`\nTask #${info.taskNumber} is still open. Quitting now will unassign ${info.workerId}. Quit anyway?`));
+      this.display.clearBar();
       const idx = await pickFn(["No, keep working", "Yes, quit anyway"]);
+      this.display.drawBar();
       if (idx === 1) return "quit";
       return "cancel";
     }
