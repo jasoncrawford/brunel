@@ -21,13 +21,22 @@ export type PickQuestionResult =
   | { type: "other"; text: string }
   | { type: "discuss" };
 
+/** Minimal display interface needed to clear/restore the status bar around picker menus. */
+export type PickerDisplay = { clearBar(): void; drawBar(): void };
+
 // ── Picker class ──────────────────────────────────────────────────────────────
 
 /**
  * Arrow-key picker menus. Stateless — each method runs an independent raw-mode
  * stdin loop. Instantiate once in startup (index.ts) and inject where needed.
+ *
+ * When a display is provided, each pick method clears the status bar before
+ * rendering its menu and restores it after the user makes a selection. This
+ * prevents the picker options from overwriting the status bar rows.
  */
 export class Picker {
+  constructor(private display?: PickerDisplay) {}
+
   /** Formats a single picker row: adds marker and dims non-selected rows. */
   private static pickerLine(text: string, isSelected: boolean, marker?: string): string {
     const prefix = isSelected ? "▶ " : (marker ?? "  ");
@@ -48,6 +57,9 @@ export class Picker {
     const escapable = config?.escapable ?? false;
     const lastIsTextEntry = config?.lastIsTextEntry ?? false;
     const hasConfig = config != null;
+    const { display } = this;
+
+    display?.clearBar();
 
     return new Promise((resolve) => {
       let idx = hasConfig && currentIdx >= 0 ? currentIdx : 0;
@@ -101,6 +113,7 @@ export class Picker {
       function finish(result: number | PickResult) {
         done = true;
         process.stdin.removeListener("data", onData);
+        display?.drawBar();
         resolve(result);
       }
 
@@ -159,6 +172,9 @@ export class Picker {
    * Ctrl-C exits the process.
    */
   pickMultiple(options: string[], promptStr?: string): Promise<number[]> {
+    const { display } = this;
+    display?.clearBar();
+
     return new Promise((resolve) => {
       let idx = 0;
       let done = false;
@@ -196,6 +212,7 @@ export class Picker {
           } else if (ch === "\r" || ch === "\n") {
             done = true;
             process.stdin.removeListener("data", onData);
+            display?.drawBar();
             resolve([...selected].sort((a, b) => a - b));
           } else if (ch === "\x03") {
             process.stdout.write("^C\r\n");
@@ -256,6 +273,9 @@ export class Picker {
   pickQuestion(
     options: Array<{ label: string; description: string }>,
   ): Promise<PickQuestionResult> {
+    const { display } = this;
+    display?.clearBar();
+
     return new Promise((resolve) => {
       const extras = [
         { label: "Other:",        description: "" },
@@ -325,6 +345,13 @@ export class Picker {
         redraw();
       }
 
+      function finish(result: PickQuestionResult) {
+        done = true;
+        process.stdin.removeListener("data", onData);
+        display?.drawBar();
+        resolve(result);
+      }
+
       function onData(raw: string) {
         if (done) return;
         let data = raw;
@@ -336,9 +363,7 @@ export class Picker {
           if (textMode) {
             // Inline text entry for Other: — write chars directly (cursor already positioned)
             if (ch === "\r" || ch === "\n") {
-              done = true;
-              process.stdin.removeListener("data", onData);
-              resolve({ type: "other", text: textBuf });
+              finish({ type: "other", text: textBuf });
               return;
             } else if (ch === "\x10") { navigateTo((idx - 1 + count) % count); }
             else if (ch === "\x11")   { navigateTo((idx + 1) % count); }
@@ -359,18 +384,12 @@ export class Picker {
             else if (ch === "\x11") { navigateTo((idx + 1) % count); }
             else if (ch === "\r" || ch === "\n") {
               if (idx === discussIdx) {
-                done = true;
-                process.stdin.removeListener("data", onData);
-                resolve({ type: "discuss" });
+                finish({ type: "discuss" });
               } else if (idx === otherIdx) {
                 // Already in textMode; Enter submits (textBuf is empty if they just navigated here)
-                done = true;
-                process.stdin.removeListener("data", onData);
-                resolve({ type: "other", text: textBuf });
+                finish({ type: "other", text: textBuf });
               } else {
-                done = true;
-                process.stdin.removeListener("data", onData);
-                resolve({ type: "answer", value: options[idx].label });
+                finish({ type: "answer", value: options[idx].label });
               }
               return;
             } else if (ch === "\x03") {

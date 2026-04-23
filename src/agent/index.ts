@@ -41,7 +41,7 @@ export class BrunelAgent {
     this.agentStatus = new AgentStatus({ agentId: WorkerSession.generateAgentId(), settings: this.settings });
     this.display = new Display(config, this.agentStatus);
     this.input = new Input(this.display);
-    this.picker = new Picker();
+    this.picker = new Picker(this.display);
     this.agentController = new AgentController(this.display, this.picker, this.settings);
 
     const originalCwd = process.cwd();
