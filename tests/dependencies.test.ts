@@ -142,7 +142,7 @@ describe("Task.fetchBlockers", () => {
       ok: true,
       json: async () => ({ data: { repository: { issue: { blockedBy: { nodes: [] } } } } }),
     } as any);
-    const blockers = await Task.fetchBlockers(42, "Depends on #5\nBlocked by #6");
+    const blockers = await Task.fetchBlockers(42, "Depends on #5\nBlocked by #6", "owner/repo");
     expect(blockers).toEqual(expect.arrayContaining([5, 6]));
     expect(blockers).toHaveLength(2);
   });
@@ -154,7 +154,7 @@ describe("Task.fetchBlockers", () => {
         data: { repository: { issue: { blockedBy: { nodes: [{ number: 5 }, { number: 9 }] } } } },
       }),
     } as any);
-    const blockers = await Task.fetchBlockers(42, "Depends on #5");
+    const blockers = await Task.fetchBlockers(42, "Depends on #5", "owner/repo");
     expect(new Set(blockers)).toEqual(new Set([5, 9]));
   });
 
@@ -163,6 +163,6 @@ describe("Task.fetchBlockers", () => {
       ok: true,
       json: async () => ({ data: { repository: { issue: { blockedBy: { nodes: [] } } } } }),
     } as any);
-    expect(await Task.fetchBlockers(42, "No dependencies here")).toEqual([]);
+    expect(await Task.fetchBlockers(42, "No dependencies here", "owner/repo")).toEqual([]);
   });
 });

@@ -271,10 +271,10 @@ export class TaskManager extends EventEmitter {
     issueNumber: number,
     body: string,
   ): Promise<void> {
-    const blockers = await Task.fetchBlockers(issueNumber, body);
+    const blockers = await Task.fetchBlockers(issueNumber, body, this.repo.fullName);
     this.setBlockers(issueNumber, blockers);
     if (blockers.length > 0) {
-      const states = await fetchIssueStates(blockers);
+      const states = await fetchIssueStates(blockers, this.repo.fullName);
       for (const [num, state] of states) {
         this.setIssueOpenState(num, state === "open");
       }
