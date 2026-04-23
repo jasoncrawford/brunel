@@ -32,11 +32,6 @@ let mockPicker: {
   pickQuestion: ReturnType<typeof vi.fn>;
 };
 
-const defaultPermConfig = {
-  permissionMode: "default" as const,
-  allowDangerouslySkipPermissions: false,
-};
-
 const FAKE_MODELS = [
   { value: "sonnet", displayName: "Sonnet 4.6", description: "Best for everyday tasks" },
   { value: "opus", displayName: "Opus 4.6", description: "Most capable for complex work" },
@@ -78,7 +73,7 @@ beforeEach(() => {
     pickQuestion: vi.fn().mockResolvedValue({ type: "answer", value: "Fast" }),
   };
   testSettings = new Settings({});
-  testController = new AgentController(testDisplay, mockPicker as unknown as Picker, defaultPermConfig, testSettings);
+  testController = new AgentController(testDisplay, mockPicker as unknown as Picker, testSettings);
   getConfig().verbose = false;
   vi.clearAllMocks();
 });
@@ -640,13 +635,14 @@ describe("runQuery - interrupt via ^C on stdin", () => {
 
 describe("runQuery - model option", () => {
 
-  it("passes model to SDK query options when provided", async () => {
+  it("passes model to SDK query options when set on settings", async () => {
+    testSettings._setModel("opus");
     mockQueryMessages([
       { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5 } },
     ]);
     const cap = captureConsole();
     try {
-      await testController.runQuery("test", undefined, undefined, "opus");
+      await testController.runQuery("test", undefined);
     } finally {
       cap.restore();
     }

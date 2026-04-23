@@ -12,12 +12,10 @@ import { loadConfig, getConfig, type BrunelConfig } from "../config.js";
 import { Workspace } from "./models/workspace.js";
 import { fmtError } from "../utils.js";
 import { Settings } from "./models/settings.js";
-import type { FetchModelsFn } from "./models/settings.js";
 import { CommandRegistry, CommandController } from "./controllers/command-controller.js";
 import { SettingsController } from "./controllers/settings-controller.js";
 import { WorkspaceController } from "./controllers/workspace-controller.js";
-import { AgentController, logFull, createFetchModelsFn } from "./controllers/agent-controller.js";
-import type { AgentPermConfig } from "./controllers/agent-controller.js";
+import { AgentController, logFull } from "./controllers/agent-controller.js";
 
 // ── BrunelAgent ───────────────────────────────────────────────────────────────
 
@@ -30,27 +28,21 @@ import type { AgentPermConfig } from "./controllers/agent-controller.js";
 export class BrunelAgent {
   readonly display: Display;
   private readonly settings: Settings;
-  private readonly permConfig: AgentPermConfig;
   private readonly agentStatus: AgentStatus;
   private readonly input: Input;
   private readonly picker: Picker;
   private readonly agentController: AgentController;
   private readonly workspaceController: WorkspaceController;
-  private readonly fetchModelsFn: FetchModelsFn;
   private readonly settingsController: SettingsController;
   private readonly controller: CommandController;
 
   constructor(config: BrunelConfig) {
-    this.settings = new Settings({ model: config.model, effort: config.effort, permissionMode: config.permissionMode });
+    this.settings = new Settings(config);
     this.agentStatus = new AgentStatus({ agentId: WorkerSession.generateAgentId(), settings: this.settings });
     this.display = new Display(config, this.agentStatus);
-    this.permConfig = {
-      permissionMode: config.permissionMode,
-      allowDangerouslySkipPermissions: config.allowDangerouslySkipPermissions,
-    };
     this.input = new Input(this.display);
     this.picker = new Picker();
-    this.agentController = new AgentController(this.display, this.picker, this.permConfig, this.settings);
+    this.agentController = new AgentController(this.display, this.picker, this.settings);
 
     const originalCwd = process.cwd();
     const confirm = async (msg: string): Promise<boolean> => {
@@ -76,7 +68,6 @@ export class BrunelAgent {
       : undefined;
     this.workspaceController = new WorkspaceController(workspace, this.display, config);
 
-    this.fetchModelsFn = createFetchModelsFn(this.permConfig);
     this.settingsController = new SettingsController(this.settings, this.display);
     const registry = new CommandRegistry();
     this.controller = new CommandController(registry);
@@ -112,7 +103,7 @@ export class BrunelAgent {
     // Print the startup banner.
     this.display.print(c.sageGreen(hr("═")));
     this.display.print(c.skyBlue(this.display.s.bold("  Brunel Agent")));
-    this.display.print(c.lavender(`  Permissions: ${this.permConfig.permissionMode} | Model: ${this.settings.model ?? "default"} | Effort: ${this.settings.effort ?? "auto"} | Output: ${getConfig().verbose ? "verbose" : "quiet"} | Log: repl.log`));
+    this.display.print(c.lavender(`  Permissions: ${this.settings.permissionMode ?? "default"} | Model: ${this.settings.model ?? "default"} | Effort: ${this.settings.effort ?? "auto"} | Output: ${getConfig().verbose ? "verbose" : "quiet"} | Log: repl.log`));
     this.display.print(c.sageGreen(hr("═")));
 
     process.stdout.write("\x1b[?2004h"); // enable bracketed paste mode
@@ -155,7 +146,7 @@ export class BrunelAgent {
         await this.settingsController.pickModel(
           args,
           (opts, idx) => this.picker.pick(opts, { currentIdx: idx, escapable: true }),
-          this.fetchModelsFn,
+          () => this.agentController.fetchModels(),
         );
       },
     });
@@ -188,7 +179,7 @@ export class BrunelAgent {
       const ac = new AbortController();
       session?.notifyQueryStart(ac);
       try {
-        const { sessionId: newId, stats } = await this.agentController.runQuery(prompt, sessionId, ac, this.settings.model, this.settings.effort);
+        const { sessionId: newId, stats } = await this.agentController.runQuery(prompt, sessionId, ac);
         sessionId = newId ?? sessionId;
         if (session) {
           this.agentStatus.addQueryStats(stats.inputTokens, stats.outputTokens, stats.costUsd);
