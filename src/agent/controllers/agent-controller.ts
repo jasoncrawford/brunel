@@ -80,7 +80,7 @@ export class AgentController {
     abortController?: AbortController,
     model?: string,
     effort?: EffortValue,
-  ): Promise<string | undefined> {
+  ): Promise<{ sessionId: string | undefined; stats: QueryStats }> {
     logFull("QUERY", { prompt, sessionId });
     const { display, permConfig } = this;
     // Save and clear the input callbacks while the query runs. In worker
@@ -175,6 +175,7 @@ export class AgentController {
         if (message.type === "result") {
           resultReceived = true;
           display.stopBar();
+          stats.update(message as Parameters<typeof stats.update>[0]);
         }
 
         display.printMessage(message);
@@ -196,7 +197,7 @@ export class AgentController {
     display.inputClear = savedClearCallback;
     savedInputCallback?.();
 
-    return capturedSessionId;
+    return { sessionId: capturedSessionId, stats };
   }
 
   // ── Private helpers ────────────────────────────────────────────────────────

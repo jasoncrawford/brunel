@@ -188,7 +188,11 @@ export class BrunelAgent {
       const ac = new AbortController();
       session?.notifyQueryStart(ac);
       try {
-        sessionId = await this.agentController.runQuery(prompt, sessionId, ac, this.settings.model, this.settings.effort) ?? sessionId;
+        const { sessionId: newId, stats } = await this.agentController.runQuery(prompt, sessionId, ac, this.settings.model, this.settings.effort);
+        sessionId = newId ?? sessionId;
+        if (session) {
+          this.agentStatus.addQueryStats(stats.inputTokens, stats.outputTokens, stats.costUsd);
+        }
         return !ac.signal.aborted;
       } catch (err) {
         console.error(c.boldRed(`\nERROR: ${fmtError(err)}`));

@@ -3,6 +3,7 @@ import { stripAnsi } from "./helpers.js";
 import { Display } from "../src/agent/views/display.js";
 import { resolve } from "../src/agent/views/renderer.js";
 import type { FmtTable } from "../src/agent/views/renderer.js";
+import { fmtStats } from "../shared/formatters.js";
 import { getConfig } from "../src/config.js";
 import { AgentStatus } from "../src/agent/models/agent-status.js";
 
@@ -942,6 +943,33 @@ describe("MESSAGE_FMT", () => {
     expect(text).toContain("150 out");
   });
 
+  it("result message includes cost when available", () => {
+    const raw = captureRaw(() => {
+      testDisplay.printMessage({
+        type: "result",
+        duration_ms: 5000,
+        num_turns: 2,
+        usage: { input_tokens: 100, output_tokens: 250 },
+        total_cost_usd: 0.15,
+      });
+    });
+    const text = stripAnsi(raw);
+    expect(text).toContain("cost: $0.15");
+  });
+
+  it("result message omits cost when not available", () => {
+    const raw = captureRaw(() => {
+      testDisplay.printMessage({
+        type: "result",
+        duration_ms: 5000,
+        num_turns: 2,
+        usage: { input_tokens: 100, output_tokens: 250 },
+      });
+    });
+    const text = stripAnsi(raw);
+    expect(text).not.toContain("cost");
+  });
+
   it("rate_limit_event, status=allowed, VERBOSE=false → nothing printed", () => {
     getConfig().verbose = false;
     const output = captureOutput(() => {
@@ -1021,5 +1049,32 @@ describe("MESSAGE_FMT", () => {
       testDisplay.printMessage({ type: "whatever" });
     });
     expect(stripAnsi(output)).toContain("msg: whatever");
+  });
+});
+
+describe("fmtStats - cost formatting", () => {
+  it("includes cost when provided", () => {
+    const result = fmtStats(60, 2, 100, 50, 0.25);
+    expect(result).toContain("cost: $0.25");
+  });
+
+  it("omits cost when cost is undefined", () => {
+    const result = fmtStats(60, 2, 100, 50);
+    expect(result).not.toContain("cost");
+  });
+
+  it("formats cost with two decimal places", () => {
+    const result = fmtStats(60, 2, 100, 50, 0.1234);
+    expect(result).toContain("cost: $0.12");
+  });
+
+  it("formats cost correctly at zero", () => {
+    const result = fmtStats(60, 2, 100, 50, 0);
+    expect(result).toContain("cost: $0.00");
+  });
+
+  it("places cost at the end of the string", () => {
+    const result = fmtStats(60, 2, 100, 50, 0.50);
+    expect(result).toMatch(/cost: \$0\.50$/);
   });
 });

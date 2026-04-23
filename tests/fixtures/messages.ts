@@ -193,6 +193,7 @@ export const MSG_RESULT = {
   duration_ms: 2064,
   num_turns: 1,
   usage: { input_tokens: 3, output_tokens: 77 },
+  total_cost_usd: 0.12,
 };
 
 export const MSG_RATE_LIMIT = {

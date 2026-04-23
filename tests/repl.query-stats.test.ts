@@ -216,3 +216,68 @@ describe("QueryStats - getStatusText", () => {
     expect(stripAnsi(stats.getStatusText())).not.toContain("turn");
   });
 });
+
+describe("QueryStats - cost tracking", () => {
+  it("starts with undefined cost", () => {
+    const stats = new QueryStats();
+    expect(stats.costUsd).toBeUndefined();
+  });
+});
+
+describe("QueryStats - cost from result message", () => {
+  it("extracts cost from result message", () => {
+    const stats = new QueryStats();
+    stats.update({ type: "result", total_cost_usd: 0.42 });
+    expect(stats.costUsd).toBe(0.42);
+  });
+
+  it("ignores result message without cost", () => {
+    const stats = new QueryStats();
+    stats.update({ type: "result" });
+    expect(stats.costUsd).toBeUndefined();
+  });
+
+  it("emits change when result with cost is received", () => {
+    const stats = new QueryStats();
+    const onChange = vi.fn();
+    stats.on("change", onChange);
+    stats.update({ type: "result", total_cost_usd: 0.1 });
+    expect(onChange).toHaveBeenCalledOnce();
+  });
+
+  it("includes cost in getStatusText after result message", () => {
+    const stats = new QueryStats();
+    stats.update({ type: "result", total_cost_usd: 0.50 });
+    expect(stripAnsi(stats.getStatusText())).toContain("cost: $0.50");
+  });
+
+  it("omits cost from getStatusText when no result received", () => {
+    const stats = new QueryStats();
+    expect(stripAnsi(stats.getStatusText())).not.toContain("cost");
+  });
+});
+
+describe("QueryStats - integration with cost", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("correctly formats stats with tokens and cost", () => {
+    vi.useFakeTimers();
+    const start = Date.now();
+    const stats = new QueryStats(start);
+
+    // Simulate a query
+    stats.update({ type: "message_start", message: { usage: { input_tokens: 100 } } });
+    stats.update({ type: "message_delta", usage: { output_tokens: 250 } });
+    stats.update({ type: "message_stop" });
+    vi.advanceTimersByTime(5000);
+    stats.update({ type: "result", total_cost_usd: 0.42 });
+
+    const text = stripAnsi(stats.getStatusText());
+    expect(text).toContain("5s");
+    expect(text).toContain("1 turn");
+    expect(text).toContain("tokens: 100 in / 250 out");
+    expect(text).toContain("cost: $0.42");
+  });
+});

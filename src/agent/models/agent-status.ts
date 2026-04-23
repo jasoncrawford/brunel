@@ -39,6 +39,9 @@ export class AgentStatus extends EventEmitter {
   private _model: string | undefined;
   private _effort: EffortValue | undefined;
   private _countdownTimer: ReturnType<typeof setInterval> | null = null;
+  private _taskInputTokens = 0;
+  private _taskOutputTokens = 0;
+  private _taskCostUsd: number | undefined;
 
   // Fired after a tool result is printed (tool has just finished running).
   // Used by the worker to refresh git branch in the status bar after Bash.
@@ -75,6 +78,9 @@ export class AgentStatus extends EventEmitter {
   get branch(): string { return this._branch; }
   get model(): string | undefined { return this._model; }
   get effort(): EffortValue | undefined { return this._effort; }
+  get taskInputTokens(): number { return this._taskInputTokens; }
+  get taskOutputTokens(): number { return this._taskOutputTokens; }
+  get taskCostUsd(): number | undefined { return this._taskCostUsd; }
 
   /** Apply a partial status update and emit "change". */
   update(patch: WorkerStatusPatch): void {
@@ -89,6 +95,24 @@ export class AgentStatus extends EventEmitter {
     if ("branch" in patch) this._branch = patch.branch!;
     if ("model" in patch) this._model = patch.model;
     if ("effort" in patch) this._effort = patch.effort;
+    this.emit("change");
+  }
+
+  /** Accumulate per-query token/cost stats into the running task totals and emit "change". */
+  addQueryStats(inputTokens: number, outputTokens: number, costUsd: number | undefined): void {
+    this._taskInputTokens += inputTokens;
+    this._taskOutputTokens += outputTokens;
+    if (costUsd != null) {
+      this._taskCostUsd = (this._taskCostUsd ?? 0) + costUsd;
+    }
+    this.emit("change");
+  }
+
+  /** Reset per-task token/cost accumulators and emit "change". */
+  resetTaskStats(): void {
+    this._taskInputTokens = 0;
+    this._taskOutputTokens = 0;
+    this._taskCostUsd = undefined;
     this.emit("change");
   }
 

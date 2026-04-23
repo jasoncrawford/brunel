@@ -386,7 +386,7 @@ export class Renderer {
 
   private readonly MESSAGE_FMT: FmtTable = {
     _empty:           (m) => c.darkGray(`[${m.type} — empty]`),
-    result:           (m) => c.darkGray(`\n${fmtStats(Math.round(m.duration_ms / 1000), m.num_turns, m.usage.output_tokens, m.usage.input_tokens)}`),
+    result:           (m) => c.darkGray(`\n${fmtStats(Math.round(m.duration_ms / 1000), m.num_turns, m.usage.output_tokens, m.usage.input_tokens, m.total_cost_usd)}`),
     rate_limit_event: (m) => {
       const info = m.rate_limit_info;
       if (!info || info.status === "allowed") return null;
@@ -597,6 +597,12 @@ export class Renderer {
     else parts.push("no current task");
     if (status.prNumber != null) parts.push(`PR #${status.prNumber}`);
     if (status.branch) parts.push(status.branch);
+    if (status.taskNumber != null && status.taskInputTokens > 0) {
+      parts.push(`tokens: ${fmtNum(status.taskInputTokens)} in / ${fmtNum(status.taskOutputTokens)} out`);
+      if (status.taskCostUsd != null) {
+        parts.push(`cost: $${status.taskCostUsd.toFixed(2)}`);
+      }
+    }
     let leftText = parts.join(" ∙ ");
 
     // Truncate left side if needed to leave room for right side with a gap of 1
