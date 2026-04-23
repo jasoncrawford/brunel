@@ -31,6 +31,7 @@ function fmtTaskStats(inputTokens: number, outputTokens: number, costUsd: number
  * Satisfied structurally by Display; tests can pass lightweight stubs.
  */
 export interface WorkerDisplay {
+  verbose: boolean;
   print(line: string | null): void;
   printForemanMessage(msg: Wire.ForemanMessage): void;
 }

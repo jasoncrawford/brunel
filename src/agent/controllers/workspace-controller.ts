@@ -100,31 +100,28 @@ export class WorkspaceController {
     if (!workspace) return;
 
     workspace.on("clone-start", ({ repoUrl: url, dir }: { repoUrl: string; dir: string }) => {
-      display.print(c.sageGreen(`[workspace] Cloning ${url} → ${dir}`));
+      if (display.verbose) display.print(c.sageGreen(`Cloning ${url} → ${dir}`));
     });
     workspace.on("npm-install", ({ dir }: { dir: string }) => {
-      display.print(c.sageGreen(`[workspace] Installing dependencies in ${dir}`));
+      if (display.verbose) display.print(c.sageGreen(`Installing dependencies in ${dir}`));
     });
     workspace.on("reset-start", ({ dir }: { dir: string }) => {
-      display.print(c.sageGreen(`[workspace] Resetting ${dir}`));
+      display.print(c.sageGreen(display.verbose ? `Resetting ${dir}` : "Resetting workspace..."));
     });
     workspace.on("reset-retry", ({ error }: { dir: string; error: string }) => {
-      display.print(c.amber(`[workspace] Reset failed, retrying: ${error}`));
+      display.print(c.amber(`Reset failed, retrying: ${error}`));
     });
-    workspace.on("reset-reclone", ({ repoUrl: url, dir, error }: { dir: string; error: string; repoUrl: string }) => {
-      display.print(c.amber(`[workspace] Reset failed again, re-cloning: ${error}`));
-      display.print(c.sageGreen(`[workspace] Re-cloning ${url} → ${dir}`));
+    workspace.on("reset-reclone", ({ error }: { dir: string; error: string; repoUrl: string }) => {
+      display.print(c.amber(`Reset failed again, re-cloning: ${error}`));
     });
     workspace.on("destroy", ({ dir }: { dir: string }) => {
-      display.print(c.sageGreen(`[workspace] Destroying ${dir}`));
+      display.print(c.sageGreen(display.verbose ? `Destroying ${dir}` : "Destroying workspace..."));
     });
     workspace.on("prune-start", ({ workspaceDir: dir }: { workspaceDir: string }) => {
-      display.print(c.sageGreen(`[workspace] Pruning orphaned workspaces in ${dir}`));
-    });
-    workspace.on("prune-remove", ({ dir }: { dir: string }) => {
-      display.print(c.sageGreen(`[workspace] Removing orphaned workspace ${dir}`));
+      display.print(c.sageGreen(display.verbose ? `Pruning orphaned workspaces in ${dir}` : "Pruning orphaned workspaces..."));
     });
 
+    display.print(c.sageGreen("Creating workspace..."));
     await workspace.create();
     process.chdir(workspace.dir);
   }

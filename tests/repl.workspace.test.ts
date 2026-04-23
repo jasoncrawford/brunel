@@ -15,10 +15,10 @@ const SESSION_ID = "test-session-uuid";
 const REPO_URL = "https://x@github.com/owner/repo.git";
 const ORIGINAL_CWD = "/original";
 
-let testDisplay: { print: ReturnType<typeof vi.fn>; printForemanMessage: ReturnType<typeof vi.fn> };
+let testDisplay: { verbose: boolean; print: ReturnType<typeof vi.fn>; printForemanMessage: ReturnType<typeof vi.fn> };
 
 beforeEach(() => {
-  testDisplay = { print: vi.fn(), printForemanMessage: vi.fn() };
+  testDisplay = { verbose: false, print: vi.fn(), printForemanMessage: vi.fn() };
   vi.spyOn(process, "chdir").mockImplementation(() => undefined);
 });
 
@@ -147,6 +147,80 @@ describe("workspace:remove", () => {
     expect(ws.destroy).not.toHaveBeenCalled();
     expect(process.chdir).not.toHaveBeenCalled();
     expect(ws.isCreated).toBe(true);
+  });
+});
+
+// ── onCreate ─────────────────────────────────────────────────────────────────
+
+describe("WorkspaceController.onCreate", () => {
+  it("prints 'Creating workspace...' and chdirs to workspace dir", async () => {
+    const ws = makeWorkspace();
+    await new WorkspaceController(ws, testDisplay).onCreate();
+    expect(ws.create).toHaveBeenCalledOnce();
+    expect(process.chdir).toHaveBeenCalledWith(ws.dir);
+    const printed = testDisplay.print.mock.calls.map(([l]: [string]) => stripAnsi(l)).join("\n");
+    expect(printed).toContain("Creating workspace...");
+  });
+
+  it("does not print clone URL or dir in non-verbose mode", async () => {
+    const ws = makeWorkspace();
+    vi.spyOn(ws, "create").mockImplementation(async () => {
+      ws.emit("clone-start", { repoUrl: REPO_URL, dir: ws.dir });
+      ws.isCreated = true;
+    });
+    await new WorkspaceController(ws, testDisplay).onCreate();
+    const printed = testDisplay.print.mock.calls.map(([l]: [string]) => stripAnsi(l)).join("\n");
+    expect(printed).not.toContain("Cloning");
+    expect(printed).not.toContain(REPO_URL);
+  });
+
+  it("prints clone URL and dir in verbose mode", async () => {
+    const ws = makeWorkspace();
+    vi.spyOn(ws, "create").mockImplementation(async () => {
+      ws.emit("clone-start", { repoUrl: REPO_URL, dir: ws.dir });
+      ws.isCreated = true;
+    });
+    testDisplay.verbose = true;
+    await new WorkspaceController(ws, testDisplay).onCreate();
+    const printed = testDisplay.print.mock.calls.map(([l]: [string]) => stripAnsi(l)).join("\n");
+    expect(printed).toContain("Cloning");
+    expect(printed).toContain(REPO_URL);
+  });
+
+  it("prints 'Resetting workspace...' on reset-start in non-verbose", async () => {
+    const ws = makeWorkspace();
+    await new WorkspaceController(ws, testDisplay).onCreate();
+    testDisplay.print.mockClear();
+    ws.emit("reset-start", { dir: ws.dir });
+    const printed = testDisplay.print.mock.calls.map(([l]: [string]) => stripAnsi(l)).join("\n");
+    expect(printed).toContain("Resetting workspace...");
+    expect(printed).not.toContain(ws.dir);
+  });
+
+  it("prints dir path on reset-start in verbose mode", async () => {
+    const ws = makeWorkspace();
+    testDisplay.verbose = true;
+    await new WorkspaceController(ws, testDisplay).onCreate();
+    testDisplay.print.mockClear();
+    ws.emit("reset-start", { dir: ws.dir });
+    const printed = testDisplay.print.mock.calls.map(([l]: [string]) => stripAnsi(l)).join("\n");
+    expect(printed).toContain(ws.dir);
+  });
+
+  it("does not include [workspace] prefix in any message", async () => {
+    const ws = makeWorkspace();
+    vi.spyOn(ws, "create").mockImplementation(async () => {
+      ws.emit("clone-start", { repoUrl: REPO_URL, dir: ws.dir });
+      ws.emit("npm-install", { dir: ws.dir });
+      ws.isCreated = true;
+    });
+    testDisplay.verbose = true;
+    await new WorkspaceController(ws, testDisplay).onCreate();
+    ws.emit("reset-start", { dir: ws.dir });
+    ws.emit("reset-retry", { dir: ws.dir, error: "err" });
+    ws.emit("destroy", { dir: ws.dir });
+    const printed = testDisplay.print.mock.calls.map(([l]: [string]) => stripAnsi(l)).join("\n");
+    expect(printed).not.toContain("[workspace]");
   });
 });
 
