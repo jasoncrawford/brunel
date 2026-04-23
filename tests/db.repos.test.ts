@@ -59,3 +59,25 @@ describe("Repo.list", () => {
     expect(ours).toHaveLength(2);
   });
 });
+
+describe("Repo.listActive", () => {
+  it("returns only repos with status 'active'", async () => {
+    const a = await Repo.findOrCreate("dbr-owner/repo-a");
+    await Repo.findOrCreate("dbr-owner/repo-b");
+    await supabase.from("repos").update({ status: "active" }).eq("id", a.id);
+
+    const active = await Repo.listActive();
+    const ours = active.filter((r) => r.fullName.startsWith("dbr-owner/"));
+    expect(ours).toHaveLength(1);
+    expect(ours[0].fullName).toBe("dbr-owner/repo-a");
+  });
+
+  it("returns empty when no repos are active", async () => {
+    await Repo.findOrCreate("dbr-owner/repo-a");
+    await Repo.findOrCreate("dbr-owner/repo-b");
+
+    const active = await Repo.listActive();
+    const ours = active.filter((r) => r.fullName.startsWith("dbr-owner/"));
+    expect(ours).toHaveLength(0);
+  });
+});

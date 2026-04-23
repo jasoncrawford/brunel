@@ -54,7 +54,7 @@ if (isMain) {
   // Step 1: Bootstrap per-repo TaskManagers from known repos, then load active tasks.
   log("[startup] step 1: loading active tasks from DB...");
   try {
-    const repos = await Repo.list();
+    const repos = await Repo.listActive();
     for (const repo of repos) {
       await repo.taskManager.loadActiveTasksFromDb();
     }
