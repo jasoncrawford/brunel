@@ -41,7 +41,7 @@ export class BrunelAgent {
   private readonly controller: CommandController;
 
   constructor(config: BrunelConfig) {
-    this.settings = new Settings({ model: config.model, effort: config.effort });
+    this.settings = new Settings({ model: config.model, effort: config.effort, permissionMode: config.permissionMode });
     this.agentStatus = new AgentStatus({ agentId: WorkerSession.generateAgentId(), settings: this.settings });
     this.display = new Display(config, this.agentStatus);
     this.permConfig = {

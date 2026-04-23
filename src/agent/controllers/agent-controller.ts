@@ -117,9 +117,8 @@ export class AgentController {
     // Use caller-provided AbortController (worker mode) or create our own (REPL mode).
     const ac = abortController ?? new AbortController();
 
-    // Use permissionMode from settings if set, otherwise from config
-    const effectivePermissionMode = this.settings.permissionMode ?? permConfig.permissionMode;
-    const allowDangerouslySkipPerms = effectivePermissionMode === "bypassPermissions" || permConfig.allowDangerouslySkipPermissions;
+    // Use settings as source of truth for permissionMode (initialized from config)
+    const allowDangerouslySkipPerms = this.settings.permissionMode === "bypassPermissions";
 
     const iterable = query({
       prompt,
@@ -127,7 +126,7 @@ export class AgentController {
         cwd: process.cwd(),
         systemPrompt: { type: "preset", preset: "claude_code" },
         settingSources: ["user", "project"],
-        permissionMode: effectivePermissionMode,
+        permissionMode: this.settings.permissionMode,
         includePartialMessages: true,
         canUseTool,
         abortController: ac,
