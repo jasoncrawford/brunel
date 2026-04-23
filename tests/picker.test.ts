@@ -2,79 +2,74 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { Picker } from "../src/agent/views/picker.js";
 
 // ── Bar management ────────────────────────────────────────────────────────────
+//
+// The bug: Picker.pick() writes its menu starting at the cursor's resting
+// position, which is the blank separator row immediately above the status bar.
+// Without bar management, picker options overwrite the status bar lines.
+//
+// The fix: display.clearBar() is called before any options are written to
+// stdout, and display.drawBar() is called after the user selects. These tests
+// verify that the option text appears in stdout *after* clearBar fires and
+// *before* drawBar fires — confirming options land on freshly-cleared lines.
 
 describe("Picker bar management", () => {
   afterEach(() => {
     process.stdin.removeAllListeners("data");
+    vi.restoreAllMocks();
   });
 
-  it("calls clearBar synchronously before rendering the menu", () => {
-    const display = { clearBar: vi.fn(), drawBar: vi.fn() };
+  /** Returns a tracking display and a spy on stdout.write. */
+  function setup(optionText: string) {
+    const events: Array<"clearBar" | "option" | "drawBar"> = [];
+
+    vi.spyOn(process.stdout, "write").mockImplementation((chunk: unknown) => {
+      if (String(chunk).includes(optionText)) events.push("option");
+      return true;
+    });
+
+    const display = {
+      clearBar: vi.fn(() => { events.push("clearBar"); }),
+      drawBar:  vi.fn(() => { events.push("drawBar"); }),
+    };
+
+    return { events, display };
+  }
+
+  it("pick(): options are written to stdout after clearBar and before drawBar", async () => {
+    const { events, display } = setup("Option A");
     const picker = new Picker(display);
 
-    // Don't await — we only care about what happens synchronously up front.
-    void picker.pick(["A", "B"]);
-
-    expect(display.clearBar).toHaveBeenCalledOnce();
-    expect(display.drawBar).not.toHaveBeenCalled();
-  });
-
-  it("calls drawBar after pick resolves", async () => {
-    const display = { clearBar: vi.fn(), drawBar: vi.fn() };
-    const picker = new Picker(display);
-
-    const promise = picker.pick(["A", "B"]);
-    process.stdin.emit("data", "\r"); // Enter — selects first option
-    await promise;
-
-    expect(display.drawBar).toHaveBeenCalledOnce();
-  });
-
-  it("calls clearBar synchronously before rendering in pickMultiple", () => {
-    const display = { clearBar: vi.fn(), drawBar: vi.fn() };
-    const picker = new Picker(display);
-
-    void picker.pickMultiple(["A", "B"]);
-
-    expect(display.clearBar).toHaveBeenCalledOnce();
-    expect(display.drawBar).not.toHaveBeenCalled();
-  });
-
-  it("calls drawBar after pickMultiple resolves", async () => {
-    const display = { clearBar: vi.fn(), drawBar: vi.fn() };
-    const picker = new Picker(display);
-
-    const promise = picker.pickMultiple(["A", "B"]);
+    const promise = picker.pick(["Option A", "Option B"]);
     process.stdin.emit("data", "\r");
     await promise;
 
-    expect(display.drawBar).toHaveBeenCalledOnce();
+    expect(events).toEqual(["clearBar", "option", "drawBar"]);
   });
 
-  it("calls clearBar synchronously before rendering in pickQuestion", () => {
-    const display = { clearBar: vi.fn(), drawBar: vi.fn() };
+  it("pickMultiple(): options are written to stdout after clearBar and before drawBar", async () => {
+    const { events, display } = setup("Choice A");
     const picker = new Picker(display);
-    const opts = [{ label: "Yes", description: "Do it" }];
 
-    void picker.pickQuestion(opts);
+    const promise = picker.pickMultiple(["Choice A", "Choice B"]);
+    process.stdin.emit("data", "\r");
+    await promise;
 
-    expect(display.clearBar).toHaveBeenCalledOnce();
-    expect(display.drawBar).not.toHaveBeenCalled();
+    expect(events).toEqual(["clearBar", "option", "drawBar"]);
   });
 
-  it("calls drawBar after pickQuestion resolves", async () => {
-    const display = { clearBar: vi.fn(), drawBar: vi.fn() };
+  it("pickQuestion(): options are written to stdout after clearBar and before drawBar", async () => {
+    const { events, display } = setup("Yes");
     const picker = new Picker(display);
-    const opts = [{ label: "Yes", description: "Do it" }];
+    const opts = [{ label: "Yes", description: "Proceed" }];
 
     const promise = picker.pickQuestion(opts);
     process.stdin.emit("data", "\r");
     await promise;
 
-    expect(display.drawBar).toHaveBeenCalledOnce();
+    expect(events).toEqual(["clearBar", "option", "drawBar"]);
   });
 
-  it("works with no display (no-op)", async () => {
+  it("works with no display (no bar methods called, pick still resolves)", async () => {
     const picker = new Picker();
 
     const promise = picker.pick(["A", "B"]);
