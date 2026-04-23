@@ -24,9 +24,9 @@ A unified REPL + worker loop. `index.ts` is the composition root; `AgentControll
 
 Follows MVC with three subdirectories:
 
-- **Models** (`models/`) — `Workspace` (git/npm workspace management), `Settings` (runtime-settable preferences), `QueryStats` (token usage/turn counts), `AgentStatus` (pure state model for worker status — emits `"change"` on updates, subscribed to by `Display` for reactive redraws)
+- **Models** (`models/`) — `Workspace` (git/npm workspace management), `Settings` (runtime-settable preferences: model, effort, permissions), `QueryStats` (token usage/turn counts), `AgentStatus` (pure state model for worker status — emits `"change"` on updates, subscribed to by `Display` for reactive redraws)
 - **Views** (`views/`) — `Display` (TUI terminal I/O — the single doorway to stdout), `Renderer` (pure string producers, no I/O), `Input` (readline-based REPL), `Picker` (arrow-key menus), `style.ts` (terminal color/style constants)
-- **Controllers** (`controllers/`) — `AgentController` (runs queries), `WorkerController`/`WorkerSession` (WS protocol + task lifecycle), `WorkspaceController` (workspace lifecycle + `/workspace:*` slash commands), `CommandRegistry`/`CommandController` (slash command registration and dispatch), `SettingsController` (model/effort selection)
+- **Controllers** (`controllers/`) — `AgentController` (runs queries), `WorkerController`/`WorkerSession` (WS protocol + task lifecycle), `WorkspaceController` (workspace lifecycle + `/workspace:*` slash commands), `CommandRegistry`/`CommandController` (slash command registration and dispatch), `SettingsController` (model/effort/permissions selection)
 
 ### Shared
 
