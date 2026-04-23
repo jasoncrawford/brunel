@@ -247,6 +247,23 @@ describe("foreman WebSocket protocol", () => {
     expect(raceResult).toBe("timeout");
   });
 
+  it("task_complete with stats persists token counts and cost on the task", async () => {
+    await makeTask(taskManager, 3001);
+    const ws = await connect();
+    const q = makeQueue(ws);
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
+    await q.next(); // hello_ack
+    await q.next(); // task_assigned
+
+    send(ws, { type: "task_complete", workerId: "w1", taskId: "3001", stats: { inputTokens: 1000, outputTokens: 500, costUsd: 0.05 } });
+    await waitUntil(() => Worker.get("w1")?.status === "idle");
+
+    const task = await Task.get("3001");
+    expect(task?.inputTokens).toBe(1000);
+    expect(task?.outputTokens).toBe(500);
+    expect(task?.costUsd).toBe(0.05);
+  });
+
   it("worker reconnects as busy and reclaims its own task (no task_assigned sent)", async () => {
     await makeTask(taskManager, 1);
     const ws1 = await connect();

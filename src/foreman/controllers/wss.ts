@@ -119,7 +119,7 @@ export class ForemanWss {
         }
         if (task) {
           try {
-            await task.complete();
+            await task.complete(msg.stats);
           } catch (err) {
             log(`ERROR Failed to mark task #${msg.taskId} complete: ${fmtError(err)}`);
             return; // don't release — keeps task assigned so the failure is visible

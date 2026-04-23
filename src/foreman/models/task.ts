@@ -32,6 +32,9 @@ export class Task extends ActiveRecord {
   completedAt: string | null;
   issueClosedAt: string | null;
   prMergedAt: string | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  costUsd: number | null;
 
   // ── In-memory blocker state (not persisted to DB) ─────────────────────────
   /** Merged set of blockers with their current open/closed state — set by TaskManager.hydrateBlockers(). */
@@ -60,6 +63,9 @@ export class Task extends ActiveRecord {
     this.completedAt = row.completed_at;
     this.issueClosedAt = row.issue_closed_at;
     this.prMergedAt = row.pr_merged_at;
+    this.inputTokens = row.input_tokens;
+    this.outputTokens = row.output_tokens;
+    this.costUsd = row.cost_usd;
   }
 
   get status(): TaskStatus {
@@ -91,6 +97,9 @@ export class Task extends ActiveRecord {
       createdAt: this.createdAt,
       assignedAt: this.assignedAt ?? undefined,
       completedAt: this.completedAt ?? undefined,
+      inputTokens: this.inputTokens ?? undefined,
+      outputTokens: this.outputTokens ?? undefined,
+      costUsd: this.costUsd ?? undefined,
     };
   }
 
@@ -134,6 +143,9 @@ export class Task extends ActiveRecord {
       completed_at: null,
       issue_closed_at: null,
       pr_merged_at: null,
+      input_tokens: null,
+      output_tokens: null,
+      cost_usd: null,
       ...fields,
     };
     return new Task(row);
@@ -174,6 +186,9 @@ export class Task extends ActiveRecord {
     if ("title" in changes) this.title = changes.title!;
     if ("body" in changes) this.body = changes.body!;
     if ("labels" in changes) this.labels = changes.labels!;
+    if ("input_tokens" in changes) this.inputTokens = changes.input_tokens ?? null;
+    if ("output_tokens" in changes) this.outputTokens = changes.output_tokens ?? null;
+    if ("cost_usd" in changes) this.costUsd = changes.cost_usd ?? null;
     await this.update(changes as Record<string, unknown>);
     // "changed" event is emitted by the base update() above.
   }
@@ -233,8 +248,15 @@ export class Task extends ActiveRecord {
     await this.save({ worker_id: worker.workerId, assigned_at: new Date().toISOString() });
   }
 
-  async complete(): Promise<void> {
-    await this.save({ completed_at: new Date().toISOString() });
+  async complete(stats?: { inputTokens: number; outputTokens: number; costUsd?: number }): Promise<void> {
+    await this.save({
+      completed_at: new Date().toISOString(),
+      ...(stats && {
+        input_tokens: stats.inputTokens,
+        output_tokens: stats.outputTokens,
+        cost_usd: stats.costUsd ?? null,
+      }),
+    });
   }
 
   async revert(): Promise<void> {

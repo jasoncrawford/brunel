@@ -83,6 +83,9 @@ export type Database = {
           completed_at: string | null
           issue_closed_at: string | null
           pr_merged_at: string | null
+          input_tokens: number | null
+          output_tokens: number | null
+          cost_usd: number | null
         }
         Insert: {
           task_id: string
@@ -100,6 +103,9 @@ export type Database = {
           completed_at?: string | null
           issue_closed_at?: string | null
           pr_merged_at?: string | null
+          input_tokens?: number | null
+          output_tokens?: number | null
+          cost_usd?: number | null
         }
         Update: {
           task_id?: string
@@ -117,6 +123,9 @@ export type Database = {
           completed_at?: string | null
           issue_closed_at?: string | null
           pr_merged_at?: string | null
+          input_tokens?: number | null
+          output_tokens?: number | null
+          cost_usd?: number | null
         }
         Relationships: [
           {

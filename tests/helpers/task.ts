@@ -64,6 +64,9 @@ export async function seedTask(
     completed_at: null,
     issue_closed_at: null,
     pr_merged_at: null,
+    input_tokens: null,
+    output_tokens: null,
+    cost_usd: null,
     ...fields,
   } as any, { onConflict: "task_id" }).select().maybeSingle();
   Task.events.emit("changed");

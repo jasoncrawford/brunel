@@ -67,6 +67,17 @@ export function createHttpServer({ webhooks, routeEvent }: HttpServerOptions): h
     }
   });
 
+  app.get("/api/tasks/:id", async (c) => {
+    try {
+      const task = await Task.get(c.req.param("id"));
+      if (!task) return c.json({ error: "not found" }, 404);
+      return c.json(task.toWire());
+    } catch (err) {
+      log(`ERROR API query failed: ${fmtError(err)}`);
+      return c.json({ error: "internal error" }, 500);
+    }
+  });
+
   app.get("/api/tasks/:id/events", async (c) => {
     try {
       const taskId = c.req.param("id");

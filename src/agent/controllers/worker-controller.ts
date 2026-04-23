@@ -276,10 +276,13 @@ export class WorkerSession extends EventEmitter {
         this.display.print(c.amber(`afterTask failed: ${fmtError(err)}`));
       }
     }
+    const { taskInputTokens, taskOutputTokens, taskCostUsd } = this.agentStatus;
+    const hasStats = taskInputTokens > 0 || taskOutputTokens > 0 || taskCostUsd != null;
     this.sendTaskMessage({
       type: "task_complete",
       workerId: this.agentStatus.agentId,
       taskId: this.currentTaskId,
+      ...(hasStats && { stats: { inputTokens: taskInputTokens, outputTokens: taskOutputTokens, costUsd: taskCostUsd } }),
     });
     const taskNumber = this.currentIssue!.number;
     this.currentTaskId = undefined;
