@@ -72,6 +72,7 @@ describe("defaults", () => {
     expect(cfg.foremanUrl).toBe("ws://localhost:3000");
     expect(cfg.permissionMode).toBe("default");
     expect(cfg.allowDangerouslySkipPermissions).toBe(false);
+    expect(cfg.model).toBeUndefined();
   });
 });
 
@@ -469,12 +470,6 @@ describe("workspaceDir", () => {
 // ── model ────────────────────────────────────────────────────────────────────
 
 describe("model", () => {
-  it("is undefined by default", async () => {
-    baseEnv();
-    const cfg = await loadConfig(["node", "repl.js"]);
-    expect(cfg.model).toBeUndefined();
-  });
-
   it("BRUNEL_MODEL sets model", async () => {
     baseEnv();
     process.env.BRUNEL_MODEL = "opus";
