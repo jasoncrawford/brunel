@@ -10,12 +10,19 @@ import { buildInitialPrompt, buildEventPrompt } from "../worker-prompts.js";
 import type { EffortValue } from "../models/settings.js";
 import * as Wire from "../../../shared/wire.js";
 import { fmtError } from "../../utils.js";
+import { fmtNum } from "../../../shared/formatters.js";
 import { getConfig } from "../../config.js";
 import type { CommandRegistry } from "./command-controller.js";
 import { Picker } from "../views/picker.js";
 import { WorkspaceController } from "./workspace-controller.js";
 
 const execAsync = promisify(exec);
+
+function fmtTaskStats(inputTokens: number, outputTokens: number, costUsd: number | undefined): string {
+  const parts = [`tokens: ${fmtNum(inputTokens)} in / ${fmtNum(outputTokens)} out`];
+  if (costUsd != null) parts.push(`cost: $${costUsd.toFixed(2)}`);
+  return parts.join(", ");
+}
 
 // ── WorkerDisplay interface ───────────────────────────────────────────────────
 
@@ -274,10 +281,14 @@ export class WorkerSession extends EventEmitter {
       workerId: this.agentStatus.agentId,
       taskId: this.currentTaskId,
     });
+    const taskNumber = this.currentIssue!.number;
     this.currentTaskId = undefined;
     this.currentIssue = undefined;
+    const statsStr = fmtTaskStats(this.agentStatus.taskInputTokens, this.agentStatus.taskOutputTokens, this.agentStatus.taskCostUsd);
+    this.display.print(c.sageGreen(`Task #${taskNumber} complete, ${statsStr}`));
+    this.agentStatus.resetTaskStats();
     this.agentStatus.update({ taskNumber: undefined, prNumber: undefined, branch: "" });
-    this.display.print(c.sageGreen("Task complete. Waiting for next task..."));
+    this.display.print(c.sageGreen("Waiting for next task..."));
     return "task-complete";
   }
 
@@ -501,6 +512,7 @@ export class WorkerSession extends EventEmitter {
           prNumber: undefined,
           branch: "",
         });
+        this.agentStatus.resetTaskStats();
         this.display.print(c.amber("Task cancelled (reassigned to another worker)."));
         const workspace = this.options.workspaceController?.workspace;
         if (workspace?.isCreated) {
@@ -529,6 +541,7 @@ export class WorkerSession extends EventEmitter {
       this.prIsClosed = false;
       this.issueClosed = false;
       this.agentStatus.update({ taskNumber: msg.issue.number, prNumber: undefined });
+      this.agentStatus.resetTaskStats();
       void this.refreshBranch();
       const initialPrompt = buildInitialPrompt(msg.issue, !!this.options.workspaceController?.workspace);
       this.display.print(c.sageGreen(initialPrompt));

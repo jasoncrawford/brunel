@@ -67,6 +67,7 @@ export type QueryStreamEvent = {
   type: string;
   message?: { usage?: { input_tokens?: number } };
   usage?: { output_tokens?: number };
+  total_cost_usd?: number;
 };
 
 /**
@@ -113,14 +114,11 @@ export class QueryStats extends EventEmitter {
     } else if (event.type === "message_stop") {
       this._completedOutputTokens += this._currentOutputTokens;
       this._currentOutputTokens = 0;
+    } else if (event.type === "result") {
+      this._costUsd = event.total_cost_usd;
     } else {
       return; // unrecognized event — no state change, no emission
     }
-    this.emit("change");
-  }
-
-  setCost(cost: number): void {
-    this._costUsd = cost;
     this.emit("change");
   }
 

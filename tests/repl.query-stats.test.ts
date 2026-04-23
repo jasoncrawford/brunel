@@ -222,20 +222,36 @@ describe("QueryStats - cost tracking", () => {
     const stats = new QueryStats();
     expect(stats.costUsd).toBeUndefined();
   });
+});
 
-  it("stores cost when setCost is called", () => {
+describe("QueryStats - cost from result message", () => {
+  it("extracts cost from result message", () => {
     const stats = new QueryStats();
-    stats.setCost(0.42);
+    stats.update({ type: "result", total_cost_usd: 0.42 });
     expect(stats.costUsd).toBe(0.42);
   });
 
-  it("includes cost in getStatusText when set", () => {
+  it("ignores result message without cost", () => {
     const stats = new QueryStats();
-    stats.setCost(0.50);
+    stats.update({ type: "result" });
+    expect(stats.costUsd).toBeUndefined();
+  });
+
+  it("emits change when result with cost is received", () => {
+    const stats = new QueryStats();
+    const onChange = vi.fn();
+    stats.on("change", onChange);
+    stats.update({ type: "result", total_cost_usd: 0.1 });
+    expect(onChange).toHaveBeenCalledOnce();
+  });
+
+  it("includes cost in getStatusText after result message", () => {
+    const stats = new QueryStats();
+    stats.update({ type: "result", total_cost_usd: 0.50 });
     expect(stripAnsi(stats.getStatusText())).toContain("cost: $0.50");
   });
 
-  it("omits cost from getStatusText when not set", () => {
+  it("omits cost from getStatusText when no result received", () => {
     const stats = new QueryStats();
     expect(stripAnsi(stats.getStatusText())).not.toContain("cost");
   });
@@ -256,43 +272,12 @@ describe("QueryStats - integration with cost", () => {
     stats.update({ type: "message_delta", usage: { output_tokens: 250 } });
     stats.update({ type: "message_stop" });
     vi.advanceTimersByTime(5000);
-    stats.setCost(0.42);
+    stats.update({ type: "result", total_cost_usd: 0.42 });
 
     const text = stripAnsi(stats.getStatusText());
     expect(text).toContain("5s");
     expect(text).toContain("1 turn");
     expect(text).toContain("tokens: 100 in / 250 out");
     expect(text).toContain("cost: $0.42");
-  });
-
-  it("captures cost from result message during live stats", () => {
-    vi.useFakeTimers();
-    const start = Date.now();
-    const stats = new QueryStats(start);
-
-    // Simulate stream events
-    stats.update({ type: "message_start", message: { usage: { input_tokens: 50 } } });
-    stats.update({ type: "message_delta", usage: { output_tokens: 100 } });
-
-    // Before cost is set, status text should not contain cost
-    expect(stripAnsi(stats.getStatusText())).not.toContain("cost");
-
-    // Simulate result message arriving with cost (what AgentController does)
-    stats.setCost(0.25);
-
-    // After cost is set, status text should include it
-    const text = stripAnsi(stats.getStatusText());
-    expect(text).toContain("cost: $0.25");
-    expect(text).toContain("tokens: 50 in / 100 out");
-  });
-
-  it("emits change event when cost is set", () => {
-    const stats = new QueryStats();
-    const onChange = vi.fn();
-    stats.on("change", onChange);
-
-    stats.setCost(0.10);
-
-    expect(onChange).toHaveBeenCalledOnce();
   });
 });

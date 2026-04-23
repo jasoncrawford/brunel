@@ -96,8 +96,8 @@ describe("runQuery - session ID", () => {
     ]);
     const cap = captureConsole();
     try {
-      const sid = await testController.runQuery("hello", undefined);
-      expect(sid).toBe("abc-123");
+      const { sessionId } = await testController.runQuery("hello", undefined);
+      expect(sessionId).toBe("abc-123");
     } finally {
       cap.restore();
     }
@@ -109,8 +109,8 @@ describe("runQuery - session ID", () => {
     ]);
     const cap = captureConsole();
     try {
-      const sid = await testController.runQuery("hello", undefined);
-      expect(sid).toBeUndefined();
+      const { sessionId } = await testController.runQuery("hello", undefined);
+      expect(sessionId).toBeUndefined();
     } finally {
       cap.restore();
     }
@@ -514,7 +514,7 @@ describe("runQuery - interrupt support", () => {
     let sessionId: string | undefined;
     try {
       setTimeout(() => ac.abort(), 5);
-      sessionId = await testController.runQuery("test", undefined, ac);
+      ({ sessionId } = await testController.runQuery("test", undefined, ac));
     } finally {
       cap.restore();
     }

@@ -597,6 +597,12 @@ export class Renderer {
     else parts.push("no current task");
     if (status.prNumber != null) parts.push(`PR #${status.prNumber}`);
     if (status.branch) parts.push(status.branch);
+    if (status.taskNumber != null && status.taskInputTokens > 0) {
+      parts.push(`tokens: ${fmtNum(status.taskInputTokens)} in / ${fmtNum(status.taskOutputTokens)} out`);
+      if (status.taskCostUsd != null) {
+        parts.push(`cost: $${status.taskCostUsd.toFixed(2)}`);
+      }
+    }
     let leftText = parts.join(" ∙ ");
 
     // Truncate left side if needed to leave room for right side with a gap of 1
