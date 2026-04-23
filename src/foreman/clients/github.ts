@@ -47,14 +47,14 @@ export async function loadIssuesToQueue(
     await taskModel.enqueueIssue(String(issue.number), issue.number, repo, issue.title, body, labels)
       .catch((err: unknown) => console.error(`[startup] ERROR upserting task #${issue.number}: ${fmtError(err)}`));
 
-    const blockers = await Task.fetchBlockers(issue.number, body);
+    const blockers = await taskModel.fetchBlockers(issue.number, body);
     taskModel.setBlockers(issue.number, blockers);
     for (const b of blockers) allBlockerNumbers.add(b);
     loadedIssueNumbers.push(issue.number);
   }
 
   if (allBlockerNumbers.size > 0) {
-    const states = await fetchIssueStates(Array.from(allBlockerNumbers));
+    const states = await fetchIssueStates(Array.from(allBlockerNumbers), repo);
     for (const [num, state] of states) {
       taskModel.setIssueOpenState(num, state === "open");
     }
@@ -80,14 +80,15 @@ export async function loadIssuesToQueue(
 
 export async function fetchIssueStates(
   issueNumbers: number[],
+  repo: string,
 ): Promise<Map<number, "open" | "closed">> {
   if (issueNumbers.length === 0) return new Map();
-  const { githubRepo: repo, githubToken: token } = getConfig();
+  const { githubToken: token, githubApiUrl: apiUrl = "https://api.github.com" } = getConfig();
   const [owner, repoName] = repo.split("/");
   const result = new Map<number, "open" | "closed">();
   await Promise.all(
     issueNumbers.map(async (n) => {
-      const url = `https://api.github.com/repos/${owner}/${repoName}/issues/${n}`;
+      const url = `${apiUrl}/repos/${owner}/${repoName}/issues/${n}`;
       const res = await fetch(url, { headers: ghHeaders(token) });
       if (!res.ok) throw new Error(`GitHub API error: ${res.status}`);
       const issue = await res.json() as { number: number; state: string };
@@ -99,8 +100,9 @@ export async function fetchIssueStates(
 
 export async function fetchNativeBlockers(
   issueNumber: number,
+  repo: string,
 ): Promise<number[]> {
-  const { githubRepo: repo, githubToken: token, githubApiUrl: apiUrl = "https://api.github.com" } = getConfig();
+  const { githubToken: token, githubApiUrl: apiUrl = "https://api.github.com" } = getConfig();
   const [owner, repoName] = repo.split("/");
   const query = `
     query($owner: String!, $repo: String!, $number: Int!) {

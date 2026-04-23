@@ -126,11 +126,14 @@ describe("TaskManager — setBlockers / isBlocked", () => {
   });
 });
 
-describe("Task.fetchBlockers", () => {
-  beforeEach(() => {
+describe("TaskManager.fetchBlockers", () => {
+  let tm: TaskManager;
+
+  beforeEach(async () => {
+    resetDb();
     vi.stubGlobal("fetch", vi.fn());
-    getConfig().githubRepo = "owner/repo";
     getConfig().githubToken = "token123";
+    tm = await createTestTaskManager("owner/repo");
   });
 
   afterEach(() => {
@@ -142,7 +145,7 @@ describe("Task.fetchBlockers", () => {
       ok: true,
       json: async () => ({ data: { repository: { issue: { blockedBy: { nodes: [] } } } } }),
     } as any);
-    const blockers = await Task.fetchBlockers(42, "Depends on #5\nBlocked by #6");
+    const blockers = await tm.fetchBlockers(42, "Depends on #5\nBlocked by #6");
     expect(blockers).toEqual(expect.arrayContaining([5, 6]));
     expect(blockers).toHaveLength(2);
   });
@@ -154,7 +157,7 @@ describe("Task.fetchBlockers", () => {
         data: { repository: { issue: { blockedBy: { nodes: [{ number: 5 }, { number: 9 }] } } } },
       }),
     } as any);
-    const blockers = await Task.fetchBlockers(42, "Depends on #5");
+    const blockers = await tm.fetchBlockers(42, "Depends on #5");
     expect(new Set(blockers)).toEqual(new Set([5, 9]));
   });
 
@@ -163,6 +166,17 @@ describe("Task.fetchBlockers", () => {
       ok: true,
       json: async () => ({ data: { repository: { issue: { blockedBy: { nodes: [] } } } } }),
     } as any);
-    expect(await Task.fetchBlockers(42, "No dependencies here")).toEqual([]);
+    expect(await tm.fetchBlockers(42, "No dependencies here")).toEqual([]);
+  });
+
+  it("uses the repo from taskManager, not config", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ data: { repository: { issue: { blockedBy: { nodes: [] } } } } }),
+    } as any);
+    await tm.fetchBlockers(42, "");
+    const body = JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string);
+    expect(body.variables.owner).toBe("owner");
+    expect(body.variables.repo).toBe("repo");
   });
 });

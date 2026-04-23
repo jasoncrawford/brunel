@@ -4,7 +4,6 @@ import type { Worker } from "./worker.js";
 import type { WebhookEvent } from "./webhook-event.js";
 import type { Database } from "../../database.types.js";
 import * as Wire from "../../../shared/wire.js";
-import { fetchNativeBlockers } from "../clients/github.js";
 import { db } from "../clients/db-client.js";
 import { ActiveRecord } from "./active-record.js";
 import { Repo } from "./repo.js";
@@ -158,21 +157,6 @@ export class Task extends ActiveRecord {
       }
     }
     return Array.from(numbers);
-  }
-
-  /**
-   * Fetch all blockers for an issue from both body text and GitHub native relationships.
-   * Results are merged and deduplicated.
-   */
-  static async fetchBlockers(
-    issueNumber: number,
-    body: string,
-  ): Promise<number[]> {
-    const [bodyBlockers, nativeBlockers] = await Promise.all([
-      Task.parseBodyBlockers(body),
-      fetchNativeBlockers(issueNumber),
-    ]);
-    return Array.from(new Set([...bodyBlockers, ...nativeBlockers]));
   }
 
   // ── Private helpers ─────────────────────────────────────────────────────────

@@ -32,7 +32,7 @@ describe("loadIssuesToQueue", () => {
 
     resetDb();
     const taskManager = await createTestTaskManager("owner/repo");
-    vi.spyOn(Task, "fetchBlockers").mockResolvedValue([]);
+    vi.spyOn(taskManager, "fetchBlockers").mockResolvedValue([]);
 
     await loadIssuesToQueue(taskManager);
 
@@ -62,7 +62,7 @@ describe("loadIssuesToQueue", () => {
 
     resetDb();
     const taskManager = await createTestTaskManager("owner/repo");
-    vi.spyOn(Task, "fetchBlockers").mockResolvedValue([]);
+    vi.spyOn(taskManager, "fetchBlockers").mockResolvedValue([]);
 
     // Task #1 already exists and is assigned to a worker (simulates foreman restart)
     await Task.upsert("1", 1, "owner/repo", "Original title", "Original body", ["brunel:ready"]);
@@ -87,20 +87,29 @@ describe("fetchIssueStates", () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce({ ok: true, json: async () => ({ number: 1, state: "open" }) } as any)
       .mockResolvedValueOnce({ ok: true, json: async () => ({ number: 2, state: "closed" }) } as any);
-    const states = await fetchIssueStates([1, 2]);
+    const states = await fetchIssueStates([1, 2], "owner/repo");
     expect(states.get(1)).toBe("open");
     expect(states.get(2)).toBe("closed");
   });
 
+  it("uses the provided repo in the API URL", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({ ok: true, json: async () => ({ number: 1, state: "open" }) } as any);
+    await fetchIssueStates([1], "other-owner/other-repo");
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining("other-owner/other-repo/issues/1"),
+      expect.anything(),
+    );
+  });
+
   it("returns empty map for empty input without calling fetch", async () => {
-    const states = await fetchIssueStates([]);
+    const states = await fetchIssueStates([], "owner/repo");
     expect(fetch).not.toHaveBeenCalled();
     expect(states.size).toBe(0);
   });
 
   it("throws on non-ok response", async () => {
     vi.mocked(fetch).mockResolvedValueOnce({ ok: false, status: 500 } as any);
-    await expect(fetchIssueStates([1])).rejects.toThrow("500");
+    await expect(fetchIssueStates([1], "owner/repo")).rejects.toThrow("500");
   });
 });
 
@@ -118,8 +127,19 @@ describe("fetchNativeBlockers", () => {
         },
       }),
     } as any);
-    const blockers = await fetchNativeBlockers(42);
+    const blockers = await fetchNativeBlockers(42, "owner/repo");
     expect(blockers).toEqual([5, 7]);
+  });
+
+  it("uses the provided repo in the GraphQL variables", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ data: { repository: { issue: { blockedBy: { nodes: [] } } } } }),
+    } as any);
+    await fetchNativeBlockers(42, "other-owner/other-repo");
+    const body = JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string);
+    expect(body.variables.owner).toBe("other-owner");
+    expect(body.variables.repo).toBe("other-repo");
   });
 
   it("returns empty array when issue has no blockers", async () => {
@@ -129,7 +149,7 @@ describe("fetchNativeBlockers", () => {
         data: { repository: { issue: { blockedBy: { nodes: [] } } } },
       }),
     } as any);
-    expect(await fetchNativeBlockers(42)).toEqual([]);
+    expect(await fetchNativeBlockers(42, "owner/repo")).toEqual([]);
   });
 
   it("returns empty array when GraphQL field is null (feature unavailable)", async () => {
@@ -139,17 +159,17 @@ describe("fetchNativeBlockers", () => {
         data: { repository: { issue: { blockedBy: null } } },
       }),
     } as any);
-    expect(await fetchNativeBlockers(42)).toEqual([]);
+    expect(await fetchNativeBlockers(42, "owner/repo")).toEqual([]);
   });
 
   it("throws on non-ok HTTP response", async () => {
     vi.mocked(fetch).mockResolvedValueOnce({ ok: false, status: 403 } as any);
-    await expect(fetchNativeBlockers(42)).rejects.toThrow("403");
+    await expect(fetchNativeBlockers(42, "owner/repo")).rejects.toThrow("403");
   });
 });
 
 describe("loadIssuesToQueue with blockers", () => {
-  it("populates taskManager blockers from Task.fetchBlockers result", async () => {
+  it("populates taskManager blockers from fetchBlockers result", async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce({
         ok: true,
@@ -164,7 +184,7 @@ describe("loadIssuesToQueue with blockers", () => {
 
     resetDb();
     const taskManager = await createTestTaskManager("owner/repo");
-    vi.spyOn(Task, "fetchBlockers").mockResolvedValueOnce([99]);
+    vi.spyOn(taskManager, "fetchBlockers").mockResolvedValueOnce([99]);
 
     await loadIssuesToQueue(taskManager);
 
@@ -186,10 +206,10 @@ describe("loadIssuesToQueue with blockers", () => {
         json: async () => ({ number: 50, state: "closed" }),
       } as any);
 
-    vi.spyOn(Task, "fetchBlockers").mockResolvedValueOnce([50]);
-
     resetDb();
     const taskManager = await createTestTaskManager("owner/repo");
+    vi.spyOn(taskManager, "fetchBlockers").mockResolvedValueOnce([50]);
+
     await loadIssuesToQueue(taskManager);
 
     // Blocker 50 is closed, so isBlocked should be false
