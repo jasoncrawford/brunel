@@ -311,6 +311,12 @@ export class Display {
   private _handleResize(): void {
     if (!this.persistentActive && !this.active) return;
     this.clearBar();
+    // Erase from cursor (blank separator row) to end of screen. When the terminal
+    // becomes narrower, the old wider status bar wraps into extra visual rows that
+    // clearBar() (which only clears n logical rows) leaves behind as garbage.
+    if (!this.inputPrint && !this.inputStatus) {
+      process.stdout.write("\x1b[J");
+    }
     if (this._getText) this._text = this._getText();
     this._persistentText = this.renderer.fmtStatusBar(this.agentStatus, (this.getColumns() ?? W) - 1);
     this.drawBar();
