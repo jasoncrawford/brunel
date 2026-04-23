@@ -12,11 +12,10 @@ import { loadConfig, getConfig, type BrunelConfig } from "../config.js";
 import { Workspace } from "./models/workspace.js";
 import { fmtError } from "../utils.js";
 import { Settings } from "./models/settings.js";
-import type { FetchModelsFn } from "./models/settings.js";
 import { CommandRegistry, CommandController } from "./controllers/command-controller.js";
 import { SettingsController } from "./controllers/settings-controller.js";
 import { WorkspaceController } from "./controllers/workspace-controller.js";
-import { AgentController, logFull, createFetchModelsFn } from "./controllers/agent-controller.js";
+import { AgentController, logFull } from "./controllers/agent-controller.js";
 
 // ── BrunelAgent ───────────────────────────────────────────────────────────────
 
@@ -34,7 +33,6 @@ export class BrunelAgent {
   private readonly picker: Picker;
   private readonly agentController: AgentController;
   private readonly workspaceController: WorkspaceController;
-  private readonly fetchModelsFn: FetchModelsFn;
   private readonly settingsController: SettingsController;
   private readonly controller: CommandController;
 
@@ -70,7 +68,6 @@ export class BrunelAgent {
       : undefined;
     this.workspaceController = new WorkspaceController(workspace, this.display, config);
 
-    this.fetchModelsFn = createFetchModelsFn(this.settings);
     this.settingsController = new SettingsController(this.settings, this.display);
     const registry = new CommandRegistry();
     this.controller = new CommandController(registry);
@@ -149,7 +146,7 @@ export class BrunelAgent {
         await this.settingsController.pickModel(
           args,
           (opts, idx) => this.picker.pick(opts, { currentIdx: idx, escapable: true }),
-          this.fetchModelsFn,
+          () => this.agentController.fetchModels(),
         );
       },
     });

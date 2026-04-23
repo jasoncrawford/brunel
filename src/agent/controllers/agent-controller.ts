@@ -6,7 +6,7 @@ import type { Display } from "../views/display.js";
 import { Picker } from "../views/picker.js";
 import type { PickQuestionResult } from "../views/picker.js";
 import { Settings } from "../models/settings.js";
-import type { ModelInfo, FetchModelsFn } from "../models/settings.js";
+import type { ModelInfo } from "../models/settings.js";
 import { QueryStats } from "../models/query-stats.js";
 
 // ── Log file ──────────────────────────────────────────────────────────────────
@@ -33,19 +33,6 @@ type Question = { question: string; header: string; options: QuestionOption[]; m
 /** The SDK query object exposes supportedModels() as an undocumented extension. */
 type QueryWithModels = { supportedModels?: () => Promise<ModelInfo[]> };
 
-/**
- * Returns a function that fetches available Claude models from the SDK.
- * Used by the /model command to populate the model picker.
- */
-export function createFetchModelsFn(settings: Settings): FetchModelsFn {
-  return async () => {
-    const q = query({ prompt: "", options: { cwd: process.cwd(), systemPrompt: { type: "preset", preset: "claude_code" }, permissionMode: settings.permissionMode } });
-    const qm = q as unknown as QueryWithModels;
-    if (typeof qm.supportedModels === "function") return qm.supportedModels();
-    return [];
-  };
-}
-
 // ── AgentController ───────────────────────────────────────────────────────────
 
 /**
@@ -62,6 +49,14 @@ export class AgentController {
     private picker: Picker,
     private settings: Settings,
   ) {}
+
+  /** Fetches available Claude models from the SDK. Used by the /model command. */
+  async fetchModels(): Promise<ModelInfo[]> {
+    const q = query({ prompt: "", options: { cwd: process.cwd(), systemPrompt: { type: "preset", preset: "claude_code" }, permissionMode: this.settings.permissionMode } });
+    const qm = q as unknown as QueryWithModels;
+    if (typeof qm.supportedModels === "function") return qm.supportedModels();
+    return [];
+  }
 
   /**
    * Run a single prompt through the Claude SDK. Manages the status bar,
