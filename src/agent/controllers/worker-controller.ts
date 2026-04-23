@@ -538,6 +538,10 @@ export class WorkerSession extends EventEmitter {
           });
         }
       } else if (msg.repoStatus === "new") {
+        // Show "Connected" in the status bar before waiting for user input — the
+        // worker IS connected, it just needs activation. connectionState stays
+        // "hello_sent" so buffered messages are not flushed prematurely.
+        this.agentStatus.update({ connectionStatus: "connected", disconnectCode: undefined });
         // Repo is new — ask the user whether to activate it before proceeding.
         const repoName = this.options.repo ?? "this repo";
         this.display.print(c.amber(`Repo ${repoName} is new — activate it?`));
