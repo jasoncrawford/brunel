@@ -51,8 +51,6 @@ let sb: AgentStatus;
 let display: {
   print: ReturnType<typeof vi.fn>;
   printForemanMessage: ReturnType<typeof vi.fn>;
-  clearBar: ReturnType<typeof vi.fn>;
-  drawBar: ReturnType<typeof vi.fn>;
 };
 let session: WorkerSession;
 
@@ -62,8 +60,6 @@ beforeEach(() => {
   display = {
     print: vi.fn(),
     printForemanMessage: vi.fn(),
-    clearBar: vi.fn(),
-    drawBar: vi.fn(),
   };
   sb = new AgentStatus({ agentId: AGENT_ID });
   vi.spyOn(sb, "setOnToolResult");
@@ -1389,7 +1385,7 @@ describe("workspace slash commands in WorkerSession", () => {
   });
 
   it("/workspace:create prints 'already exists' when workspace is pre-created", async () => {
-    const localDisplay = { print: vi.fn(), printForemanMessage: vi.fn(), clearBar: vi.fn(), drawBar: vi.fn() };
+    const localDisplay = { print: vi.fn(), printForemanMessage: vi.fn() };
     const workspace = makeWorkspace();
     const wc = new WorkspaceController(workspace, localDisplay);
     new WorkerSession(new AgentStatus({ agentId: AGENT_ID }), wsFactory, display, { workspaceController: wc }).start();
@@ -1687,14 +1683,9 @@ describe("getTaskQuitInfo", () => {
 describe("confirmTaskQuit", () => {
   const openTask: TaskQuitInfo = { taskNumber: 42, workerId: "test-worker", issueClosed: false };
   const closedTask: TaskQuitInfo = { taskNumber: 42, workerId: "test-worker", issueClosed: true };
-  const noopDisplay = { print: vi.fn(), printForemanMessage: vi.fn(), clearBar: vi.fn(), drawBar: vi.fn() };
+  const noopDisplay = { print: vi.fn(), printForemanMessage: vi.fn() };
 
-  beforeEach(() => {
-    noopDisplay.print.mockReset();
-    noopDisplay.printForemanMessage.mockReset();
-    noopDisplay.clearBar.mockReset();
-    noopDisplay.drawBar.mockReset();
-  });
+  beforeEach(() => { noopDisplay.print.mockReset(); noopDisplay.printForemanMessage.mockReset(); });
 
   it("open issue: returns 'cancel' when user picks 'No, keep working' (index 0)", async () => {
     const mockPick = vi.fn().mockResolvedValue(0);
@@ -1711,7 +1702,7 @@ describe("confirmTaskQuit", () => {
   });
 
   it("open issue: prompt mentions task number and worker id", async () => {
-    const printDisplay = { print: vi.fn(), printForemanMessage: vi.fn(), clearBar: vi.fn(), drawBar: vi.fn() };
+    const printDisplay = { print: vi.fn(), printForemanMessage: vi.fn() };
     const mockPick = vi.fn().mockResolvedValue(0);
     const sess = new WorkerSession(new AgentStatus({ agentId: "test" }), vi.fn(), printDisplay);
     await sess.confirmTaskQuit(openTask, mockPick);
@@ -1742,7 +1733,7 @@ describe("confirmTaskQuit", () => {
   });
 
   it("closed issue: prompt mentions task number", async () => {
-    const printDisplay = { print: vi.fn(), printForemanMessage: vi.fn(), clearBar: vi.fn(), drawBar: vi.fn() };
+    const printDisplay = { print: vi.fn(), printForemanMessage: vi.fn() };
     const mockPick = vi.fn().mockResolvedValue(0);
     const sess = new WorkerSession(new AgentStatus({ agentId: "test" }), vi.fn(), printDisplay);
     await sess.confirmTaskQuit(closedTask, mockPick);
@@ -1768,34 +1759,6 @@ describe("confirmTaskQuit", () => {
     expect(mockPick).toHaveBeenCalledOnce();
     const options = mockPick.mock.calls[0][0] as string[];
     expect(options).toHaveLength(3);
-  });
-
-  it("clears bar before picker and redraws after (open issue)", async () => {
-    const callOrder: string[] = [];
-    const trackDisplay = {
-      print: vi.fn(),
-      printForemanMessage: vi.fn(),
-      clearBar: vi.fn(() => { callOrder.push("clearBar"); }),
-      drawBar: vi.fn(() => { callOrder.push("drawBar"); }),
-    };
-    const mockPick = vi.fn(() => { callOrder.push("pick"); return Promise.resolve(0); });
-    const sess = new WorkerSession(new AgentStatus({ agentId: "test" }), vi.fn(), trackDisplay);
-    await sess.confirmTaskQuit(openTask, mockPick);
-    expect(callOrder).toEqual(["clearBar", "pick", "drawBar"]);
-  });
-
-  it("clears bar before picker and redraws after (closed issue)", async () => {
-    const callOrder: string[] = [];
-    const trackDisplay = {
-      print: vi.fn(),
-      printForemanMessage: vi.fn(),
-      clearBar: vi.fn(() => { callOrder.push("clearBar"); }),
-      drawBar: vi.fn(() => { callOrder.push("drawBar"); }),
-    };
-    const mockPick = vi.fn(() => { callOrder.push("pick"); return Promise.resolve(0); });
-    const sess = new WorkerSession(new AgentStatus({ agentId: "test" }), vi.fn(), trackDisplay);
-    await sess.confirmTaskQuit(closedTask, mockPick);
-    expect(callOrder).toEqual(["clearBar", "pick", "drawBar"]);
   });
 });
 
