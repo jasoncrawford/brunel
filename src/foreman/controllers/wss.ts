@@ -11,6 +11,7 @@ import { TaskManager } from "../models/task-manager.js";
 import { Repo } from "../models/repo.js";
 import { Task } from "../models/task.js";
 import { Worker } from "../models/worker.js";
+import { loadIssuesToQueue } from "../clients/github.js";
 
 type R = Record<string, unknown>;
 
@@ -142,6 +143,10 @@ export class ForemanWss {
         Worker.get(workerId)?.remove();
       };
 
+      const handleActivateRepo = async (_msg: Extract<Wire.WorkerMessage, { type: "activate_repo" }>) => {
+        await this.handleActivateRepo(workerId, ws);
+      };
+
       ws.on("message", (data) => {
         void (async () => {
           let msg: Wire.WorkerMessage;
@@ -164,6 +169,7 @@ export class ForemanWss {
           if (msg.type === "worker_hello") await handleWorkerHello(msg);
           else if (msg.type === "task_complete") await handleTaskComplete(msg);
           else if (msg.type === "worker_goodbye") await handleWorkerGoodbye(msg);
+          else if (msg.type === "activate_repo") await handleActivateRepo(msg);
           else { log(`[worker ${workerId}] unknown message type: ${(msg as R).type}`); return; }
           await this.assignWork();
         })().catch(err => {
@@ -341,7 +347,7 @@ export class ForemanWss {
   }
 
   private cancelWorker(worker: Worker, task: Task | null): void {
-    this.sendMsg(worker, { type: "hello_ack", workerId: worker.workerId, status: "cancelled" }, task?.taskId);
+    this.sendMsg(worker, { type: "hello_ack", workerId: worker.workerId, status: "cancelled", repoStatus: worker.repo.status }, task?.taskId);
   }
 
   private async reclaimWorker(worker: Worker, task: Task): Promise<void> {
@@ -351,7 +357,7 @@ export class ForemanWss {
       await task.assign(worker);
     }
     // For complete tasks, the task stays complete while worker finishes cleanup/finalization work
-    this.sendMsg(worker, { type: "hello_ack", workerId: worker.workerId, status: "busy" }, task.taskId);
+    this.sendMsg(worker, { type: "hello_ack", workerId: worker.workerId, status: "busy", repoStatus: worker.repo.status }, task.taskId);
     this.flushQueuedEvents(worker, task);
   }
 
@@ -431,13 +437,39 @@ export class ForemanWss {
         this.workerLog(workerId, "hello idle");
       }
       const w = Worker.register(workerId, ws, repo);
-      this.sendMsg(w, { type: "hello_ack", workerId: w.workerId, status: "idle" });
+      this.sendMsg(w, { type: "hello_ack", workerId: w.workerId, status: "idle", repoStatus: repo.status });
     } catch (err) {
       log(`ERROR handleIdleHello ${workerId}: ${fmtError(err)}`);
       // DB error during worker lookup — recoverable: DB may be temporarily down.
       // Worker retries on reconnect and the operation succeeds once the DB recovers.
       this.sendError(ws, `Internal error during idle hello: ${fmtError(err)}`, false, workerId, repo.id);
     }
+  }
+
+  async handleActivateRepo(workerId: string, ws: WebSocket): Promise<void> {
+    this.workerLog(workerId, "activate_repo");
+    const worker = Worker.get(workerId);
+    if (!worker) {
+      log(`[worker ${shortWorkerId(workerId)}] activate_repo received but worker not registered — ignoring`);
+      return;
+    }
+    const repo = worker.repo;
+    try {
+      await repo.activate();
+      this.workerLog(workerId, `repo ${repo.fullName} activated`);
+    } catch (err) {
+      log(`ERROR Failed to activate repo ${repo.fullName}: ${fmtError(err)}`);
+      this.sendError(ws, `Failed to activate repo: ${fmtError(err)}`, false, workerId, repo.id);
+      return;
+    }
+    try {
+      await loadIssuesToQueue(repo.taskManager);
+      this.workerLog(workerId, `loaded issues for ${repo.fullName}`);
+    } catch (err) {
+      log(`ERROR Failed to load issues for ${repo.fullName}: ${fmtError(err)}`);
+      // Non-fatal: repo is active, tasks can still be created via webhooks.
+    }
+    this.sendMsg(worker, { type: "hello_ack", workerId: worker.workerId, status: "idle", repoStatus: "active" });
   }
 
   // ── Routing ─────────────────────────────────────────────────────────────────

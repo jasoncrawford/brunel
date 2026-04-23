@@ -34,8 +34,8 @@ export async function createTestTaskManager(fullName = "test/repo"): Promise<Tas
 }
 
 /** Returns a fake Repo object suitable for Worker.register() in tests. */
-export function fakeRepo(fullName = "owner/repo", id = 1): Repo {
-  return { id, fullName } as unknown as Repo;
+export function fakeRepo(fullName = "owner/repo", id = 1, status: "new" | "active" = "new"): Repo {
+  return { id, fullName, status } as unknown as Repo;
 }
 
 /**

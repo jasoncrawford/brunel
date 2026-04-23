@@ -431,7 +431,7 @@ describe("hello_ack handshake", () => {
     const ackPromise = nextMsg(ws);
     send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
     const ack = await ackPromise;
-    expect(ack).toEqual({ type: "hello_ack", workerId: "w1", status: "idle" });
+    expect(ack).toMatchObject({ type: "hello_ack", workerId: "w1", status: "idle" });
   });
 
   it("sends hello_ack with status busy when worker reclaims its own task", async () => {
@@ -448,7 +448,7 @@ describe("hello_ack handshake", () => {
     const ackPromise = nextMsg(ws2);
     send(ws2, { type: "worker_hello", repo: "owner/repo", workerId: "w1", taskId: "1", status: "busy" });
     const ack = await ackPromise;
-    expect(ack).toEqual({ type: "hello_ack", workerId: "w1", status: "busy" });
+    expect(ack).toMatchObject({ type: "hello_ack", workerId: "w1", status: "busy" });
   });
 
   it("sends hello_ack with status cancelled when task was taken by another worker", async () => {
@@ -464,7 +464,7 @@ describe("hello_ack handshake", () => {
     const ackPromise = nextMsg(wsB);
     send(wsB, { type: "worker_hello", repo: "owner/repo", workerId: "worker-b", taskId: "1", status: "busy" });
     const ack = await ackPromise;
-    expect(ack).toEqual({ type: "hello_ack", workerId: "worker-b", status: "cancelled" });
+    expect(ack).toMatchObject({ type: "hello_ack", workerId: "worker-b", status: "cancelled" });
     expect(Worker.get("worker-b")?.status).toBe("idle");
   });
 
@@ -473,7 +473,7 @@ describe("hello_ack handshake", () => {
     const ackPromise = nextMsg(ws);
     send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", taskId: "nonexistent", status: "busy" });
     const ack = await ackPromise;
-    expect(ack).toEqual({ type: "hello_ack", workerId: "w1", status: "cancelled" });
+    expect(ack).toMatchObject({ type: "hello_ack", workerId: "w1", status: "cancelled" });
     expect(Worker.get("w1")?.status).toBe("idle");
   });
 
@@ -488,7 +488,7 @@ describe("hello_ack handshake", () => {
     const ackPromise = nextMsg(ws);
     send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", taskId: "1", status: "busy" });
     const ack = await ackPromise;
-    expect(ack).toEqual({ type: "hello_ack", workerId: "w1", status: "busy" });
+    expect(ack).toMatchObject({ type: "hello_ack", workerId: "w1", status: "busy" });
     expect(Worker.get("w1")?.status).toBe("busy");
     expect(Worker.get("w1")?.currentTaskId).toBe("1");
   });
@@ -504,7 +504,7 @@ describe("hello_ack handshake", () => {
     const ackPromise = nextMsg(ws);
     send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", taskId: "1", status: "busy" });
     const ack = await ackPromise;
-    expect(ack).toEqual({ type: "hello_ack", workerId: "w1", status: "cancelled" });
+    expect(ack).toMatchObject({ type: "hello_ack", workerId: "w1", status: "cancelled" });
     expect(Worker.get("w1")?.status).toBe("idle");
   });
 
@@ -1037,7 +1037,7 @@ describe("worker_hello — reclaim complete task for finalization work", () => {
     const ackPromise = nextMsg(ws);
     send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", taskId: "1", status: "busy" });
     const ack = await ackPromise;
-    expect(ack).toEqual({ type: "hello_ack", workerId: "w1", status: "busy" });
+    expect(ack).toMatchObject({ type: "hello_ack", workerId: "w1", status: "busy" });
     expect(Worker.get("w1")?.status).toBe("busy");
     expect(Worker.get("w1")?.currentTaskId).toBe("1");
   });
