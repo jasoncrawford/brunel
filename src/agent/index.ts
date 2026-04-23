@@ -168,6 +168,15 @@ export class BrunelAgent {
         );
       },
     });
+    registry.register("permissions", {
+      description: "Set the permission mode for tool use",
+      handler: async (args) => {
+        await this.settingsController.pickPermissions(
+          args,
+          (opts, idx) => this.picker.pick(opts, { currentIdx: idx, escapable: true }),
+        );
+      },
+    });
 
     /**
      * Run a single prompt through agentController.runQuery. Notifies the session
