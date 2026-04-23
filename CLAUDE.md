@@ -94,6 +94,7 @@ See **`docs/type-system.md`** for the full design. In brief: one server model cl
 ## Key conventions
 
 - **Output in agent/worker code**: use `display.print(...)` on an injected `display: WorkerDisplay` instance — it routes through the status-bar-aware renderer so messages don't corrupt the TUI. `WorkerDisplay` interface is defined in `controllers/worker-controller.ts`.
+- **Interactive prompts (Picker)**: always construct `Picker` with a `display` argument (`new Picker(display)`). The Picker clears the status bar before rendering its menu and restores it after selection, preventing options from overwriting the bar. Omit `display` only in tests that don't involve a real terminal.
 - **Real-time UIs**: prefer event-based designs — a model holds state and emits on change; the UI subscribes once rather than scattering manual refresh calls.
 - **Pass model objects, not IDs**: controllers look up model objects from wire message IDs first, then pass the objects to helpers.
 - **Wire types**: all live in `shared/wire.ts`, imported as `import * as Wire from "../../shared/wire.js"`.
