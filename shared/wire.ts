@@ -26,6 +26,9 @@ export interface Task {
   createdAt?: string;
   assignedAt?: string;
   completedAt?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  costUsd?: number;
 }
 
 /** Wire representation of a connected worker — sent over the admin WebSocket. */
@@ -75,7 +78,7 @@ export interface TaskIssue {
 // Worker → Foreman messages
 export type WorkerMessage =
   | { type: "worker_hello"; workerId: string; repo: string; taskId?: string; status: "idle" | "busy"; workerSecret?: string }
-  | { type: "task_complete"; workerId: string; taskId: string }
+  | { type: "task_complete"; workerId: string; taskId: string; stats?: { inputTokens: number; outputTokens: number; costUsd?: number } }
   | { type: "worker_goodbye"; workerId: string; taskId?: string };
 
 // Foreman → Worker messages

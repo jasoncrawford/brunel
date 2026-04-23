@@ -164,6 +164,9 @@ export function createMemoryTaskDb(): SupabaseClient<Database> {
             completed_at: null,
             issue_closed_at: null,
             pr_merged_at: null,
+            input_tokens: null,
+            output_tokens: null,
+            cost_usd: null,
             created_at: now,
             // Preserve all existing field values (mirrors ON CONFLICT DO UPDATE
             // which only updates the columns listed in the UPDATE SET — all other

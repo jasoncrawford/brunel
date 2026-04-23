@@ -71,6 +71,7 @@ export default function TaskList() {
               <th style={th}>PR</th>
               <th style={th}>Created</th>
               <th style={th}>Completed</th>
+              <th style={th}>Tokens / Cost</th>
             </tr>
           </thead>
           <tbody>
@@ -87,6 +88,7 @@ export default function TaskList() {
                   : "—"}</td>
                 <td style={td}>{t.createdAt ? new Date(t.createdAt).toLocaleString() : "—"}</td>
                 <td style={td}>{t.completedAt ? new Date(t.completedAt).toLocaleString() : "—"}</td>
+                <td style={td}>{fmtStats(t)}</td>
               </tr>
             ))}
           </tbody>
@@ -98,3 +100,11 @@ export default function TaskList() {
 
 const th: React.CSSProperties = { textAlign: "left", borderBottom: "1px solid #ccc", padding: "4px 8px" };
 const td: React.CSSProperties = { padding: "4px 8px", borderBottom: "1px solid #eee" };
+
+function fmtStats(t: Task): string {
+  if (t.inputTokens == null && t.outputTokens == null) return "—";
+  const inK = ((t.inputTokens ?? 0) / 1000).toFixed(1);
+  const outK = ((t.outputTokens ?? 0) / 1000).toFixed(1);
+  const cost = t.costUsd != null ? ` · $${t.costUsd.toFixed(4)}` : "";
+  return `${inK}k in / ${outK}k out${cost}`;
+}

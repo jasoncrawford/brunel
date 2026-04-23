@@ -244,6 +244,25 @@ describe("completeCurrentTask", () => {
     await session.completeCurrentTask();
     expect(fakeWs.send).not.toHaveBeenCalled();
   });
+
+  it("includes accumulated token stats in task_complete message", async () => {
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
+    session.takeNextPrompt();
+    sb.addQueryStats(1000, 500, 0.05); // add stats after assignment (task_assigned resets stats)
+    await session.completeCurrentTask();
+    const sent = JSON.parse(fakeWs.send.mock.calls[0][0]);
+    expect(sent.type).toBe("task_complete");
+    expect(sent.stats).toEqual({ inputTokens: 1000, outputTokens: 500, costUsd: 0.05 });
+  });
+
+  it("omits stats from task_complete when no tokens were used", async () => {
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
+    session.takeNextPrompt();
+    await session.completeCurrentTask();
+    const sent = JSON.parse(fakeWs.send.mock.calls[0][0]);
+    expect(sent.type).toBe("task_complete");
+    expect(sent.stats).toBeUndefined();
+  });
 });
 
 // ── State isolation ───────────────────────────────────────────────────────────

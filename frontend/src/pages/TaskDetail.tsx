@@ -10,6 +10,10 @@ export default function TaskDetail() {
   const [task, setTask] = useState<Task | null>(null);
 
   useEffect(() => {
+    fetch(`/api/tasks/${id}`)
+      .then((r) => r.json() as Promise<Task>)
+      .then(setTask)
+      .catch(console.error);
     fetch(`/api/tasks/${id}/events`)
       .then((r) => r.json() as Promise<LogEntry[]>)
       .then(setEvents)
@@ -31,6 +35,13 @@ export default function TaskDetail() {
     <div>
       <h2>Task #{id}</h2>
       <p><Link to="/">← Dashboard</Link></p>
+
+      {task && (task.inputTokens != null || task.outputTokens != null) && (
+        <section style={{ marginBottom: "1rem", fontFamily: "monospace", fontSize: "0.9em", color: "#555" }}>
+          <span>Tokens: {(task.inputTokens ?? 0).toLocaleString()} in / {(task.outputTokens ?? 0).toLocaleString()} out</span>
+          {task.costUsd != null && <span style={{ marginLeft: "1rem" }}>Cost: ${task.costUsd.toFixed(4)}</span>}
+        </section>
+      )}
 
       {task?.blockers && task.blockers.length > 0 && (
         <section style={{ marginBottom: "1.5rem" }}>

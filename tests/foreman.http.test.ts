@@ -144,6 +144,46 @@ describe("GET /api/log", () => {
   });
 });
 
+describe("GET /api/tasks/:id", () => {
+  it("returns 404 when task does not exist", async () => {
+    resetDb();
+    const s = createHttpServer({ webhooks: null, routeEvent: vi.fn() });
+    const p = await startServer(s);
+    try {
+      const res = await request(p, "GET", "/api/tasks/nonexistent");
+      expect(res.status).toBe(404);
+    } finally {
+      await stopServer(s);
+    }
+  });
+
+  it("returns 200 with task data including stats for a completed task", async () => {
+    resetDb();
+    await createTestTaskManager();
+
+    const t = await Task.upsert("http-t1", 9901, "test/repo", "Fix bug", "body", []);
+    await t.complete({ inputTokens: 1000, outputTokens: 500, costUsd: 0.05 });
+
+    const s = createHttpServer({ webhooks: null, routeEvent: vi.fn() });
+    const p = await startServer(s);
+    try {
+      const res = await request(p, "GET", "/api/tasks/http-t1");
+      expect(res.status).toBe(200);
+      const body = JSON.parse(res.body);
+      expect(body).toMatchObject({
+        taskId: "http-t1",
+        status: "complete",
+        inputTokens: 1000,
+        outputTokens: 500,
+        costUsd: 0.05,
+      });
+    } finally {
+      vi.restoreAllMocks();
+      await stopServer(s);
+    }
+  });
+});
+
 describe("GET /api/tasks/:id/events", () => {
   it("returns 200 with an empty JSON array when queryActivityLog returns empty", async () => {
     const res = await request(port, "GET", "/api/tasks/42/events");
