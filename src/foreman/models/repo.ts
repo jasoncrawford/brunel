@@ -40,6 +40,10 @@ export class Repo extends ActiveRecord {
     return super.list() as Promise<Repo[]>;
   }
 
+  static async listActive(): Promise<Repo[]> {
+    return super.listBy("status", "active") as Promise<Repo[]>;
+  }
+
   /** Convenience accessor — returns the per-repo TaskManager instance. */
   get taskManager(): TaskManager {
     return TaskManager.forRepo(this);

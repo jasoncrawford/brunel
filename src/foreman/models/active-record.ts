@@ -75,6 +75,16 @@ export abstract class ActiveRecord {
   }
 
   /**
+   * List all records where `col` equals `val`.
+   * Subclasses may override to narrow the return type (e.g. `Promise<Repo[]>`).
+   */
+  protected static async listBy(col: string, val: string | number): Promise<any[]> {
+    const { data, error } = await (this as any).select().eq(col, val);
+    if (error) throw error;
+    return ((data ?? []) as unknown[]).map((row) => new (this as any)(row));
+  }
+
+  /**
    * Insert a new record and return the persisted instance (including server-generated fields).
    * Subclasses may override to narrow the return type.
    * Throws on error.
