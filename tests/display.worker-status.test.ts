@@ -337,6 +337,21 @@ describe("Display persistent status bar", () => {
     expect(writes.join("")).toContain("Connected");
   });
 
+  it("emits erase-to-end-of-screen on resize to clean up wrapped content", () => {
+    // When the terminal is made narrower, the old wider status bar wraps into
+    // extra visual rows that clearBar() (which only clears n logical rows) would
+    // leave as garbage. The resize handler must emit \x1b[J (erase from cursor
+    // to end of screen) to clear those wrapped rows before redrawing.
+    agentStatus.update({ connectionStatus: "connected" });
+    display.startPersistentBar();
+    stdoutWrite.mockClear();
+
+    display.getColumns = () => 30;
+    process.stdout.emit("resize");
+    const combined = stdoutWrite.mock.calls.map(a => String(a[0])).join("");
+    expect(combined).toContain("\x1b[J");
+  });
+
   it("does not register multiple resize listeners on repeated startPersistentBar calls", () => {
     display.startPersistentBar();
     display.startPersistentBar(); // second call should not add a second listener
