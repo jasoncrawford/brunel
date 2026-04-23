@@ -74,7 +74,7 @@ export class BrunelAgent {
     const workspace = workspaceCfg
       ? new Workspace(workspaceCfg.workspaceDir, this.agentStatus.agentId, workspaceCfg.repoUrl, originalCwd, confirm)
       : undefined;
-    this.workspaceController = new WorkspaceController(workspace, this.display);
+    this.workspaceController = new WorkspaceController(workspace, this.display, config);
 
     this.fetchModelsFn = createFetchModelsFn(this.permConfig);
     this.settingsController = new SettingsController(this.settings, this.display);

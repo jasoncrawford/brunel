@@ -15,10 +15,12 @@ const SESSION_ID = "test-session-uuid";
 const REPO_URL = "https://x@github.com/owner/repo.git";
 const ORIGINAL_CWD = "/original";
 
-let testDisplay: { verbose: boolean; print: ReturnType<typeof vi.fn>; printForemanMessage: ReturnType<typeof vi.fn> };
+let testDisplay: { print: ReturnType<typeof vi.fn>; printForemanMessage: ReturnType<typeof vi.fn> };
+let testConfig: { verbose: boolean };
 
 beforeEach(() => {
-  testDisplay = { verbose: false, print: vi.fn(), printForemanMessage: vi.fn() };
+  testDisplay = { print: vi.fn(), printForemanMessage: vi.fn() };
+  testConfig = { verbose: false };
   vi.spyOn(process, "chdir").mockImplementation(() => undefined);
 });
 
@@ -42,7 +44,7 @@ function makeWorkspace(confirm = vi.fn().mockResolvedValue(true)): Workspace {
 function makeAndRegister(workspace: Workspace | undefined): void {
   const reg = new CommandRegistry();
   registry = new CommandController(reg);
-  new WorkspaceController(workspace, testDisplay).registerCommands(reg.scoped("workspace"));
+  new WorkspaceController(workspace, testDisplay, testConfig).registerCommands(reg.scoped("workspace"));
 }
 
 // ── workspace:create ──────────────────────────────────────────────────────────
@@ -153,13 +155,24 @@ describe("workspace:remove", () => {
 // ── onCreate ─────────────────────────────────────────────────────────────────
 
 describe("WorkspaceController.onCreate", () => {
-  it("prints 'Creating workspace...' and chdirs to workspace dir", async () => {
+  it("prints 'Creating workspace...' via create-start event and chdirs to workspace dir", async () => {
     const ws = makeWorkspace();
-    await new WorkspaceController(ws, testDisplay).onCreate();
+    vi.spyOn(ws, "create").mockImplementation(async () => {
+      ws.emit("create-start", { dir: ws.dir });
+      ws.isCreated = true;
+    });
+    await new WorkspaceController(ws, testDisplay, testConfig).onCreate();
     expect(ws.create).toHaveBeenCalledOnce();
     expect(process.chdir).toHaveBeenCalledWith(ws.dir);
     const printed = testDisplay.print.mock.calls.map(([l]: [string]) => stripAnsi(l)).join("\n");
     expect(printed).toContain("Creating workspace...");
+  });
+
+  it("does not print 'Creating workspace...' when create-start is not emitted (workspace already exists)", async () => {
+    const ws = makeWorkspace(); // mock does not emit create-start
+    await new WorkspaceController(ws, testDisplay, testConfig).onCreate();
+    const printed = testDisplay.print.mock.calls.map(([l]: [string]) => stripAnsi(l)).join("\n");
+    expect(printed).not.toContain("Creating workspace...");
   });
 
   it("does not print clone URL or dir in non-verbose mode", async () => {
@@ -168,7 +181,7 @@ describe("WorkspaceController.onCreate", () => {
       ws.emit("clone-start", { repoUrl: REPO_URL, dir: ws.dir });
       ws.isCreated = true;
     });
-    await new WorkspaceController(ws, testDisplay).onCreate();
+    await new WorkspaceController(ws, testDisplay, testConfig).onCreate();
     const printed = testDisplay.print.mock.calls.map(([l]: [string]) => stripAnsi(l)).join("\n");
     expect(printed).not.toContain("Cloning");
     expect(printed).not.toContain(REPO_URL);
@@ -180,8 +193,8 @@ describe("WorkspaceController.onCreate", () => {
       ws.emit("clone-start", { repoUrl: REPO_URL, dir: ws.dir });
       ws.isCreated = true;
     });
-    testDisplay.verbose = true;
-    await new WorkspaceController(ws, testDisplay).onCreate();
+    testConfig.verbose = true;
+    await new WorkspaceController(ws, testDisplay, testConfig).onCreate();
     const printed = testDisplay.print.mock.calls.map(([l]: [string]) => stripAnsi(l)).join("\n");
     expect(printed).toContain("Cloning");
     expect(printed).toContain(REPO_URL);
@@ -189,7 +202,7 @@ describe("WorkspaceController.onCreate", () => {
 
   it("prints 'Resetting workspace...' on reset-start in non-verbose", async () => {
     const ws = makeWorkspace();
-    await new WorkspaceController(ws, testDisplay).onCreate();
+    await new WorkspaceController(ws, testDisplay, testConfig).onCreate();
     testDisplay.print.mockClear();
     ws.emit("reset-start", { dir: ws.dir });
     const printed = testDisplay.print.mock.calls.map(([l]: [string]) => stripAnsi(l)).join("\n");
@@ -199,8 +212,8 @@ describe("WorkspaceController.onCreate", () => {
 
   it("prints dir path on reset-start in verbose mode", async () => {
     const ws = makeWorkspace();
-    testDisplay.verbose = true;
-    await new WorkspaceController(ws, testDisplay).onCreate();
+    testConfig.verbose = true;
+    await new WorkspaceController(ws, testDisplay, testConfig).onCreate();
     testDisplay.print.mockClear();
     ws.emit("reset-start", { dir: ws.dir });
     const printed = testDisplay.print.mock.calls.map(([l]: [string]) => stripAnsi(l)).join("\n");
@@ -210,12 +223,13 @@ describe("WorkspaceController.onCreate", () => {
   it("does not include [workspace] prefix in any message", async () => {
     const ws = makeWorkspace();
     vi.spyOn(ws, "create").mockImplementation(async () => {
+      ws.emit("create-start", { dir: ws.dir });
       ws.emit("clone-start", { repoUrl: REPO_URL, dir: ws.dir });
       ws.emit("npm-install", { dir: ws.dir });
       ws.isCreated = true;
     });
-    testDisplay.verbose = true;
-    await new WorkspaceController(ws, testDisplay).onCreate();
+    testConfig.verbose = true;
+    await new WorkspaceController(ws, testDisplay, testConfig).onCreate();
     ws.emit("reset-start", { dir: ws.dir });
     ws.emit("reset-retry", { dir: ws.dir, error: "err" });
     ws.emit("destroy", { dir: ws.dir });
@@ -242,12 +256,23 @@ describe("workspace:prune", () => {
     expect(stripAnsi(testDisplay.print.mock.calls[0][0])).toContain("Nothing to prune");
   });
 
-  it("lists removed dirs and prints summary when orphans are pruned", async () => {
+  it("lists removed dirs via prune-remove events and prints summary", async () => {
     const ws = makeWorkspace();
-    vi.mocked(ws.prune).mockResolvedValue(["/base/abc", "/base/def"]);
-    makeAndRegister(ws);
+    vi.mocked(ws.prune).mockImplementation(async () => {
+      ws.emit("prune-remove", { dir: "/base/abc" });
+      ws.emit("prune-remove", { dir: "/base/def" });
+      return ["/base/abc", "/base/def"];
+    });
+    // Register event handlers via onCreate, then commands
+    const reg = new CommandRegistry();
+    registry = new CommandController(reg);
+    const controller = new WorkspaceController(ws, testDisplay, testConfig);
+    await controller.onCreate();
+    controller.registerCommands(reg.scoped("workspace"));
+    testDisplay.print.mockClear();
+
     await registry.registry.execute("workspace:prune", "");
-    const allOutput = testDisplay.print.mock.calls.map((c: [string]) => stripAnsi(c[0])).join("\n");
+    const allOutput = testDisplay.print.mock.calls.map(([l]: [string]) => stripAnsi(l)).join("\n");
     expect(allOutput).toContain("/base/abc");
     expect(allOutput).toContain("/base/def");
     expect(allOutput).toContain("Pruned 2 orphaned workspace(s)");
