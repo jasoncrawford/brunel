@@ -1,3 +1,4 @@
+import type { PermissionMode } from "@anthropic-ai/claude-agent-sdk";
 import { c } from "../views/style.js";
 import type { WorkerDisplay } from "./worker-controller.js";
 import type { PickResult } from "../views/picker.js";
@@ -144,5 +145,55 @@ export class SettingsController {
     }
     this.display.print(c.darkGray(`Effort set to ${chosen.value}.`));
     this.settings._setEffort(chosen.value as EffortValue);
+  }
+
+  /** Handle the /permissions command: show a picker or set directly from an argument. */
+  async pickPermissions(
+    args: string,
+    pickFn: PickFn,
+  ): Promise<void> {
+    // Direct set: /permissions <mode>
+    if (args) {
+      if (args === "default") {
+        this.display.print(c.darkGray("Permissions set to default."));
+        this.settings._setPermissionMode(undefined);
+        return;
+      }
+      const match = Settings.PERMISSION_MODES.find(m => m.value === args);
+      if (match && match.value !== "default") {
+        this.display.print(c.darkGray(`Permissions set to ${match.value}.`));
+        this.settings._setPermissionMode(match.value);
+        return;
+      }
+      // Unknown mode — reject (permissions is a closed set like effort)
+      const names = Settings.PERMISSION_MODES.map(m => m.value).join(", ");
+      this.display.print(c.amber(`Unknown permission mode "${args}". Valid modes: ${names}`));
+      return;
+    }
+
+    // Interactive picker
+    const options: string[] = [];
+    let currentIdx = 0;
+    for (let i = 0; i < Settings.PERMISSION_MODES.length; i++) {
+      const m = Settings.PERMISSION_MODES[i];
+      const desc = m.description ? ` · ${m.description}` : "";
+      options.push(`${m.displayName}${desc}`);
+      if (m.value === (this.settings.permissionMode ?? "default")) currentIdx = i;
+    }
+
+    this.display.print(c.yellow("\nSelect permission mode:"));
+    const result = await pickFn(options, currentIdx);
+
+    if (result.type !== "selected") return;
+
+    const chosen = Settings.PERMISSION_MODES[result.index];
+    if (chosen.value === "default") {
+      if (this.settings.permissionMode === undefined) return; // already default, no-op
+      this.display.print(c.darkGray(`Permissions set to default.`));
+      this.settings._setPermissionMode(undefined);
+      return;
+    }
+    this.display.print(c.darkGray(`Permissions set to ${chosen.value}.`));
+    this.settings._setPermissionMode(chosen.value);
   }
 }

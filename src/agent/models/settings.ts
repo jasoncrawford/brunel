@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import type { PermissionMode } from "@anthropic-ai/claude-agent-sdk";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -7,8 +8,8 @@ export type FetchModelsFn = () => Promise<ModelInfo[]>;
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 
-/** Owns the runtime-settable preferences (model and effort) and operations on them.
- * Emits "change" whenever model or effort is updated. */
+/** Owns the runtime-settable preferences (model, effort, and permissionMode) and operations on them.
+ * Emits "change" whenever any setting is updated. */
 export class Settings extends EventEmitter {
   // ── Effort levels ──────────────────────────────────────────────────────────
 
@@ -22,6 +23,16 @@ export class Settings extends EventEmitter {
 
   /** The valid effort values accepted as config/CLI input (excludes "auto"). */
   static readonly VALID_EFFORT_VALUES = ["low", "medium", "high", "max"] as const;
+
+  // ── Permission modes ───────────────────────────────────────────────────────
+
+  static readonly PERMISSION_MODES = [
+    { value: "default" as PermissionMode,           displayName: "Default",           description: "Ask for permission on each tool use" },
+    { value: "acceptEdits" as PermissionMode,       displayName: "Accept Edits",      description: "Auto-approve file edits, ask for other tools" },
+    { value: "plan" as PermissionMode,              displayName: "Plan",              description: "Auto-approve planning, ask for file/tool use" },
+    { value: "dontAsk" as PermissionMode,           displayName: "Don't Ask",         description: "Skip prompts, let the agent decide" },
+    { value: "bypassPermissions" as PermissionMode, displayName: "Bypass",            description: "Auto-approve all tools without asking" },
+  ] as const;
 
   // ── Matching ───────────────────────────────────────────────────────────────
 
@@ -37,19 +48,23 @@ export class Settings extends EventEmitter {
 
   private _model: string | undefined;
   private _effort: EffortValue | undefined;
+  private _permissionMode: PermissionMode | undefined;
   private _cachedModels: ModelInfo[] | null = null;
 
-  constructor(initial: { model?: string; effort?: EffortValue } = {}) {
+  constructor(initial: { model?: string; effort?: EffortValue; permissionMode?: PermissionMode } = {}) {
     super();
     this._model = initial.model;
     this._effort = initial.effort;
+    this._permissionMode = initial.permissionMode;
   }
 
   get model(): string | undefined { return this._model; }
   get effort(): EffortValue | undefined { return this._effort; }
+  get permissionMode(): PermissionMode | undefined { return this._permissionMode; }
 
   _setModel(v: string | undefined): void { this._model = v; this.emit("change"); }
   _setEffort(v: EffortValue | undefined): void { this._effort = v; this.emit("change"); }
+  _setPermissionMode(v: PermissionMode | undefined): void { this._permissionMode = v; this.emit("change"); }
 
   /** Returns the cached model list, or null if no query has been run yet. */
   getCachedModels(): ModelInfo[] | null { return this._cachedModels; }

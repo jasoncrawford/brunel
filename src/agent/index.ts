@@ -41,7 +41,7 @@ export class BrunelAgent {
   private readonly controller: CommandController;
 
   constructor(config: BrunelConfig) {
-    this.settings = new Settings({ model: config.model, effort: config.effort });
+    this.settings = new Settings({ model: config.model, effort: config.effort, permissionMode: config.permissionMode });
     this.agentStatus = new AgentStatus({ agentId: WorkerSession.generateAgentId(), settings: this.settings });
     this.display = new Display(config, this.agentStatus);
     this.permConfig = {
@@ -163,6 +163,15 @@ export class BrunelAgent {
       description: "Set the effort level for Claude's thinking",
       handler: async (args) => {
         await this.settingsController.pickEffort(
+          args,
+          (opts, idx) => this.picker.pick(opts, { currentIdx: idx, escapable: true }),
+        );
+      },
+    });
+    registry.register("permissions", {
+      description: "Set the permission mode for tool use",
+      handler: async (args) => {
+        await this.settingsController.pickPermissions(
           args,
           (opts, idx) => this.picker.pick(opts, { currentIdx: idx, escapable: true }),
         );
