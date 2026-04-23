@@ -47,7 +47,7 @@ export async function loadIssuesToQueue(
     await taskModel.enqueueIssue(String(issue.number), issue.number, repo, issue.title, body, labels)
       .catch((err: unknown) => console.error(`[startup] ERROR upserting task #${issue.number}: ${fmtError(err)}`));
 
-    const blockers = await Task.fetchBlockers(issue.number, body, repo);
+    const blockers = await taskModel.fetchBlockers(issue.number, body);
     taskModel.setBlockers(issue.number, blockers);
     for (const b of blockers) allBlockerNumbers.add(b);
     loadedIssueNumbers.push(issue.number);

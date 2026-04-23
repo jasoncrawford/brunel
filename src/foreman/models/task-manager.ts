@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import type { WebhookEvent } from "./webhook-event.js";
 import * as Wire from "../../../shared/wire.js";
-import { loadIssuesToQueue, fetchIssueStates } from "../clients/github.js";
+import { loadIssuesToQueue, fetchIssueStates, fetchNativeBlockers } from "../clients/github.js";
 import { EventQueue } from "./event-queue.js";
 import { Task } from "./task.js";
 import { Worker } from "./worker.js";
@@ -265,13 +265,22 @@ export class TaskManager extends EventEmitter {
     }
   }
 
+  /** Fetch all blockers for an issue from body text and GitHub native relationships. */
+  async fetchBlockers(issueNumber: number, body: string): Promise<number[]> {
+    const [bodyBlockers, nativeBlockers] = await Promise.all([
+      Task.parseBodyBlockers(body),
+      fetchNativeBlockers(issueNumber, this.repo.fullName),
+    ]);
+    return Array.from(new Set([...bodyBlockers, ...nativeBlockers]));
+  }
+
   /** Fetch and store blocker state for an issue. Called when a task is first
    *  enqueued or when its body is edited. Fire-and-forget from the caller. */
   async fetchAndLoadDeps(
     issueNumber: number,
     body: string,
   ): Promise<void> {
-    const blockers = await Task.fetchBlockers(issueNumber, body, this.repo.fullName);
+    const blockers = await this.fetchBlockers(issueNumber, body);
     this.setBlockers(issueNumber, blockers);
     if (blockers.length > 0) {
       const states = await fetchIssueStates(blockers, this.repo.fullName);

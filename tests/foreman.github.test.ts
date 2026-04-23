@@ -32,7 +32,7 @@ describe("loadIssuesToQueue", () => {
 
     resetDb();
     const taskManager = await createTestTaskManager("owner/repo");
-    vi.spyOn(Task, "fetchBlockers").mockResolvedValue([]);
+    vi.spyOn(taskManager, "fetchBlockers").mockResolvedValue([]);
 
     await loadIssuesToQueue(taskManager);
 
@@ -62,7 +62,7 @@ describe("loadIssuesToQueue", () => {
 
     resetDb();
     const taskManager = await createTestTaskManager("owner/repo");
-    vi.spyOn(Task, "fetchBlockers").mockResolvedValue([]);
+    vi.spyOn(taskManager, "fetchBlockers").mockResolvedValue([]);
 
     // Task #1 already exists and is assigned to a worker (simulates foreman restart)
     await Task.upsert("1", 1, "owner/repo", "Original title", "Original body", ["brunel:ready"]);
@@ -169,7 +169,7 @@ describe("fetchNativeBlockers", () => {
 });
 
 describe("loadIssuesToQueue with blockers", () => {
-  it("populates taskManager blockers from Task.fetchBlockers result", async () => {
+  it("populates taskManager blockers from fetchBlockers result", async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce({
         ok: true,
@@ -184,7 +184,7 @@ describe("loadIssuesToQueue with blockers", () => {
 
     resetDb();
     const taskManager = await createTestTaskManager("owner/repo");
-    vi.spyOn(Task, "fetchBlockers").mockResolvedValueOnce([99]);
+    vi.spyOn(taskManager, "fetchBlockers").mockResolvedValueOnce([99]);
 
     await loadIssuesToQueue(taskManager);
 
@@ -206,10 +206,10 @@ describe("loadIssuesToQueue with blockers", () => {
         json: async () => ({ number: 50, state: "closed" }),
       } as any);
 
-    vi.spyOn(Task, "fetchBlockers").mockResolvedValueOnce([50]);
-
     resetDb();
     const taskManager = await createTestTaskManager("owner/repo");
+    vi.spyOn(taskManager, "fetchBlockers").mockResolvedValueOnce([50]);
+
     await loadIssuesToQueue(taskManager);
 
     // Blocker 50 is closed, so isBlocked should be false
