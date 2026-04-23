@@ -240,3 +240,28 @@ describe("QueryStats - cost tracking", () => {
     expect(stripAnsi(stats.getStatusText())).not.toContain("cost");
   });
 });
+
+describe("QueryStats - integration with cost", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("correctly formats stats with tokens and cost", () => {
+    vi.useFakeTimers();
+    const start = Date.now();
+    const stats = new QueryStats(start);
+
+    // Simulate a query
+    stats.update({ type: "message_start", message: { usage: { input_tokens: 100 } } });
+    stats.update({ type: "message_delta", usage: { output_tokens: 250 } });
+    stats.update({ type: "message_stop" });
+    vi.advanceTimersByTime(5000);
+    stats.setCost(0.42);
+
+    const text = stripAnsi(stats.getStatusText());
+    expect(text).toContain("5s");
+    expect(text).toContain("1 turn");
+    expect(text).toContain("tokens: 100 in / 250 out");
+    expect(text).toContain("cost: $0.42");
+  });
+});
