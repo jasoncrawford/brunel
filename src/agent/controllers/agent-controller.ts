@@ -1,12 +1,12 @@
 import fs from "fs";
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import type { CanUseTool, PermissionMode, PermissionResult } from "@anthropic-ai/claude-agent-sdk";
+import type { CanUseTool, PermissionResult } from "@anthropic-ai/claude-agent-sdk";
 import { c } from "../views/style.js";
 import type { Display } from "../views/display.js";
 import { Picker } from "../views/picker.js";
 import type { PickQuestionResult } from "../views/picker.js";
 import { Settings } from "../models/settings.js";
-import type { ModelInfo, FetchModelsFn, EffortValue } from "../models/settings.js";
+import type { ModelInfo, FetchModelsFn } from "../models/settings.js";
 import { QueryStats } from "../models/query-stats.js";
 
 // ── Log file ──────────────────────────────────────────────────────────────────
@@ -28,11 +28,6 @@ export function logFull(label: string, data: unknown) {
 type QuestionOption = { label: string; description: string };
 type Question = { question: string; header: string; options: QuestionOption[]; multiSelect: boolean };
 
-export type AgentPermConfig = {
-  permissionMode: PermissionMode;
-  allowDangerouslySkipPermissions: boolean;
-};
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /** The SDK query object exposes supportedModels() as an undocumented extension. */
@@ -42,9 +37,9 @@ type QueryWithModels = { supportedModels?: () => Promise<ModelInfo[]> };
  * Returns a function that fetches available Claude models from the SDK.
  * Used by the /model command to populate the model picker.
  */
-export function createFetchModelsFn(permConfig: AgentPermConfig): FetchModelsFn {
+export function createFetchModelsFn(settings: Settings): FetchModelsFn {
   return async () => {
-    const q = query({ prompt: "", options: { cwd: process.cwd(), systemPrompt: { type: "preset", preset: "claude_code" }, permissionMode: permConfig.permissionMode } });
+    const q = query({ prompt: "", options: { cwd: process.cwd(), systemPrompt: { type: "preset", preset: "claude_code" }, permissionMode: settings.permissionMode } });
     const qm = q as unknown as QueryWithModels;
     if (typeof qm.supportedModels === "function") return qm.supportedModels();
     return [];
@@ -65,7 +60,6 @@ export class AgentController {
   constructor(
     private display: Display,
     private picker: Picker,
-    private permConfig: AgentPermConfig,
     private settings: Settings,
   ) {}
 
@@ -78,11 +72,9 @@ export class AgentController {
     prompt: string,
     sessionId: string | undefined,
     abortController?: AbortController,
-    model?: string,
-    effort?: EffortValue,
   ): Promise<{ sessionId: string | undefined; stats: QueryStats }> {
     logFull("QUERY", { prompt, sessionId });
-    const { display, permConfig } = this;
+    const { display } = this;
     // Save and clear the input callbacks while the query runs. In worker
     // mode, ask() registers drawFresh() as the callback so the prompt redraws
     // after background WebSocket messages — but during a query run the callback
@@ -106,19 +98,18 @@ export class AgentController {
     const getStatusText = () => c.darkGray(stats.getStatusText());
     display.startBar(getStatusText);
 
+    const allowDangerouslySkipPerms = this.settings.permissionMode === "bypassPermissions";
+
     const canUseTool: CanUseTool = async (toolName, input) => {
       if (toolName === "AskUserQuestion") {
         return this.handleAskUserQuestion(input, getStatusText);
       }
-      if (permConfig.allowDangerouslySkipPermissions) return { behavior: "allow", updatedInput: input };
+      if (allowDangerouslySkipPerms) return { behavior: "allow", updatedInput: input };
       return this.handleToolPermission(toolName, input, getStatusText);
     };
 
     // Use caller-provided AbortController (worker mode) or create our own (REPL mode).
     const ac = abortController ?? new AbortController();
-
-    // Use settings as source of truth for permissionMode (initialized from config)
-    const allowDangerouslySkipPerms = this.settings.permissionMode === "bypassPermissions";
 
     const iterable = query({
       prompt,
@@ -132,8 +123,8 @@ export class AgentController {
         abortController: ac,
         ...(allowDangerouslySkipPerms ? { allowDangerouslySkipPermissions: true } : {}),
         ...(sessionId ? { resume: sessionId } : {}),
-        ...(model ? { model } : {}),
-        ...(effort ? { effort } : {}),
+        ...(this.settings.model ? { model: this.settings.model } : {}),
+        ...(this.settings.effort ? { effort: this.settings.effort } : {}),
       },
     });
 
