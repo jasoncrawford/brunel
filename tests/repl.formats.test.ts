@@ -3,6 +3,7 @@ import { stripAnsi } from "./helpers.js";
 import { Display } from "../src/agent/views/display.js";
 import { resolve } from "../src/agent/views/renderer.js";
 import type { FmtTable } from "../src/agent/views/renderer.js";
+import { fmtStats } from "../shared/formatters.js";
 import { getConfig } from "../src/config.js";
 import { AgentStatus } from "../src/agent/models/agent-status.js";
 
@@ -1021,5 +1022,32 @@ describe("MESSAGE_FMT", () => {
       testDisplay.printMessage({ type: "whatever" });
     });
     expect(stripAnsi(output)).toContain("msg: whatever");
+  });
+});
+
+describe("fmtStats - cost formatting", () => {
+  it("includes cost when provided", () => {
+    const result = fmtStats(60, 2, 100, 50, 0.25);
+    expect(result).toContain("cost: $0.25");
+  });
+
+  it("omits cost when cost is undefined", () => {
+    const result = fmtStats(60, 2, 100, 50);
+    expect(result).not.toContain("cost");
+  });
+
+  it("formats cost with two decimal places", () => {
+    const result = fmtStats(60, 2, 100, 50, 0.1234);
+    expect(result).toContain("cost: $0.12");
+  });
+
+  it("formats cost correctly at zero", () => {
+    const result = fmtStats(60, 2, 100, 50, 0);
+    expect(result).toContain("cost: $0.00");
+  });
+
+  it("places cost at the end of the string", () => {
+    const result = fmtStats(60, 2, 100, 50, 0.50);
+    expect(result).toMatch(/cost: \$0\.50$/);
   });
 });

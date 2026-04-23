@@ -43,6 +43,7 @@ export function fmtStats(
   turns?: number,
   outputTokens?: number,
   inputTokens?: number,
+  costUsd?: number,
 ): string {
   const parts: string[] = [fmtDuration(secs)];
   if (turns) parts.push(fmtCount(turns, "turn"));
@@ -51,6 +52,9 @@ export function fmtStats(
       ? `tokens: ${fmtNum(inputTokens)} in / ${fmtNum(outputTokens)} out`
       : `tokens: ${fmtNum(outputTokens)} out`;
     parts.push(tok);
+  }
+  if (costUsd != null) {
+    parts.push(`cost: $${costUsd.toFixed(2)}`);
   }
   return parts.join(", ");
 }
