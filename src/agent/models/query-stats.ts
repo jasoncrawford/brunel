@@ -48,12 +48,15 @@ function fmtCount(count: number, singular_noun: string, plural_noun?: string) {
   return `${count} ${noun}`;
 }
 
-function fmtStats(secs: number, turns?: number, outputTokens?: number, inputTokens?: number): string {
+function fmtStats(secs: number, turns?: number, outputTokens?: number, inputTokens?: number, costUsd?: number): string {
   const parts: string[] = [fmtDuration(secs)];
   if (turns) parts.push(fmtCount(turns, "turn"));
   if (outputTokens) {
     const tok = inputTokens != null ? `tokens: ${fmtNum(inputTokens)} in / ${fmtNum(outputTokens)} out` : `tokens: ${fmtNum(outputTokens)} out`;
     parts.push(tok);
+  }
+  if (costUsd != null) {
+    parts.push(`cost: $${costUsd.toFixed(2)}`);
   }
   return parts.join(", ");
 }
@@ -81,6 +84,7 @@ export class QueryStats extends EventEmitter {
   private _inputTokens = 0;
   private _completedOutputTokens = 0;
   private _currentOutputTokens = 0;
+  private _costUsd: number | undefined;
   private readonly _startTime: number;
   private readonly _workingVerb: string;
 
@@ -93,6 +97,7 @@ export class QueryStats extends EventEmitter {
   get turns(): number { return this._turns; }
   get inputTokens(): number { return this._inputTokens; }
   get outputTokens(): number { return this._completedOutputTokens + this._currentOutputTokens; }
+  get costUsd(): number | undefined { return this._costUsd; }
   get elapsedSecs(): number { return Math.floor((Date.now() - this._startTime) / 1000); }
 
   /**
@@ -114,10 +119,15 @@ export class QueryStats extends EventEmitter {
     this.emit("change");
   }
 
+  setCost(cost: number): void {
+    this._costUsd = cost;
+    this.emit("change");
+  }
+
   /** Formatted status bar text for use with display.startStatus(). Styling is the caller's responsibility. */
   getStatusText(): string {
     const secs = this.elapsedSecs;
     const outTokens = this.outputTokens;
-    return `${this._workingVerb}… ${fmtStats(secs, this._turns || undefined, outTokens || undefined, this._inputTokens || undefined)}`;
+    return `${this._workingVerb}… ${fmtStats(secs, this._turns || undefined, outTokens || undefined, this._inputTokens || undefined, this._costUsd)}`;
   }
 }

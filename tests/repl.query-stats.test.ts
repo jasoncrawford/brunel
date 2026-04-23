@@ -216,3 +216,27 @@ describe("QueryStats - getStatusText", () => {
     expect(stripAnsi(stats.getStatusText())).not.toContain("turn");
   });
 });
+
+describe("QueryStats - cost tracking", () => {
+  it("starts with undefined cost", () => {
+    const stats = new QueryStats();
+    expect(stats.costUsd).toBeUndefined();
+  });
+
+  it("stores cost when setCost is called", () => {
+    const stats = new QueryStats();
+    stats.setCost(0.42);
+    expect(stats.costUsd).toBe(0.42);
+  });
+
+  it("includes cost in getStatusText when set", () => {
+    const stats = new QueryStats();
+    stats.setCost(0.50);
+    expect(stripAnsi(stats.getStatusText())).toContain("cost: $0.50");
+  });
+
+  it("omits cost from getStatusText when not set", () => {
+    const stats = new QueryStats();
+    expect(stripAnsi(stats.getStatusText())).not.toContain("cost");
+  });
+});
