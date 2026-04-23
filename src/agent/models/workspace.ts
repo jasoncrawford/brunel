@@ -57,6 +57,7 @@ export class Workspace extends EventEmitter {
     fs.mkdirSync(path.dirname(this.dir), { recursive: true });
     if (!fs.existsSync(path.join(this.dir, ".git"))) {
       if (fs.existsSync(this.dir)) fs.rmSync(this.dir, { recursive: true, force: true });
+      this.emit("create-start", { dir: this.dir });
       this.emit("clone-start", { repoUrl: this.repoUrl, dir: this.dir });
       await this.exec(["clone", this.repoUrl, this.dir], undefined);
       await this._npmInstall();
