@@ -201,12 +201,14 @@ describe("pickModel <arg> (direct set)", () => {
     expect(printed.join("")).toContain("default");
   });
 
-  it("'sonnet' maps to default", async () => {
+  it("'sonnet' is stored as-is, not silently mapped to default", async () => {
     const s = new Settings({ model: "opus" });
     s.setCachedModels(MODELS);
     await makeCtrl(s).pickModel("sonnet", noopPick, undefined);
-    expect(s.model).toBeUndefined();
-    expect(printed.join("")).toContain("default");
+    expect(s.model).toBe("sonnet");
+    const output = printed.join("");
+    expect(output).toMatch(/warning|unknown/i);
+    expect(output).toContain("sonnet");
   });
 
   it("accepts value as-is when no cache", async () => {
@@ -234,13 +236,13 @@ describe("pickModel (interactive picker)", () => {
     expect(printed.join("")).toContain("No model list available");
   });
 
-  it("selecting first entry resets to undefined (default)", async () => {
+  it("selecting first entry stores that entry's literal value", async () => {
     const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickResult>>()
       .mockResolvedValue({ type: "selected", index: 0 });
     const s = new Settings({ model: "opus" });
     s.setCachedModels(MODELS);
     await makeCtrl(s).pickModel("", pickFn, undefined);
-    expect(s.model).toBeUndefined();
+    expect(s.model).toBe(MODELS[0].value); // "default" stored literally, not undefined
   });
 
   it("selecting a named model sets the model", async () => {
@@ -262,13 +264,13 @@ describe("pickModel (interactive picker)", () => {
     expect(pickFn.mock.calls[0][1]).toBe(1);
   });
 
-  it("passes currentIdx 0 when no model set (default)", async () => {
+  it("passes currentIdx -1 when no model set (nothing pre-selected)", async () => {
     const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickResult>>()
       .mockResolvedValue({ type: "cancelled" });
     const s = new Settings();
     s.setCachedModels(MODELS);
     await makeCtrl(s).pickModel("", pickFn, undefined);
-    expect(pickFn.mock.calls[0][1]).toBe(0);
+    expect(pickFn.mock.calls[0][1]).toBe(-1);
   });
 
   it("shows model descriptions in options", async () => {

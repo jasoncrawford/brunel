@@ -36,7 +36,7 @@ export class SettingsController {
 
     // Direct set: /model <alias-or-id>
     if (args) {
-      if (args === "default" || args === "sonnet") {
+      if (args === "default") {
         this.display.print(c.darkGray("Model set to default."));
         this.settings._setModel(undefined);
         return;
@@ -76,23 +76,13 @@ export class SettingsController {
       options.push(`${m.displayName}${desc}`);
       if (m.value === this.settings.model) currentIdx = i;
     }
-    // If model is undefined (default), mark the first entry as current
-    if (this.settings.model === undefined) currentIdx = 0;
 
     this.display.print(c.yellow("\nSelect model:"));
     const result = await pickFn(options, currentIdx);
 
     if (result.type !== "selected") return;
 
-    // Selected a model from the list
     const chosen = models[result.index];
-    if (result.index === 0 && this.settings.model === undefined) return; // already on default, no-op
-    // Selecting the first (default/recommended) entry resets to undefined
-    if (result.index === 0) {
-      this.display.print(c.darkGray(`Model set to ${chosen.displayName}.`));
-      this.settings._setModel(undefined);
-      return;
-    }
     this.display.print(c.darkGray(`Model set to ${chosen.displayName}.`));
     this.settings._setModel(chosen.value);
   }
