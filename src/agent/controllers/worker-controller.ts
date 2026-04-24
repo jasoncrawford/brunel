@@ -551,9 +551,9 @@ export class WorkerSession extends EventEmitter {
         this.display.print(c.amber(`Repo ${this.options.repo} is new — activate it?`));
         const idx = await this.options.pickFn!(["Yes, activate", "No, skip"]);
         if (idx === 0) {
-          // Send activate_repo — foreman will reply with another hello_ack (repoStatus: 'active').
+          // Send activate_repo — foreman will reply with a repo_activated message.
           this.ws?.send(JSON.stringify({ type: "activate_repo", workerId: this.agentId } satisfies Wire.WorkerMessage));
-          return; // wait for the next hello_ack
+          return; // wait for repo_activated
         }
         // User declined — transition to idle without activating.
         this.display.print(c.darkGray("Repo not activated. Staying idle."));
