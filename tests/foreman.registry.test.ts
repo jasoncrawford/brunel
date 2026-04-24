@@ -17,7 +17,7 @@ beforeEach(() => { Worker._reset(); });
 describe("Worker", () => {
   it("registers a worker and retrieves it", () => {
     Worker.register("w1", fakeWs(), fakeRepo());
-    expect(Worker.get("w1")).toMatchObject({ workerId: "w1", status: "idle" });
+    expect(Worker.fromRegistry("w1")).toMatchObject({ workerId: "w1", status: "idle" });
   });
 
   it("getIdle returns an idle worker", () => {
@@ -49,7 +49,7 @@ describe("Worker", () => {
   it("remove deletes the worker from the registry", () => {
     const w = Worker.register("w1", fakeWs(), fakeRepo());
     w.remove();
-    expect(Worker.get("w1")).toBeUndefined();
+    expect(Worker.fromRegistry("w1")).toBeUndefined();
   });
 
   it("getByTask returns worker assigned to that task", () => {
@@ -148,7 +148,7 @@ describe("Worker", () => {
     const ws2 = fakeWs();
     Worker.register("w1", ws1, fakeRepo());
     const w = Worker.register("w1", ws2, fakeRepo());
-    expect(Worker.get("w1")).toBe(w);
+    expect(Worker.fromRegistry("w1")).toBe(w);
     expect(w.isCurrentSocket(ws2)).toBe(true);
   });
 });

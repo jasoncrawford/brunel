@@ -94,9 +94,9 @@ export function createHttpServer({ webhooks, routeEvent }: HttpServerOptions): h
   app.get("/api/workers/:id", async (c) => {
     try {
       const workerId = c.req.param("id");
-      const row = await Worker.getDbRow(workerId);
-      if (!row) return c.json({ error: "not found" }, 404);
-      return c.json(Worker._rowToWire(row));
+      const worker = await Worker.get(workerId);
+      if (!worker) return c.json({ error: "not found" }, 404);
+      return c.json(worker.toWire());
     } catch (err) {
       log(`ERROR API query failed: ${fmtError(err)}`);
       return c.json({ error: "internal error" }, 500);

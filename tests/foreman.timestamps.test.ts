@@ -141,7 +141,7 @@ describe("foreman log timestamps", () => {
   it("worker hello log lines start with ISO 8601 timestamp", async () => {
     const ws = await connect();
     send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "worker-abc123", status: "idle" });
-    await waitUntil(() => !!Worker.get("worker-abc123"));
+    await waitUntil(() => !!Worker.fromRegistry("worker-abc123"));
 
     expect(logLines.length).toBeGreaterThan(0);
     for (const line of logLines) {
@@ -182,7 +182,7 @@ describe("foreman log timestamps", () => {
   it("task enqueue log line starts with ISO 8601 timestamp", async () => {
     const ws = await connect();
     send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "worker-abc123", status: "idle" });
-    await waitUntil(() => !!Worker.get("worker-abc123"));
+    await waitUntil(() => !!Worker.fromRegistry("worker-abc123"));
 
     logLines.length = 0;
     foremanWss.routeEvent("evt-1", "issues", {

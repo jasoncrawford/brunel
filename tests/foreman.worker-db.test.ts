@@ -86,17 +86,19 @@ describe("Worker DB persistence", () => {
     expect(data?.goodbye_at).toBeTruthy();
   });
 
-  it("getDbRow returns DB row including repo_full_name", async () => {
+  it("Worker.get returns worker including repoFullName", async () => {
     const repo = fakeRepo("owner/repo", 1, "new");
     Worker.register("w1", fakeWs(), repo);
     await new Promise((r) => setTimeout(r, 20));
-    const row = await Worker.getDbRow("w1");
-    expect(row).toMatchObject({ worker_id: "w1", repo_full_name: "owner/repo" });
+    const worker = await Worker.get("w1");
+    expect(worker).not.toBeNull();
+    expect(worker?.workerId).toBe("w1");
+    expect(worker?.repoFullName).toBe("owner/repo");
   });
 
-  it("getDbRow returns null for unknown worker", async () => {
-    const row = await Worker.getDbRow("no-such-worker");
-    expect(row).toBeNull();
+  it("Worker.get returns null for unknown worker", async () => {
+    const worker = await Worker.get("no-such-worker");
+    expect(worker).toBeNull();
   });
 
   it("allForDashboard includes in-memory connected workers", async () => {

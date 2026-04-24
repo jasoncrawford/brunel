@@ -4,9 +4,9 @@ import { WebSocket } from "ws";
 import type { WebSocket as WsSocket } from "ws";
 import type { Task } from "./task.js";
 import type { Repo } from "./repo.js";
-import { db } from "../clients/db-client.js";
 import type { Database } from "../../database.types.js";
 import { log } from "../../utils.js";
+import { ActiveRecord } from "./active-record.js";
 
 type WorkerDbRow = Database["public"]["Tables"]["workers"]["Row"];
 
@@ -25,26 +25,48 @@ const registry = new Map<string, Worker>();
 /** Active WebSocket connections keyed by workerId. */
 const sockets = new Map<string, WsSocket>();
 
-export class Worker {
+export class Worker extends ActiveRecord {
   static readonly events: EventEmitter = new EventEmitter();
 
-  private constructor(readonly workerId: string) {}
+  protected static readonly tableName = "workers";
+  protected static readonly primaryKey = "worker_id";
 
-  status: "idle" | "busy" | "disconnected" = "idle";
-  currentTask?: Task;
+  readonly workerId: string;
+  status: "idle" | "busy" | "disconnected";
   disconnectedAt?: Date;
-  /** The repo this worker declared in its worker_hello. Always set at registration. */
+
+  // Fields populated from DB row (undefined for synthetic registry instances)
+  readonly repoFullName?: string;
+  readonly numConnections?: number;
+  readonly firstConnectedAt?: string;
+  readonly lastConnectedAt?: string;
+  readonly dbCurrentTaskId?: string;
+
+  // In-memory only — not persisted to DB
+  currentTask?: Task;
   repo!: Repo;
 
   /** Serialized DB write chain — ensures mutations are persisted in order. */
-  private _pendingWrite: Promise<void> = Promise.resolve();
+  private _pendingWrite: Promise<unknown> = Promise.resolve();
 
-  get currentTaskId(): string | undefined {
-    return this.currentTask?.taskId;
+  protected getPrimaryKeyValue(): string {
+    return this.workerId;
+  }
+
+  private constructor(row: WorkerDbRow) {
+    super();
+    this.workerId = row.worker_id;
+    this.status = row.status as "idle" | "busy" | "disconnected";
+    this.repoFullName = row.repo_full_name ?? undefined;
+    this.numConnections = row.num_connections ?? undefined;
+    this.firstConnectedAt = row.first_connected_at ?? undefined;
+    this.lastConnectedAt = row.last_connected_at ?? undefined;
+    this.dbCurrentTaskId = row.current_task_id ?? undefined;
+    this.disconnectedAt = row.disconnected_at ? new Date(row.disconnected_at) : undefined;
   }
 
   /** Chain a DB write onto this worker's serialized write queue (fire-and-forget). */
-  private _chain(fn: () => Promise<void>): void {
+  private _chain(fn: () => Promise<unknown>): void {
     this._pendingWrite = this._pendingWrite.then(fn).catch((err) =>
       log(`ERROR persisting worker ${this.workerId} to DB: ${String(err)}`),
     );
@@ -55,7 +77,22 @@ export class Worker {
   static register(workerId: string, ws: WsSocket, repo: Repo): Worker {
     let worker = registry.get(workerId);
     if (!worker) {
-      worker = new Worker(workerId);
+      // Synthetic row for the in-memory registry instance — diagnostic fields
+      // (first_connected_at, last_connected_at, num_connections) are not yet
+      // known and will be written by _persistRegister. They resolve to undefined
+      // in toWire(), so the dashboard omits them for connected workers.
+      worker = new Worker({
+        worker_id: workerId,
+        status: "idle",
+        current_task_id: null,
+        repo_id: repo.id,
+        repo_full_name: repo.fullName,
+        first_connected_at: null,
+        last_connected_at: null,
+        num_connections: null,
+        disconnected_at: null,
+        goodbye_at: null,
+      } as unknown as WorkerDbRow);
     }
     worker.repo = repo;
     worker.status = "idle";
@@ -68,8 +105,14 @@ export class Worker {
     return worker;
   }
 
-  static get(workerId: string): Worker | undefined {
+  /** Look up a connected worker in the runtime registry (sync). Use Worker.get() for a DB lookup. */
+  static fromRegistry(workerId: string): Worker | undefined {
     return registry.get(workerId);
+  }
+
+  // Worker.get(id) is inherited from ActiveRecord — async DB lookup by worker_id.
+  static get(id: string): Promise<Worker | null> {
+    return super.get(id) as Promise<Worker | null>;
   }
 
   static getIdle(): Worker[] {
@@ -97,33 +140,17 @@ export class Worker {
 
     let fromDb: Wire.Worker[] = [];
     try {
-      const { data, error } = await (db.from as any)("workers")
-        .select("*")
-        .not("current_task_id", "is", null);
+      const { data, error } = await Worker.select().not("current_task_id", "is", null);
       if (!error && data) {
         fromDb = (data as WorkerDbRow[])
           .filter((row) => !connectedIds.has(row.worker_id))
-          .map((row) => Worker._rowToWire(row));
+          .map((row) => new Worker(row).toWire());
       }
     } catch {
       // Non-critical: dashboard degrades to just connected workers on DB error
     }
 
     return [...connected, ...fromDb];
-  }
-
-  /**
-   * Load a worker's DB row by ID.
-   * Works even when the worker is disconnected (not in runtime registry).
-   * Returns null if no record exists.
-   */
-  static async getDbRow(workerId: string): Promise<WorkerDbRow | null> {
-    const { data, error } = await (db.from as any)("workers")
-      .select("*")
-      .eq("worker_id", workerId)
-      .maybeSingle();
-    if (error) throw error;
-    return (data as WorkerDbRow | null) ?? null;
   }
 
   /** Clear registry and sockets — use in tests for isolation. */
@@ -136,81 +163,52 @@ export class Worker {
 
   private static async _persistRegister(workerId: string, repo: Repo): Promise<void> {
     const now = new Date().toISOString();
-    // Check if record already exists (reconnect vs. first connect)
-    const { data: existing } = await (db.from as any)("workers")
-      .select("*")
-      .eq("worker_id", workerId)
-      .maybeSingle() as { data: WorkerDbRow | null };
-
+    const existing = await Worker.get(workerId);
     if (existing) {
-      await (db.from as any)("workers")
-        .update({
-          repo_id: repo.id,
-          repo_full_name: repo.fullName,
-          status: "idle",
-          current_task_id: null,
-          last_connected_at: now,
-          num_connections: existing.num_connections + 1,
-          disconnected_at: null,
-          goodbye_at: null,
-        })
-        .eq("worker_id", workerId)
-        .select()
-        .single();
+      await existing.update({
+        repo_id: repo.id,
+        repo_full_name: repo.fullName,
+        status: "idle",
+        current_task_id: null,
+        last_connected_at: now,
+        num_connections: (existing.numConnections ?? 0) + 1,
+        disconnected_at: null,
+        goodbye_at: null,
+      });
     } else {
-      await (db.from as any)("workers")
-        .insert({
-          worker_id: workerId,
-          repo_id: repo.id,
-          repo_full_name: repo.fullName,
-          status: "idle",
-          current_task_id: null,
-          first_connected_at: now,
-          last_connected_at: now,
-          num_connections: 1,
-          disconnected_at: null,
-          goodbye_at: null,
-        })
-        .select()
-        .single();
+      await Worker.insert({
+        worker_id: workerId,
+        repo_id: repo.id,
+        repo_full_name: repo.fullName,
+        status: "idle",
+        current_task_id: null,
+        first_connected_at: now,
+        last_connected_at: now,
+        num_connections: 1,
+        disconnected_at: null,
+        goodbye_at: null,
+      });
     }
   }
 
-  private static async _updateDb(workerId: string, changes: Partial<WorkerDbRow>): Promise<void> {
-    await (db.from as any)("workers")
-      .update(changes)
-      .eq("worker_id", workerId)
-      .select()
-      .single();
-  }
-
-  static _rowToWire(row: WorkerDbRow): Wire.Worker {
-    return {
-      workerId: row.worker_id,
-      status: row.status as "idle" | "busy" | "disconnected",
-      currentTaskId: row.current_task_id ?? undefined,
-      repo: row.repo_full_name,
-      firstConnectedAt: row.first_connected_at,
-      lastConnectedAt: row.last_connected_at,
-      numConnections: row.num_connections,
-      disconnectedAt: row.disconnected_at ?? undefined,
-    };
-  }
-
   // ── Instance operations ──────────────────────────────────────────────────
+
+  get currentTaskId(): string | undefined {
+    return this.currentTask?.taskId ?? this.dbCurrentTaskId;
+  }
 
   assign(task: Task): void {
     this.status = "busy";
     this.currentTask = task;
     Worker.events.emit("changed");
-    this._chain(() => Worker._updateDb(this.workerId, { status: "busy", current_task_id: task.taskId }));
+    this._chain(() => this.update({ status: "busy", current_task_id: task.taskId }));
   }
 
   release(): void {
     this.status = "idle";
     this.currentTask = undefined;
     Worker.events.emit("changed");
-    this._chain(() => Worker._updateDb(this.workerId, { status: "idle", current_task_id: null }));
+    this._chain(() => this.update({ status: "idle", current_task_id: null }));
   }
 
   markDisconnected(): void {
@@ -219,10 +217,7 @@ export class Worker {
     const disconnectedAt = this.disconnectedAt.toISOString();
     sockets.delete(this.workerId);
     Worker.events.emit("changed");
-    this._chain(() => Worker._updateDb(this.workerId, {
-      status: "disconnected",
-      disconnected_at: disconnectedAt,
-    }));
+    this._chain(() => this.update({ status: "disconnected", disconnected_at: disconnectedAt }));
   }
 
   remove(): void {
@@ -230,7 +225,7 @@ export class Worker {
     registry.delete(this.workerId);
     sockets.delete(this.workerId);
     Worker.events.emit("changed");
-    this._chain(() => Worker._updateDb(this.workerId, {
+    this._chain(() => this.update({
       status: "disconnected",
       disconnected_at: now,
       goodbye_at: now,
@@ -255,8 +250,12 @@ export class Worker {
     return {
       workerId: this.workerId,
       status: this.status,
-      currentTaskId: this.currentTask?.taskId,
-      repo: this.repo?.fullName,
+      currentTaskId: this.currentTaskId,
+      repo: this.repo?.fullName ?? this.repoFullName,
+      numConnections: this.numConnections,
+      firstConnectedAt: this.firstConnectedAt,
+      lastConnectedAt: this.lastConnectedAt,
+      disconnectedAt: this.disconnectedAt?.toISOString(),
     };
   }
 }
