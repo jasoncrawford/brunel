@@ -79,7 +79,7 @@ describe("TaskDetail", () => {
   it("renders worker link for events with workerId", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ json: () => Promise.resolve([event2]) }));
     renderTaskDetail("99");
-    await waitFor(() => expect(screen.getByText("worker-a")).toBeInTheDocument()); // first 8 chars of "worker-abc-123"
+    await waitFor(() => expect(screen.getByText("worker-abc-123")).toBeInTheDocument());
   });
 
   it("appends matching log_event messages from WebSocket", async () => {
@@ -94,7 +94,7 @@ describe("TaskDetail", () => {
     const rows = screen.getAllByRole("row");
     // header + 2 data rows
     expect(rows).toHaveLength(3);
-    expect(rows[2].textContent).toContain("task assigned"); // appended at end
+    expect(rows[1].textContent).toContain("task assigned"); // prepended at top
   });
 
   it("ignores log_event messages for different tasks", async () => {

@@ -71,7 +71,7 @@ describe("EventLog", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ json: () => Promise.resolve([entry2]) }));
     renderEventLog();
     await waitFor(() => expect(screen.getByText("#42")).toBeInTheDocument());
-    expect(screen.getByText("worker-a")).toBeInTheDocument(); // first 8 chars of "worker-abc-123"
+    expect(screen.getByText("worker-abc-123")).toBeInTheDocument();
   });
 
   it("shows — when taskId or workerId is null", async () => {
