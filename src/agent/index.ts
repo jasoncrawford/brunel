@@ -27,46 +27,32 @@ import { AgentController, logFull } from "./controllers/agent-controller.js";
  */
 export class BrunelAgent {
   readonly display: Display;
+  private readonly config: BrunelConfig;
   private readonly settings: Settings;
   private readonly agentStatus: AgentStatus;
   private readonly input: Input;
   private readonly picker: Picker;
   private readonly agentController: AgentController;
-  private readonly workspaceController: WorkspaceController;
   private readonly settingsController: SettingsController;
   private readonly controller: CommandController;
+  private readonly originalCwd: string;
+  private readonly confirm: (msg: string) => Promise<boolean>;
 
   constructor(config: BrunelConfig) {
+    this.config = config;
     this.settings = new Settings(config);
     this.agentStatus = new AgentStatus({ agentId: WorkerSession.generateAgentId(), settings: this.settings });
     this.display = new Display(config, this.agentStatus);
     this.input = new Input(this.display);
     this.picker = new Picker(this.display, () => this.input.cancel());
     this.agentController = new AgentController(this.display, this.picker, this.settings);
-
-    const originalCwd = process.cwd();
-    const confirm = async (msg: string): Promise<boolean> => {
+    this.originalCwd = process.cwd();
+    this.confirm = async (msg: string): Promise<boolean> => {
       this.display.stopBar();
       this.display.print(c.amber(`\n⚠ Potential data loss:\n${msg}`));
       const idx = await this.picker.pick(["Yes, proceed", "No, cancel"]);
       return idx === 0;
     };
-
-    const workspaceCfg = (config.githubRepo && config.githubToken)
-      ? {
-          workspaceDir: config.workspaceDir ?? path.join(os.homedir(), ".brunel", "workers"),
-          repoUrl: config.repoUrl ?? `https://${config.githubToken}@github.com/${config.githubRepo}.git`,
-        }
-      : undefined;
-
-    // Construct workspace and controller once for both REPL and worker modes.
-    // In worker mode, WorkspaceController.onCreate() (called via startWorkerMode)
-    // clones the repo and changes the working directory. In REPL mode it is
-    // available for manual /workspace:* commands but not auto-cloned.
-    const workspace = workspaceCfg
-      ? new Workspace(workspaceCfg.workspaceDir, this.agentStatus.agentId, workspaceCfg.repoUrl, originalCwd, confirm)
-      : undefined;
-    this.workspaceController = new WorkspaceController(workspace, this.display, config);
 
     this.settingsController = new SettingsController(this.settings, this.display);
     const registry = new CommandRegistry();
@@ -85,8 +71,26 @@ export class BrunelAgent {
     // workspace events, create the clone, configure the WorkerSession, and
     // install signal handlers.
     const repo = runWorkerMode ? await WorkerSession.getRemoteRepo() : "";
+
+    // Build workspace config after repo detection. repoUrl can be set explicitly
+    // in config; otherwise it's derived from the detected git remote + token.
+    const { config } = this;
+    const repoUrl = config.repoUrl ?? (repo && config.githubToken
+      ? `https://${config.githubToken}@github.com/${repo}.git`
+      : undefined);
+    const workspaceCfg = repoUrl
+      ? {
+          workspaceDir: config.workspaceDir ?? path.join(os.homedir(), ".brunel", "workers"),
+          repoUrl,
+        }
+      : undefined;
+    const workspace = workspaceCfg
+      ? new Workspace(workspaceCfg.workspaceDir, this.agentStatus.agentId, workspaceCfg.repoUrl, this.originalCwd, this.confirm)
+      : undefined;
+    const workspaceController = new WorkspaceController(workspace, this.display, config);
+
     const workerCtx = runWorkerMode
-      ? await startWorkerMode(this.display, this.picker, this.workspaceController, repo)
+      ? await startWorkerMode(this.display, this.picker, workspaceController, repo)
       : undefined;
     const session = workerCtx?.session;
     const workerCleanup = workerCtx?.cleanup;
@@ -94,7 +98,7 @@ export class BrunelAgent {
     // doExit handles REPL workspace cleanup and stdin/stdout teardown.
     // Only called in REPL mode (worker mode cleanup goes through workerCleanup()).
     const doExit = async () => {
-      await this.workspaceController.onDestroy();
+      await workspaceController.onDestroy();
       process.stdout.write("\x1b[?2004l\r\n");
       if (process.stdin.isTTY) process.stdin.setRawMode(false);
       process.stdin.pause();
@@ -118,7 +122,7 @@ export class BrunelAgent {
     // Registration happens here rather than the constructor because some
     // handlers close over start()-local state (sessionId, doExit, session).
     const registry = this.controller.registry;
-    this.workspaceController.registerCommands(registry.scoped("workspace"));
+    workspaceController.registerCommands(registry.scoped("workspace"));
     registerWorkerCommands(session, registry.scoped("worker"), this.display);
     registry.register("exit", {
       description: "Exit",

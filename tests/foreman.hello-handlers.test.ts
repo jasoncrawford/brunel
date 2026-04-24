@@ -24,7 +24,7 @@ function fakeWs() {
 
 function makeWss(taskManager: TaskManager) {
   const wss = new ForemanWss({
-    config: { taskLabel: "brunel:ready", githubRepo: "owner/repo", githubToken: "token", workerSecret: undefined, pingIntervalMs: 1e9 },
+    config: { taskLabel: "brunel:ready", githubToken: "token", workerSecret: undefined, pingIntervalMs: 1e9 },
     server: http.createServer(),
   });
   const sendMsg = vi.spyOn(wss, "sendMsg").mockImplementation(() => {});
@@ -497,7 +497,7 @@ describe("repoStatus in hello_ack", () => {
 describe("activate_repo", () => {
   function makeWssForActivate() {
     const wss = new ForemanWss({
-      config: { taskLabel: "brunel:ready", githubRepo: "owner/repo", githubToken: "token", workerSecret: undefined, pingIntervalMs: 1e9 },
+      config: { taskLabel: "brunel:ready", githubToken: "token", workerSecret: undefined, pingIntervalMs: 1e9 },
       server: http.createServer(),
     });
     const sendMsg = vi.spyOn(wss, "sendMsg").mockImplementation(() => {});

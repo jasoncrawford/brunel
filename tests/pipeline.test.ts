@@ -103,7 +103,7 @@ function labeledPayload(issueNumber: number, body = "") {
       body,
       labels: [{ name: "brunel:ready" }],
     },
-    repository: { html_url: "https://github.com/owner/repo" },
+    repository: { full_name: "owner/repo", html_url: "https://github.com/owner/repo" },
   };
 }
 
@@ -116,7 +116,7 @@ function closedPayload(issueNumber: number) {
       body: "",
       labels: [],
     },
-    repository: { html_url: "https://github.com/owner/repo" },
+    repository: { full_name: "owner/repo", html_url: "https://github.com/owner/repo" },
   };
 }
 
@@ -133,7 +133,7 @@ function prOpenedPayload(
       body,
       head: { ref: headBranch },
     },
-    repository: { html_url: "https://github.com/owner/repo" },
+    repository: { full_name: "owner/repo", html_url: "https://github.com/owner/repo" },
   };
 }
 
@@ -146,7 +146,7 @@ function checkRunPayload(prNumber: number) {
       output: { summary: "" },
       pull_requests: [{ number: prNumber }],
     },
-    repository: { html_url: "https://github.com/owner/repo" },
+    repository: { full_name: "owner/repo", html_url: "https://github.com/owner/repo" },
   };
 }
 
@@ -220,7 +220,6 @@ async function buildForeman(): Promise<{
 
   const foremanWss = new ForemanWss({ server: httpServer, config: {
     ...defaultCfg,
-    githubRepo: "owner/repo",
     githubToken: "token",
   } });
   const { wss } = foremanWss;

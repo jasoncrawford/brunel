@@ -46,14 +46,14 @@ function routeResult(task: { taskId: string; workerId: string | null } | null | 
 // ── ForemanWss class ──────────────────────────────────────────────────────────
 
 type ForemanWssOptions = {
-  config: Pick<BrunelConfig, "taskLabel" | "githubRepo" | "githubToken" | "githubApiUrl" | "workerSecret" | "pingIntervalMs">;
+  config: Pick<BrunelConfig, "taskLabel" | "githubToken" | "githubApiUrl" | "workerSecret" | "pingIntervalMs">;
   server: http.Server;
   adminWss?: AdminWss;
 };
 
 export class ForemanWss {
   readonly wss: WebSocketServer;
-  private readonly config: Pick<BrunelConfig, "taskLabel" | "githubRepo" | "githubToken" | "githubApiUrl" | "workerSecret" | "pingIntervalMs">;
+  private readonly config: Pick<BrunelConfig, "taskLabel" | "githubToken" | "githubApiUrl" | "workerSecret" | "pingIntervalMs">;
   private readonly adminWss?: AdminWss;
   private nextBroadcastId = 1;
 
@@ -533,7 +533,8 @@ export class ForemanWss {
 
   /** Resolve the Repo from a webhook payload's repository.full_name, creating it if needed. */
   private async resolveRepo(p: R): Promise<Repo> {
-    const repoFullName = strProp(p.repository, "full_name") ?? this.config.githubRepo;
+    const repoFullName = strProp(p.repository, "full_name");
+    if (!repoFullName) throw new Error("Webhook payload missing repository.full_name");
     return Repo.findOrCreate(repoFullName);
   }
 
