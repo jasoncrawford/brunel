@@ -325,7 +325,7 @@ describe("TaskManager.assignIdleWorkers", () => {
     await Task.upsert("42", 42, REPO, "Fix the bug", "Body", ["brunel:ready"]);
     manager.markBlockersLoaded(42);
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    Worker.register("worker-1", fakeWs, fakeRepo());
+    Worker.register("worker-1", fakeWs, fakeRepo(REPO, manager.repo.id, "active"));
 
     const outcomes = await manager.assignIdleWorkers();
 
@@ -342,7 +342,7 @@ describe("TaskManager.assignIdleWorkers", () => {
     await Task.upsert("42", 42, REPO, "Fix the bug", "Body", ["brunel:ready"]);
     manager.markBlockersLoaded(42);
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    const worker = Worker.register("worker-1", fakeWs, fakeRepo());
+    const worker = Worker.register("worker-1", fakeWs, fakeRepo(REPO, manager.repo.id, "active"));
 
     await manager.assignIdleWorkers();
     expect(worker.currentTaskId).toBe("42");
@@ -352,8 +352,8 @@ describe("TaskManager.assignIdleWorkers", () => {
     await Task.upsert("42", 42, REPO, "Fix the bug", "Body", ["brunel:ready"]);
     manager.markBlockersLoaded(42);
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    Worker.register("worker-1", fakeWs, fakeRepo());
-    Worker.register("worker-2", fakeWs, fakeRepo());
+    Worker.register("worker-1", fakeWs, fakeRepo(REPO, manager.repo.id, "active"));
+    Worker.register("worker-2", fakeWs, fakeRepo(REPO, manager.repo.id, "active"));
 
     // Fire both concurrently — only one worker should win the task.
     const [r1, r2] = await Promise.all([manager.assignIdleWorkers(), manager.assignIdleWorkers()]);
@@ -364,7 +364,7 @@ describe("TaskManager.assignIdleWorkers", () => {
     await Task.upsert("42", 42, REPO, "Fix the bug", "Body", ["brunel:ready"]);
     manager.markBlockersLoaded(42);
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    Worker.register("worker-1", fakeWs, fakeRepo());
+    Worker.register("worker-1", fakeWs, fakeRepo(REPO, manager.repo.id, "active"));
 
     vi.spyOn(Task.prototype, "assign").mockRejectedValue(new Error("DB down"));
 
@@ -382,13 +382,34 @@ describe("TaskManager.assignIdleWorkers", () => {
     await Task.upsert("42", 42, REPO, "Fix the bug", "Body", ["brunel:ready"]);
     manager.markBlockersLoaded(42);
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    Worker.register("worker-1", fakeWs, fakeRepo());
+    Worker.register("worker-1", fakeWs, fakeRepo(REPO, manager.repo.id, "active"));
 
     vi.spyOn(Task.prototype, "assign").mockRejectedValue(new Error("DB down"));
 
     // Both calls should resolve (not hang), even though assignment fails.
     await manager.assignIdleWorkers();
     await manager.assignIdleWorkers();
+  });
+
+  it("skips assignment when worker's repo is not active", async () => {
+    await Task.upsert("42", 42, REPO, "Fix the bug", "Body", ["brunel:ready"]);
+    manager.markBlockersLoaded(42);
+    const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
+    Worker.register("worker-1", fakeWs, fakeRepo(REPO, manager.repo.id, "new"));
+
+    const outcomes = await manager.assignIdleWorkers();
+    expect(outcomes).toHaveLength(0);
+  });
+
+  it("skips assignment when worker's repo id does not match task's repo id", async () => {
+    await Task.upsert("42", 42, REPO, "Fix the bug", "Body", ["brunel:ready"]);
+    manager.markBlockersLoaded(42);
+    const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
+    // Worker belongs to a different repo (id 999)
+    Worker.register("worker-1", fakeWs, fakeRepo("other/repo", 999, "active"));
+
+    const outcomes = await manager.assignIdleWorkers();
+    expect(outcomes).toHaveLength(0);
   });
 });
 

@@ -86,6 +86,7 @@ beforeEach(async () => {
   httpServer = http.createServer();
   resetDb();
   taskManager = await createTestTaskManager("owner/repo");
+  await taskManager.repo.activate();
 });
 
 afterEach(() => {
