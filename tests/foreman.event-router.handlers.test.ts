@@ -555,6 +555,32 @@ describe("routeIssueEvent — edited", () => {
     expect(taskManager.handleIssueBodyEditedEvent).not.toHaveBeenCalled();
     expect(forwardEvent).not.toHaveBeenCalled();
   });
+
+  it("persists updated body to DB when body is edited", async () => {
+    await seedTask({ task_id: "42", issue_number: 42, repo_id: testRepoId, body: "original body" });
+    const { wss } = await makeDeps();
+    await wss.routeIssueEvent(
+      { action: "edited", changes: { body: { from: "original body" } } },
+      makeEvent("issues"),
+      { number: 42, body: "updated body" },
+      42,
+    );
+    const task = await Task.getByRepoIssue(testRepoId, 42);
+    expect(task?.body).toBe("updated body");
+  });
+
+  it("persists updated title to DB when title is edited", async () => {
+    await seedTask({ task_id: "42", issue_number: 42, repo_id: testRepoId, title: "original title" });
+    const { wss } = await makeDeps();
+    await wss.routeIssueEvent(
+      { action: "edited", changes: { title: { from: "original title" } } },
+      makeEvent("issues"),
+      { number: 42, title: "updated title" },
+      42,
+    );
+    const task = await Task.getByRepoIssue(testRepoId, 42);
+    expect(task?.title).toBe("updated title");
+  });
 });
 
 describe("routeIssueEvent — passthrough forwarding", () => {
