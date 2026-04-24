@@ -57,6 +57,13 @@ export class Repo extends ActiveRecord {
     return Task.getByRepoPr(this.id, prNumber);
   }
 
+  /** Sets status to 'active' and persists. Returns the updated Repo instance. */
+  async activate(): Promise<Repo> {
+    const updated = await this.update({ status: "active" });
+    this.status = "active";
+    return updated;
+  }
+
   /**
    * Find or create a repo by full_name (e.g. "owner/repo").
    * Upserts on full_name so it's safe to call on every webhook.

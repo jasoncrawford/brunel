@@ -64,7 +64,7 @@ beforeEach(() => {
   sb = new AgentStatus({ agentId: AGENT_ID });
   vi.spyOn(sb, "setOnToolResult");
   vi.spyOn(sb, "update");
-  session = new WorkerSession(sb, wsFactory, display);
+  session = new WorkerSession(sb, wsFactory, display, { repo: "owner/repo" });
   session.start();
 });
 
@@ -1779,5 +1779,96 @@ describe("hasTask", () => {
     expect(session.hasTask()).toBe(true);
     await session.completeCurrentTask();
     expect(session.hasTask()).toBe(false);
+  });
+});
+
+// ── Repo activation flow ───────────────────────────────────────────────────────
+
+describe("repo activation flow", () => {
+  function makeSessionWithPick(pickFn: (opts: string[]) => Promise<number>, repo = "owner/myrepo") {
+    const ws = new FakeWs();
+    const factory = vi.fn().mockReturnValue(ws);
+    const disp = { print: vi.fn(), printForemanMessage: vi.fn() };
+    const status = new AgentStatus({ agentId: AGENT_ID });
+    const sess = new WorkerSession(status, factory, disp, { pickFn, repo });
+    sess.start();
+    return { sess, ws, disp };
+  }
+
+  it("when repoStatus is 'new', shows activation prompt before transitioning", async () => {
+    const pickFn = vi.fn().mockResolvedValue(0); // "Yes, activate"
+    const { sess, ws } = makeSessionWithPick(pickFn);
+    sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "idle", repoStatus: "new" });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(pickFn).toHaveBeenCalledWith(expect.arrayContaining(["Yes, activate", "No, skip"]));
+  });
+
+  it("when user confirms activation, sends activate_repo to the foreman", async () => {
+    const pickFn = vi.fn().mockResolvedValue(0); // "Yes, activate"
+    const { sess, ws } = makeSessionWithPick(pickFn);
+    sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "idle", repoStatus: "new" });
+    await new Promise((r) => setTimeout(r, 10));
+    const sent = ws.send.mock.calls.map(([d]: [string]) => JSON.parse(d));
+    const activateMsg = sent.find((m) => m.type === "activate_repo");
+    expect(activateMsg).toBeDefined();
+    expect(activateMsg.workerId).toBe(AGENT_ID);
+  });
+
+  it("when user confirms, does NOT yet transition to registered (waits for repo_activated)", async () => {
+    const pickFn = vi.fn().mockResolvedValue(0); // "Yes, activate"
+    const { sess, ws } = makeSessionWithPick(pickFn);
+    sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "idle", repoStatus: "new" });
+    // No task has been assigned — still no pending prompts
+    expect(sess.hasPendingPrompts()).toBe(false); // no task prompt yet
+  });
+
+  it("when repo_activated is received, transitions to registered and can accept tasks", async () => {
+    const pickFn = vi.fn().mockResolvedValue(0); // "Yes, activate"
+    const { sess, ws } = makeSessionWithPick(pickFn);
+    sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "idle", repoStatus: "new" });
+    await new Promise((r) => setTimeout(r, 10));
+    // Foreman responds with repo_activated
+    sendMsg(ws, { type: "repo_activated", workerId: AGENT_ID });
+    await new Promise((r) => setTimeout(r, 10));
+    // Session is now registered — task_assigned should be enqueued
+    sendMsg(ws, { type: "task_assigned", taskId: "77", issue: makeIssue(77) });
+    expect(sess.hasPendingPrompts()).toBe(true);
+  });
+
+  it("when user declines activation, transitions to registered without sending activate_repo", async () => {
+    const pickFn = vi.fn().mockResolvedValue(1); // "No, skip"
+    const { sess, ws } = makeSessionWithPick(pickFn);
+    sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "idle", repoStatus: "new" });
+    await new Promise((r) => setTimeout(r, 10));
+    const sent = ws.send.mock.calls.map(([d]: [string]) => JSON.parse(d));
+    const activateMsg = sent.find((m) => m.type === "activate_repo");
+    expect(activateMsg).toBeUndefined();
+  });
+
+  it("when user declines, session is still registered (can receive tasks later)", async () => {
+    const pickFn = vi.fn().mockResolvedValue(1); // "No, skip"
+    const { sess, ws } = makeSessionWithPick(pickFn);
+    sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "idle", repoStatus: "new" });
+    await new Promise((r) => setTimeout(r, 10));
+    // After declining, a follow-up task_assigned should be enqueued (session is registered)
+    sendMsg(ws, { type: "task_assigned", taskId: "99", issue: makeIssue(99) });
+    expect(sess.hasPendingPrompts()).toBe(true);
+  });
+
+  it("when repoStatus is 'active', transitions normally without showing activation prompt", async () => {
+    const pickFn = vi.fn().mockResolvedValue(0);
+    const { sess, ws } = makeSessionWithPick(pickFn);
+    sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "idle", repoStatus: "active" });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(pickFn).not.toHaveBeenCalled();
+  });
+
+  it("activation prompt includes the repo name from options", async () => {
+    const pickFn = vi.fn().mockResolvedValue(0);
+    const { disp, ws } = makeSessionWithPick(pickFn, "acme/my-project");
+    sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "idle", repoStatus: "new" });
+    await new Promise((r) => setTimeout(r, 10));
+    const printedLines = disp.print.mock.calls.map(([l]: [string]) => l);
+    expect(printedLines.some((l) => l.includes("acme/my-project"))).toBe(true);
   });
 });

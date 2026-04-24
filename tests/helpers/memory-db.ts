@@ -52,6 +52,26 @@ export function createMemoryTaskDb(): SupabaseClient<Database> {
         };
         return sb;
       },
+      update(changes: Partial<RepoRow>) {
+        let matchId: number | null = null;
+        const thenable = {
+          eq(_col: string, val: unknown) {
+            matchId = val as number;
+            return thenable;
+          },
+          select() { return thenable; },
+          single(): Promise<{ data: RepoRow | null; error: null }> {
+            const entry = [...reposStore.entries()].find(([, r]) => r.id === matchId);
+            if (entry) {
+              const updated = { ...entry[1], ...changes };
+              reposStore.set(entry[0], updated);
+              return Promise.resolve({ data: updated, error: null });
+            }
+            return Promise.resolve({ data: null, error: null });
+          },
+        };
+        return thenable;
+      },
       select(_cols?: string) {
         const rows = [...reposStore.values()];
         const sb = {

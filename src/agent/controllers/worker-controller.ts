@@ -119,8 +119,10 @@ export type WorkerSessionOptions = {
   /** Interval in ms between worker-sent pings. Dead connections are detected after
    * one interval with no pong. Default is set in the config schema (pingIntervalMs). */
   pingIntervalMs?: number;
-  /** Pick function used by confirmTaskQuit. Supplied by startWorkerMode via picker.pick. */
+  /** Pick function used by confirmTaskQuit and repo activation. Supplied by startWorkerMode via picker.pick. */
   pickFn?: (options: string[]) => Promise<number>;
+  /** Repo name (owner/name) — sent in worker_hello and shown in the activation prompt. */
+  repo: string;
 };
 
 /** Task state needed to decide whether and how to prompt before quitting. */
@@ -172,7 +174,7 @@ export class WorkerSession extends EventEmitter {
     readonly agentStatus: AgentStatus,
     private wsFactory: WsFactory,
     private display: WorkerDisplay,
-    private options: WorkerSessionOptions = {},
+    private options: WorkerSessionOptions,
   ) {
     super();
   }
@@ -395,6 +397,12 @@ export class WorkerSession extends EventEmitter {
     this.flushBuffer();
   }
 
+  private transitionToRegistered(): void {
+    this.connectionState = "registered";
+    this.agentStatus.update({ connectionStatus: "connected", disconnectCode: undefined });
+    this.flushBuffer();
+  }
+
   /**
    * Send all buffered messages if registered and the socket is open.
    * No-ops if the handshake is still pending or the socket is not ready.
@@ -459,7 +467,7 @@ export class WorkerSession extends EventEmitter {
     ws.on("message", (data: Buffer | string) => {
       let msg: Wire.ForemanMessage;
       try { msg = JSON.parse(data.toString()); } catch { return; }
-      this.handleMessage(msg);
+      void this.handleMessage(msg);
     });
 
     ws.on("close", (code: number, _reason: Buffer) => {
@@ -485,7 +493,7 @@ export class WorkerSession extends EventEmitter {
     });
   }
 
-  private handleMessage(msg: Wire.ForemanMessage): void {
+  private async handleMessage(msg: Wire.ForemanMessage): Promise<void> {
     this.display.printForemanMessage(msg);
 
     if (msg.type === "foreman_error") {
@@ -495,6 +503,11 @@ export class WorkerSession extends EventEmitter {
         this.ws?.close();
         this.emit("fatal");
       }
+      return;
+    }
+
+    if (msg.type === "repo_activated") {
+      this.transitionToRegistered();
       return;
     }
 
@@ -529,11 +542,25 @@ export class WorkerSession extends EventEmitter {
             this._resetPromise = null;
           });
         }
-      } else {
-        // "idle" or "busy": transition to registered and flush buffered messages.
-        this.connectionState = "registered";
+      } else if (msg.repoStatus === "new") {
+        // Show "Connected" in the status bar before waiting for user input — the
+        // worker IS connected, it just needs activation. connectionState stays
+        // "hello_sent" so buffered messages are not flushed prematurely.
         this.agentStatus.update({ connectionStatus: "connected", disconnectCode: undefined });
-        this.flushBuffer();
+        // Repo is new — ask the user whether to activate it before proceeding.
+        this.display.print(c.amber(`Repo ${this.options.repo} is new — activate it?`));
+        const idx = await this.options.pickFn!(["Yes, activate", "No, skip"]);
+        if (idx === 0) {
+          // Send activate_repo — foreman will reply with a repo_activated message.
+          this.ws?.send(JSON.stringify({ type: "activate_repo", workerId: this.agentId } satisfies Wire.WorkerMessage));
+          return; // wait for repo_activated
+        }
+        // User declined — transition to idle without activating.
+        this.display.print(c.darkGray("Repo not activated. Staying idle."));
+        this.transitionToRegistered();
+      } else {
+        // "idle" or "busy" with repoStatus 'active' (or no repoStatus for back-compat).
+        this.transitionToRegistered();
       }
       return;
     }
@@ -695,6 +722,7 @@ export async function startWorkerMode(
     workspaceController,
     pingIntervalMs: getConfig().pingIntervalMs,
     pickFn: (opts) => picker.pick(opts),
+    repo,
   });
 
   const shutdown = async () => {

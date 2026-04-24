@@ -79,11 +79,13 @@ export interface TaskIssue {
 export type WorkerMessage =
   | { type: "worker_hello"; workerId: string; repo: string; taskId?: string; status: "idle" | "busy"; workerSecret?: string }
   | { type: "task_complete"; workerId: string; taskId: string; stats?: { inputTokens: number; outputTokens: number; costUsd?: number } }
-  | { type: "worker_goodbye"; workerId: string; taskId?: string };
+  | { type: "worker_goodbye"; workerId: string; taskId?: string }
+  | { type: "activate_repo"; workerId: string };
 
 // Foreman → Worker messages
 export type ForemanMessage =
   | { type: "task_assigned"; taskId: string; issue: TaskIssue }
   | { type: "event_notification"; taskId: string; event: WebhookEvent }
-  | { type: "hello_ack"; workerId: string; status: "idle" | "busy" | "cancelled" }
+  | { type: "hello_ack"; workerId: string; status: "idle" | "busy" | "cancelled"; repoStatus: "new" | "active" }
+  | { type: "repo_activated"; workerId: string }
   | { type: "foreman_error"; message: string; fatal: boolean };

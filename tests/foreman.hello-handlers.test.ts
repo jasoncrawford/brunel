@@ -12,8 +12,9 @@ import { Task } from "../src/foreman/models/task.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { ForemanMessage } from "../src/foreman/models/foreman-message.js";
 import { Repo } from "../src/foreman/models/repo.js";
-import { fakeRepo, resetDb, seedTask, createTestTaskManager } from "./helpers/task.js";
+import { fakeRepo, resetDb, seedTask, createTestTaskManager, createTestRepo } from "./helpers/task.js";
 import * as utils from "../src/utils.js";
+import * as github from "../src/foreman/clients/github.js";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -441,6 +442,122 @@ describe("sendError — ForemanMessage.log() is called", () => {
     expect(errorLogCall![0].direction).toBe("sent");
     expect(errorLogCall![0].workerId).toBe("w1");
     expect((errorLogCall![0].payload as { message?: string }).message).toContain("DB write failed");
+  });
+});
+
+// ── repoStatus in hello_ack ────────────────────────────────────────────────────
+
+describe("repoStatus in hello_ack", () => {
+  it("handleIdleHello sends repoStatus: 'new' for a new repo", async () => {
+    const { wss, sendMsg } = makeWss(taskManager);
+    const repo = fakeRepo("new/repo");
+    await wss.handleIdleHello("w1", fakeWs(), repo);
+
+    const ack = helloAck(sendMsg) as { status: string; repoStatus: string } | undefined;
+    expect(ack?.status).toBe("idle");
+    expect(ack?.repoStatus).toBe("new");
+  });
+
+  it("handleIdleHello sends repoStatus: 'active' for an active repo", async () => {
+    const repo = await createTestRepo("active/repo");
+    await repo.activate();
+    const { wss, sendMsg } = makeWss(taskManager);
+    await wss.handleIdleHello("w1", fakeWs(), repo);
+
+    const ack = helloAck(sendMsg) as { status: string; repoStatus: string } | undefined;
+    expect(ack?.status).toBe("idle");
+    expect(ack?.repoStatus).toBe("active");
+  });
+
+  it("cancelWorker includes repoStatus from the worker's repo", async () => {
+    await seedTask({ task_id: "10", issue_number: 10, worker_id: "w2", assigned_at: new Date().toISOString() });
+    const { wss, sendMsg } = makeWss(taskManager);
+    const repo = fakeRepo("some/repo", 1, "active");
+    await wss.handleBusyHello("w1", "10", fakeWs(), repo);
+
+    const ack = helloAck(sendMsg) as { status: string; repoStatus: string } | undefined;
+    expect(ack?.status).toBe("cancelled");
+    expect(ack?.repoStatus).toBe("active");
+  });
+
+  it("reclaimWorker includes repoStatus from the worker's repo", async () => {
+    await seedTask({ task_id: "10", issue_number: 10, worker_id: "w1", assigned_at: new Date().toISOString() });
+    const { wss, sendMsg } = makeWss(taskManager);
+    const repo = fakeRepo("some/repo", 1, "active");
+    await wss.handleBusyHello("w1", "10", fakeWs(), repo);
+
+    const ack = helloAck(sendMsg) as { status: string; repoStatus: string } | undefined;
+    expect(ack?.status).toBe("busy");
+    expect(ack?.repoStatus).toBe("active");
+  });
+});
+
+// ── activate_repo handling ─────────────────────────────────────────────────────
+
+describe("activate_repo", () => {
+  function makeWssForActivate() {
+    const wss = new ForemanWss({
+      config: { taskLabel: "brunel:ready", githubRepo: "owner/repo", githubToken: "token", workerSecret: undefined, pingIntervalMs: 1e9 },
+      server: http.createServer(),
+    });
+    const sendMsg = vi.spyOn(wss, "sendMsg").mockImplementation(() => {});
+    return { wss, sendMsg };
+  }
+
+  it("activate_repo activates the repo and sends repo_activated", async () => {
+    const repo = await createTestRepo("activate/repo");
+    expect(repo.status).toBe("new");
+
+    const { wss, sendMsg } = makeWssForActivate();
+    vi.spyOn(github, "loadIssuesToQueue").mockResolvedValue(undefined);
+
+    const ws = fakeWs();
+    await wss.handleIdleHello("w1", ws, repo);
+    await wss.handleActivateRepo("w1", ws);
+
+    const activatedCall = sendMsg.mock.calls.find(([, msg]) => (msg as { type: string }).type === "repo_activated");
+    expect(activatedCall).toBeDefined();
+    expect((activatedCall![1] as { workerId: string }).workerId).toBe("w1");
+  });
+
+  it("activate_repo calls repo.activate() and loadIssuesToQueue", async () => {
+    const repo = await createTestRepo("activate2/repo");
+    const activateSpy = vi.spyOn(repo, "activate").mockResolvedValue(repo);
+    const loadSpy = vi.spyOn(github, "loadIssuesToQueue").mockResolvedValue(undefined);
+
+    const { wss } = makeWssForActivate();
+    const ws = fakeWs();
+    await wss.handleIdleHello("w1", ws, repo);
+    await wss.handleActivateRepo("w1", ws);
+
+    expect(activateSpy).toHaveBeenCalled();
+    expect(loadSpy).toHaveBeenCalled();
+  });
+
+  it("activate_repo sends foreman_error (non-fatal) if repo.activate() throws", async () => {
+    const repo = await createTestRepo("failrepo/repo");
+    vi.spyOn(repo, "activate").mockRejectedValue(new Error("DB write failed"));
+    vi.spyOn(utils, "log").mockImplementation(() => {});
+
+    const { wss } = makeWssForActivate();
+    const ws = fakeWs();
+    await wss.handleIdleHello("w1", ws, repo);
+    await wss.handleActivateRepo("w1", ws);
+
+    const errorCall = ws.send.mock.calls.find(([data]: [string]) => {
+      const msg = JSON.parse(data);
+      return msg.type === "foreman_error";
+    });
+    expect(errorCall).toBeDefined();
+    expect(JSON.parse(errorCall![0]).fatal).toBe(false);
+    expect(JSON.parse(errorCall![0]).message).toContain("DB write failed");
+  });
+
+  it("activate_repo is a no-op if worker is not registered", async () => {
+    const { wss, sendMsg } = makeWssForActivate();
+    vi.spyOn(utils, "log").mockImplementation(() => {});
+    await wss.handleActivateRepo("unknown-worker", fakeWs());
+    expect(sendMsg).not.toHaveBeenCalled();
   });
 });
 

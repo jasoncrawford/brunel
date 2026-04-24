@@ -11,6 +11,7 @@ import { TaskManager } from "../models/task-manager.js";
 import { Repo } from "../models/repo.js";
 import { Task } from "../models/task.js";
 import { Worker } from "../models/worker.js";
+import { loadIssuesToQueue } from "../clients/github.js";
 
 type R = Record<string, unknown>;
 
@@ -80,68 +81,6 @@ export class ForemanWss {
     wss.on("connection", (ws) => {
       let workerId = "";
 
-      const handleWorkerHello = async (msg: Extract<Wire.WorkerMessage, { type: "worker_hello" }>) => {
-        if (config.workerSecret && msg.workerSecret !== config.workerSecret) {
-          ws.close(4001, "unauthorized");
-          return;
-        }
-
-        workerId = msg.workerId;
-
-        if (!msg.repo) {
-          log(`[worker ${shortWorkerId(workerId)}] worker_hello missing required repo field — rejecting`);
-          this.sendError(ws, "worker_hello must include a repo field", true, workerId, null);
-          return;
-        }
-
-        let repo: Repo;
-        try {
-          repo = await Repo.findOrCreate(msg.repo);
-        } catch (err) {
-          log(`[worker ${shortWorkerId(workerId)}] failed to resolve repo ${msg.repo}: ${fmtError(err)}`);
-          this.sendError(ws, `Failed to resolve repo ${msg.repo}: ${fmtError(err)}`, true, workerId, null);
-          return;
-        }
-
-        if (msg.status === "busy" && msg.taskId) {
-          await this.handleBusyHello(workerId, msg.taskId, ws, repo);
-        } else {
-          await this.handleIdleHello(workerId, ws, repo);
-        }
-      };
-
-      const handleTaskComplete = async (msg: Extract<Wire.WorkerMessage, { type: "task_complete" }>) => {
-        this.workerLog(workerId, `task_complete #${msg.taskId}`);
-        const task = await Task.get(msg.taskId);
-        if (task && task.workerId !== workerId) {
-          this.workerLog(workerId, `task_complete #${msg.taskId} ignored — owned by ${task.workerId ?? "nobody"}`);
-          return;
-        }
-        if (task) {
-          try {
-            await task.complete(msg.stats);
-          } catch (err) {
-            log(`ERROR Failed to mark task #${msg.taskId} complete: ${fmtError(err)}`);
-            return; // don't release — keeps task assigned so the failure is visible
-          }
-        }
-        Worker.get(workerId)?.release();
-      };
-
-      const handleWorkerGoodbye = async (msg: Extract<Wire.WorkerMessage, { type: "worker_goodbye" }>) => {
-        this.workerLog(workerId, `worker_goodbye (task=${msg.taskId ?? "none"})`);
-        if (msg.taskId) {
-          const task = await Task.get(msg.taskId);
-          if (task) {
-            this.workerLog(workerId, `reverting task #${task.issueNumber} to pending (worker_goodbye)`);
-            await task.revert().catch((err: unknown) =>
-              log(`ERROR Failed to revert task #${msg.taskId} to pending: ${fmtError(err)}`)
-            );
-          }
-        }
-        Worker.get(workerId)?.remove();
-      };
-
       ws.on("message", (data) => {
         void (async () => {
           let msg: Wire.WorkerMessage;
@@ -161,10 +100,19 @@ export class ForemanWss {
           });
           this.broadcastMessageEvent({ direction: "received", workerId: rcvWorkerId, taskId: rcvTaskId, msgType: msg.type, payload: rcvPayload });
 
-          if (msg.type === "worker_hello") await handleWorkerHello(msg);
-          else if (msg.type === "task_complete") await handleTaskComplete(msg);
-          else if (msg.type === "worker_goodbye") await handleWorkerGoodbye(msg);
-          else { log(`[worker ${workerId}] unknown message type: ${(msg as R).type}`); return; }
+          if (msg.type === "worker_hello") {
+            workerId = msg.workerId;
+            await this.handleWorkerHello(workerId, ws, msg);
+          } else if (msg.type === "task_complete") {
+            await this.handleTaskComplete(workerId, msg);
+          } else if (msg.type === "worker_goodbye") {
+            await this.handleWorkerGoodbye(workerId, msg);
+          } else if (msg.type === "activate_repo") {
+            await this.handleActivateRepo(workerId, ws);
+          } else {
+            log(`[worker ${workerId}] unknown message type: ${(msg as R).type}`);
+            return;
+          }
           await this.assignWork();
         })().catch(err => {
           log(`ERROR handling worker message: ${fmtError(err)}`);
@@ -341,7 +289,7 @@ export class ForemanWss {
   }
 
   private cancelWorker(worker: Worker, task: Task | null): void {
-    this.sendMsg(worker, { type: "hello_ack", workerId: worker.workerId, status: "cancelled" }, task?.taskId);
+    this.sendMsg(worker, { type: "hello_ack", workerId: worker.workerId, status: "cancelled", repoStatus: worker.repo.status }, task?.taskId);
   }
 
   private async reclaimWorker(worker: Worker, task: Task): Promise<void> {
@@ -351,8 +299,68 @@ export class ForemanWss {
       await task.assign(worker);
     }
     // For complete tasks, the task stays complete while worker finishes cleanup/finalization work
-    this.sendMsg(worker, { type: "hello_ack", workerId: worker.workerId, status: "busy" }, task.taskId);
+    this.sendMsg(worker, { type: "hello_ack", workerId: worker.workerId, status: "busy", repoStatus: worker.repo.status }, task.taskId);
     this.flushQueuedEvents(worker, task);
+  }
+
+  async handleWorkerHello(workerId: string, ws: WebSocket, msg: Extract<Wire.WorkerMessage, { type: "worker_hello" }>): Promise<void> {
+    if (this.config.workerSecret && msg.workerSecret !== this.config.workerSecret) {
+      ws.close(4001, "unauthorized");
+      return;
+    }
+
+    if (!msg.repo) {
+      log(`[worker ${shortWorkerId(workerId)}] worker_hello missing required repo field — rejecting`);
+      this.sendError(ws, "worker_hello must include a repo field", true, workerId, null);
+      return;
+    }
+
+    let repo: Repo;
+    try {
+      repo = await Repo.findOrCreate(msg.repo);
+    } catch (err) {
+      log(`[worker ${shortWorkerId(workerId)}] failed to resolve repo ${msg.repo}: ${fmtError(err)}`);
+      this.sendError(ws, `Failed to resolve repo ${msg.repo}: ${fmtError(err)}`, true, workerId, null);
+      return;
+    }
+
+    if (msg.status === "busy" && msg.taskId) {
+      await this.handleBusyHello(workerId, msg.taskId, ws, repo);
+    } else {
+      await this.handleIdleHello(workerId, ws, repo);
+    }
+  }
+
+  async handleTaskComplete(workerId: string, msg: Extract<Wire.WorkerMessage, { type: "task_complete" }>): Promise<void> {
+    this.workerLog(workerId, `task_complete #${msg.taskId}`);
+    const task = await Task.get(msg.taskId);
+    if (task && task.workerId !== workerId) {
+      this.workerLog(workerId, `task_complete #${msg.taskId} ignored — owned by ${task.workerId ?? "nobody"}`);
+      return;
+    }
+    if (task) {
+      try {
+        await task.complete(msg.stats);
+      } catch (err) {
+        log(`ERROR Failed to mark task #${msg.taskId} complete: ${fmtError(err)}`);
+        return; // don't release — keeps task assigned so the failure is visible
+      }
+    }
+    Worker.get(workerId)?.release();
+  }
+
+  async handleWorkerGoodbye(workerId: string, msg: Extract<Wire.WorkerMessage, { type: "worker_goodbye" }>): Promise<void> {
+    this.workerLog(workerId, `worker_goodbye (task=${msg.taskId ?? "none"})`);
+    if (msg.taskId) {
+      const task = await Task.get(msg.taskId);
+      if (task) {
+        this.workerLog(workerId, `reverting task #${task.issueNumber} to pending (worker_goodbye)`);
+        await task.revert().catch((err: unknown) =>
+          log(`ERROR Failed to revert task #${msg.taskId} to pending: ${fmtError(err)}`)
+        );
+      }
+    }
+    Worker.get(workerId)?.remove();
   }
 
   /**
@@ -431,13 +439,39 @@ export class ForemanWss {
         this.workerLog(workerId, "hello idle");
       }
       const w = Worker.register(workerId, ws, repo);
-      this.sendMsg(w, { type: "hello_ack", workerId: w.workerId, status: "idle" });
+      this.sendMsg(w, { type: "hello_ack", workerId: w.workerId, status: "idle", repoStatus: repo.status });
     } catch (err) {
       log(`ERROR handleIdleHello ${workerId}: ${fmtError(err)}`);
       // DB error during worker lookup — recoverable: DB may be temporarily down.
       // Worker retries on reconnect and the operation succeeds once the DB recovers.
       this.sendError(ws, `Internal error during idle hello: ${fmtError(err)}`, false, workerId, repo.id);
     }
+  }
+
+  async handleActivateRepo(workerId: string, ws: WebSocket): Promise<void> {
+    this.workerLog(workerId, "activate_repo");
+    const worker = Worker.get(workerId);
+    if (!worker) {
+      log(`[worker ${shortWorkerId(workerId)}] activate_repo received but worker not registered — ignoring`);
+      return;
+    }
+    const repo = worker.repo;
+    try {
+      await repo.activate();
+      this.workerLog(workerId, `repo ${repo.fullName} activated`);
+    } catch (err) {
+      log(`ERROR Failed to activate repo ${repo.fullName}: ${fmtError(err)}`);
+      this.sendError(ws, `Failed to activate repo: ${fmtError(err)}`, false, workerId, repo.id);
+      return;
+    }
+    try {
+      await loadIssuesToQueue(repo.taskManager);
+      this.workerLog(workerId, `loaded issues for ${repo.fullName}`);
+    } catch (err) {
+      log(`ERROR Failed to load issues for ${repo.fullName}: ${fmtError(err)}`);
+      // Non-fatal: repo is active, tasks can still be created via webhooks.
+    }
+    this.sendMsg(worker, { type: "repo_activated", workerId: worker.workerId });
   }
 
   // ── Routing ─────────────────────────────────────────────────────────────────
