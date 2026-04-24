@@ -39,7 +39,8 @@ test("dashboard: repos section shows active repo", async ({ page }) => {
   await page.goto("/");
   // The test server activates "owner/repo" at startup
   await expect(page.getByRole("heading", { name: /Repos/ })).toBeVisible();
-  await expect(page.getByRole("link", { name: "owner/repo" })).toBeVisible();
+  const reposSection = page.locator("section").filter({ has: page.locator("h3").filter({ hasText: /Repos/ }) });
+  await expect(reposSection.getByRole("link", { name: "owner/repo" })).toBeVisible();
 });
 
 test("repo detail page: shows repo name and tasks", async ({ page }) => {
@@ -56,9 +57,10 @@ test("repo detail page: shows repo name and tasks", async ({ page }) => {
     repository: { full_name: "owner/repo" },
   });
 
-  // Navigate to the dashboard and click the repo link
+  // Navigate to the dashboard and click the repo link in the Repos section
   await page.goto("/");
-  await page.getByRole("link", { name: "owner/repo" }).click();
+  const reposSection = page.locator("section").filter({ has: page.locator("h3").filter({ hasText: /Repos/ }) });
+  await reposSection.getByRole("link", { name: "owner/repo" }).click();
 
   // Should be on a /repos/:id page showing the repo name
   await expect(page.getByRole("heading", { name: "owner/repo" })).toBeVisible();
@@ -72,7 +74,8 @@ test("repo detail page: shows workers for this repo", async ({ page }) => {
 
   try {
     await page.goto("/");
-    await page.getByRole("link", { name: "owner/repo" }).click();
+    const reposSection = page.locator("section").filter({ has: page.locator("h3").filter({ hasText: /Repos/ }) });
+    await reposSection.getByRole("link", { name: "owner/repo" }).click();
 
     // Worker should appear in the workers section
     await expect(
