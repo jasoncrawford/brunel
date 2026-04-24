@@ -133,7 +133,10 @@ export class TaskManager extends EventEmitter {
   }
 
   private async tryAssignWork(worker: Worker): Promise<AssignOutcome | null> {
-    const task = await this.nextPending(t => t.blockersLoaded && t.status === "pending");
+    if (worker.repo.status !== "active") return null;
+    const task = await this.nextPending(
+      t => t.blockersLoaded && t.status === "pending" && t.repoId === worker.repo.id,
+    );
     if (!task) return null;
     worker.assign(task);
     try {

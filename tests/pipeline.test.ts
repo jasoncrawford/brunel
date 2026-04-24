@@ -214,6 +214,7 @@ async function buildForeman(): Promise<{
 }> {
   Worker._reset();
   const taskModel = await createTestTaskManager("owner/repo");
+  await taskModel.repo.activate();
   const httpServer = http.createServer();
   const openClients: WebSocket[] = [];
 

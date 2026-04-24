@@ -244,6 +244,7 @@ beforeEach(async () => {
 
   resetDb();
   taskManager = await createTestTaskManager("owner/repo");
+  await taskManager.repo.activate();
   httpServer = http.createServer();
   foremanWss = new ForemanWss({ server: httpServer, config: defaultCfg });
   ({ wss } = foremanWss);

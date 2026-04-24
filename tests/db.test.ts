@@ -212,23 +212,26 @@ describe("WebhookEvent.format (richer summaries)", () => {
 
 describe("queryActivityLog", () => {
   it("returns entries sorted by timestamp descending", async () => {
+    // Use a task_id not shared with pipeline.test.ts (which uses "42" and "55")
+    // to avoid DB contamination when both test files run in parallel.
+    const SORT_TASK_ID = "db-sort-999";
     await supabase.from("webhook_events").insert({
-      event_name: "issues", action: "labeled", issue_number: 42,
-      task_id: "42", worker_id: null, payload: {},
+      event_name: "issues", action: "labeled", issue_number: 999,
+      task_id: SORT_TASK_ID, worker_id: null, payload: {},
       received_at: "2026-03-27T01:00:00Z",
     });
     await supabase.from("foreman_messages").insert({
-      direction: "sent", worker_id: "w1", task_id: "42",
+      direction: "sent", worker_id: "w1", task_id: SORT_TASK_ID,
       msg_type: "task_assigned", payload: {},
       created_at: "2026-03-27T02:00:00Z",
     });
     await supabase.from("webhook_events").insert({
-      event_name: "issues", action: "unlabeled", issue_number: 42,
-      task_id: "42", worker_id: null, payload: {},
+      event_name: "issues", action: "unlabeled", issue_number: 999,
+      task_id: SORT_TASK_ID, worker_id: null, payload: {},
       received_at: "2026-03-27T03:00:00Z",
     });
 
-    const entries = await queryActivityLog({ taskId: "42" });
+    const entries = await queryActivityLog({ taskId: SORT_TASK_ID });
     expect(entries).toHaveLength(3);
     expect(entries[0].timestamp).toBe("2026-03-27T03:00:00+00:00");
     expect(entries[1].timestamp).toBe("2026-03-27T02:00:00+00:00");

@@ -246,12 +246,24 @@ async function run(): Promise<void> {
   }
 
   // Send worker_hello and wait for hello_ack (status: "idle").
-  ws.send(JSON.stringify({ type: "worker_hello", repo: "owner/repo", workerId, status: "idle" }));
+  // The repo must match the webhook's repository so the task and worker are scoped to the same repo.
+  const FAKE_WORKER_REPO = "test/test";
+  ws.send(JSON.stringify({ type: "worker_hello", repo: FAKE_WORKER_REPO, workerId, status: "idle" }));
   const ack = await withTimeout(nextWsMsg(), TIMEOUT_MS, "hello_ack");
   if (ack.type !== "hello_ack" || ack.status !== "idle") {
     throw new Error(`Expected hello_ack idle, got: ${JSON.stringify(ack)}`);
   }
   process.stderr.write("[fake-worker] hello_ack received — worker is idle\n");
+
+  // If the repo is new, activate it so the foreman will assign tasks to this worker.
+  if (ack.repoStatus === "new") {
+    ws.send(JSON.stringify({ type: "activate_repo", workerId }));
+    const activated = await withTimeout(nextWsMsg(), TIMEOUT_MS, "repo_activated");
+    if (activated.type !== "repo_activated") {
+      throw new Error(`Expected repo_activated, got: ${JSON.stringify(activated)}`);
+    }
+    process.stderr.write("[fake-worker] repo activated\n");
+  }
 
   // POST a fake issues/labeled webhook to the foreman.
   const webhookPayload = JSON.stringify({

@@ -22,6 +22,7 @@ beforeEach(async () => {
   Worker._reset();
   resetDb();
   taskManager = await createTestTaskManager("owner/repo");
+  await taskManager.repo.activate();
   const server = http.createServer();
   foremanWss = new ForemanWss({ server, config: { ...defaultCfg, taskLabel: TASK_LABEL } });
 });
@@ -50,7 +51,7 @@ describe("reconcile()", () => {
 
   it("assigns a pending task to an idle worker when blockersLoaded is true", async () => {
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    Worker.register("w1", fakeWs, fakeRepo());
+    Worker.register("w1", fakeWs, fakeRepo("owner/repo", taskManager.repo.id, "active"));
 
     await Task.upsert("42", 42, "owner/repo", "T", "b", []);
     taskManager.trackIssue(42);
