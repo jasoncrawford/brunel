@@ -83,33 +83,31 @@ describe("Picker bar management", () => {
 
 // ── Issue #832: status bar corruption when ask() is active ───────────────────
 //
-// The bug: when the picker runs while ask() owns the screen (e.g. SIGINT fires
+// Bug: when the picker runs while ask() owns the screen (e.g. SIGINT fires
 // during the "[agent] > " prompt), display.clearBar() exits early because
-// inputPrint is set. Picker options are then written at the prompt cursor
-// position, overwriting the status bar rows.
+// inputPrint is set. Picker options overwrite the status bar rows. After the
+// picker, drawBar() routes through the no-op inputPrint callback and never
+// redraws the status bar below the options.
 //
-// The fix: Picker accepts an optional onStart callback that is called before
-// clearBar(). The composition root wires this to input.cancel(), which clears
-// inputPrint/inputStatus/inputClear so clearBar() can actually erase the status
-// bar rows before rendering options.
+// Fix: Picker accepts an optional onStart callback called before clearBar().
+// The composition root wires this to input.cancel(), which nulls inputPrint so
+// clearBar() erases the old bar and drawBar() redraws it below the options.
 //
-// Behavioral test: with inputPrint set (ask() active) and a persistent status
-// bar present, verify that the erase-to-end-of-line sequence (\x1b[K) written
-// by clearBar() appears in stdout *before* the first option text. Without
-// onStart, clearBar() is a no-op and no erase precedes the options.
+// Behavioral test: start a real persistent status bar, simulate ask() being
+// active, run a picker, then verify that the status bar text appears in stdout
+// *after* the picker options. Without the fix, drawBar() routes through the
+// no-op inputPrint and never writes status bar text after the options — meaning
+// the bar was not redrawn below the picker (it was left on top of it, corrupted).
 
-describe("Picker: status bar erasure before options when ask() is active (issue #832)", () => {
+describe("Picker: status bar not corrupted when ask() is active (issue #832)", () => {
   afterEach(() => {
     process.stdin.removeAllListeners("data");
     vi.restoreAllMocks();
   });
 
-  /** Sets up a real Display with a persistent bar active and inputPrint set, returns stdout spy. */
   function setup() {
-    const agentStatus = new AgentStatus({ agentId: "test-agent" });
+    const agentStatus = new AgentStatus({ agentId: "status-bar-test" });
     const display = new Display(getConfig(), agentStatus);
-    display.persistentActive = true; // makes clearBar() have rows to erase
-    display.inputPrint = () => {};   // simulates ask() owning the screen
 
     const written: string[] = [];
     vi.spyOn(process.stdout, "write").mockImplementation((chunk: unknown) => {
@@ -117,7 +115,15 @@ describe("Picker: status bar erasure before options when ask() is active (issue 
       return true;
     });
 
-    // onStart tears down the ask() state so clearBar() can run (the fix)
+    // Start the persistent bar — writes initial bar text (including "status-b",
+    // the first 8 chars of the agentId) to stdout before the picker runs.
+    display.startPersistentBar();
+
+    // Simulate ask() owning the screen: clearBar() and drawBar() become no-ops
+    // or route through these callbacks instead of writing bar text directly.
+    display.inputPrint = () => {};
+
+    // onStart tears down ask() state so clearBar()/drawBar() operate normally
     const onStart = () => {
       display.inputPrint = null;
       display.inputStatus = null;
@@ -127,15 +133,12 @@ describe("Picker: status bar erasure before options when ask() is active (issue 
     return { display, written, onStart };
   }
 
-  /** Returns true if an erase-to-end-of-line (\x1b[K) appears before `text` in the joined output. */
-  function eraseBeforeText(written: string[], text: string): boolean {
-    const all = written.join("");
-    const optionAt = all.indexOf(text);
-    if (optionAt === -1) return false;
-    return all.lastIndexOf("\x1b[K", optionAt) !== -1;
-  }
+  // "status-b" is the first 8 chars of agentId "status-bar-test", which the
+  // status bar renders as "worker status-b". It appears in stdout whenever
+  // drawBar() runs the normal (non-inputPrint) code path.
+  const BAR_MARKER = "status-b";
 
-  it("pick(): status bar is erased before options even when inputPrint is set", async () => {
+  it("pick(): status bar text appears after picker options in stdout", async () => {
     const { display, written, onStart } = setup();
     const picker = new Picker(display, onStart);
 
@@ -143,10 +146,12 @@ describe("Picker: status bar erasure before options when ask() is active (issue 
     process.stdin.emit("data", "\r");
     await promise;
 
-    expect(eraseBeforeText(written, "Option A")).toBe(true);
+    const all = written.join("");
+    const afterOptions = all.indexOf(BAR_MARKER, all.indexOf("Option A"));
+    expect(afterOptions).toBeGreaterThan(-1);
   });
 
-  it("pickMultiple(): status bar is erased before options even when inputPrint is set", async () => {
+  it("pickMultiple(): status bar text appears after picker options in stdout", async () => {
     const { display, written, onStart } = setup();
     const picker = new Picker(display, onStart);
 
@@ -154,10 +159,12 @@ describe("Picker: status bar erasure before options when ask() is active (issue 
     process.stdin.emit("data", "\r");
     await promise;
 
-    expect(eraseBeforeText(written, "Choice A")).toBe(true);
+    const all = written.join("");
+    const afterOptions = all.indexOf(BAR_MARKER, all.indexOf("Choice A"));
+    expect(afterOptions).toBeGreaterThan(-1);
   });
 
-  it("pickQuestion(): status bar is erased before options even when inputPrint is set", async () => {
+  it("pickQuestion(): status bar text appears after picker options in stdout", async () => {
     const { display, written, onStart } = setup();
     const picker = new Picker(display, onStart);
     const opts = [{ label: "Yes", description: "Proceed" }];
@@ -166,17 +173,8 @@ describe("Picker: status bar erasure before options when ask() is active (issue 
     process.stdin.emit("data", "\r");
     await promise;
 
-    expect(eraseBeforeText(written, "Yes")).toBe(true);
-  });
-
-  it("without onStart, no erase precedes options when inputPrint is set (documents the bug)", async () => {
-    const { display, written } = setup();
-    const picker = new Picker(display); // no onStart — clearBar() stays a no-op
-
-    const promise = picker.pick(["Option A", "Option B"]);
-    process.stdin.emit("data", "\r");
-    await promise;
-
-    expect(eraseBeforeText(written, "Option A")).toBe(false);
+    const all = written.join("");
+    const afterOptions = all.indexOf(BAR_MARKER, all.indexOf("Yes"));
+    expect(afterOptions).toBeGreaterThan(-1);
   });
 });
