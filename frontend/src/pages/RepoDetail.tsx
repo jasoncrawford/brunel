@@ -12,7 +12,6 @@ export default function RepoDetail() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [workers, setWorkers] = useState<Worker[]>([]);
   const [recentLog, setRecentLog] = useState<LogEntry[]>([]);
-  const [taskIds, setTaskIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     fetch(`/api/repos/${repoId}`)
@@ -32,16 +31,14 @@ export default function RepoDetail() {
         setRepo(repoRecord);
         const repoTasks = msg.tasks.filter((t) => t.repo === repoRecord.fullName);
         setTasks(repoTasks);
-        setTaskIds(new Set(repoTasks.map((t) => t.taskId)));
         setWorkers(msg.workers.filter((w) => w.repo === repoRecord.fullName));
       }
     } else if (msg.type === "log_event") {
-      // Show events that belong to a task in this repo, or have no taskId (system events)
-      if (msg.entry.taskId == null || taskIds.has(msg.entry.taskId)) {
+      if (repo && msg.entry.repo === repo.fullName) {
         setRecentLog((prev) => [msg.entry, ...prev].slice(0, 50));
       }
     }
-  }, [repoId, taskIds]);
+  }, [repoId, repo]);
 
   useAdminWs(handleMessage);
 
