@@ -7,6 +7,7 @@ import { Hono } from "hono";
 import { getRequestListener } from "@hono/node-server";
 import { Task } from "../models/task.js";
 import { Repo } from "../models/repo.js";
+import { Worker } from "../models/worker.js";
 import { queryActivityLog } from "../models/activity-log.js";
 import type { TaskStatus } from "../../../shared/wire.js";
 import { fmtError, log } from "../../utils.js";
@@ -84,6 +85,18 @@ export function createHttpServer({ webhooks, routeEvent }: HttpServerOptions): h
       const taskId = c.req.param("id");
       const entries = await queryActivityLog({ taskId });
       return c.json(entries);
+    } catch (err) {
+      log(`ERROR API query failed: ${fmtError(err)}`);
+      return c.json({ error: "internal error" }, 500);
+    }
+  });
+
+  app.get("/api/workers/:id", async (c) => {
+    try {
+      const workerId = c.req.param("id");
+      const row = await Worker.getDbRow(workerId);
+      if (!row) return c.json({ error: "not found" }, 404);
+      return c.json(Worker._rowToWire(row));
     } catch (err) {
       log(`ERROR API query failed: ${fmtError(err)}`);
       return c.json({ error: "internal error" }, 500);
