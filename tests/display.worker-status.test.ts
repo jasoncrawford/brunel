@@ -306,13 +306,14 @@ describe("Display persistent status bar", () => {
   });
 
   it("stopBar leaves persistent status active", () => {
+    agentStatus.update({ connectionStatus: "connected" });
     display.startPersistentBar();
     display.startBar(() => "Working…");
     stdoutWrite.mockClear();
     display.stopBar();
-    // persistent status is still active
-    expect(display.persistentActive).toBe(true);
-    expect(display.active).toBe(false);
+    const combined = stdoutWrite.mock.calls.map(a => String(a[0])).join("");
+    expect(combined).toContain("Connected");
+    expect(combined).not.toContain("Working…");
   });
 
   it("agentStatus change triggers persistent bar redraw", () => {
