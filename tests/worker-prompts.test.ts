@@ -76,7 +76,6 @@ describe("buildInitialPrompt", () => {
     const p = buildInitialPrompt({
       number: 1, title: "T", body: "body", labels: [], repoUrl: "https://github.com/x/y",
     }, true);
-    expect(p).toContain("CLAUDE.md");
     expect(p).toMatch(/project doc/i);
   });
 
@@ -222,7 +221,6 @@ describe("check_suite success prompt", () => {
     ];
     const p = buildEventPrompt(events);
     expect(p).toContain("documentation");
-    expect(p).toContain("CLAUDE.md");
   });
 });
 

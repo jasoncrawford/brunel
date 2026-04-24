@@ -34,7 +34,7 @@ You are working in ${workspaceContext}. Use your branch-discipline skill, and re
 1. Pull main to get the latest before making any edits.
 2. ${branchInstruction}
 3. As much as possible, use test-driven development.
-4. Before creating a PR, check whether your changes call for updates to project documentation (CLAUDE.md, README, or other docs). Include any doc updates in the same PR as the code changes.
+4. Before creating a PR, check whether your changes call for updates to project documentation. Include any doc updates in the same PR as the code changes.
 5. Create a PR when done, and include the text "Closes #${issue.number}".
 
 Do not work on any other issues: leave task assignment to the foreman. Do not merge any PRs or set them to auto-merge: leave merging to the user after UAT.`;
@@ -160,10 +160,10 @@ function resolveEventTemplate(table: EventTemplateFmtTable, key: string, event: 
 }
 
 const BRANCH_REVIEW_PROMPT =
-  "Check whether all tests have passed. If not, take no action now — you will be notified when each check completes, so do not sleep or poll waiting for results. " +
+  "Check whether all tests have passed. If not, do not sleep or poll waiting for results — you will be notified when each check completes. " +
   "If all tests passed, check if the branch is up to date, and if not, rebase it. " +
   "Then check if the PR can be merged. If anything is blocking merge, resolve it, but do not merge yourself. " +
-  "Before merging, also check whether any project documentation (like CLAUDE.md or README) should be updated to reflect your changes, and include those updates in this PR.";
+  "Also remember to check whether any project documentation should be updated to reflect your changes, and include those updates in this PR.";
 
 const CODE_REVIEW_PROMPT = "Please respond in whatever way you think is most appropriate, replying and/or making code changes.";
 
@@ -206,7 +206,7 @@ const EVENT_FMT: EventTemplateFmtTable = {
     const pr = p.pull_request as Record<string, unknown> | undefined;
     const prNumber = pr?.number;
     if (p.action === "opened") {
-      return `PR #${prNumber} has been created. While waiting for user feedback and CI checks, consider whether any project documentation should be updated, like CLAUDE.md, and include those updates in this PR.`;
+      return `PR #${prNumber} has been created. While waiting for user feedback and CI checks, consider whether any project documentation should be updated, and include those updates in this PR.`;
     }
     if (p.action === "auto_merge_enabled") {
       return `Auto-merge was enabled on PR #${prNumber}. ${BRANCH_REVIEW_PROMPT}`;
