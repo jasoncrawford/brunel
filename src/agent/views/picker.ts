@@ -33,9 +33,15 @@ export type PickerDisplay = { clearBar(): void; drawBar(): void };
  * When a display is provided, each pick method clears the status bar before
  * rendering its menu and restores it after the user makes a selection. This
  * prevents the picker options from overwriting the status bar rows.
+ *
+ * The optional onStart callback is called at the very start of each pick method,
+ * before clearBar(). The composition root wires this to input.cancel() so that
+ * any active ask() prompt is torn down before the picker renders — otherwise
+ * display.clearBar() silently no-ops while ask() owns the screen, causing picker
+ * options to overwrite the status bar lines (issue #832).
  */
 export class Picker {
-  constructor(private display?: PickerDisplay) {}
+  constructor(private display?: PickerDisplay, private onStart?: () => void) {}
 
   /** Formats a single picker row: adds marker and dims non-selected rows. */
   private static pickerLine(text: string, isSelected: boolean, marker?: string): string {
@@ -59,6 +65,7 @@ export class Picker {
     const hasConfig = config != null;
     const { display } = this;
 
+    this.onStart?.();
     display?.clearBar();
 
     return new Promise((resolve) => {
@@ -173,6 +180,7 @@ export class Picker {
    */
   pickMultiple(options: string[], promptStr?: string): Promise<number[]> {
     const { display } = this;
+    this.onStart?.();
     display?.clearBar();
 
     return new Promise((resolve) => {
@@ -274,6 +282,7 @@ export class Picker {
     options: Array<{ label: string; description: string }>,
   ): Promise<PickQuestionResult> {
     const { display } = this;
+    this.onStart?.();
     display?.clearBar();
 
     return new Promise((resolve) => {
