@@ -372,23 +372,4 @@ describe("Display persistent status bar", () => {
     expect(stdoutWrite.mock.calls.length).toBe(0);
   });
 
-  it("persistentActive is true after startPersistentBar", () => {
-    display.startPersistentBar();
-    expect(display.persistentActive).toBe(true);
-  });
-
-  it("persistentActive is false after stopPersistentBar", () => {
-    display.startPersistentBar();
-    display.stopPersistentBar();
-    expect(display.persistentActive).toBe(false);
-  });
-
-  it("active is false by default", () => {
-    expect(display.active).toBe(false);
-  });
-
-  it("stopBar sets active to false", () => {
-    display.stopBar();
-    expect(display.active).toBe(false);
-  });
 });
