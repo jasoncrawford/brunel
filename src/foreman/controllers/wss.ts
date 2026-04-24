@@ -678,10 +678,21 @@ export class ForemanWss {
 
     if (action === "edited") {
       const changes = p.changes as R | undefined;
+      if (task && (changes?.body || changes?.title)) {
+        const newTitle = String(issue.title ?? task.title);
+        const newBody = String(issue.body ?? task.body);
+        const labels = (issue.labels as Array<{ name: string }> | undefined)?.map((l) => l.name) ?? task.labels;
+        try {
+          await task.updateContent(newTitle, newBody, labels);
+        } catch (err) {
+          log(`ERROR Failed to update content for task #${issueNumber}: ${fmtError(err)}`);
+          return null;
+        }
+      }
       if (changes?.body && task) {
         manager.handleIssueBodyEditedEvent(
           issueNumber,
-          String(issue.body ?? ""),
+          String(issue.body ?? task.body),
         );
       }
     }
