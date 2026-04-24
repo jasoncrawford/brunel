@@ -44,7 +44,7 @@ async function makeDeps(): Promise<TestDeps> {
   vi.spyOn(taskManager, "handlePrClosedEvent").mockResolvedValue(null);
   vi.spyOn(taskManager, "getTaskForCheckEvent").mockResolvedValue(null);
   const wss = new ForemanWss({
-    config: { taskLabel: "brunel:ready", githubRepo: "owner/repo", githubToken: "token", workerSecret: undefined, pingIntervalMs: 1e9 },
+    config: { taskLabel: "brunel:ready", githubToken: "token", workerSecret: undefined, pingIntervalMs: 1e9 },
     server: http.createServer(),
   });
   const sendMsg = vi.spyOn(wss, "sendMsg").mockImplementation(() => {});
@@ -83,7 +83,7 @@ describe("routePrEvent — synchronize", () => {
     await seedTask({ task_id: "42", issue_number: 42, pr_number: 99, repo_id: testRepoId });
     const { wss, sendMsg, forwardEvent } = await makeDeps();
     const result = await wss.routePrEvent(
-      { action: "synchronize", pull_request: { number: 99 } },
+      { action: "synchronize", pull_request: { number: 99 }, repository: { full_name: "owner/repo" } },
       makeEvent(),
     );
     expect(result.taskId).toBe("42");
@@ -107,6 +107,7 @@ describe("routePrEvent — opened", () => {
           body: "Closes #42",
           head: { ref: "feature-branch" },
         },
+        repository: { full_name: "owner/repo" },
       },
       makeEvent(),
     );
@@ -120,7 +121,7 @@ describe("routePrEvent — opened", () => {
     const { wss, sendMsg, forwardEvent, taskManager } = await makeDeps();
     taskManager.handlePrOpenedEvent.mockResolvedValue(null);
     const result = await wss.routePrEvent(
-      { action: "opened", pull_request: { number: 99, body: "no link here", head: { ref: "branch" } } },
+      { action: "opened", pull_request: { number: 99, body: "no link here", head: { ref: "branch" } }, repository: { full_name: "owner/repo" } },
       makeEvent(),
     );
     expect(result).toEqual({ taskId: null, workerId: null });
@@ -137,7 +138,7 @@ describe("routePrEvent — closed without merge", () => {
     const { wss, sendMsg, forwardEvent, taskManager } = await makeDeps();
     taskManager.handlePrClosedEvent.mockResolvedValue(task);
     const result = await wss.routePrEvent(
-      { action: "closed", pull_request: { number: 99, merged: false } },
+      { action: "closed", pull_request: { number: 99, merged: false }, repository: { full_name: "owner/repo" } },
       makeEvent(),
     );
     expect(taskManager.handlePrClosedEvent).toHaveBeenCalledWith(99, false);
@@ -150,7 +151,7 @@ describe("routePrEvent — closed without merge", () => {
     const { wss, forwardEvent, taskManager } = await makeDeps();
     taskManager.handlePrClosedEvent.mockResolvedValue(null);
     const result = await wss.routePrEvent(
-      { action: "closed", pull_request: { number: 99, merged: false } },
+      { action: "closed", pull_request: { number: 99, merged: false }, repository: { full_name: "owner/repo" } },
       makeEvent(),
     );
     expect(result).toEqual({ taskId: null, workerId: null });
@@ -166,7 +167,7 @@ describe("routePrEvent — closed with merge", () => {
     const { wss, sendMsg, forwardEvent, taskManager } = await makeDeps();
     taskManager.handlePrClosedEvent.mockResolvedValue(task);
     const result = await wss.routePrEvent(
-      { action: "closed", pull_request: { number: 99, merged: true } },
+      { action: "closed", pull_request: { number: 99, merged: true }, repository: { full_name: "owner/repo" } },
       makeEvent(),
     );
     expect(taskManager.handlePrClosedEvent).toHaveBeenCalledWith(99, true);
@@ -178,7 +179,7 @@ describe("routePrEvent — closed with merge", () => {
   it("returns null when no task owns the PR", async () => {
     const { wss, forwardEvent } = await makeDeps();
     const result = await wss.routePrEvent(
-      { action: "closed", pull_request: { number: 99, merged: true } },
+      { action: "closed", pull_request: { number: 99, merged: true }, repository: { full_name: "owner/repo" } },
       makeEvent(),
     );
     expect(result).toEqual({ taskId: null, workerId: null });
@@ -193,7 +194,7 @@ describe("routePrEvent — passthrough", () => {
     w.assign(task);
     const { wss, sendMsg, forwardEvent } = await makeDeps();
     const result = await wss.routePrEvent(
-      { action: "labeled", pull_request: { number: 99 } },
+      { action: "labeled", pull_request: { number: 99 }, repository: { full_name: "owner/repo" } },
       makeEvent(),
     );
     expect(forwardEvent).toHaveBeenCalledOnce();
@@ -204,7 +205,7 @@ describe("routePrEvent — passthrough", () => {
   it("returns null task when no task owns the PR", async () => {
     const { wss, forwardEvent } = await makeDeps();
     const result = await wss.routePrEvent(
-      { action: "labeled", pull_request: { number: 99 } },
+      { action: "labeled", pull_request: { number: 99 }, repository: { full_name: "owner/repo" } },
       makeEvent(),
     );
     expect(result).toEqual({ taskId: null, workerId: null });
@@ -228,7 +229,7 @@ describe("routePrReviewEvent", () => {
     w.assign(task);
     const { wss, sendMsg, forwardEvent } = await makeDeps();
     const result = await wss.routePrReviewEvent(
-      { pull_request: { number: 99 } },
+      { pull_request: { number: 99 }, repository: { full_name: "owner/repo" } },
       makeEvent("pull_request_review"),
     );
     expect(forwardEvent).toHaveBeenCalledOnce();
@@ -239,7 +240,7 @@ describe("routePrReviewEvent", () => {
   it("returns null when no task owns the reviewed PR", async () => {
     const { wss, forwardEvent } = await makeDeps();
     const result = await wss.routePrReviewEvent(
-      { pull_request: { number: 99 } },
+      { pull_request: { number: 99 }, repository: { full_name: "owner/repo" } },
       makeEvent("pull_request_review"),
     );
     expect(result).toEqual({ taskId: null, workerId: null });
@@ -257,7 +258,7 @@ describe("routeCheckEvent — via PR number", () => {
     const { wss, sendMsg, forwardEvent, taskManager } = await makeDeps();
     taskManager.getTaskForCheckEvent.mockResolvedValue({ task, ref: "PR #99" });
     const result = await wss.routeCheckEvent(
-      { check_run: { pull_requests: [{ number: 99 }] } },
+      { check_run: { pull_requests: [{ number: 99 }] }, repository: { full_name: "owner/repo" } },
       makeEvent("check_run"),
       "check_run",
     );
@@ -274,7 +275,7 @@ describe("routeCheckEvent — via PR number", () => {
     const { wss, sendMsg, forwardEvent, taskManager } = await makeDeps();
     taskManager.getTaskForCheckEvent.mockResolvedValue({ task, ref: "PR #99" });
     const result = await wss.routeCheckEvent(
-      { check_suite: { pull_requests: [{ number: 99 }] } },
+      { check_suite: { pull_requests: [{ number: 99 }] }, repository: { full_name: "owner/repo" } },
       makeEvent("check_suite"),
       "check_suite",
     );
@@ -293,7 +294,7 @@ describe("routeCheckEvent — via branch name", () => {
     const { wss, sendMsg, forwardEvent, taskManager } = await makeDeps();
     taskManager.getTaskForCheckEvent.mockResolvedValue({ task, ref: "branch feature-branch" });
     const result = await wss.routeCheckEvent(
-      { check_run: { pull_requests: [], check_suite: { head_branch: "feature-branch" } } },
+      { check_run: { pull_requests: [], check_suite: { head_branch: "feature-branch" } }, repository: { full_name: "owner/repo" } },
       makeEvent("check_run"),
       "check_run",
     );
@@ -310,7 +311,7 @@ describe("routeCheckEvent — via branch name", () => {
     const { wss, sendMsg, forwardEvent, taskManager } = await makeDeps();
     taskManager.getTaskForCheckEvent.mockResolvedValue({ task, ref: "branch feature-branch" });
     const result = await wss.routeCheckEvent(
-      { check_suite: { pull_requests: [], head_branch: "feature-branch" } },
+      { check_suite: { pull_requests: [], head_branch: "feature-branch" }, repository: { full_name: "owner/repo" } },
       makeEvent("check_suite"),
       "check_suite",
     );
@@ -323,7 +324,7 @@ describe("routeCheckEvent — via branch name", () => {
   it("returns null when getTaskForCheckEvent finds nothing", async () => {
     const { wss, forwardEvent } = await makeDeps();
     const result = await wss.routeCheckEvent(
-      { check_run: { pull_requests: [], check_suite: { head_branch: "unknown-branch" } } },
+      { check_run: { pull_requests: [], check_suite: { head_branch: "unknown-branch" } }, repository: { full_name: "owner/repo" } },
       makeEvent("check_run"),
       "check_run",
     );
@@ -361,7 +362,7 @@ describe("routeIssueEvent — enqueue on labeled", () => {
     taskManager.handleIssueLabeledEvent.mockResolvedValue(null);
     const issue = { number: 42, title: "Do something", body: "", state: "closed", labels: [{ name: "brunel:ready" }] };
     const result = await wss.routeIssueEvent(
-      { action: "labeled", label: { name: "brunel:ready" } },
+      { action: "labeled", label: { name: "brunel:ready" }, repository: { full_name: "owner/repo" } },
       makeEvent("issues"),
       issue,
       42,
@@ -375,7 +376,7 @@ describe("routeIssueEvent — enqueue on labeled", () => {
     const { wss, forwardEvent, taskManager } = await makeDeps();
     const issue = { number: 42, title: "Do something", body: "", state: "open", labels: [] };
     const result = await wss.routeIssueEvent(
-      { action: "labeled", label: { name: "other-label" } },
+      { action: "labeled", label: { name: "other-label" }, repository: { full_name: "owner/repo" } },
       makeEvent("issues"),
       issue,
       42,
@@ -407,7 +408,7 @@ describe("routeIssueEvent — enqueue on opened", () => {
     const { wss, forwardEvent, taskManager } = await makeDeps();
     const issue = { number: 42, title: "Do something", body: "", state: "open", labels: [] };
     const result = await wss.routeIssueEvent(
-      { action: "opened" },
+      { action: "opened", repository: { full_name: "owner/repo" } },
       makeEvent("issues"),
       issue,
       42,
@@ -424,7 +425,7 @@ describe("routeIssueEvent — unlabeled (dequeue)", () => {
     const { wss, forwardEvent, taskManager } = await makeDeps();
     const issue = { number: 42 };
     await wss.routeIssueEvent(
-      { action: "unlabeled", label: { name: "brunel:ready" } },
+      { action: "unlabeled", label: { name: "brunel:ready" }, repository: { full_name: "owner/repo" } },
       makeEvent("issues"),
       issue,
       42,
@@ -440,7 +441,7 @@ describe("routeIssueEvent — unlabeled (dequeue)", () => {
     const { wss, forwardEvent, taskManager } = await makeDeps();
     const issue = { number: 42 };
     await wss.routeIssueEvent(
-      { action: "unlabeled", label: { name: "other-label" } },
+      { action: "unlabeled", label: { name: "other-label" }, repository: { full_name: "owner/repo" } },
       makeEvent("issues"),
       issue,
       42,
@@ -456,7 +457,7 @@ describe("routeIssueEvent — closed", () => {
     const { wss, forwardEvent, taskManager } = await makeDeps();
     const issue = { number: 42 };
     await wss.routeIssueEvent(
-      { action: "closed" },
+      { action: "closed", repository: { full_name: "owner/repo" } },
       makeEvent("issues"),
       issue,
       42,
@@ -471,7 +472,7 @@ describe("routeIssueEvent — closed", () => {
     const { wss, forwardEvent, taskManager } = await makeDeps();
     const issue = { number: 42 };
     await wss.routeIssueEvent(
-      { action: "closed" },
+      { action: "closed", repository: { full_name: "owner/repo" } },
       makeEvent("issues"),
       issue,
       42,
@@ -486,7 +487,7 @@ describe("routeIssueEvent — reopened", () => {
     const { wss, forwardEvent, taskManager } = await makeDeps();
     const issue = { number: 42 };
     await wss.routeIssueEvent(
-      { action: "reopened" },
+      { action: "reopened", repository: { full_name: "owner/repo" } },
       makeEvent("issues"),
       issue,
       42,
@@ -501,7 +502,7 @@ describe("routeIssueEvent — reopened", () => {
     const { wss, forwardEvent, taskManager } = await makeDeps();
     const issue = { number: 42 };
     await wss.routeIssueEvent(
-      { action: "reopened" },
+      { action: "reopened", repository: { full_name: "owner/repo" } },
       makeEvent("issues"),
       issue,
       42,
@@ -517,7 +518,7 @@ describe("routeIssueEvent — edited", () => {
     const { wss, forwardEvent, taskManager } = await makeDeps();
     const issue = { number: 42, body: "updated body" };
     await wss.routeIssueEvent(
-      { action: "edited", changes: { body: { from: "old body" } } },
+      { action: "edited", changes: { body: { from: "old body" } }, repository: { full_name: "owner/repo" } },
       makeEvent("issues"),
       issue,
       42,
@@ -533,7 +534,7 @@ describe("routeIssueEvent — edited", () => {
     const { wss, forwardEvent, taskManager } = await makeDeps();
     const issue = { number: 42, title: "updated title" };
     await wss.routeIssueEvent(
-      { action: "edited", changes: { title: { from: "old title" } } },
+      { action: "edited", changes: { title: { from: "old title" } }, repository: { full_name: "owner/repo" } },
       makeEvent("issues"),
       issue,
       42,
@@ -547,7 +548,7 @@ describe("routeIssueEvent — edited", () => {
     const { wss, forwardEvent, taskManager } = await makeDeps();
     const issue = { number: 42, body: "updated body" };
     await wss.routeIssueEvent(
-      { action: "edited", changes: { body: { from: "old body" } } },
+      { action: "edited", changes: { body: { from: "old body" } }, repository: { full_name: "owner/repo" } },
       makeEvent("issues"),
       issue,
       42,
@@ -560,7 +561,7 @@ describe("routeIssueEvent — edited", () => {
     await seedTask({ task_id: "42", issue_number: 42, repo_id: testRepoId, body: "original body" });
     const { wss } = await makeDeps();
     await wss.routeIssueEvent(
-      { action: "edited", changes: { body: { from: "original body" } } },
+      { action: "edited", changes: { body: { from: "original body" } }, repository: { full_name: "owner/repo" } },
       makeEvent("issues"),
       { number: 42, body: "updated body" },
       42,
@@ -573,7 +574,7 @@ describe("routeIssueEvent — edited", () => {
     await seedTask({ task_id: "42", issue_number: 42, repo_id: testRepoId, title: "original title" });
     const { wss } = await makeDeps();
     await wss.routeIssueEvent(
-      { action: "edited", changes: { title: { from: "original title" } } },
+      { action: "edited", changes: { title: { from: "original title" } }, repository: { full_name: "owner/repo" } },
       makeEvent("issues"),
       { number: 42, title: "updated title" },
       42,
@@ -591,7 +592,7 @@ describe("routeIssueEvent — passthrough forwarding", () => {
     const { wss, sendMsg, forwardEvent } = await makeDeps();
     const issue = { number: 42 };
     const result = await wss.routeIssueEvent(
-      { action: "assigned" },
+      { action: "assigned", repository: { full_name: "owner/repo" } },
       makeEvent("issues"),
       issue,
       42,
@@ -608,7 +609,7 @@ describe("routeIssueEvent — passthrough forwarding", () => {
     const { wss, sendMsg, forwardEvent } = await makeDeps();
     const issue = { number: 99 }; // PR number in issue.number
     const result = await wss.routeIssueEvent(
-      { action: "created" },
+      { action: "created", repository: { full_name: "owner/repo" } },
       makeEvent("issue_comment"),
       issue,
       99,

@@ -171,7 +171,7 @@ describe("foreman log timestamps", () => {
 
     logLines.length = 0;
     const reply = nextMsg(ws);
-    foremanWss.routeEvent("evt-1", "issue_comment", { issue: { number: 1 }, comment: { body: "hi" } });
+    foremanWss.routeEvent("evt-1", "issue_comment", { issue: { number: 1 }, comment: { body: "hi" }, repository: { full_name: "owner/repo" } });
     await reply;
 
     for (const line of logLines) {
@@ -189,7 +189,7 @@ describe("foreman log timestamps", () => {
       action: "labeled",
       label: { name: "brunel:ready" },
       issue: { number: 5, title: "Do something", body: "", labels: [{ name: "brunel:ready" }] },
-      repository: { html_url: "https://github.com/owner/repo" },
+      repository: { full_name: "owner/repo", html_url: "https://github.com/owner/repo" },
     });
     // give a tick for async processing
     await new Promise((r) => setTimeout(r, 10));

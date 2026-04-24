@@ -296,7 +296,7 @@ describe("foreman WebSocket protocol", () => {
     await nextMsg(ws); // task_assigned
 
     const reply = nextMsg(ws);
-    foremanWss.routeEvent("evt-1", "issue_comment", { issue: { number: 1 }, comment: { body: "hi" } });
+    foremanWss.routeEvent("evt-1", "issue_comment", { issue: { number: 1 }, comment: { body: "hi" }, repository: { full_name: "owner/repo" } });
     const msg = await reply;
     assert(msg.type === "event_notification");
     expect(msg.taskId).toBe("1");
@@ -305,7 +305,7 @@ describe("foreman WebSocket protocol", () => {
 
   it("routeEvent queues event when no worker is assigned", async () => {
     await makeTask(taskManager, 1);
-    await foremanWss.routeEvent("evt-1", "issue_comment", { issue: { number: 1 } });
+    await foremanWss.routeEvent("evt-1", "issue_comment", { issue: { number: 1 }, repository: { full_name: "owner/repo" } });
     const t = await Task.get("1");
     const events = taskManager.drainEvents(t!);
     expect(events).toHaveLength(1);
@@ -411,7 +411,7 @@ describe("foreman WebSocket protocol", () => {
       nextMsg(wsB).then(() => "message" as const),
       new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
     ]);
-    foremanWss.routeEvent("evt-1", "issue_comment", { issue: { number: taskA }, comment: { body: "update" } });
+    foremanWss.routeEvent("evt-1", "issue_comment", { issue: { number: taskA }, comment: { body: "update" }, repository: { full_name: "owner/repo" } });
     expect(await replyA).toMatchObject({ type: "event_notification", taskId: String(taskA) });
     expect(await noMsgB).toBe("timeout");
 
@@ -420,7 +420,7 @@ describe("foreman WebSocket protocol", () => {
       nextMsg(wsA).then(() => "message" as const),
       new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
     ]);
-    foremanWss.routeEvent("evt-2", "issue_comment", { issue: { number: taskB }, comment: { body: "update" } });
+    foremanWss.routeEvent("evt-2", "issue_comment", { issue: { number: taskB }, comment: { body: "update" }, repository: { full_name: "owner/repo" } });
     expect(await replyB).toMatchObject({ type: "event_notification", taskId: String(taskB) });
     expect(await noMsgA).toBe("timeout");
   });
@@ -514,7 +514,7 @@ describe("hello_ack handshake", () => {
     const t = await Task.get("1");
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
     { const w = Worker.register("w1", fakeWs, fakeRepo()); await t!.assign(w); w.assign(t!); w.markDisconnected(); }
-    await foremanWss.routeEvent("evt-1", "issue_comment", { issue: { number: 1 } });
+    await foremanWss.routeEvent("evt-1", "issue_comment", { issue: { number: 1 }, repository: { full_name: "owner/repo" } });
 
     const ws = await connect();
     const messages: Wire.ForemanMessage[] = [];
@@ -589,6 +589,7 @@ describe("dependency-aware task assignment", () => {
     foremanWss.routeEvent("evt-1", "issues", {
       action: "closed",
       issue: { number: 10, title: "Blocker", body: "", labels: [] },
+      repository: { full_name: "owner/repo" },
     });
     expect(await reply).toMatchObject({ type: "task_assigned", taskId: "42" });
   });
@@ -600,6 +601,7 @@ describe("dependency-aware task assignment", () => {
     foremanWss.routeEvent("evt-1", "issues", {
       action: "reopened",
       issue: { number: 10, title: "Blocker", body: "", labels: [] },
+      repository: { full_name: "owner/repo" },
     });
 
     const ws = await connect();
@@ -837,7 +839,7 @@ describe("disconnected worker state", () => {
     await closeClient(ws);
     await waitUntil(() => Worker.get("w1")?.status === "disconnected");
 
-    await foremanWss.routeEvent("evt-1", "issue_comment", { issue: { number: 1 }, comment: { body: "hi" } });
+    await foremanWss.routeEvent("evt-1", "issue_comment", { issue: { number: 1 }, comment: { body: "hi" }, repository: { full_name: "owner/repo" } });
 
     const t = await Task.get("1");
     const queued = taskManager.drainEvents(t!);
@@ -854,7 +856,7 @@ describe("disconnected worker state", () => {
     await closeClient(ws1);
     await waitUntil(() => Worker.get("w1")?.status === "disconnected");
 
-    await foremanWss.routeEvent("evt-1", "issue_comment", { issue: { number: 1 }, comment: { body: "hi" } });
+    await foremanWss.routeEvent("evt-1", "issue_comment", { issue: { number: 1 }, comment: { body: "hi" }, repository: { full_name: "owner/repo" } });
 
     const ws2 = await connect();
     const q2 = makeQueue(ws2);
@@ -1019,7 +1021,7 @@ describe("issues/closed — close persistence", () => {
     taskManager.trackIssue(1);
     taskManager.markBlockersLoaded(1);
 
-    await foremanWss.routeEvent("evt-1", "issues", { action: "closed", issue: { number: 1, title: "T", body: "", labels: [] } });
+    await foremanWss.routeEvent("evt-1", "issues", { action: "closed", issue: { number: 1, title: "T", body: "", labels: [] }, repository: { full_name: "owner/repo" } });
 
     await waitUntil(() => spyClose.mock.calls.length > 0);
     expect(spyClose).toHaveBeenCalled();

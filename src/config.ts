@@ -25,8 +25,8 @@ const boolPreprocess = (v: unknown) => {
 const BrunelConfigSchema = z.object({
   // ── Shared (foreman + worker) ───────────────────────────────────────────────
 
-  /** GitHub repo in "owner/repo" format. Required. */
-  githubRepo:     z.string().min(1),
+  /** GitHub repo in "owner/repo" format. Optional; workers detect it from git remote automatically. */
+  githubRepo:     z.string().min(1).optional(),
   /** GitHub personal access token with `repo` scope. Required. Prefer env var over config file. */
   githubToken:    z.string().min(1),
   /** Issue label that triggers work (foreman picks up issues with this label). */
@@ -292,5 +292,5 @@ export async function loadConfig(
  * that need default values (e.g. taskLabel) without a real GitHub repo or token.
  */
 export function loadDefaultConfig(): Promise<BrunelConfig> {
-  return loadConfig([], { githubRepo: "owner/repo", githubToken: "tok" });
+  return loadConfig([], { githubToken: "tok" });
 }

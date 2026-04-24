@@ -145,7 +145,7 @@ describe("foreman admin broadcast — snapshot on PR registration", () => {
         body: "Closes #42",
         head: { ref: "fix-the-bug" },
       },
-      repository: { html_url: "https://github.com/owner/repo" },
+      repository: { full_name: "owner/repo", html_url: "https://github.com/owner/repo" },
     });
 
     await waitUntil(() => snapshots.length > 0);

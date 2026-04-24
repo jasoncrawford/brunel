@@ -13,7 +13,6 @@ const mockIssues = [
 beforeEach(() => {
   Worker._reset();
   vi.stubGlobal("fetch", vi.fn());
-  getConfig().githubRepo = "owner/repo";
   getConfig().githubToken = "token123";
   getConfig().taskLabel = "brunel:ready";
 });

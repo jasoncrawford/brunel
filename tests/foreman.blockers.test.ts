@@ -61,6 +61,7 @@ describe("foreman — blocker transitions via routeEvent", () => {
     await foremanWss.routeEvent("evt-1", "issues", {
       action: "closed",
       issue: { number: 5, title: "Blocker", labels: [] },
+      repository: { full_name: "owner/repo" },
     });
 
     // Now pending
@@ -91,6 +92,7 @@ describe("foreman — blocker transitions via routeEvent", () => {
     await foremanWss.routeEvent("evt-1", "issues", {
       action: "closed",
       issue: { number: 5, title: "Blocker 5", labels: [] },
+      repository: { full_name: "owner/repo" },
     });
 
     // Task remains blocked (6 is still open)

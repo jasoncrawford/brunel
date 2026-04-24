@@ -86,7 +86,7 @@ function labeledPayload(issueNumber: number, labelName: string) {
       body: `Body of issue ${issueNumber}`,
       labels: [{ name: labelName }],
     },
-    repository: { html_url: "https://github.com/owner/repo" },
+    repository: { full_name: "owner/repo", html_url: "https://github.com/owner/repo" },
   };
 }
 
@@ -99,7 +99,7 @@ function openedPayload(issueNumber: number, labels: string[]) {
       body: `Body of issue ${issueNumber}`,
       labels: labels.map((name) => ({ name })),
     },
-    repository: { html_url: "https://github.com/owner/repo" },
+    repository: { full_name: "owner/repo", html_url: "https://github.com/owner/repo" },
   };
 }
 
@@ -112,7 +112,7 @@ function prOpenedPayload(prNumber: number, body: string, headBranch = `branch-fo
       body,
       head: { ref: headBranch },
     },
-    repository: { html_url: "https://github.com/owner/repo" },
+    repository: { full_name: "owner/repo", html_url: "https://github.com/owner/repo" },
   };
 }
 
@@ -127,7 +127,7 @@ function checkRunPayloadByBranch(headBranch: string, conclusion: string) {
       pull_requests: [],
       check_suite: { head_branch: headBranch },
     },
-    repository: { html_url: "https://github.com/owner/repo" },
+    repository: { full_name: "owner/repo", html_url: "https://github.com/owner/repo" },
   };
 }
 
@@ -139,7 +139,7 @@ function checkSuitePayloadByBranch(headBranch: string, conclusion: string) {
       pull_requests: [],
       head_branch: headBranch,
     },
-    repository: { html_url: "https://github.com/owner/repo" },
+    repository: { full_name: "owner/repo", html_url: "https://github.com/owner/repo" },
   };
 }
 
@@ -152,7 +152,7 @@ function checkRunPayload(prNumber: number, conclusion: string) {
       output: { summary: "Test output" },
       pull_requests: [{ number: prNumber }],
     },
-    repository: { html_url: "https://github.com/owner/repo" },
+    repository: { full_name: "owner/repo", html_url: "https://github.com/owner/repo" },
   };
 }
 
@@ -165,7 +165,7 @@ function prClosedPayload(prNumber: number, merged: boolean) {
       merged,
       head: { ref: `branch-for-pr-${prNumber}` },
     },
-    repository: { html_url: "https://github.com/owner/repo" },
+    repository: { full_name: "owner/repo", html_url: "https://github.com/owner/repo" },
   };
 }
 
@@ -179,7 +179,7 @@ function prEditedPayload(prNumber: number, newBody: string, headBranch = `branch
       head: { ref: headBranch },
     },
     changes: { body: { from: "old body without closing keyword" } },
-    repository: { html_url: "https://github.com/owner/repo" },
+    repository: { full_name: "owner/repo", html_url: "https://github.com/owner/repo" },
   };
 }
 
@@ -188,7 +188,7 @@ function prReviewPayload(prNumber: number) {
     action: "submitted",
     pull_request: { number: prNumber, title: "PR title" },
     review: { state: "changes_requested", body: "Please fix this." },
-    repository: { html_url: "https://github.com/owner/repo" },
+    repository: { full_name: "owner/repo", html_url: "https://github.com/owner/repo" },
   };
 }
 
@@ -197,7 +197,7 @@ function prReviewCommentPayload(prNumber: number) {
     action: "created",
     pull_request: { number: prNumber, title: "PR title" },
     comment: { body: "Nit: rename this", path: "src/foo.ts" },
-    repository: { html_url: "https://github.com/owner/repo" },
+    repository: { full_name: "owner/repo", html_url: "https://github.com/owner/repo" },
   };
 }
 
@@ -206,7 +206,7 @@ function issueCommentPayload(prOrIssueNumber: number, body = "LGTM") {
     action: "created",
     issue: { number: prOrIssueNumber, title: `Issue/PR ${prOrIssueNumber}`, pull_request: {} },
     comment: { body, user: { login: "reviewer" } },
-    repository: { html_url: "https://github.com/owner/repo" },
+    repository: { full_name: "owner/repo", html_url: "https://github.com/owner/repo" },
   };
 }
 
@@ -217,7 +217,7 @@ function checkSuitePayload(prNumber: number, conclusion: string) {
       conclusion,
       pull_requests: [{ number: prNumber }],
     },
-    repository: { html_url: "https://github.com/owner/repo" },
+    repository: { full_name: "owner/repo", html_url: "https://github.com/owner/repo" },
   };
 }
 
@@ -568,7 +568,7 @@ describe("PR event forwarding to workers", () => {
       action: "edited",
       pull_request: { number: 10, title: "PR 10 (updated title)", body: "Closes #42", head: { ref: "branch-for-pr-10" } },
       changes: { title: { from: "PR 10" } }, // no body change
-      repository: { html_url: "https://github.com/owner/repo" },
+      repository: { full_name: "owner/repo", html_url: "https://github.com/owner/repo" },
     });
     const msg = await reply;
     expect(msg.type).toBe("event_notification");
@@ -760,7 +760,7 @@ describe("foreman event filtering", () => {
     foremanWss.routeEvent("evt-sync", "pull_request", {
       action: "synchronize",
       pull_request: { number: 10, title: "PR 10", body: "Closes #42", head: { ref: "branch" } },
-      repository: { html_url: "https://github.com/owner/repo" },
+      repository: { full_name: "owner/repo", html_url: "https://github.com/owner/repo" },
     });
 
     const raceResult = await Promise.race([
@@ -782,7 +782,7 @@ describe("foreman event filtering", () => {
       action: "unlabeled",
       label: { name: "brunel:ready" },
       issue: { number: 42, title: "Issue 42", body: "Body", labels: [] },
-      repository: { html_url: "https://github.com/owner/repo" },
+      repository: { full_name: "owner/repo", html_url: "https://github.com/owner/repo" },
     });
     // Allow async processing to complete
     await new Promise((r) => setTimeout(r, 50));
@@ -806,7 +806,7 @@ describe("foreman event filtering", () => {
       action: "unlabeled",
       label: { name: "brunel:ready" },
       issue: { number: 42, title: "Issue 42", body: "Body", labels: [] },
-      repository: { html_url: "https://github.com/owner/repo" },
+      repository: { full_name: "owner/repo", html_url: "https://github.com/owner/repo" },
     });
     // Allow async processing
     await new Promise((r) => setTimeout(r, 50));
@@ -824,7 +824,7 @@ describe("foreman event filtering", () => {
       action: "unlabeled",
       label: { name: "some-other-label" },
       issue: { number: 42, title: "Issue 42", body: "Body", labels: [{ name: "brunel:ready" }] },
-      repository: { html_url: "https://github.com/owner/repo" },
+      repository: { full_name: "owner/repo", html_url: "https://github.com/owner/repo" },
     });
     // Allow async processing
     await new Promise((r) => setTimeout(r, 50));
@@ -846,7 +846,7 @@ describe("foreman event filtering", () => {
         state: "closed",
         labels: [{ name: "brunel:ready" }],
       },
-      repository: { html_url: "https://github.com/owner/repo" },
+      repository: { full_name: "owner/repo", html_url: "https://github.com/owner/repo" },
     });
     // Allow async processing
     await new Promise((r) => setTimeout(r, 50));
@@ -865,7 +865,7 @@ describe("foreman event filtering", () => {
     foremanWss.routeEvent("evt-closed", "issues", {
       action: "closed",
       issue: { number: 42, title: "Issue 42", body: "Body", labels: [{ name: "brunel:ready" }] },
-      repository: { html_url: "https://github.com/owner/repo" },
+      repository: { full_name: "owner/repo", html_url: "https://github.com/owner/repo" },
     });
     const msg = await reply;
     expect((msg as any).event.payload.action).toBe("closed");
@@ -882,7 +882,7 @@ describe("foreman event filtering", () => {
     foremanWss.routeEvent("evt-reopened", "issues", {
       action: "reopened",
       issue: { number: 42, title: "Issue 42", body: "Body", labels: [{ name: "brunel:ready" }] },
-      repository: { html_url: "https://github.com/owner/repo" },
+      repository: { full_name: "owner/repo", html_url: "https://github.com/owner/repo" },
     });
     const msg = await reply;
     expect((msg as any).event.payload.action).toBe("reopened");

@@ -241,6 +241,7 @@ describe("PR tracking persistence", () => {
         body: "Fixes #42\n\nSome work.",
         head: { ref: "fix-issue-42" },
       },
+      repository: { full_name: "owner/repo" },
     });
 
     expect(spyRegisterPr).toHaveBeenCalledWith(10, "fix-issue-42");
@@ -263,6 +264,7 @@ describe("PR tracking persistence", () => {
         body: "Fixes #42",
         head: {}, // no ref
       },
+      repository: { full_name: "owner/repo" },
     });
 
     expect(spyRegisterPr).toHaveBeenCalledWith(10, null);

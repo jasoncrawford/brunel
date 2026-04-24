@@ -97,6 +97,7 @@ describe("issues/closed — task lifecycle", () => {
     await foremanWss.routeEvent("evt-1", "issues", {
       action: "closed",
       issue: { number: 142, title: "T", body: "", labels: [] },
+      repository: { full_name: "owner/repo" },
     });
 
     expect((await Task.get("142"))?.status).toBe("closed");
@@ -112,6 +113,7 @@ describe("issues/closed — task lifecycle", () => {
     await foremanWss.routeEvent("evt-1", "issues", {
       action: "closed",
       issue: { number: 143, title: "T", body: "", labels: [] },
+      repository: { full_name: "owner/repo" },
     });
 
     expect((await Task.get("143"))?.status).toBe("complete");
@@ -125,6 +127,7 @@ describe("issues/closed — task lifecycle", () => {
     await foremanWss.routeEvent("evt-1", "issues", {
       action: "closed",
       issue: { number: 144, title: "T", body: "", labels: [] },
+      repository: { full_name: "owner/repo" },
     });
 
     expect(await Task.get("144")).toBeNull();
@@ -141,6 +144,7 @@ describe("issues/closed — task lifecycle", () => {
     await foremanWss.routeEvent("evt-1", "issues", {
       action: "closed",
       issue: { number: 145, title: "T", body: "", labels: [] },
+      repository: { full_name: "owner/repo" },
     });
 
     expect((await Task.get("145"))?.status).toBe("closed");
@@ -156,6 +160,7 @@ describe("issues/closed — task lifecycle", () => {
     await foremanWss.routeEvent("evt-1", "issues", {
       action: "closed",
       issue: { number: 42, title: "T", body: "", labels: [] },
+      repository: { full_name: "owner/repo" },
     });
 
     await new Promise((r) => setImmediate(r));
@@ -180,7 +185,7 @@ describe("startDepsLoad() error handling", () => {
         body: "body",
         labels: [{ name: TASK_LABEL }],
       },
-      repository: { html_url: "https://github.com/o/r" },
+      repository: { full_name: "owner/repo", html_url: "https://github.com/o/r" },
     });
 
     expect(taskManager.isBlockersLoaded(42)).toBe(false);

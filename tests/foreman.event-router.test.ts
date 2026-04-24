@@ -30,7 +30,7 @@ function makeEvent(name = "issue_comment"): WebhookEvent {
 
 function makeWss(_taskManager?: any): { wss: ForemanWss; sendMsg: ReturnType<typeof vi.fn> } {
   const wss = new ForemanWss({
-    config: { taskLabel: "brunel:ready", githubRepo: "owner/repo", githubToken: "token", workerSecret: undefined, pingIntervalMs: 1e9 },
+    config: { taskLabel: "brunel:ready", githubToken: "token", workerSecret: undefined, pingIntervalMs: 1e9 },
     server: http.createServer(),
   });
   const sendMsg = vi.spyOn(wss, "sendMsg").mockImplementation(() => {});

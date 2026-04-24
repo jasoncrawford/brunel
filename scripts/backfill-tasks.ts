@@ -24,6 +24,11 @@ const dryRun = process.argv.includes("--dry-run");
 const config = await loadConfig(process.argv.slice(2).filter(a => a !== "--dry-run"));
 const { githubRepo: repo, githubToken: token, supabaseUrl, supabaseSecretKey } = config;
 
+if (!repo) {
+  console.error("ERROR: githubRepo is required for this script. Set BRUNEL_GITHUB_REPO or pass --github-repo.");
+  process.exit(1);
+}
+
 if (!supabaseUrl || !supabaseSecretKey) {
   console.error("ERROR: supabaseUrl and supabaseSecretKey are required.");
   process.exit(1);
