@@ -36,6 +36,12 @@ export default function TaskDetail() {
       <h2>Task #{id}</h2>
       <p><Link to="/">← Dashboard</Link></p>
 
+      {task?.repo && (
+        <p style={{ fontFamily: "monospace", fontSize: "0.9em", color: "#555" }}>
+          Repo: {task.repo}
+        </p>
+      )}
+
       {task && (task.inputTokens != null || task.outputTokens != null) && (
         <section style={{ marginBottom: "1rem", fontFamily: "monospace", fontSize: "0.9em", color: "#555" }}>
           <span>Tokens: {(task.inputTokens ?? 0).toLocaleString()} in / {(task.outputTokens ?? 0).toLocaleString()} out</span>

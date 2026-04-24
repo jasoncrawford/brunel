@@ -64,6 +64,7 @@ export class ForemanWss {
     const debouncedBroadcast = debounce(() => this.broadcastSnapshot(), 10);
     TaskManager.events.on("changed", debouncedBroadcast);
     Worker.events.on("changed", debouncedBroadcast);
+    Repo.events.on("changed", debouncedBroadcast);
     TaskManager.events.on("deps_loaded", (taskManager: TaskManager) => {
       this.assignWorkForRepo(taskManager).catch((err) => log(`ERROR assignWork after deps_loaded: ${fmtError(err)}`));
     });
@@ -89,7 +90,9 @@ export class ForemanWss {
           const rcvWorkerId = workerId || ((msg as { workerId?: string }).workerId ?? null);
           const rcvTaskId = (msg as { taskId?: string }).taskId ?? null;
           const rcvPayload = msg as unknown as Record<string, unknown>;
-          const rcvRepoId = rcvWorkerId ? Worker.get(rcvWorkerId)?.repo.id ?? null : null;
+          const rcvWorker = rcvWorkerId ? Worker.get(rcvWorkerId) : undefined;
+          const rcvRepoId = rcvWorker?.repo.id ?? null;
+          const rcvRepo = rcvWorker?.repo.fullName;
           void ForemanMessage.log({
             direction: "received",
             workerId: rcvWorkerId,
@@ -98,7 +101,7 @@ export class ForemanWss {
             msgType: msg.type,
             payload: rcvPayload,
           });
-          this.broadcastMessageEvent({ direction: "received", workerId: rcvWorkerId, taskId: rcvTaskId, msgType: msg.type, payload: rcvPayload });
+          this.broadcastMessageEvent({ direction: "received", workerId: rcvWorkerId, taskId: rcvTaskId, msgType: msg.type, payload: rcvPayload, repo: rcvRepo });
 
           if (msg.type === "worker_hello") {
             workerId = msg.workerId;
@@ -137,7 +140,7 @@ export class ForemanWss {
             msgType: "worker_disconnected",
             payload: disconnPayload,
           });
-          this.broadcastMessageEvent({ direction: "received", workerId, taskId, msgType: "worker_disconnected", payload: disconnPayload });
+          this.broadcastMessageEvent({ direction: "received", workerId, taskId, msgType: "worker_disconnected", payload: disconnPayload, repo: currentWorker?.repo.fullName });
           if (taskId) {
             currentWorker?.markDisconnected();
           } else {
@@ -210,6 +213,7 @@ export class ForemanWss {
       timestamp: new Date().toISOString(),
       taskId,
       workerId,
+      repo: repoFullName ?? undefined,
       summary: evt.format(),
     });
   }
@@ -232,15 +236,15 @@ export class ForemanWss {
   sendMsg(worker: Worker, msg: Wire.ForemanMessage, logTaskId?: string): void {
     const taskId = logTaskId ?? (("taskId" in msg ? msg.taskId : null) ?? null);
     worker.send(msg);
-    this.logAndBroadcastSent(worker.workerId, taskId, msg.type, msg as unknown as Record<string, unknown>, worker.repo.id);
+    this.logAndBroadcastSent(worker.workerId, taskId, msg.type, msg as unknown as Record<string, unknown>, worker.repo.id, worker.repo.fullName);
   }
 
-  private logAndBroadcastSent(workerId: string | null, taskId: string | null, msgType: string, payload: Record<string, unknown>, repoId: number | null): void {
+  private logAndBroadcastSent(workerId: string | null, taskId: string | null, msgType: string, payload: Record<string, unknown>, repoId: number | null, repo?: string): void {
     void ForemanMessage.log({ direction: "sent", workerId, taskId, repoId, msgType, payload });
-    this.broadcastMessageEvent({ direction: "sent", workerId, taskId, msgType, payload });
+    this.broadcastMessageEvent({ direction: "sent", workerId, taskId, msgType, payload, repo });
   }
 
-  private broadcastMessageEvent(data: { direction: string; workerId: string | null; taskId: string | null; msgType: string; payload?: Record<string, unknown> }): void {
+  private broadcastMessageEvent(data: { direction: string; workerId: string | null; taskId: string | null; msgType: string; payload?: Record<string, unknown>; repo?: string }): void {
     if (!this.adminWss) return;
     const summary = ForemanMessage.buildSummary(data.direction, data.msgType, data.taskId, data.payload ?? {});
     this.adminWss.broadcastLogEvent({
@@ -249,6 +253,7 @@ export class ForemanWss {
       timestamp: new Date().toISOString(),
       taskId: data.taskId,
       workerId: data.workerId,
+      repo: data.repo,
       summary,
     });
   }
@@ -258,6 +263,7 @@ export class ForemanWss {
     this.adminWss.broadcastSnapshot({
       tasks: await TaskManager.getAllTasksForBroadcast(),
       workers: Worker.all().map((w) => w.toWire()),
+      repos: (await Repo.listActive()).map((r) => r.toWire()),
     });
   }
 

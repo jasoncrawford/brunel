@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import type { Database } from "../../database.types.js";
+import * as Wire from "../../../shared/wire.js";
 import { db } from "../clients/db-client.js";
 import { ActiveRecord } from "./active-record.js";
 import { Task } from "./task.js";
@@ -30,6 +31,10 @@ export class Repo extends ActiveRecord {
 
   protected getPrimaryKeyValue(): number {
     return this.id;
+  }
+
+  toWire(): Wire.Repo {
+    return { repoId: this.id, fullName: this.fullName, status: this.status };
   }
 
   static async get(id: number): Promise<Repo | null> {

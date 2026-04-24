@@ -1,18 +1,20 @@
 import { useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useAdminWs } from "../hooks/useAdminWs.ts";
-import type { Task, Worker, LogEntry, AdminMessage } from "../types.ts";
+import type { Task, Worker, Repo, LogEntry, AdminMessage } from "../types.ts";
 import { shortWorkerId } from "../../../shared/utils.ts";
 
 export default function Dashboard() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [workers, setWorkers] = useState<Worker[]>([]);
+  const [repos, setRepos] = useState<Repo[]>([]);
   const [recentLog, setRecentLog] = useState<LogEntry[]>([]);
 
   const handleMessage = useCallback((msg: AdminMessage) => {
     if (msg.type === "snapshot") {
       setTasks(msg.tasks);
       setWorkers(msg.workers);
+      setRepos(msg.repos ?? []);
     } else if (msg.type === "initial_log") {
       setRecentLog(msg.entries.slice(0, 50));
     } else if (msg.type === "log_event") {
@@ -40,6 +42,19 @@ export default function Dashboard() {
     <div>
       <h2>Dashboard</h2>
 
+      {repos.length > 0 && (
+        <section style={{ marginBottom: "2rem" }}>
+          <h3>Repos ({repos.length})</h3>
+          <ul>
+            {repos.map((r) => (
+              <li key={r.repoId}>
+                <Link to={`/repos/${r.repoId}`}>{r.fullName}</Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       <section>
         <h3>Tasks ({statsText})</h3>
         {tasks.length === 0 ? <p>No tasks.</p> : (
@@ -51,6 +66,7 @@ export default function Dashboard() {
                 <th style={th}>Status</th>
                 <th style={th}>Worker</th>
                 <th style={th}>PR</th>
+                <th style={th}>Repo</th>
               </tr>
             </thead>
             <tbody>
@@ -65,6 +81,7 @@ export default function Dashboard() {
                   <td style={td}>{t.prUrl
                     ? <a href={t.prUrl} target="_blank" rel="noreferrer">#{t.prNumber}</a>
                     : "—"}</td>
+                  <td style={td}>{repoLink(t.repo, repos)}</td>
                 </tr>
               ))}
             </tbody>
@@ -81,6 +98,7 @@ export default function Dashboard() {
                 <Link to={`/workers/${w.workerId}`}>{shortWorkerId(w.workerId)}</Link>
                 {" — "}{w.status}
                 {w.currentTaskId && <> working on <Link to={`/tasks/${w.currentTaskId}`}>#{w.currentTaskId}</Link></>}
+                {w.repo && <> · {repoLink(w.repo, repos)}</>}
               </li>
             ))}
           </ul>
@@ -107,6 +125,7 @@ function LogTable({ entries }: { entries: LogEntry[] }) {
           <th style={th}>Summary</th>
           <th style={th}>Task</th>
           <th style={th}>Worker</th>
+          <th style={th}>Repo</th>
         </tr>
       </thead>
       <tbody>
@@ -117,11 +136,19 @@ function LogTable({ entries }: { entries: LogEntry[] }) {
             <td style={td}>{e.summary}</td>
             <td style={td}>{e.taskId ? <Link to={`/tasks/${e.taskId}`}>#{e.taskId}</Link> : "—"}</td>
             <td style={td}>{e.workerId ? <Link to={`/workers/${e.workerId}`}>{shortWorkerId(e.workerId)}</Link> : "—"}</td>
+            <td style={td}>{e.repo ?? "—"}</td>
           </tr>
         ))}
       </tbody>
     </table>
   );
+}
+
+function repoLink(fullName: string | undefined, repos: Repo[]): React.ReactNode {
+  if (!fullName) return "—";
+  const repo = repos.find((r) => r.fullName === fullName);
+  if (repo) return <Link to={`/repos/${repo.repoId}`}>{fullName}</Link>;
+  return fullName;
 }
 
 const th: React.CSSProperties = { textAlign: "left", borderBottom: "1px solid #ccc", padding: "4px 8px" };

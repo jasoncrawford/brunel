@@ -73,13 +73,20 @@ export function createMemoryTaskDb(): SupabaseClient<Database> {
         return thenable;
       },
       select(_cols?: string) {
-        const rows = [...reposStore.values()];
+        let filteredRows = [...reposStore.values()];
         const sb = {
-          eq(_col: string, _val: unknown) { return sb; },
+          eq(col: string, val: unknown) {
+            filteredRows = filteredRows.filter((r) => (r as Record<string, unknown>)[col] === val);
+            return sb;
+          },
           order(_col: string, _opts?: unknown) { return sb; },
-          limit(n: number) { return ok(rows.slice(0, n)); },
-          maybeSingle() { return ok(rows[0] ?? null); },
-          single() { return ok(rows[0] ?? null); },
+          limit(n: number) { return ok(filteredRows.slice(0, n)); },
+          maybeSingle() { return ok(filteredRows[0] ?? null); },
+          single() { return ok(filteredRows[0] ?? null); },
+          // Support `await select().eq(col, val)` used by listBy()
+          then(resolve: (v: { data: RepoRow[]; error: null }) => void) {
+            resolve({ data: filteredRows, error: null });
+          },
         };
         return sb;
       },

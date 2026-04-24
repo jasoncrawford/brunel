@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useAdminWs } from "../hooks/useAdminWs.ts";
-import type { LogEntry, AdminMessage } from "../types.ts";
+import type { LogEntry, Worker, AdminMessage } from "../types.ts";
 import { shortWorkerId } from "../../../shared/utils.ts";
 
 export default function WorkerDetail() {
   const { id } = useParams<{ id: string }>();
   const [messages, setMessages] = useState<LogEntry[]>([]);
+  const [worker, setWorker] = useState<Worker | null>(null);
 
   useEffect(() => {
     fetch(`/api/workers/${id}/messages`)
@@ -16,7 +17,10 @@ export default function WorkerDetail() {
   }, [id]);
 
   const handleMessage = useCallback((msg: AdminMessage) => {
-    if (msg.type === "log_event" && msg.entry.workerId === id) {
+    if (msg.type === "snapshot") {
+      const found = msg.workers.find((w) => w.workerId === id);
+      if (found) setWorker(found);
+    } else if (msg.type === "log_event" && msg.entry.workerId === id) {
       setMessages((prev) => [msg.entry, ...prev]);
     }
   }, [id]);
@@ -27,6 +31,13 @@ export default function WorkerDetail() {
     <div>
       <h2>Worker {id ? shortWorkerId(id) : ""}</h2>
       <p><Link to="/">← Dashboard</Link></p>
+
+      {worker?.repo && (
+        <p style={{ fontFamily: "monospace", fontSize: "0.9em", color: "#555" }}>
+          Repo: {worker.repo}
+        </p>
+      )}
+
       {messages.length === 0 ? <p>No messages for this worker.</p> : (
         <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "monospace", fontSize: "0.85em" }}>
           <thead>

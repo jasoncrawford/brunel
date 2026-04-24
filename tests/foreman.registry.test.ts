@@ -83,7 +83,7 @@ describe("Worker", () => {
   it("toWire returns WorkerSnapshot", () => {
     const w = Worker.register("w1", fakeWs(), fakeRepo());
     w.assign(fakeTask("42"));
-    expect(w.toWire()).toEqual({ workerId: "w1", status: "busy", currentTaskId: "42" });
+    expect(w.toWire()).toEqual({ workerId: "w1", status: "busy", currentTaskId: "42", repo: "owner/repo" });
   });
 
   describe("markDisconnected", () => {
