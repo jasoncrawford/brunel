@@ -34,6 +34,7 @@ export default function EventLog() {
               <th style={th}>Summary</th>
               <th style={th}>Task</th>
               <th style={th}>Worker</th>
+              <th style={th}>Repo</th>
             </tr>
           </thead>
           <tbody>
@@ -44,6 +45,7 @@ export default function EventLog() {
                 <td style={td}>{e.summary}</td>
                 <td style={td}>{e.taskId ? <Link to={`/tasks/${e.taskId}`}>#{e.taskId}</Link> : "—"}</td>
                 <td style={td}>{e.workerId ? <Link to={`/workers/${e.workerId}`}>{shortWorkerId(e.workerId)}</Link> : "—"}</td>
+                <td style={td}>{e.repo ?? "—"}</td>
               </tr>
             ))}
           </tbody>

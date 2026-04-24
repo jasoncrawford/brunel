@@ -38,8 +38,6 @@ export default function Dashboard() {
     ? stats.map((s) => `${s.count} ${s.label}`).join(" · ")
     : "none";
 
-  const multiRepo = repos.length > 1;
-
   return (
     <div>
       <h2>Dashboard</h2>
@@ -68,7 +66,7 @@ export default function Dashboard() {
                 <th style={th}>Status</th>
                 <th style={th}>Worker</th>
                 <th style={th}>PR</th>
-                {multiRepo && <th style={th}>Repo</th>}
+                <th style={th}>Repo</th>
               </tr>
             </thead>
             <tbody>
@@ -83,7 +81,7 @@ export default function Dashboard() {
                   <td style={td}>{t.prUrl
                     ? <a href={t.prUrl} target="_blank" rel="noreferrer">#{t.prNumber}</a>
                     : "—"}</td>
-                  {multiRepo && <td style={td}>{repoLink(t.repo, repos)}</td>}
+                  <td style={td}>{repoLink(t.repo, repos)}</td>
                 </tr>
               ))}
             </tbody>
@@ -100,7 +98,7 @@ export default function Dashboard() {
                 <Link to={`/workers/${w.workerId}`}>{shortWorkerId(w.workerId)}</Link>
                 {" — "}{w.status}
                 {w.currentTaskId && <> working on <Link to={`/tasks/${w.currentTaskId}`}>#{w.currentTaskId}</Link></>}
-                {multiRepo && w.repo && <> · {repoLink(w.repo, repos)}</>}
+                {w.repo && <> · {repoLink(w.repo, repos)}</>}
               </li>
             ))}
           </ul>
@@ -127,6 +125,7 @@ function LogTable({ entries }: { entries: LogEntry[] }) {
           <th style={th}>Summary</th>
           <th style={th}>Task</th>
           <th style={th}>Worker</th>
+          <th style={th}>Repo</th>
         </tr>
       </thead>
       <tbody>
@@ -137,6 +136,7 @@ function LogTable({ entries }: { entries: LogEntry[] }) {
             <td style={td}>{e.summary}</td>
             <td style={td}>{e.taskId ? <Link to={`/tasks/${e.taskId}`}>#{e.taskId}</Link> : "—"}</td>
             <td style={td}>{e.workerId ? <Link to={`/workers/${e.workerId}`}>{shortWorkerId(e.workerId)}</Link> : "—"}</td>
+            <td style={td}>{e.repo ?? "—"}</td>
           </tr>
         ))}
       </tbody>

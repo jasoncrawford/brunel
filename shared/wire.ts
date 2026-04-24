@@ -53,6 +53,7 @@ export interface LogEntry {
   timestamp: string;
   taskId: string | null;
   workerId: string | null;
+  repo?: string;
   summary: string;
 }
 
