@@ -9,6 +9,7 @@ export interface QueryActivityLogOpts {
   limit?: number;
   taskId?: string;
   workerId?: string;
+  repoId?: number;
 }
 
 export async function queryActivityLog(opts: QueryActivityLogOpts = {}): Promise<LogEntry[]> {
@@ -25,6 +26,11 @@ export async function queryActivityLog(opts: QueryActivityLogOpts = {}): Promise
     [webhooks, messages] = await Promise.all([
       WebhookEvent.queryForWorker(opts.workerId),
       ForemanMessage.queryForWorker(opts.workerId),
+    ]);
+  } else if (opts.repoId != null) {
+    [webhooks, messages] = await Promise.all([
+      WebhookEvent.queryForRepo(opts.repoId),
+      ForemanMessage.queryForRepo(opts.repoId),
     ]);
   } else {
     [webhooks, messages] = await Promise.all([

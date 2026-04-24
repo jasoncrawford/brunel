@@ -10,6 +10,13 @@ export interface BlockerInfo {
   isOpen: boolean;
 }
 
+/** Wire representation of a repo — sent over the admin WebSocket and REST API. */
+export interface Repo {
+  repoId: number;
+  fullName: string;
+  status: "new" | "active";
+}
+
 /** Wire representation of a task — sent over the admin WebSocket and REST API. */
 export interface Task {
   taskId: string;
@@ -36,6 +43,7 @@ export interface Worker {
   workerId: string;
   status: "idle" | "busy" | "disconnected";
   currentTaskId?: string;
+  repo?: string;
 }
 
 /** A single entry in the activity log — sent over the admin WebSocket and REST API. */
@@ -51,10 +59,11 @@ export interface LogEntry {
 export interface AdminSnapshot {
   tasks: Task[];
   workers: Worker[];
+  repos: Repo[];
 }
 
 export type AdminMessage =
-  | { type: "snapshot"; tasks: Task[]; workers: Worker[] }
+  | { type: "snapshot"; tasks: Task[]; workers: Worker[]; repos: Repo[] }
   | { type: "initial_log"; entries: LogEntry[] }
   | { type: "log_event"; entry: LogEntry };
 

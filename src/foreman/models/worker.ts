@@ -101,6 +101,7 @@ export class Worker {
       workerId: this.workerId,
       status: this.status,
       currentTaskId: this.currentTask?.taskId,
+      repo: this.repo?.fullName,
     };
   }
 }

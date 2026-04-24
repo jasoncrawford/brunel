@@ -65,6 +65,7 @@ export default function TaskList() {
           <thead>
             <tr>
               <th style={th}>Issue</th>
+              <th style={th}>Repo</th>
               <th style={th}>Title</th>
               <th style={th}>Status</th>
               <th style={th}>Worker</th>
@@ -78,6 +79,7 @@ export default function TaskList() {
             {tasks.map((t) => (
               <tr key={t.taskId}>
                 <td style={td}><Link to={`/tasks/${t.taskId}`}>#{t.issueNumber}</Link></td>
+                <td style={td}>{t.repo ?? "—"}</td>
                 <td style={td}>{t.title}</td>
                 <td style={td}>{t.status}</td>
                 <td style={td}>{t.assignedWorkerId

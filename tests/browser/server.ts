@@ -40,6 +40,7 @@ import { Worker } from "../../src/foreman/models/worker.js";
 import { ForemanWss } from "../../src/foreman/controllers/wss.js";
 import { createHttpServer } from "../../src/foreman/controllers/http-server.js";
 import { Task } from "../../src/foreman/models/task.js";
+import { Repo } from "../../src/foreman/models/repo.js";
 import { initDb } from "../../src/foreman/clients/db-client.js";
 import { createMemoryTaskDb } from "../helpers/memory-db.js";
 import { createTestTaskManager } from "../helpers/task.js";
@@ -144,6 +145,7 @@ async function handleTestRoute(
 const adminWss = createAdminWss(server, async () => ({
   tasks: await TaskManager.getAllTasksForBroadcast(),
   workers: Worker.all().map((w) => w.toWire()),
+  repos: (await Repo.listActive()).map((r) => r.toWire()),
 }));
 
 // ── Foreman WebSocket ─────────────────────────────────────────────────────────

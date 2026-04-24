@@ -64,6 +64,7 @@ export class ForemanWss {
     const debouncedBroadcast = debounce(() => this.broadcastSnapshot(), 10);
     TaskManager.events.on("changed", debouncedBroadcast);
     Worker.events.on("changed", debouncedBroadcast);
+    Repo.events.on("changed", debouncedBroadcast);
     TaskManager.events.on("deps_loaded", (taskManager: TaskManager) => {
       this.assignWorkForRepo(taskManager).catch((err) => log(`ERROR assignWork after deps_loaded: ${fmtError(err)}`));
     });
@@ -258,6 +259,7 @@ export class ForemanWss {
     this.adminWss.broadcastSnapshot({
       tasks: await TaskManager.getAllTasksForBroadcast(),
       workers: Worker.all().map((w) => w.toWire()),
+      repos: (await Repo.listActive()).map((r) => r.toWire()),
     });
   }
 

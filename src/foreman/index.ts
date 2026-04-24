@@ -39,6 +39,7 @@ if (isMain) {
   const adminWss = createAdminWss(server, async () => ({
     tasks: await TaskManager.getAllTasksForBroadcast(),
     workers: Worker.all().map((w) => w.toWire()),
+    repos: (await Repo.listActive()).map((r) => r.toWire()),
   }));
 
   foremanWss = new ForemanWss({ config, server, adminWss });

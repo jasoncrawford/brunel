@@ -1,1 +1,1 @@
-export type { TaskStatus, Task, Worker, LogEntry, AdminMessage, BlockerInfo } from "../../shared/wire.ts";
+export type { TaskStatus, Task, Worker, Repo, LogEntry, AdminMessage, BlockerInfo } from "../../shared/wire.ts";

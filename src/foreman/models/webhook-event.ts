@@ -121,6 +121,14 @@ export class WebhookEvent extends ActiveRecord {
     return (data ?? []).map((r: Row) => new WebhookEvent(r));
   }
 
+  static async queryForRepo(repoId: number): Promise<WebhookEvent[]> {
+    const { data } = await WebhookEvent.select()
+      .eq("repo_id", repoId)
+      .order("received_at", { ascending: false })
+      .limit(500);
+    return (data ?? []).map((r: Row) => new WebhookEvent(r));
+  }
+
   static async list(opts: { limit?: number } = {}): Promise<WebhookEvent[]> {
     const { data } = await WebhookEvent.select()
       .order("received_at", { ascending: false })
