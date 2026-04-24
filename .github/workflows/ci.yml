@@ -43,6 +43,11 @@ jobs:
         env:
           CI: true
 
+      - name: Run frontend component tests
+        run: cd frontend && npm ci && npm test
+        env:
+          CI: true
+
       - run: npm run coverage
         if: always()
 
