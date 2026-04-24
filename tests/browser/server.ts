@@ -55,6 +55,7 @@ const cfg = await loadDefaultConfig();
 
 initDb(createMemoryTaskDb());
 const taskModel = await createTestTaskManager("owner/repo");
+await taskModel.repo.activate();
 
 // Mock workers managed by /test/connect-worker and /test/workers/:id
 const mockWorkers = new Map<string, WebSocket>();
