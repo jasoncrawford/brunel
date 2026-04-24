@@ -38,12 +38,17 @@ export interface Task {
   costUsd?: number;
 }
 
-/** Wire representation of a connected worker — sent over the admin WebSocket. */
+/** Wire representation of a worker — sent over the admin WebSocket and REST API. */
 export interface Worker {
   workerId: string;
   status: "idle" | "busy" | "disconnected";
   currentTaskId?: string;
   repo?: string;
+  // Diagnostic fields — present in REST responses, optional in WebSocket snapshots
+  firstConnectedAt?: string;
+  lastConnectedAt?: string;
+  numConnections?: number;
+  disconnectedAt?: string;
 }
 
 /** A single entry in the activity log — sent over the admin WebSocket and REST API. */
