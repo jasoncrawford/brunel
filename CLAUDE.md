@@ -74,13 +74,13 @@ Config via `.env` or `brunel.config.ts` (CLI flags also accepted). See `src/conf
 ## Useful scripts
 
 - `npm test` — unit tests (vitest); excludes `frontend/**`
-- `cd frontend && npm test` — frontend component tests (vitest + jsdom); not run by CI
+- `cd frontend && npm test` — frontend component tests (vitest + jsdom)
 - `npm run smoke` — end-to-end smoke test: spawns real foreman + worker and asserts they connect
 - `npm run test:browser` — Playwright browser tests for the admin dashboard (requires `npm run build` first)
 - `npm run lint` — ESLint
 - `npx tsc --noEmit` — type check
 
-All except the frontend component tests run in CI on every PR.
+All five run in CI on every PR.
 
 ## Database
 
