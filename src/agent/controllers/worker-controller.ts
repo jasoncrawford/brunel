@@ -121,8 +121,8 @@ export type WorkerSessionOptions = {
   pingIntervalMs?: number;
   /** Pick function used by confirmTaskQuit and repo activation. Supplied by startWorkerMode via picker.pick. */
   pickFn?: (options: string[]) => Promise<number>;
-  /** Repo name (owner/name) — used in the activation prompt when repoStatus is 'new'. */
-  repo?: string;
+  /** Repo name (owner/name) — sent in worker_hello and shown in the activation prompt. */
+  repo: string;
 };
 
 /** Task state needed to decide whether and how to prompt before quitting. */
@@ -174,7 +174,7 @@ export class WorkerSession extends EventEmitter {
     readonly agentStatus: AgentStatus,
     private wsFactory: WsFactory,
     private display: WorkerDisplay,
-    private options: WorkerSessionOptions = {},
+    private options: WorkerSessionOptions,
   ) {
     super();
   }
@@ -506,6 +506,11 @@ export class WorkerSession extends EventEmitter {
       return;
     }
 
+    if (msg.type === "repo_activated") {
+      this.transitionToRegistered();
+      return;
+    }
+
     if (msg.type === "hello_ack") {
       if (msg.status === "cancelled") {
         // Task was reassigned while worker was disconnected — stop and reset.
@@ -543,8 +548,7 @@ export class WorkerSession extends EventEmitter {
         // "hello_sent" so buffered messages are not flushed prematurely.
         this.agentStatus.update({ connectionStatus: "connected", disconnectCode: undefined });
         // Repo is new — ask the user whether to activate it before proceeding.
-        const repoName = this.options.repo ?? "this repo";
-        this.display.print(c.amber(`Repo ${repoName} is new — activate it?`));
+        this.display.print(c.amber(`Repo ${this.options.repo} is new — activate it?`));
         const idx = await this.options.pickFn!(["Yes, activate", "No, skip"]);
         if (idx === 0) {
           // Send activate_repo — foreman will reply with another hello_ack (repoStatus: 'active').

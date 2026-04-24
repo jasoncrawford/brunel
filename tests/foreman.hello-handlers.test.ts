@@ -504,7 +504,7 @@ describe("activate_repo", () => {
     return { wss, sendMsg };
   }
 
-  it("activate_repo activates the repo and sends idle hello_ack with repoStatus: 'active'", async () => {
+  it("activate_repo activates the repo and sends repo_activated", async () => {
     const repo = await createTestRepo("activate/repo");
     expect(repo.status).toBe("new");
 
@@ -515,11 +515,9 @@ describe("activate_repo", () => {
     await wss.handleIdleHello("w1", ws, repo);
     await wss.handleActivateRepo("w1", ws);
 
-    const ackCalls = sendMsg.mock.calls.filter(([, msg]) => (msg as { type: string }).type === "hello_ack");
-    // Second hello_ack should be the activation response
-    const activationAck = ackCalls[1]?.[1] as { status: string; repoStatus: string } | undefined;
-    expect(activationAck?.status).toBe("idle");
-    expect(activationAck?.repoStatus).toBe("active");
+    const activatedCall = sendMsg.mock.calls.find(([, msg]) => (msg as { type: string }).type === "repo_activated");
+    expect(activatedCall).toBeDefined();
+    expect((activatedCall![1] as { workerId: string }).workerId).toBe("w1");
   });
 
   it("activate_repo calls repo.activate() and loadIssuesToQueue", async () => {

@@ -64,7 +64,7 @@ beforeEach(() => {
   sb = new AgentStatus({ agentId: AGENT_ID });
   vi.spyOn(sb, "setOnToolResult");
   vi.spyOn(sb, "update");
-  session = new WorkerSession(sb, wsFactory, display);
+  session = new WorkerSession(sb, wsFactory, display, { repo: "owner/repo" });
   session.start();
 });
 
@@ -1814,12 +1814,25 @@ describe("repo activation flow", () => {
     expect(activateMsg.workerId).toBe(AGENT_ID);
   });
 
-  it("when user confirms, does NOT yet transition to registered (waits for next hello_ack)", async () => {
+  it("when user confirms, does NOT yet transition to registered (waits for repo_activated)", async () => {
     const pickFn = vi.fn().mockResolvedValue(0); // "Yes, activate"
     const { sess, ws } = makeSessionWithPick(pickFn);
     sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "idle", repoStatus: "new" });
     // No task has been assigned — still no pending prompts
     expect(sess.hasPendingPrompts()).toBe(false); // no task prompt yet
+  });
+
+  it("when repo_activated is received, transitions to registered and can accept tasks", async () => {
+    const pickFn = vi.fn().mockResolvedValue(0); // "Yes, activate"
+    const { sess, ws } = makeSessionWithPick(pickFn);
+    sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "idle", repoStatus: "new" });
+    await new Promise((r) => setTimeout(r, 10));
+    // Foreman responds with repo_activated
+    sendMsg(ws, { type: "repo_activated", workerId: AGENT_ID });
+    await new Promise((r) => setTimeout(r, 10));
+    // Session is now registered — task_assigned should be enqueued
+    sendMsg(ws, { type: "task_assigned", taskId: "77", issue: makeIssue(77) });
+    expect(sess.hasPendingPrompts()).toBe(true);
   });
 
   it("when user declines activation, transitions to registered without sending activate_repo", async () => {
