@@ -189,7 +189,8 @@ export class WorkerController extends EventEmitter {
   /**
    * Called by main() after a prompt finishes (or is interrupted). Clears the
    * AbortController, drains any pending events into the prompt queue (unless
-   * the query was aborted), and refreshes the branch display.
+   * the query was aborted, which signals the user interrupted), and refreshes
+   * the branch display.
    */
   notifyQueryEnd(aborted = false): void {
     this.currentAc = null;
@@ -218,7 +219,12 @@ export class WorkerController extends EventEmitter {
     return this.currentTaskId !== undefined;
   }
 
-  /** Abort the currently running query, if any. Returns true if aborted. */
+  /**
+   * Abort the currently running query, if any.
+   * Returns true if a query was aborted, false if no query was running.
+   * Called by the SIGINT handler so ^C interrupts the current query
+   * rather than shutting down the worker.
+   */
   interrupt(): boolean {
     if (this.currentAc) {
       this.currentAc.abort();
@@ -229,6 +235,8 @@ export class WorkerController extends EventEmitter {
 
   /**
    * Send worker_goodbye to the foreman if the WebSocket is currently open.
+   * Called before clean exits (SIGTERM, /quit) so the foreman can immediately
+   * revert the task to pending without waiting for the reclaim timeout.
    */
   sendGoodbye(): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
@@ -242,6 +250,7 @@ export class WorkerController extends EventEmitter {
 
   /**
    * Returns task quit info if a task is currently active, undefined otherwise.
+   * Used by the quit/exit handlers to decide whether to prompt the user.
    */
   getTaskQuitInfo(): TaskQuitInfo | undefined {
     if (!this.currentTaskId || !this.currentIssue) return undefined;
@@ -255,8 +264,13 @@ export class WorkerController extends EventEmitter {
   /**
    * Prompt the user before quitting with an active task.
    *
-   * Returns 'quit', 'complete-and-quit', or 'cancel'.
-   * An injectable pickFn override is accepted for tests.
+   * - Issue closed but not complete: asks whether to complete first (default yes).
+   * - Issue still open: warns about unassignment and asks to confirm quit (default no).
+   *
+   * Returns 'quit' to proceed without completing, 'complete-and-quit' to mark
+   * the task complete then quit, or 'cancel' to stay in the worker.
+   *
+   * An injectable pickFn is accepted so callers can supply a mock in tests.
    */
   async confirmTaskQuit(
     info: TaskQuitInfo,
@@ -459,7 +473,8 @@ export class WorkerController extends EventEmitter {
 
   /**
    * Send a task-scoped message to the foreman. Always buffers first, then
-   * immediately flushes if the handshake is complete.
+   * immediately flushes if the handshake is complete. This way the buffer
+   * is the single code path regardless of connection state.
    */
   private sendTaskMessage(msg: BufferableMessage): void {
     this.bufferedMessages.push(msg);
@@ -472,6 +487,10 @@ export class WorkerController extends EventEmitter {
     this.flushBuffer();
   }
 
+  /**
+   * Send all buffered messages if registered and the socket is open.
+   * No-ops if the handshake is still pending or the socket is not ready.
+   */
   private flushBuffer(): void {
     if (this.connectionState !== "registered") return;
     if (this.ws?.readyState !== WebSocket.OPEN) return;
@@ -482,6 +501,7 @@ export class WorkerController extends EventEmitter {
   }
 
   private connect(): void {
+    // Clearing reconnectAt stops the countdown timer in the model.
     this.agentStatus.update({ connectionStatus: "reconnecting", reconnectAt: undefined });
     const ws = this._activeWsFactory!(this.agentStatus.agentId, this.currentTaskId);
     this.ws = ws;
@@ -498,13 +518,13 @@ export class WorkerController extends EventEmitter {
       this.connectionState = "hello_sent";
       this.agentStatus.update({ connectionStatus: "handshaking" });
 
-      isAlive = true;
-
       // Heartbeat: detect silent connection drops (network loss, laptop sleep, etc.)
       // Each tick sends a ping. If no pong/ping arrives before the next tick, the
       // connection is terminated so the status bar updates and reconnect runs.
       // Receiving any frame (pong from our ping, or ping from the foreman's heartbeat)
       // resets the timer so the next check is a full interval away.
+      isAlive = true;
+
       const startPingTimer = () => {
         clearPingTimer();
         pingTimer = setInterval(() => {
@@ -541,10 +561,10 @@ export class WorkerController extends EventEmitter {
       // Full Jitter (Brooker 2015): spread = entire [0, cap] window at high attempt counts.
       const delay = Math.random() * Math.min(this._activeMaxReconnectDelayMs, 1000 * Math.pow(2, this.reconnectAttempts));
       this.reconnectAttempts++;
+      // Setting reconnectAt starts a 1-second countdown timer in the model.
       this.agentStatus.update({
         connectionStatus: "disconnected",
         disconnectCode: code,
-        // Setting reconnectAt starts a 1-second countdown timer in the model.
         reconnectAt: Date.now() + delay,
       });
       setTimeout(() => this.connect(), delay);
@@ -552,9 +572,9 @@ export class WorkerController extends EventEmitter {
 
     ws.on("error", (err: Error) => {
       if (ws !== this.ws) return; // stale error from a previous connection
+      this.display.print(c.amber(`WebSocket error: ${err.message}`));
       // Ensure close fires even for errors that don't automatically close the socket
       // (e.g. some TLS negotiation failures on older Node.js / ws versions).
-      this.display.print(c.amber(`WebSocket error: ${err.message}`));
       ws.terminate();
     });
   }
