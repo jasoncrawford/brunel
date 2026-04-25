@@ -7,7 +7,7 @@ import { c, hr } from "./views/style.js";
 import { AgentStatus } from "./models/agent-status.js";
 import { Input } from "./views/input.js";
 import { Picker } from "./views/picker.js";
-import { WorkerController, WorkerSession } from "./controllers/worker-controller.js";
+import { WorkerController } from "./controllers/worker-controller.js";
 import { loadConfig, getConfig, type BrunelConfig } from "../config.js";
 import { Workspace } from "./models/workspace.js";
 import { fmtError } from "../utils.js";
@@ -41,7 +41,7 @@ export class BrunelAgent {
   constructor(config: BrunelConfig) {
     this.config = config;
     this.settings = new Settings(config);
-    this.agentStatus = new AgentStatus({ agentId: WorkerSession.generateAgentId(), settings: this.settings });
+    this.agentStatus = new AgentStatus({ agentId: AgentStatus.generateAgentId(), settings: this.settings });
     this.display = new Display(config, this.agentStatus);
     this.input = new Input(this.display);
     this.picker = new Picker(this.display, () => this.input.cancel());
@@ -68,9 +68,9 @@ export class BrunelAgent {
    */
   async start(runWorkerMode: boolean): Promise<void> {
     // Always detect the repo so /worker:start can use it at runtime.
-    const repo = await WorkerSession.getRemoteRepo();
+    const repo = await AgentStatus.getRemoteRepo();
     // Show current branch in the minimal status bar before worker mode activates.
-    this.agentStatus.update({ branch: await WorkerController.getCurrentBranch() });
+    this.agentStatus.update({ branch: await AgentStatus.getCurrentBranch() });
 
     // Build workspace config after repo detection. repoUrl can be set explicitly
     // in config; otherwise it's derived from the detected git remote + token.
@@ -100,7 +100,7 @@ export class BrunelAgent {
 
     // ── Routing queue ─────────────────────────────────────────────────────────
     //
-    // Defined early so the session-started listener (which fires before the
+    // Defined early so the prompts_ready/fatal listeners (which fire before the
     // routing loop starts) can enqueue session events into it.
 
     type RoutingEvent =
@@ -123,15 +123,13 @@ export class BrunelAgent {
     // ── Worker controller ─────────────────────────────────────────────────────
 
     const workerController = new WorkerController(this.display, this.picker, workspaceController, repo);
-    workerController.on("session-started", (s: WorkerSession) => {
-      s.on("prompts_ready", () => {
-        this.input.cancel();
-        enqueueRoutingEvent({ type: "session", event: "prompts_ready" });
-      });
-      s.on("fatal", () => {
-        this.input.cancel();
-        enqueueRoutingEvent({ type: "session", event: "fatal" });
-      });
+    workerController.on("prompts_ready", () => {
+      this.input.cancel();
+      enqueueRoutingEvent({ type: "session", event: "prompts_ready" });
+    });
+    workerController.on("fatal", () => {
+      this.input.cancel();
+      enqueueRoutingEvent({ type: "session", event: "fatal" });
     });
 
     // ── Signal handlers ───────────────────────────────────────────────────────
@@ -234,7 +232,7 @@ export class BrunelAgent {
      */
     const runPrompt = async (prompt: string): Promise<boolean> => {
       const ac = new AbortController();
-      workerController.session?.notifyQueryStart(ac);
+      workerController.notifyQueryStart(ac);
       try {
         const { sessionId: newId, stats } = await this.agentController.runQuery(prompt, sessionId, ac);
         sessionId = newId ?? sessionId;
@@ -247,7 +245,7 @@ export class BrunelAgent {
         logFull("ERROR", err instanceof Error ? { message: err.message, stack: err.stack } : err);
         return false;
       } finally {
-        workerController.session?.notifyQueryEnd(ac.signal.aborted);
+        workerController.notifyQueryEnd(ac.signal.aborted);
       }
     };
 
@@ -256,8 +254,8 @@ export class BrunelAgent {
      * draining if a prompt is interrupted or errors.
      */
     const drainPendingPrompts = async (): Promise<void> => {
-      while (workerController.session?.hasPendingPrompts()) {
-        const item = workerController.session.takeNextPrompt()!;
+      while (workerController.hasPendingPrompts()) {
+        const item = workerController.takeNextPrompt()!;
         if (item.fresh) sessionId = undefined; // new task → fresh conversation
         const ok = await runPrompt(item.prompt);
         if (!ok) break;
@@ -285,7 +283,7 @@ export class BrunelAgent {
     while (true) {
       // Skip showing the prompt when session prompts are already queued
       // (avoids briefly flashing the prompt before immediately cancelling it).
-      if (workerController.session?.hasPendingPrompts()) {
+      if (workerController.hasPendingPrompts()) {
         await drainPendingPrompts();
         continue;
       }

@@ -14,18 +14,19 @@ vi.mock("ws", async () => {
   };
 });
 
-// Captures sessions created by WorkerController.start() so tests can inspect state.
-const capturedSessions = vi.hoisted(() => ({
-  list: [] as import("../src/agent/controllers/worker-controller.js").WorkerSession[],
+// Captures WorkerController instances created by BrunelAgent.start() so tests
+// can inspect state directly (e.g. inject task IDs for ^C tests).
+const capturedControllers = vi.hoisted(() => ({
+  list: [] as import("../src/agent/controllers/worker-controller.js").WorkerController[],
 }));
 
 vi.mock("../src/agent/controllers/worker-controller.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/agent/controllers/worker-controller.js")>();
   class CapturingController extends actual.WorkerController {
     override async start(): Promise<void> {
-      const hadSession = this.session !== undefined;
+      const wasActive = this.isActive;
       await super.start();
-      if (!hadSession && this.session) capturedSessions.list.push(this.session);
+      if (!wasActive && this.isActive) capturedControllers.list.push(this);
     }
   }
   return { ...actual, WorkerController: CapturingController };
@@ -115,7 +116,7 @@ async function runAgent(runWorkerMode: boolean, agentOverride?: BrunelAgent): Pr
 
 describe("worker mode switching", () => {
   beforeEach(() => {
-    capturedSessions.list = [];
+    capturedControllers.list = [];
     makeMocks();
   });
 
@@ -161,7 +162,7 @@ describe("worker mode switching", () => {
 
     await runAgent(false);
 
-    expect(capturedSessions.list).toHaveLength(1);
+    expect(capturedControllers.list).toHaveLength(1);
     expect(capturedStatus?.workerModeActive).toBe(true);
   });
 
@@ -201,7 +202,7 @@ describe("worker mode switching", () => {
 
     await runAgent(false, agent);
 
-    expect(capturedSessions.list).toHaveLength(1); // only one session created
+    expect(capturedControllers.list).toHaveLength(1); // only one controller activated
     expect(printedMessages.some(m => m.includes("already active"))).toBe(true);
   });
 
@@ -254,11 +255,11 @@ describe("worker mode switching", () => {
       askCallCount++;
       if (askCallCount === 1) return Promise.resolve("/worker:start");
       if (askCallCount === 2) {
-        // Inject a task into the session before returning ^C
-        const s = capturedSessions.list[0];
-        if (s) {
-          (s as any).currentTaskId = "task-99";
-          (s as any).currentIssue = { number: 99, title: "Test", body: "", labels: [], repoUrl: "" };
+        // Inject a task into the captured controller before returning ^C
+        const ctrl = capturedControllers.list[0];
+        if (ctrl) {
+          (ctrl as any).currentTaskId = "task-99";
+          (ctrl as any).currentIssue = { number: 99, title: "Test", body: "", labels: [], repoUrl: "" };
         }
         return Promise.resolve("__ctrl_c__"); // ^C with task in progress
       }

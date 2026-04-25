@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "events";
-import { WorkerSession } from "../src/agent/controllers/worker-controller.js";
+import { WorkerController } from "../src/agent/controllers/worker-controller.js";
 import { AgentStatus } from "../src/agent/models/agent-status.js";
 import { Display } from "../src/agent/views/display.js";
 import * as Wire from "../shared/wire.js";
@@ -52,21 +52,23 @@ let sb: AgentStatus;
 let display: {
   print: ReturnType<typeof vi.fn>;
   printForemanMessage: ReturnType<typeof vi.fn>;
+  agentStatus: AgentStatus;
 };
-let session: WorkerSession;
+let session: WorkerController;
 
-beforeEach(() => {
+beforeEach(async () => {
   fakeWs = new FakeWs();
   wsFactory = vi.fn().mockReturnValue(fakeWs);
+  sb = new AgentStatus({ agentId: AGENT_ID });
   display = {
     print: vi.fn(),
     printForemanMessage: vi.fn(),
+    agentStatus: sb,
   };
-  sb = new AgentStatus({ agentId: AGENT_ID });
   vi.spyOn(sb, "setOnToolResult");
   vi.spyOn(sb, "update");
-  session = new WorkerSession(sb, wsFactory, display, { repo: "owner/repo", maxReconnectDelayMs: 300_000 });
-  session.start();
+  session = new WorkerController(display, undefined, undefined, "owner/repo", { wsFactory, maxReconnectDelayMs: 300_000 });
+  await session.start();
 });
 
 // Always restore real timers after each test so fake-timer leaks don't cascade.
@@ -205,7 +207,6 @@ describe("event_notification", () => {
 
     session.notifyQueryEnd(false);
     expect(session.hasPendingPrompts()).toBe(true);
-    expect(session.pendingPrompts.length ?? session.hasPendingPrompts()).toBeTruthy();
     const item = session.takeNextPrompt()!;
     expect(item.prompt).toContain("Multiple events");
     // Only one batched prompt
@@ -285,12 +286,14 @@ describe("state after task_complete", () => {
   it("restores current branch in agentStatus after task completion (not empty string)", async () => {
     const getBranch = vi.fn().mockResolvedValue("feature-branch");
     const localSb = new AgentStatus({ agentId: AGENT_ID });
-    const localSession = new WorkerSession(localSb, wsFactory, display, {
-      repo: "owner/repo",
-      maxReconnectDelayMs: 300_000,
-      getBranch,
-    });
-    localSession.start();
+    const localSession = new WorkerController(
+      { ...display, agentStatus: localSb },
+      undefined,
+      undefined,
+      "owner/repo",
+      { wsFactory, maxReconnectDelayMs: 300_000, getBranch },
+    );
+    await localSession.start();
 
     sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
     localSession.takeNextPrompt();
@@ -429,13 +432,14 @@ describe("reconnect", () => {
 
     // Use a dedicated factory so each connect() gets a fresh WS (avoids stale-handler issues)
     const capFactory = vi.fn().mockImplementation(() => new FakeWs());
-    const cappedSession = new WorkerSession(
-      new AgentStatus({ agentId: AGENT_ID }),
-      capFactory,
+    const cappedSession = new WorkerController(
       display,
-      { repo: "owner/repo", maxReconnectDelayMs: 3000 },
+      undefined,
+      undefined,
+      "owner/repo",
+      { wsFactory: capFactory, maxReconnectDelayMs: 3000 },
     );
-    cappedSession.start();
+    await cappedSession.start();
     expect(capFactory).toHaveBeenCalledTimes(1);
 
     // Simulate 5 disconnects. Without cap, attempt 3 would need 0.9*8000=7200ms.
@@ -820,6 +824,7 @@ describe("hello_ack handshake — buffering", () => {
 
   it("calls workspace.reset() on hello_ack cancelled when workspace is set", async () => {
     vi.useFakeTimers();
+    const chdirSpy = vi.spyOn(process, "chdir").mockImplementation(() => {});
     try {
       const workspace = {
         dir: "/tmp/test-workspace",
@@ -827,6 +832,8 @@ describe("hello_ack handshake — buffering", () => {
         sessionId: "test-agent",
         originalCwd: "/original",
         isCreated: true,
+        on: vi.fn(),
+        create: vi.fn().mockResolvedValue(undefined),
         confirm: vi.fn(),
         reset: vi.fn().mockResolvedValue(undefined),
         destroy: vi.fn().mockResolvedValue(undefined),
@@ -838,9 +845,9 @@ describe("hello_ack handshake — buffering", () => {
       let callCount = 0;
       const wsFactoryWs = vi.fn().mockImplementation(() => callCount++ === 0 ? wsA : wsB);
 
-      const wc = new WorkspaceController(workspace, display);
-      const sessionWithWs = new WorkerSession(new AgentStatus({ agentId: AGENT_ID }), wsFactoryWs, display, { workspaceController: wc });
-      sessionWithWs.start(); // uses wsA
+      const wc = new WorkspaceController(workspace, display, { verbose: false });
+      const sessionWithWs = new WorkerController(display, undefined, wc, "", { wsFactory: wsFactoryWs });
+      await sessionWithWs.start(); // uses wsA
 
       const issue = makeIssue();
       sendMsg(wsA, { type: "task_assigned", taskId: "42", issue });
@@ -864,6 +871,7 @@ describe("hello_ack handshake — buffering", () => {
 
   it("defers task_assigned prompt until workspace reset completes on hello_ack cancelled", async () => {
     vi.useFakeTimers();
+    const chdirSpy = vi.spyOn(process, "chdir").mockImplementation(() => {});
     try {
       let resolveReset!: () => void;
       const resetPromise = new Promise<void>((resolve) => { resolveReset = resolve; });
@@ -873,6 +881,8 @@ describe("hello_ack handshake — buffering", () => {
         sessionId: "test-agent",
         originalCwd: "/original",
         isCreated: true,
+        on: vi.fn(),
+        create: vi.fn().mockResolvedValue(undefined),
         confirm: vi.fn(),
         reset: vi.fn().mockReturnValue(resetPromise),
         destroy: vi.fn().mockResolvedValue(undefined),
@@ -884,9 +894,9 @@ describe("hello_ack handshake — buffering", () => {
       let callCount = 0;
       const wsFactoryWs = vi.fn().mockImplementation(() => callCount++ === 0 ? wsA : wsB);
 
-      const wc = new WorkspaceController(workspace, display);
-      const sessionWithWs = new WorkerSession(new AgentStatus({ agentId: AGENT_ID }), wsFactoryWs, display, { workspaceController: wc });
-      sessionWithWs.start();
+      const wc = new WorkspaceController(workspace, display, { verbose: false });
+      const sessionWithWs = new WorkerController(display, undefined, wc, "", { wsFactory: wsFactoryWs });
+      await sessionWithWs.start();
 
       sendMsg(wsA, { type: "task_assigned", taskId: "42", issue: makeIssue() });
       sessionWithWs.takeNextPrompt();
@@ -1426,9 +1436,13 @@ describe("foreman_error", () => {
   });
 });
 
-// ── workspace slash commands via WorkerSession.workspace ──────────────────────
+// ── workspace slash commands via WorkerController ─────────────────────────────
 
-describe("workspace slash commands in WorkerSession", () => {
+describe("workspace slash commands in WorkerController", () => {
+  let chdirSpy: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => { chdirSpy = vi.spyOn(process, "chdir").mockImplementation(() => {}); });
+  afterEach(() => { chdirSpy.mockRestore(); });
+
   function makeWorkspace(): Workspace {
     return {
       dir: "/tmp/test-workspace",
@@ -1436,6 +1450,8 @@ describe("workspace slash commands in WorkerSession", () => {
       sessionId: "test-agent-id",
       originalCwd: "/original",
       isCreated: true,
+      on: vi.fn(),
+      create: vi.fn().mockResolvedValue(undefined),
       confirm: vi.fn().mockResolvedValue(true),
       reset: vi.fn().mockResolvedValue(undefined),
       destroy: vi.fn().mockResolvedValue(undefined),
@@ -1447,8 +1463,8 @@ describe("workspace slash commands in WorkerSession", () => {
 
   it("/workspace:reset calls workspace.reset() when clean", async () => {
     const workspace = makeWorkspace();
-    const wc = new WorkspaceController(workspace, display);
-    new WorkerSession(new AgentStatus({ agentId: AGENT_ID }), wsFactory, display, { workspaceController: wc }).start();
+    const wc = new WorkspaceController(workspace, display, { verbose: false });
+    await new WorkerController(display, undefined, wc, "", { wsFactory }).start();
     const wsReg1 = new CommandRegistry();
     wc.registerCommands(wsReg1.scoped("workspace"));
     await wsReg1.execute("workspace:reset", "");
@@ -1461,8 +1477,8 @@ describe("workspace slash commands in WorkerSession", () => {
       uncommittedFiles: ["M foo.ts"], unpushedCommits: [], noUpstream: false,
     });
     (workspace.confirm as ReturnType<typeof vi.fn>).mockResolvedValue(false);
-    const wc = new WorkspaceController(workspace, display);
-    new WorkerSession(new AgentStatus({ agentId: AGENT_ID }), wsFactory, display, { workspaceController: wc }).start();
+    const wc = new WorkspaceController(workspace, display, { verbose: false });
+    await new WorkerController(display, undefined, wc, "", { wsFactory }).start();
     const wsReg2 = new CommandRegistry();
     wc.registerCommands(wsReg2.scoped("workspace"));
     await wsReg2.execute("workspace:reset", "");
@@ -1470,25 +1486,23 @@ describe("workspace slash commands in WorkerSession", () => {
   });
 
   it("/workspace:remove calls destroy() when approved", async () => {
-    const chdirSpy = vi.spyOn(process, "chdir").mockImplementation(() => {});
     try {
       const workspace = makeWorkspace();
-      const wc = new WorkspaceController(workspace, display);
-      new WorkerSession(new AgentStatus({ agentId: AGENT_ID }), wsFactory, display, { workspaceController: wc }).start();
+      const wc = new WorkspaceController(workspace, display, { verbose: false });
+      await new WorkerController(display, undefined, wc, "", { wsFactory }).start();
       const wsReg3 = new CommandRegistry();
       wc.registerCommands(wsReg3.scoped("workspace"));
       await wsReg3.execute("workspace:remove", "");
       expect(workspace.destroy).toHaveBeenCalledOnce();
     } finally {
-      chdirSpy.mockRestore();
     }
   });
 
   it("/workspace:create prints 'already exists' when workspace is pre-created", async () => {
-    const localDisplay = { print: vi.fn(), printForemanMessage: vi.fn() };
+    const localDisplay = { print: vi.fn(), printForemanMessage: vi.fn(), agentStatus: sb };
     const workspace = makeWorkspace();
-    const wc = new WorkspaceController(workspace, localDisplay);
-    new WorkerSession(new AgentStatus({ agentId: AGENT_ID }), wsFactory, display, { workspaceController: wc }).start();
+    const wc = new WorkspaceController(workspace, localDisplay, { verbose: false });
+    await new WorkerController(display, undefined, wc, "", { wsFactory }).start();
     const wsReg4 = new CommandRegistry();
     wc.registerCommands(wsReg4.scoped("workspace"));
     await wsReg4.execute("workspace:create", "");
@@ -1502,10 +1516,8 @@ describe("workspace slash commands in WorkerSession", () => {
 describe("afterTask callback on /worker:complete", () => {
   it("calls afterTask before sending task_complete to foreman", async () => {
     const afterTask = vi.fn().mockResolvedValue(undefined);
-    const sessionWithAfterTask = new WorkerSession(
-      new AgentStatus({ agentId: AGENT_ID }), wsFactory, display, { afterTask }
-    );
-    sessionWithAfterTask.start();
+    const sessionWithAfterTask = new WorkerController(display, undefined, undefined, "", { wsFactory, afterTask });
+    await sessionWithAfterTask.start();
 
     const issue = makeIssue();
     sendMsg(fakeWs, { type: "task_assigned", taskId: "t1", issue });
@@ -1519,10 +1531,8 @@ describe("afterTask callback on /worker:complete", () => {
 
   it("sends task_complete even if afterTask throws (task must not get stuck on foreman)", async () => {
     const afterTask = vi.fn().mockRejectedValue(new Error("reset failed"));
-    const sessionWithAfterTask = new WorkerSession(
-      new AgentStatus({ agentId: AGENT_ID }), wsFactory, display, { afterTask }
-    );
-    sessionWithAfterTask.start();
+    const sessionWithAfterTask = new WorkerController(display, undefined, undefined, "", { wsFactory, afterTask });
+    await sessionWithAfterTask.start();
 
     const issue = makeIssue();
     sendMsg(fakeWs, { type: "task_assigned", taskId: "t1", issue });
@@ -1586,17 +1596,17 @@ describe("sendGoodbye", () => {
 describe("heartbeat", () => {
   afterEach(() => { vi.useRealTimers(); });
 
-  function makeHeartbeatSession(pingIntervalMs = 100) {
+  async function makeHeartbeatSession(pingIntervalMs = 100) {
     const ws = new FakeWs();
     const factory = vi.fn().mockReturnValue(ws);
-    const s = new WorkerSession(new AgentStatus({ agentId: AGENT_ID }), factory, display, { pingIntervalMs, maxReconnectDelayMs: 300_000 });
-    s.start();
+    const s = new WorkerController(display, undefined, undefined, "", { wsFactory: factory, pingIntervalMs, maxReconnectDelayMs: 300_000 });
+    await s.start();
     return { ws, factory, s };
   }
 
-  it("sends a ping after the interval when the socket is open", () => {
+  it("sends a ping after the interval when the socket is open", async () => {
     vi.useFakeTimers();
-    const { ws } = makeHeartbeatSession(100);
+    const { ws } = await makeHeartbeatSession(100);
     ws.emit("open");
     sendMsg(ws, { type: "hello_ack", status: "idle" });
 
@@ -1605,9 +1615,9 @@ describe("heartbeat", () => {
     expect(ws.ping).toHaveBeenCalledOnce();
   });
 
-  it("keeps the connection alive when a pong is received before the next ping tick", () => {
+  it("keeps the connection alive when a pong is received before the next ping tick", async () => {
     vi.useFakeTimers();
-    const { ws } = makeHeartbeatSession(100);
+    const { ws } = await makeHeartbeatSession(100);
     ws.emit("open");
     sendMsg(ws, { type: "hello_ack", status: "idle" });
 
@@ -1618,9 +1628,9 @@ describe("heartbeat", () => {
     expect(ws.terminate).not.toHaveBeenCalled();
   });
 
-  it("keeps the connection alive when an incoming ping from the foreman resets liveness", () => {
+  it("keeps the connection alive when an incoming ping from the foreman resets liveness", async () => {
     vi.useFakeTimers();
-    const { ws } = makeHeartbeatSession(100);
+    const { ws } = await makeHeartbeatSession(100);
     ws.emit("open");
     sendMsg(ws, { type: "hello_ack", status: "idle" });
 
@@ -1631,9 +1641,9 @@ describe("heartbeat", () => {
     expect(ws.terminate).not.toHaveBeenCalled();
   });
 
-  it("terminates the connection when no pong is received after a ping", () => {
+  it("terminates the connection when no pong is received after a ping", async () => {
     vi.useFakeTimers();
-    const { ws } = makeHeartbeatSession(100);
+    const { ws } = await makeHeartbeatSession(100);
     ws.emit("open");
     sendMsg(ws, { type: "hello_ack", status: "idle" });
 
@@ -1644,9 +1654,9 @@ describe("heartbeat", () => {
     expect(ws.terminate).toHaveBeenCalledOnce();
   });
 
-  it("shows Disconnected in status text after heartbeat timeout", () => {
+  it("shows Disconnected in status text after heartbeat timeout", async () => {
     vi.useFakeTimers();
-    const { ws, s } = makeHeartbeatSession(100);
+    const { ws, s } = await makeHeartbeatSession(100);
     ws.emit("open");
     sendMsg(ws, { type: "hello_ack", status: "idle" });
     expect(fmtStatus(s.agentStatus)).toContain("Connected");
@@ -1657,9 +1667,9 @@ describe("heartbeat", () => {
     expect(fmtStatus(s.agentStatus)).toContain("Disconnected");
   });
 
-  it("reconnects after heartbeat timeout", () => {
+  it("reconnects after heartbeat timeout", async () => {
     vi.useFakeTimers();
-    const { ws, factory } = makeHeartbeatSession(100);
+    const { ws, factory } = await makeHeartbeatSession(100);
     ws.emit("open");
     sendMsg(ws, { type: "hello_ack", status: "idle" });
 
@@ -1670,9 +1680,9 @@ describe("heartbeat", () => {
     expect(factory).toHaveBeenCalledTimes(2); // initial + one reconnect
   });
 
-  it("resets the ping interval when a pong is received mid-cycle", () => {
+  it("resets the ping interval when a pong is received mid-cycle", async () => {
     vi.useFakeTimers();
-    const { ws } = makeHeartbeatSession(100);
+    const { ws } = await makeHeartbeatSession(100);
     ws.emit("open");
     sendMsg(ws, { type: "hello_ack", status: "idle" });
 
@@ -1691,9 +1701,9 @@ describe("heartbeat", () => {
     expect(ws.ping).toHaveBeenCalledOnce();
   });
 
-  it("stops the ping timer when the socket closes", () => {
+  it("stops the ping timer when the socket closes", async () => {
     vi.useFakeTimers();
-    const { ws } = makeHeartbeatSession(100);
+    const { ws } = await makeHeartbeatSession(100);
     ws.emit("open");
     sendMsg(ws, { type: "hello_ack", status: "idle" });
 
@@ -1783,28 +1793,28 @@ describe("getTaskQuitInfo", () => {
 describe("confirmTaskQuit", () => {
   const openTask: TaskQuitInfo = { taskNumber: 42, workerId: "test-worker", issueClosed: false };
   const closedTask: TaskQuitInfo = { taskNumber: 42, workerId: "test-worker", issueClosed: true };
-  const noopDisplay = { print: vi.fn(), printForemanMessage: vi.fn() };
+  const noopDisplay = { print: vi.fn(), printForemanMessage: vi.fn(), agentStatus: new AgentStatus({ agentId: "test" }) };
 
   beforeEach(() => { noopDisplay.print.mockReset(); noopDisplay.printForemanMessage.mockReset(); });
 
   it("open issue: returns 'cancel' when user picks 'No, keep working' (index 0)", async () => {
     const mockPick = vi.fn().mockResolvedValue(0);
-    const sess = new WorkerSession(new AgentStatus({ agentId: "test" }), vi.fn(), noopDisplay);
+    const sess = new WorkerController(noopDisplay, undefined, undefined, "");
     const result = await sess.confirmTaskQuit(openTask, mockPick);
     expect(result).toBe("cancel");
   });
 
   it("open issue: returns 'quit' when user picks 'Yes, quit anyway' (index 1)", async () => {
     const mockPick = vi.fn().mockResolvedValue(1);
-    const sess = new WorkerSession(new AgentStatus({ agentId: "test" }), vi.fn(), noopDisplay);
+    const sess = new WorkerController(noopDisplay, undefined, undefined, "");
     const result = await sess.confirmTaskQuit(openTask, mockPick);
     expect(result).toBe("quit");
   });
 
   it("open issue: prompt mentions task number and worker id", async () => {
-    const printDisplay = { print: vi.fn(), printForemanMessage: vi.fn() };
+    const printDisplay = { print: vi.fn(), printForemanMessage: vi.fn(), agentStatus: new AgentStatus({ agentId: "test" }) };
     const mockPick = vi.fn().mockResolvedValue(0);
-    const sess = new WorkerSession(new AgentStatus({ agentId: "test" }), vi.fn(), printDisplay);
+    const sess = new WorkerController(printDisplay, undefined, undefined, "");
     await sess.confirmTaskQuit(openTask, mockPick);
     const printed = printDisplay.print.mock.calls.map(([s]: [unknown]) => stripAnsi(String(s))).join("\n");
     expect(printed).toContain("#42");
@@ -1813,29 +1823,29 @@ describe("confirmTaskQuit", () => {
 
   it("closed issue: returns 'complete-and-quit' when user picks index 0 (yes, complete)", async () => {
     const mockPick = vi.fn().mockResolvedValue(0);
-    const sess = new WorkerSession(new AgentStatus({ agentId: "test" }), vi.fn(), noopDisplay);
+    const sess = new WorkerController(noopDisplay, undefined, undefined, "");
     const result = await sess.confirmTaskQuit(closedTask, mockPick);
     expect(result).toBe("complete-and-quit");
   });
 
   it("closed issue: returns 'quit' when user picks index 1 (no, just exit)", async () => {
     const mockPick = vi.fn().mockResolvedValue(1);
-    const sess = new WorkerSession(new AgentStatus({ agentId: "test" }), vi.fn(), noopDisplay);
+    const sess = new WorkerController(noopDisplay, undefined, undefined, "");
     const result = await sess.confirmTaskQuit(closedTask, mockPick);
     expect(result).toBe("quit");
   });
 
   it("closed issue: returns 'cancel' when user picks index 2 (don't exit)", async () => {
     const mockPick = vi.fn().mockResolvedValue(2);
-    const sess = new WorkerSession(new AgentStatus({ agentId: "test" }), vi.fn(), noopDisplay);
+    const sess = new WorkerController(noopDisplay, undefined, undefined, "");
     const result = await sess.confirmTaskQuit(closedTask, mockPick);
     expect(result).toBe("cancel");
   });
 
   it("closed issue: prompt mentions task number", async () => {
-    const printDisplay = { print: vi.fn(), printForemanMessage: vi.fn() };
+    const printDisplay = { print: vi.fn(), printForemanMessage: vi.fn(), agentStatus: new AgentStatus({ agentId: "test" }) };
     const mockPick = vi.fn().mockResolvedValue(0);
-    const sess = new WorkerSession(new AgentStatus({ agentId: "test" }), vi.fn(), printDisplay);
+    const sess = new WorkerController(printDisplay, undefined, undefined, "");
     await sess.confirmTaskQuit(closedTask, mockPick);
     const printed = printDisplay.print.mock.calls.map(([s]: [unknown]) => stripAnsi(String(s))).join("\n");
     expect(printed).toContain("#42");
@@ -1843,7 +1853,7 @@ describe("confirmTaskQuit", () => {
 
   it("open issue: pick is called with two options (No first, Yes second)", async () => {
     const mockPick = vi.fn().mockResolvedValue(0);
-    const sess = new WorkerSession(new AgentStatus({ agentId: "test" }), vi.fn(), noopDisplay);
+    const sess = new WorkerController(noopDisplay, undefined, undefined, "");
     await sess.confirmTaskQuit(openTask, mockPick);
     expect(mockPick).toHaveBeenCalledOnce();
     const options = mockPick.mock.calls[0][0] as string[];
@@ -1854,7 +1864,7 @@ describe("confirmTaskQuit", () => {
 
   it("closed issue: pick is called with three options", async () => {
     const mockPick = vi.fn().mockResolvedValue(0);
-    const sess = new WorkerSession(new AgentStatus({ agentId: "test" }), vi.fn(), noopDisplay);
+    const sess = new WorkerController(noopDisplay, undefined, undefined, "");
     await sess.confirmTaskQuit(closedTask, mockPick);
     expect(mockPick).toHaveBeenCalledOnce();
     const options = mockPick.mock.calls[0][0] as string[];
@@ -1885,19 +1895,18 @@ describe("hasTask", () => {
 // ── Repo activation flow ───────────────────────────────────────────────────────
 
 describe("repo activation flow", () => {
-  function makeSessionWithPick(pickFn: (opts: string[]) => Promise<number>, repo = "owner/myrepo") {
+  async function makeSessionWithPick(pickFn: (opts: string[]) => Promise<number>, repo = "owner/myrepo") {
     const ws = new FakeWs();
     const factory = vi.fn().mockReturnValue(ws);
-    const disp = { print: vi.fn(), printForemanMessage: vi.fn() };
-    const status = new AgentStatus({ agentId: AGENT_ID });
-    const sess = new WorkerSession(status, factory, disp, { pickFn, repo });
-    sess.start();
+    const disp = { print: vi.fn(), printForemanMessage: vi.fn(), agentStatus: new AgentStatus({ agentId: AGENT_ID }) };
+    const sess = new WorkerController(disp, undefined, undefined, repo, { wsFactory: factory, pickFn });
+    await sess.start();
     return { sess, ws, disp };
   }
 
   it("when repoStatus is 'new', shows activation prompt before transitioning", async () => {
     const pickFn = vi.fn().mockResolvedValue(0); // "Yes, activate"
-    const { sess, ws } = makeSessionWithPick(pickFn);
+    const { sess, ws } = await makeSessionWithPick(pickFn);
     sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "idle", repoStatus: "new" });
     await new Promise((r) => setTimeout(r, 10));
     expect(pickFn).toHaveBeenCalledWith(expect.arrayContaining(["Yes, activate", "No, skip"]));
@@ -1905,7 +1914,7 @@ describe("repo activation flow", () => {
 
   it("when user confirms activation, sends activate_repo to the foreman", async () => {
     const pickFn = vi.fn().mockResolvedValue(0); // "Yes, activate"
-    const { sess, ws } = makeSessionWithPick(pickFn);
+    const { sess, ws } = await makeSessionWithPick(pickFn);
     sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "idle", repoStatus: "new" });
     await new Promise((r) => setTimeout(r, 10));
     const sent = ws.send.mock.calls.map(([d]: [string]) => JSON.parse(d));
@@ -1916,7 +1925,7 @@ describe("repo activation flow", () => {
 
   it("when user confirms, does NOT yet transition to registered (waits for repo_activated)", async () => {
     const pickFn = vi.fn().mockResolvedValue(0); // "Yes, activate"
-    const { sess, ws } = makeSessionWithPick(pickFn);
+    const { sess, ws } = await makeSessionWithPick(pickFn);
     sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "idle", repoStatus: "new" });
     // No task has been assigned — still no pending prompts
     expect(sess.hasPendingPrompts()).toBe(false); // no task prompt yet
@@ -1924,7 +1933,7 @@ describe("repo activation flow", () => {
 
   it("when repo_activated is received, transitions to registered and can accept tasks", async () => {
     const pickFn = vi.fn().mockResolvedValue(0); // "Yes, activate"
-    const { sess, ws } = makeSessionWithPick(pickFn);
+    const { sess, ws } = await makeSessionWithPick(pickFn);
     sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "idle", repoStatus: "new" });
     await new Promise((r) => setTimeout(r, 10));
     // Foreman responds with repo_activated
@@ -1937,7 +1946,7 @@ describe("repo activation flow", () => {
 
   it("when user declines activation, transitions to registered without sending activate_repo", async () => {
     const pickFn = vi.fn().mockResolvedValue(1); // "No, skip"
-    const { sess, ws } = makeSessionWithPick(pickFn);
+    const { sess, ws } = await makeSessionWithPick(pickFn);
     sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "idle", repoStatus: "new" });
     await new Promise((r) => setTimeout(r, 10));
     const sent = ws.send.mock.calls.map(([d]: [string]) => JSON.parse(d));
@@ -1947,7 +1956,7 @@ describe("repo activation flow", () => {
 
   it("when user declines, session is still registered (can receive tasks later)", async () => {
     const pickFn = vi.fn().mockResolvedValue(1); // "No, skip"
-    const { sess, ws } = makeSessionWithPick(pickFn);
+    const { sess, ws } = await makeSessionWithPick(pickFn);
     sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "idle", repoStatus: "new" });
     await new Promise((r) => setTimeout(r, 10));
     // After declining, a follow-up task_assigned should be enqueued (session is registered)
@@ -1957,7 +1966,7 @@ describe("repo activation flow", () => {
 
   it("when repoStatus is 'active', transitions normally without showing activation prompt", async () => {
     const pickFn = vi.fn().mockResolvedValue(0);
-    const { sess, ws } = makeSessionWithPick(pickFn);
+    const { sess, ws } = await makeSessionWithPick(pickFn);
     sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "idle", repoStatus: "active" });
     await new Promise((r) => setTimeout(r, 10));
     expect(pickFn).not.toHaveBeenCalled();
@@ -1965,7 +1974,7 @@ describe("repo activation flow", () => {
 
   it("activation prompt includes the repo name from options", async () => {
     const pickFn = vi.fn().mockResolvedValue(0);
-    const { disp, ws } = makeSessionWithPick(pickFn, "acme/my-project");
+    const { disp, ws } = await makeSessionWithPick(pickFn, "acme/my-project");
     sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "idle", repoStatus: "new" });
     await new Promise((r) => setTimeout(r, 10));
     const printedLines = disp.print.mock.calls.map(([l]: [string]) => l);

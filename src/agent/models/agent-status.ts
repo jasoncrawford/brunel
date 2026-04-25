@@ -1,6 +1,31 @@
+import { exec } from "node:child_process";
 import { EventEmitter } from "node:events";
+import { randomInt } from "node:crypto";
+import { promisify } from "node:util";
 import type { Settings } from "./settings.js";
 import type { EffortValue } from "./settings.js";
+
+const execAsync = promisify(exec);
+
+const WORKER_NAMES = [
+  "abner", "adelaide", "albert", "alden", "alfred", "amelia", "amity", "amos",
+  "andrew", "arthur", "asa", "augustus", "aurelia", "beatrice", "benjamin",
+  "boaz", "caleb", "calvin", "cassandra", "cassius", "cecilia", "charity",
+  "charlotte", "chauncey", "clara", "clarence", "clement", "constance",
+  "cornelius", "cressida", "daniel", "deliverance", "dinah", "ebenezer",
+  "edmund", "edwin", "eleanor", "elihu", "endeavour", "ephraim", "ernest",
+  "esther", "experience", "ezekiel", "faith", "felicity", "frances",
+  "franklin", "frederick", "gideon", "grace", "harold", "harriet", "henry",
+  "herbert", "hezekiah", "hiram", "honour", "hope", "horatio", "humility",
+  "ichabod", "increase", "jedediah", "jeremiah", "jethro", "josephine",
+  "justice", "lavinia", "lawrence", "lemuel", "levi", "lucius", "lydia",
+  "mabel", "martha", "matilda", "mercy", "micah", "miles", "naomi", "obadiah",
+  "oliver", "parthenia", "patience", "peregrine", "perseverance", "philip",
+  "phineas", "priscilla", "prosper", "prudence", "resolve", "rosalind",
+  "roscoe", "rufus", "rupert", "ruth", "silas", "simon", "susannah", "tabitha",
+  "temperance", "thaddeus", "thankful", "theodore", "theophilus", "titus",
+  "tobias", "verity", "victor", "violet", "warren", "zephaniah",
+];
 
 // ── Worker status types ────────────────────────────────────────────────────────
 
@@ -148,5 +173,40 @@ export class AgentStatus extends EventEmitter {
   /** Invoke the tool-result callback (if registered) with the tool name. */
   fireOnToolResult(name: string): void {
     this._onToolResult?.(name);
+  }
+
+  // ── Static git/id utilities ────────────────────────────────────────────────
+
+  /** Returns the current git branch name, or "" on any error. */
+  static async getCurrentBranch(): Promise<string> {
+    try {
+      const { stdout } = await execAsync("git rev-parse --abbrev-ref HEAD");
+      return stdout.trim();
+    } catch {
+      return "";
+    }
+  }
+
+  /**
+   * Returns the repo in "owner/name" format by parsing the git remote origin URL.
+   * Handles both HTTPS (https://github.com/owner/repo.git) and SSH
+   * (git@github.com:owner/repo.git) URL formats. Returns "" on any error.
+   */
+  static async getRemoteRepo(): Promise<string> {
+    try {
+      const { stdout } = await execAsync("git remote get-url origin");
+      const url = stdout.trim();
+      const match = url.match(/[:/]([^/]+\/[^/]+?)(?:\.git)?$/);
+      return match ? match[1] : "";
+    } catch {
+      return "";
+    }
+  }
+
+  /** Generate a human-readable agent ID by prepending a random human name to a UUID.
+   * E.g. "patience-a9bdda00-1234-5678-abcd-ef0123456789" */
+  static generateAgentId(): string {
+    const idx = randomInt(WORKER_NAMES.length);
+    return `${WORKER_NAMES[idx]}-${crypto.randomUUID()}`;
   }
 }
