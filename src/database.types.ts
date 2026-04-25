@@ -33,6 +33,50 @@ export type Database = {
         }
         Relationships: []
       }
+      workers: {
+        Row: {
+          worker_id: string
+          repo_id: number
+          status: string
+          current_task_id: string | null
+          first_connected_at: string
+          last_connected_at: string
+          num_connections: number
+          disconnected_at: string | null
+          goodbye_at: string | null
+        }
+        Insert: {
+          worker_id: string
+          repo_id: number
+          status?: string
+          current_task_id?: string | null
+          first_connected_at?: string
+          last_connected_at?: string
+          num_connections?: number
+          disconnected_at?: string | null
+          goodbye_at?: string | null
+        }
+        Update: {
+          worker_id?: string
+          repo_id?: number
+          status?: string
+          current_task_id?: string | null
+          first_connected_at?: string
+          last_connected_at?: string
+          num_connections?: number
+          disconnected_at?: string | null
+          goodbye_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workers_repo_id_fkey"
+            columns: ["repo_id"]
+            isOneToOne: false
+            referencedRelation: "repos"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
       foreman_messages: {
         Row: {
           id: number

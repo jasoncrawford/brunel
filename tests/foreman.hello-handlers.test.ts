@@ -61,7 +61,7 @@ describe("handleBusyHello", () => {
 
       const ack = helloAck(sendMsg);
       expect(ack?.status).toBe("busy");
-      expect(Worker.get("w1")?.currentTaskId).toBe("42");
+      expect(Worker.fromRegistry("w1")?.currentTaskId).toBe("42");
     });
 
     it("non-numeric taskId — sends cancelled ack", async () => {
@@ -91,7 +91,7 @@ describe("handleBusyHello", () => {
       expect(ack?.status).toBe("busy");
       // task.assign must NOT be called because task is already complete
       expect(assignSpy).not.toHaveBeenCalled();
-      expect(Worker.get("w1")?.currentTaskId).toBe("10");
+      expect(Worker.fromRegistry("w1")?.currentTaskId).toBe("10");
     });
 
     it("different worker — sends cancelled ack", async () => {
@@ -142,7 +142,12 @@ describe("handleBusyHello", () => {
       const ack = helloAck(sendMsg);
       expect(ack?.status).toBe("busy");
       expect(assignSpy).toHaveBeenCalledWith(expect.objectContaining({ workerId: "w1" }));
-      expect(Worker.get("w1")?.currentTaskId).toBe("10");
+      expect(Worker.fromRegistry("w1")?.currentTaskId).toBe("10");
+
+      await new Promise((r) => setTimeout(r, 20));
+      const dbWorker = await Worker.get("w1");
+      expect(dbWorker?.workerId).toBe("w1");
+      expect(dbWorker?.status).toBe("busy");
     });
 
     it("unassigned — reclaims (busy ack, task.assign called)", async () => {
@@ -191,7 +196,12 @@ describe("handleIdleHello", () => {
 
     const ack = helloAck(sendMsg);
     expect(ack?.status).toBe("idle");
-    expect(Worker.get("w1")?.status).toBe("idle");
+    expect(Worker.fromRegistry("w1")?.status).toBe("idle");
+
+    await new Promise((r) => setTimeout(r, 20));
+    const dbWorker = await Worker.get("w1");
+    expect(dbWorker?.workerId).toBe("w1");
+    expect(dbWorker?.status).toBe("idle");
   });
 
   it("has prior task — reverts it and sends idle ack", async () => {
@@ -209,7 +219,7 @@ describe("handleIdleHello", () => {
     expect(revertSpy).toHaveBeenCalled();
     const ack = helloAck(sendMsg);
     expect(ack?.status).toBe("idle");
-    expect(Worker.get("w1")?.status).toBe("idle");
+    expect(Worker.fromRegistry("w1")?.status).toBe("idle");
   });
 
   it("revert failure is logged and worker is NOT registered (task stays assigned, worker retries)", async () => {
@@ -227,7 +237,7 @@ describe("handleIdleHello", () => {
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("ERROR"));
     // Worker must NOT be registered — allowing a new assignment would leave two tasks
     // pointing at this worker in the DB.
-    expect(Worker.get("w1")).toBeUndefined();
+    expect(Worker.fromRegistry("w1")).toBeUndefined();
     // No hello_ack should have been sent either
     const ackCall = sendMsg.mock.calls.find(([, msg]) => (msg as { type: string }).type === "hello_ack");
     expect(ackCall).toBeUndefined();
@@ -265,7 +275,7 @@ describe("repo stored on Worker", () => {
     const { wss } = makeWss(taskManager);
     const repo = fakeRepo("acme/widget");
     await wss.handleIdleHello("w1", fakeWs(), repo);
-    expect(Worker.get("w1")?.repo).toBe(repo);
+    expect(Worker.fromRegistry("w1")?.repo).toBe(repo);
   });
 
   it("handleBusyHello stores repo on registered Worker", async () => {
@@ -273,7 +283,7 @@ describe("repo stored on Worker", () => {
     const { wss } = makeWss(taskManager);
     const repo = fakeRepo("acme/widget");
     await wss.handleBusyHello("w1", "10", fakeWs(), repo);
-    expect(Worker.get("w1")?.repo).toBe(repo);
+    expect(Worker.fromRegistry("w1")?.repo).toBe(repo);
   });
 
   it("Repo.findOrCreate is called with msg.repo from worker_hello", async () => {
@@ -389,7 +399,7 @@ describe("handleIdleHello — error handling", () => {
     vi.spyOn(utils, "log").mockImplementation(() => {});
     await wss.handleIdleHello("w1", fakeWs(), fakeRepo());
 
-    expect(Worker.get("w1")).toBeUndefined();
+    expect(Worker.fromRegistry("w1")).toBeUndefined();
     const ackCall = sendMsg.mock.calls.find(([, msg]) => (msg as { type: string }).type === "hello_ack");
     expect(ackCall).toBeUndefined();
   });

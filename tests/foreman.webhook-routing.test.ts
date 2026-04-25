@@ -293,7 +293,7 @@ describe("webhook-triggered task routing", () => {
     // Worker connects idle (no tasks yet)
     const ws = await connect();
     send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
-    await waitUntil(() => !!Worker.get("w1"));
+    await waitUntil(() => !!Worker.fromRegistry("w1"));
 
     // Webhook fires: issue #42 gets labeled brunel:ready.
     // then startDepsLoad completes async → reconcile() assigns the task.
@@ -307,7 +307,7 @@ describe("webhook-triggered task routing", () => {
     expect((msg as any).issue.title).toBe("Issue 42");
     expect((msg as any).issue.repoUrl).toBe("https://github.com/owner/repo");
     expect((await Task.get("42"))?.status).toBe("assigned");
-    expect(Worker.get("w1")?.status).toBe("busy");
+    expect(Worker.fromRegistry("w1")?.status).toBe("busy");
   });
 
   it("issues/labeled with non-task label does not enqueue or assign", async () => {
@@ -376,7 +376,7 @@ describe("webhook-triggered task routing", () => {
   it("issues/opened with task label in issue labels assigns task to idle worker", async () => {
     const ws = await connect();
     send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
-    await waitUntil(() => !!Worker.get("w1"));
+    await waitUntil(() => !!Worker.fromRegistry("w1"));
 
     // Webhook fires: issue #99 opened with task label.
     // then startDepsLoad completes async → reconcile() assigns the task.
@@ -388,7 +388,7 @@ describe("webhook-triggered task routing", () => {
     expect(msg.type).toBe("task_assigned");
     expect((msg as any).issue.number).toBe(99);
     expect((await Task.get("99"))?.status).toBe("assigned");
-    expect(Worker.get("w1")?.status).toBe("busy");
+    expect(Worker.fromRegistry("w1")?.status).toBe("busy");
   });
 
   it("issues/opened without task label does not enqueue", async () => {
@@ -793,7 +793,7 @@ describe("foreman event filtering", () => {
   it('issues/unlabeled with task label does not remove an already-assigned task', async () => {
     const ws = await connect();
     send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
-    await waitUntil(() => !!Worker.get("w1"));
+    await waitUntil(() => !!Worker.fromRegistry("w1"));
 
     const reply = nextMsgWhere(ws, (m) => m.type === "task_assigned");
     foremanWss.routeEvent("evt-labeled", "issues", labeledPayload(42, "brunel:ready"));

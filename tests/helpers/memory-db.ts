@@ -8,7 +8,9 @@ import type { Database } from "../../src/database.types.js";
 
 type DbRow = Database["public"]["Tables"]["tasks"]["Row"];
 type RepoRow = Database["public"]["Tables"]["repos"]["Row"];
+type WorkerRow = Database["public"]["Tables"]["workers"]["Row"];
 type Filters = Array<{ col: keyof DbRow; op: "eq" | "is"; val: unknown }>;
+type WorkerFilters = Array<{ col: keyof WorkerRow; op: "eq" | "is" | "not_is"; val: unknown }>;
 
 function applyFilters(rows: DbRow[], filters: Filters): DbRow[] {
   return rows.filter((r) =>
@@ -32,6 +34,108 @@ export function createMemoryTaskDb(): SupabaseClient<Database> {
   // ── Repos store ───────────────────────────────────────────────────────────
   const reposStore = new Map<string, RepoRow>();
   let nextRepoId = 1;
+
+  // ── Workers store ─────────────────────────────────────────────────────────
+  const workersStore = new Map<string, WorkerRow>();
+
+  function applyWorkerFilters(rows: WorkerRow[], filters: WorkerFilters): WorkerRow[] {
+    return rows.filter((r) =>
+      filters.every((f) => {
+        const val = (r as Record<string, unknown>)[f.col as string];
+        if (f.op === "eq") return val === f.val;
+        if (f.op === "is") return f.val === null ? val === null : val !== null;
+        if (f.op === "not_is") return f.val === null ? val !== null : val === null;
+        return true;
+      }),
+    );
+  }
+
+  function buildWorkersTable() {
+    function withReposJoin(row: WorkerRow) {
+      const repo = [...reposStore.values()].find((r) => r.id === row.repo_id);
+      return repo ? { ...row, repos: { full_name: repo.full_name } } : { ...row, repos: null };
+    }
+
+    return {
+      insert(rowData: WorkerRow) {
+        const now = new Date().toISOString();
+        const row: WorkerRow = {
+          status: "idle",
+          current_task_id: null,
+          first_connected_at: now,
+          last_connected_at: now,
+          num_connections: 1,
+          disconnected_at: null,
+          goodbye_at: null,
+          ...rowData,
+        };
+        workersStore.set(row.worker_id, row);
+        const sb = {
+          select() { return sb; },
+          single() { return ok(row); },
+          maybeSingle() { return ok(row); },
+        };
+        return sb;
+      },
+      update(changes: Partial<WorkerRow>) {
+        let matchId: string | null = null;
+        const thenable = {
+          eq(_col: string, val: unknown) { matchId = val as string; return thenable; },
+          select() { return thenable; },
+          single(): Promise<{ data: WorkerRow | null; error: null }> {
+            if (matchId !== null) {
+              const existing = workersStore.get(matchId);
+              if (existing) {
+                const updated = { ...existing, ...changes };
+                workersStore.set(matchId, updated);
+                return Promise.resolve({ data: updated, error: null });
+              }
+            }
+            return Promise.resolve({ data: null, error: null });
+          },
+          then(resolve: (v: { data: WorkerRow | null; error: null }) => void) {
+            if (matchId !== null) {
+              const existing = workersStore.get(matchId);
+              if (existing) {
+                const updated = { ...existing, ...changes };
+                workersStore.set(matchId, updated);
+                resolve({ data: updated, error: null });
+                return;
+              }
+            }
+            resolve({ data: null, error: null });
+          },
+        };
+        return thenable;
+      },
+      select(_cols?: string) {
+        const filters: WorkerFilters = [];
+        let rows = [...workersStore.values()];
+        const sb = {
+          eq(col: string, val: unknown) {
+            filters.push({ col: col as keyof WorkerRow, op: "eq", val });
+            rows = applyWorkerFilters([...workersStore.values()], filters);
+            return sb;
+          },
+          not(col: string, op: string, val: unknown) {
+            if (op === "is") {
+              filters.push({ col: col as keyof WorkerRow, op: "not_is", val });
+              rows = applyWorkerFilters([...workersStore.values()], filters);
+            }
+            return sb;
+          },
+          order(_col: string, _opts?: unknown) { return sb; },
+          limit(n: number) { return ok(rows.slice(0, n).map(withReposJoin)); },
+          maybeSingle() { return ok(rows[0] ? withReposJoin(rows[0]) : null); },
+          single() { return ok(rows[0] ? withReposJoin(rows[0]) : null); },
+          then(resolve: (v: { data: ReturnType<typeof withReposJoin>[]; error: null }) => void) {
+            resolve({ data: rows.map(withReposJoin), error: null });
+          },
+        };
+        return sb;
+      },
+    };
+  }
 
   function buildReposTable() {
     return {
@@ -166,6 +270,9 @@ export function createMemoryTaskDb(): SupabaseClient<Database> {
     from(table: string) {
       if (table === "repos") {
         return buildReposTable();
+      }
+      if (table === "workers") {
+        return buildWorkersTable();
       }
       if (table !== "tasks") {
         return emptyBuilder;

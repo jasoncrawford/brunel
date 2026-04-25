@@ -90,7 +90,7 @@ export class ForemanWss {
           const rcvWorkerId = workerId || ((msg as { workerId?: string }).workerId ?? null);
           const rcvTaskId = (msg as { taskId?: string }).taskId ?? null;
           const rcvPayload = msg as unknown as Record<string, unknown>;
-          const rcvWorker = rcvWorkerId ? Worker.get(rcvWorkerId) : undefined;
+          const rcvWorker = rcvWorkerId ? Worker.fromRegistry(rcvWorkerId) : undefined;
           const rcvRepoId = rcvWorker?.repo.id ?? null;
           const rcvRepo = rcvWorker?.repo.fullName;
           void ForemanMessage.log({
@@ -119,13 +119,13 @@ export class ForemanWss {
           await this.assignWork();
         })().catch(err => {
           log(`ERROR handling worker message: ${fmtError(err)}`);
-          this.sendError(ws, `Internal error: ${fmtError(err)}`, false, workerId || null, Worker.get(workerId)?.repo.id ?? null);
+          this.sendError(ws, `Internal error: ${fmtError(err)}`, false, workerId || null, Worker.fromRegistry(workerId)?.repo.id ?? null);
         });
       });
 
       ws.on("close", (code, reason) => {
         if (workerId) {
-          const currentWorker = Worker.get(workerId);
+          const currentWorker = Worker.fromRegistry(workerId);
           if (currentWorker && !currentWorker.isCurrentSocket(ws)) return;
 
           const reasonStr = reason?.length ? `: ${reason}` : "";
@@ -262,7 +262,7 @@ export class ForemanWss {
     if (!this.adminWss) return;
     this.adminWss.broadcastSnapshot({
       tasks: await TaskManager.getAllTasksForBroadcast(),
-      workers: Worker.all().map((w) => w.toWire()),
+      workers: await Worker.allForDashboard(),
       repos: (await Repo.listActive()).map((r) => r.toWire()),
     });
   }
@@ -352,7 +352,7 @@ export class ForemanWss {
         return; // don't release — keeps task assigned so the failure is visible
       }
     }
-    Worker.get(workerId)?.release();
+    Worker.fromRegistry(workerId)?.release();
   }
 
   async handleWorkerGoodbye(workerId: string, msg: Extract<Wire.WorkerMessage, { type: "worker_goodbye" }>): Promise<void> {
@@ -366,7 +366,7 @@ export class ForemanWss {
         );
       }
     }
-    Worker.get(workerId)?.remove();
+    Worker.fromRegistry(workerId)?.remove();
   }
 
   /**
@@ -456,7 +456,7 @@ export class ForemanWss {
 
   async handleActivateRepo(workerId: string, ws: WebSocket): Promise<void> {
     this.workerLog(workerId, "activate_repo");
-    const worker = Worker.get(workerId);
+    const worker = Worker.fromRegistry(workerId);
     if (!worker) {
       log(`[worker ${shortWorkerId(workerId)}] activate_repo received but worker not registered — ignoring`);
       return;
@@ -484,7 +484,7 @@ export class ForemanWss {
 
   forwardEvent(task: Task, evt: WebhookEvent, ref: string): void {
     if (task.workerId) {
-      const worker = Worker.get(task.workerId);
+      const worker = Worker.fromRegistry(task.workerId);
       if (worker && worker.currentTask?.taskId !== task.taskId) {
         log(`[task ${ref}] ${evt.eventName} dropped — worker ${shortWorkerId(task.workerId)} is now on a different task`);
         return;

@@ -144,7 +144,7 @@ async function handleTestRoute(
 
 const adminWss = createAdminWss(server, async () => ({
   tasks: await TaskManager.getAllTasksForBroadcast(),
-  workers: Worker.all().map((w) => w.toWire()),
+  workers: await Worker.allForDashboard(),
   repos: (await Repo.listActive()).map((r) => r.toWire()),
 }));
 

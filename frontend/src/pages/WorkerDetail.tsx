@@ -14,12 +14,18 @@ export default function WorkerDetail() {
       .then((r) => r.json() as Promise<LogEntry[]>)
       .then(setMessages)
       .catch(console.error);
+
+    // Fetch worker data from DB — works for disconnected workers too
+    fetch(`/api/workers/${id}`)
+      .then((r) => (r.ok ? (r.json() as Promise<Worker>) : Promise.resolve(null)))
+      .then((data) => { if (data) setWorker(data); })
+      .catch(console.error);
   }, [id]);
 
   const handleMessage = useCallback((msg: AdminMessage) => {
     if (msg.type === "snapshot") {
       const found = msg.workers.find((w) => w.workerId === id);
-      if (found) setWorker(found);
+      if (found) setWorker(found); // live snapshot takes priority over REST data
     } else if (msg.type === "log_event" && msg.entry.workerId === id) {
       setMessages((prev) => [msg.entry, ...prev]);
     }
@@ -35,6 +41,14 @@ export default function WorkerDetail() {
       {worker?.repo && (
         <p style={{ fontFamily: "monospace", fontSize: "0.9em", color: "#555" }}>
           Repo: {worker.repo}
+        </p>
+      )}
+
+      {worker?.status && (
+        <p style={{ fontSize: "0.9em", color: "#555" }}>
+          Status: {worker.status}
+          {worker.numConnections !== undefined && ` · ${worker.numConnections} connection${worker.numConnections !== 1 ? "s" : ""}`}
+          {worker.disconnectedAt && ` · disconnected ${new Date(worker.disconnectedAt).toLocaleString()}`}
         </p>
       )}
 

@@ -67,5 +67,5 @@ test("worker detail page: live messages appear when the worker disconnects", asy
   await disconnectWorker(workerId);
 
   // The disconnect entry should appear live without a page reload
-  await expect(page.getByText(/disconnected/)).toBeVisible();
+  await expect(page.getByRole("cell", { name: /disconnected/ })).toBeVisible();
 });
