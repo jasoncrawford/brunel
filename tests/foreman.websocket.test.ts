@@ -1144,4 +1144,61 @@ describe("graceful shutdown", () => {
 
     await new Promise<void>((r) => testWss.close(() => srv.close(r)));
   });
+
+  it("terminates zombie connections that stop responding to pings", async () => {
+    // Use a very short ping interval so the test runs quickly.
+    const srv = http.createServer();
+    const localForemanWss = new ForemanWss({
+      server: srv,
+      config: { ...defaultCfg, pingIntervalMs: 50 },
+    });
+    const testPort = await new Promise<number>((r) => srv.listen(0, () => r((srv.address() as AddressInfo).port)));
+
+    // The ws library always auto-pongs when it receives a PING frame, so we can't
+    // use a ws.WebSocket client here — it would keep the connection alive. Instead,
+    // open a raw TCP socket that completes the WebSocket handshake but never sends
+    // pong frames, simulating a zombie (silently-dead) connection.
+    const { createConnection } = await import("net");
+    const { randomBytes } = await import("crypto");
+    const rawSocket = createConnection(testPort, "127.0.0.1");
+    rawSocket.on("error", () => {}); // suppress ECONNRESET on terminate()
+
+    await new Promise<void>((r) => rawSocket.once("connect", r));
+    const wsKey = randomBytes(16).toString("base64");
+    rawSocket.write(
+      `GET /worker HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: ${wsKey}\r\nSec-WebSocket-Version: 13\r\n\r\n`,
+    );
+    // Wait for the 101 Switching Protocols response so the server-side ws is live.
+    await new Promise<void>((r) => rawSocket.once("data", () => r()));
+
+    // The foreman should terminate the zombie after two ping intervals:
+    // first tick → marks isAlive=false and sends ping; second tick → no pong → terminate().
+    const closed = new Promise<void>((r) => rawSocket.once("close", r));
+    await closed;
+
+    await new Promise<void>((r) => localForemanWss.wss.close(() => srv.close(r)));
+  }, 2000);
+
+  it("keeps connections alive when pongs are received", async () => {
+    // Use a short ping interval; the ws library auto-pong keeps the connection alive.
+    const srv = http.createServer();
+    const localForemanWss = new ForemanWss({
+      server: srv,
+      config: { ...defaultCfg, pingIntervalMs: 30 },
+    });
+    const testPort = await new Promise<number>((r) => srv.listen(0, () => r((srv.address() as AddressInfo).port)));
+
+    const liveWs = new WebSocket(`ws://localhost:${testPort}/worker`);
+    await new Promise<void>((resolve, reject) => { liveWs.once("open", resolve); liveWs.once("error", reject); });
+
+    // Let several ping intervals pass while the ws library auto-pongs.
+    await new Promise<void>((r) => setTimeout(r, 150));
+
+    // Connection should still be open.
+    expect(liveWs.readyState).toBe(WebSocket.OPEN);
+
+    liveWs.close();
+    await new Promise<void>((r) => liveWs.once("close", r));
+    await new Promise<void>((r) => localForemanWss.wss.close(() => srv.close(r)));
+  });
 });

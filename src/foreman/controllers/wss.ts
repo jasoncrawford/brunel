@@ -72,8 +72,17 @@ export class ForemanWss {
     const wss = new WebSocketServer({ noServer: true });
     this.wss = wss;
 
+    // Track pong responses per socket — detect zombie connections.
+    const isAlive = new WeakMap<WebSocket, boolean>();
+
     const pingTimer = setInterval(() => {
       for (const client of wss.clients) {
+        if (!isAlive.get(client)) {
+          // No pong received since last ping — connection is zombie, terminate it.
+          client.terminate();
+          continue;
+        }
+        isAlive.set(client, false);
         if (client.readyState === WebSocket.OPEN) client.ping();
       }
     }, config.pingIntervalMs);
@@ -81,6 +90,8 @@ export class ForemanWss {
 
     wss.on("connection", (ws) => {
       let workerId = "";
+      isAlive.set(ws, true);
+      ws.on("pong", () => isAlive.set(ws, true));
 
       ws.on("message", (data) => {
         void (async () => {
@@ -233,10 +244,13 @@ export class ForemanWss {
     });
   }
 
-  sendMsg(worker: Worker, msg: Wire.ForemanMessage, logTaskId?: string): void {
+  sendMsg(worker: Worker, msg: Wire.ForemanMessage, logTaskId?: string): boolean {
     const taskId = logTaskId ?? (("taskId" in msg ? msg.taskId : null) ?? null);
-    worker.send(msg);
-    this.logAndBroadcastSent(worker.workerId, taskId, msg.type, msg as unknown as Record<string, unknown>, worker.repo.id, worker.repo.fullName);
+    const sent = worker.send(msg);
+    if (sent) {
+      this.logAndBroadcastSent(worker.workerId, taskId, msg.type, msg as unknown as Record<string, unknown>, worker.repo.id, worker.repo.fullName);
+    }
+    return sent;
   }
 
   private logAndBroadcastSent(workerId: string | null, taskId: string | null, msgType: string, payload: Record<string, unknown>, repoId: number | null, repo?: string): void {
@@ -289,8 +303,13 @@ export class ForemanWss {
 
   private flushQueuedEvents(worker: Worker, task: Task): void {
     for (const evt of task.drainEvents()) {
-      this.sendMsg(worker, { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload() });
-      this.workerLog(worker.workerId, `→ event_notification #${task.issueNumber} ${evt.eventName} (queued)`);
+      const sent = this.sendMsg(worker, { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload() });
+      if (sent) {
+        this.workerLog(worker.workerId, `→ event_notification #${task.issueNumber} ${evt.eventName} (queued)`);
+      } else {
+        task.queueEvent(evt);
+        this.workerLog(worker.workerId, `✗ event_notification send failed — requeued #${task.issueNumber} ${evt.eventName}`);
+      }
     }
   }
 
@@ -497,10 +516,17 @@ export class ForemanWss {
         task.queueEvent(evt);
         log(`[task ${ref}] ${evt.eventName} queued (worker ${shortWorkerId(task.workerId)} disconnected)`);
       } else if (worker) {
-        this.sendMsg(worker, { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload() });
-        log(`[worker ${shortWorkerId(task.workerId)}] → event_notification ${ref} ${evt.eventName}`);
+        const sent = this.sendMsg(worker, { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload() });
+        if (sent) {
+          log(`[worker ${shortWorkerId(task.workerId)}] → event_notification ${ref} ${evt.eventName}`);
+        } else {
+          task.queueEvent(evt);
+          log(`[task ${ref}] ${evt.eventName} queued (worker send failed)`);
+        }
       } else {
-        log(`[task ${ref}] ${evt.eventName} DROPPED — worker ${shortWorkerId(task.workerId)} not in registry (disconnected?)`);
+        // Worker not in registry — treat as disconnected and queue for reconnect.
+        task.queueEvent(evt);
+        log(`[task ${ref}] ${evt.eventName} queued — worker ${shortWorkerId(task.workerId)} not in registry`);
       }
     } else if (task.status === "pending" || task.status === "blocked") {
       task.queueEvent(evt);
