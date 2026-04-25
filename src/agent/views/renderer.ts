@@ -577,10 +577,14 @@ export class Renderer {
   fmtStatusBar(status: AgentStatus, width: number): string {
     const modelName = (!status.model || status.model === "default") ? "sonnet" : status.model;
     const effortStr = status.effort ? ` (${status.effort})` : "";
+    // Base parts shared by both modes: worker id + model/effort.
+    const baseParts = [`worker ${shortWorkerId(status.agentId)}`, `${modelName}${effortStr}`];
 
     if (!status.workerModeActive) {
-      // Minimal bar when worker mode is off: agent ID + model/effort only.
-      let leftText = [`worker ${shortWorkerId(status.agentId)}`, `${modelName}${effortStr}`].join(" ∙ ");
+      // Minimal bar: agent ID + model/effort + branch (if known).
+      const parts = [...baseParts];
+      if (status.branch) parts.push(status.branch);
+      let leftText = parts.join(" ∙ ");
       if (leftText.length > width) leftText = leftText.slice(0, Math.max(0, width - 1)) + "…";
       // Dim sage-green background + bright-white text. No trailing reset: drawRaw()
       // appends \x1b[K (fills remaining width with the same background) then \x1b[0m.
@@ -602,7 +606,7 @@ export class Renderer {
                                                    `Disconnected${codeStr}`;
 
     // Left side: worker {id8} ∙ {model} ∙ {task info}
-    const parts: string[] = [`worker ${shortWorkerId(status.agentId)}`, `${modelName}${effortStr}`];
+    const parts = [...baseParts];
     if (status.taskNumber != null) parts.push(`task #${status.taskNumber}`);
     else parts.push("no current task");
     if (status.prNumber != null) parts.push(`PR #${status.prNumber}`);

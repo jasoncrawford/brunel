@@ -195,6 +195,16 @@ export class WorkerSession extends EventEmitter {
     this.agentStatus.update({ branch });
   }
 
+  /** Returns the current git branch name, or "" on any error. */
+  static async getCurrentBranch(): Promise<string> {
+    try {
+      const { stdout } = await execAsync("git rev-parse --abbrev-ref HEAD");
+      return stdout.trim();
+    } catch {
+      return "";
+    }
+  }
+
   /**
    * Returns the repo in "owner/name" format by parsing the git remote origin URL.
    * Handles both HTTPS (https://github.com/owner/repo.git) and SSH
@@ -686,10 +696,17 @@ export class WorkerSession extends EventEmitter {
  * already be scoped, e.g. registry.scoped("worker")). Commands degrade
  * gracefully when not connected to a foreman.
  *
- * Accepts a getter so the command handlers always resolve the current session,
- * even when worker mode is started or stopped at runtime after registration.
+ * Accepts a getter so handlers always resolve the current session even when
+ * worker mode is started or stopped at runtime after registration. onStart and
+ * onStop are called by the /worker:start and /worker:stop command handlers.
  */
-export function registerWorkerCommands(getSession: () => WorkerSession | undefined, registry: CommandRegistry, display: WorkerDisplay): void {
+export function registerWorkerCommands(
+  getSession: () => WorkerSession | undefined,
+  registry: CommandRegistry,
+  display: WorkerDisplay,
+  onStart: () => Promise<void>,
+  onStop: () => Promise<void>,
+): void {
   registry.register("complete", {
     description: "Mark the current task as done",
     handler: async () => {
@@ -699,6 +716,20 @@ export function registerWorkerCommands(getSession: () => WorkerSession | undefin
         return undefined;
       }
       return session.completeCurrentTask();
+    },
+  });
+  registry.register("start", {
+    description: "Connect to the foreman and start accepting tasks",
+    handler: async () => { await onStart(); },
+  });
+  registry.register("stop", {
+    description: "Disconnect from the foreman",
+    handler: async () => {
+      if (!getSession()) {
+        display.print(c.amber("Worker mode is not active."));
+        return undefined;
+      }
+      await onStop();
     },
   });
 }

@@ -69,6 +69,8 @@ export class BrunelAgent {
   async start(runWorkerMode: boolean): Promise<void> {
     // Always detect the repo so /worker:start can use it at runtime.
     const repo = await WorkerSession.getRemoteRepo();
+    // Show current branch in the minimal status bar before worker mode activates.
+    this.agentStatus.update({ branch: await WorkerSession.getCurrentBranch() });
 
     // Build workspace config after repo detection. repoUrl can be set explicitly
     // in config; otherwise it's derived from the detected git remote + token.
@@ -206,21 +208,7 @@ export class BrunelAgent {
     const registry = this.controller.registry;
     workspaceController.registerCommands(registry.scoped("workspace"));
     const workerRegistry = registry.scoped("worker");
-    registerWorkerCommands(() => session, workerRegistry, this.display);
-    workerRegistry.register("start", {
-      description: "Connect to the foreman and start accepting tasks",
-      handler: async () => { await startWorker(); },
-    });
-    workerRegistry.register("stop", {
-      description: "Disconnect from the foreman",
-      handler: async () => {
-        if (!session) {
-          this.display.print(c.amber("Worker mode is not active."));
-          return undefined;
-        }
-        await stopWorker();
-      },
-    });
+    registerWorkerCommands(() => session, workerRegistry, this.display, startWorker, stopWorker);
     registry.register("exit", {
       description: "Exit",
       handler: async () => {
