@@ -123,8 +123,8 @@ export type WorkerSessionOptions = {
   pickFn?: (options: string[]) => Promise<number>;
   /** Repo name (owner/name) — sent in worker_hello and shown in the activation prompt. */
   repo: string;
-  /** Maximum reconnect delay in ms. Default: 300_000 (5 minutes). Overridable for tests. */
-  maxReconnectDelayMs?: number;
+  /** Maximum reconnect delay in ms. Default lives in config schema; always provided in production. */
+  maxReconnectDelayMs: number;
 };
 
 /** Task state needed to decide whether and how to prompt before quitting. */
@@ -477,8 +477,8 @@ export class WorkerSession extends EventEmitter {
       clearPingTimer(); // always clean up the ping timer when this socket closes
       if (ws !== this.ws) return; // stale close from a previous connection
       if (this.stopped) return; // fatal error received; don't reconnect
-      const maxDelay = this.options.maxReconnectDelayMs ?? 300_000;
-      const delay = Math.min(maxDelay, 2000 * Math.pow(2, this.reconnectAttempts)) + Math.random() * 1000;
+      // Full Jitter (Brooker 2015): spread = entire [0, cap] window at high attempt counts.
+      const delay = Math.random() * Math.min(this.options.maxReconnectDelayMs, 1000 * Math.pow(2, this.reconnectAttempts));
       this.reconnectAttempts++;
       // Setting reconnectAt starts a 1-second countdown timer in the model.
       this.agentStatus.update({
@@ -727,6 +727,7 @@ export async function startWorkerMode(
     afterTask,
     workspaceController,
     pingIntervalMs: getConfig().pingIntervalMs,
+    maxReconnectDelayMs: getConfig().maxReconnectDelayMs,
     pickFn: (opts) => picker.pick(opts),
     repo,
   });
