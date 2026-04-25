@@ -108,7 +108,7 @@ export class TaskManager extends EventEmitter {
   }
 
   async nextPending(isReady?: (t: Task) => boolean): Promise<Task | null> {
-    const tasks = await Task.list({ cancelable: true });
+    const tasks = await Task.list({ cancelable: true, repoId: this.repo.id });
     for (const task of tasks) {
       this.hydrateBlockers(task);
       if (isReady === undefined || isReady(task)) return task;
@@ -134,8 +134,9 @@ export class TaskManager extends EventEmitter {
 
   private async tryAssignWork(worker: Worker): Promise<AssignOutcome | null> {
     if (worker.repo.status !== "active") return null;
+    if (worker.repo.id !== this.repo.id) return null;
     const task = await this.nextPending(
-      t => t.blockersLoaded && t.status === "pending" && t.repoId === worker.repo.id,
+      t => t.blockersLoaded && t.status === "pending",
     );
     if (!task) return null;
     worker.assign(task);
@@ -254,7 +255,7 @@ export class TaskManager extends EventEmitter {
 
   /** Register ephemeral branch mappings from DB at startup. */
   async loadActiveTasksFromDb(): Promise<void> {
-    const tasks = await Task.list();
+    const tasks = await Task.list({ repoId: this.repo.id });
     for (const task of tasks) {
       if (task.completedAt) continue;
       if (task.branch) this.registerBranch(task.branch, task);
