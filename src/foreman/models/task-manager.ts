@@ -148,12 +148,6 @@ export class TaskManager extends EventEmitter {
     }
   }
 
-  /** All active (non-complete) tasks — used by the dashboard task list API and dependency resolution. */
-  async listActiveTasks(): Promise<Task[]> {
-    const tasks = await Task.list();
-    return tasks.filter((t) => !t.completedAt);
-  }
-
   // ── Memory-only write operations (ephemeral data) ─────────────────────────
 
   queueEvent(task: Task, event: WebhookEvent): void {

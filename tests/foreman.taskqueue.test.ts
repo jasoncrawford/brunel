@@ -169,21 +169,6 @@ describe("TaskManager — derived blocked status", () => {
     expect(task2).toBeNull();
   });
 
-  it("listActiveTasks returns pending and assigned but not complete", async () => {
-    await Task.upsert("1", 1, repoSlug, "T1", "B", ["brunel:ready"]);
-    await Task.upsert("2", 2, repoSlug, "T2", "B", ["brunel:ready"]);
-    const t2 = await Task.get("2");
-    const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    await t2!.assign(Worker.register("w1", fakeWs, fakeRepo()));
-    await Task.upsert("3", 3, repoSlug, "T3", "B", ["brunel:ready"]);
-    const t3 = await Task.get("3");
-    await t3!.assign(Worker.register("w2", fakeWs, fakeRepo()));
-    await t3!.complete();
-    const result = await m.listActiveTasks();
-    expect(result.map((t) => t.taskId)).toEqual(expect.arrayContaining(["1", "2"]));
-    expect(result.map((t) => t.taskId)).not.toContain("3");
-  });
-
   it("getTasksForBroadcast derives blocked status when blocker is open", async () => {
     await registerBase(); // issueNumber: 42
     m.trackIssue(42);
