@@ -73,7 +73,7 @@ export function classifyEvent(event: Wire.WebhookEvent): "actionable" | "log_onl
     }
 
     case "pull_request":
-      return (action === "closed" || action === "auto_merge_enabled") ? "actionable" : "log_only";
+      return (action === "closed" || action === "auto_merge_enabled" || action === "opened") ? "actionable" : "log_only";
 
     case "pull_request_review":
     case "pull_request_review_comment":

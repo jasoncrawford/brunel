@@ -64,8 +64,8 @@ describe("classifyEvent", () => {
       expect(classifyEvent(makeEvent("pull_request", { action: "auto_merge_enabled" }))).toBe("actionable");
     });
 
-    it("is log_only when action is opened", () => {
-      expect(classifyEvent(makeEvent("pull_request", { action: "opened" }))).toBe("log_only");
+    it("is actionable when action is opened", () => {
+      expect(classifyEvent(makeEvent("pull_request", { action: "opened" }))).toBe("actionable");
     });
 
     it("is log_only when action is synchronize", () => {
