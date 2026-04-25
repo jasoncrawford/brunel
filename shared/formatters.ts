@@ -59,6 +59,12 @@ export function fmtStats(
   return parts.join(", ");
 }
 
+export function fmtTaskStats(inputTokens: number, outputTokens: number, costUsd: number | undefined): string {
+  const parts = [`tokens: ${fmtNum(inputTokens)} in / ${fmtNum(outputTokens)} out`];
+  if (costUsd != null) parts.push(`cost: $${costUsd.toFixed(2)}`);
+  return parts.join(", ");
+}
+
 // ── Path / args helpers ────────────────────────────────────────────────────
 
 export function toRelativePath(filePath: string): string {

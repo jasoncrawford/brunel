@@ -6,7 +6,7 @@ import type { Display } from "../views/display.js";
 import { buildInitialPrompt, buildEventPrompt } from "../worker-prompts.js";
 import * as Wire from "../../../shared/wire.js";
 import { fmtError } from "../../utils.js";
-import { fmtNum } from "../../../shared/formatters.js";
+import { fmtNum, fmtTaskStats } from "../../../shared/formatters.js";
 import { getConfig } from "../../config.js";
 import type { CommandRegistry } from "./command-controller.js";
 import { Picker } from "../views/picker.js";
@@ -23,16 +23,6 @@ export interface WorkerDisplay {
   printForemanMessage(msg: Wire.ForemanMessage): void;
 }
 
-/**
- * Extended display interface required by WorkerController.
- * Adds agentStatus to WorkerDisplay so WorkerController can update status
- * without a separate AgentStatus parameter. Satisfied by Display and test stubs
- * that include an agentStatus field.
- */
-export interface WorkerControllerDisplay extends WorkerDisplay {
-  readonly agentStatus: AgentStatus;
-}
-
 // ── Wire types ────────────────────────────────────────────────────────────────
 
 export type WsFactory = (agentId: string, taskId?: string) => WebSocket;
@@ -47,20 +37,14 @@ export type TaskQuitInfo = {
 /** A prompt queued by WorkerController for main() to execute. */
 export type QueuedPrompt = { prompt: string; fresh: boolean };
 
-/** Options for overriding WorkerController internals in tests. */
+/** Options for overriding WorkerController internals, primarily for testing. */
 export type WorkerControllerOptions = {
-  /** Inject a WS factory for testing (default: builds from config in start()). */
+  /** Inject a WS factory (default: builds from config in start()). */
   wsFactory?: WsFactory;
   /** Override the afterTask hook (default: derived from workspaceController.onReset). */
   afterTask?: () => Promise<void>;
-  /** Override ping interval in ms (default: from config). */
-  pingIntervalMs?: number;
-  /** Override max reconnect delay in ms (default: from config). */
-  maxReconnectDelayMs?: number;
-  /** Override pick function for testing repo activation and quit confirmation. */
+  /** Override pick function for repo activation and quit confirmation. */
   pickFn?: (options: string[]) => Promise<number>;
-  /** Override branch getter for testing. */
-  getBranch?: () => Promise<string>;
 };
 
 // Messages that must wait for hello_ack before being sent.
@@ -118,14 +102,6 @@ function debounceMs(events: Wire.WebhookEvent[]): number {
   return 3000;
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function fmtTaskStats(inputTokens: number, outputTokens: number, costUsd: number | undefined): string {
-  const parts = [`tokens: ${fmtNum(inputTokens)} in / ${fmtNum(outputTokens)} out`];
-  if (costUsd != null) parts.push(`cost: $${costUsd.toFixed(2)}`);
-  return parts.join(", ");
-}
-
 // ── WorkerController ──────────────────────────────────────────────────────────
 
 /**
@@ -142,9 +118,6 @@ function fmtTaskStats(inputTokens: number, outputTokens: number, costUsd: number
  * by calling hasPendingPrompts() / takeNextPrompt().
  */
 export class WorkerController extends EventEmitter {
-  // Extracted from display for convenient access.
-  readonly agentStatus: AgentStatus;
-
   // ── Active session state (set by start(), cleared by stop()) ───────────────
   private _isActive = false;
   private _activeWsFactory: WsFactory | undefined;
@@ -163,6 +136,8 @@ export class WorkerController extends EventEmitter {
 
   // ── Connection state (cleared by stop()) ──────────────────────────────────
   private ws: WebSocket | undefined;
+  // Handshake lifecycle: "registered" = hello_ack received (or initial state);
+  // "hello_sent" = worker_hello was sent but hello_ack not yet received.
   // Initialized to "registered" so instances that never connect (e.g. tests
   // that exercise only task state) behave as if already registered.
   private connectionState: "hello_sent" | "registered" = "registered";
@@ -176,14 +151,14 @@ export class WorkerController extends EventEmitter {
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
-    private readonly display: WorkerControllerDisplay,
+    readonly agentStatus: AgentStatus,
+    private readonly display: WorkerDisplay,
     private readonly picker: Picker | undefined,
     private readonly workspaceController: WorkspaceController | undefined,
     private readonly repo: string,
     private readonly options?: WorkerControllerOptions,
   ) {
     super();
-    this.agentStatus = display.agentStatus;
   }
 
   // ── Public getters ────────────────────────────────────────────────────────
@@ -223,7 +198,7 @@ export class WorkerController extends EventEmitter {
       const events = this.pendingEvents.splice(0);
       this.enqueuePrompt(this.buildAndLogEventPrompt(events), false);
     }
-    void this.refreshBranch();
+    void this.agentStatus.refreshBranch();
   }
 
   /** Returns true if there are queued prompts for main() to execute. */
@@ -309,6 +284,8 @@ export class WorkerController extends EventEmitter {
     if (!this.currentTaskId) return undefined;
     if (this._activeAfterTask) {
       try { await this._activeAfterTask(); } catch (err) {
+        // Log but don't abort — the task IS complete even if workspace cleanup fails.
+        // Returning early here would leave the task stuck on the foreman forever.
         this.display.print(c.amber(`afterTask failed: ${fmtError(err)}`));
       }
     }
@@ -327,7 +304,7 @@ export class WorkerController extends EventEmitter {
     this.display.print(c.sageGreen(`Task #${taskNumber} complete, ${statsStr}`));
     this.agentStatus.resetTaskStats();
     this.agentStatus.update({ taskNumber: undefined, prNumber: undefined });
-    await this.refreshBranch();
+    await this.agentStatus.refreshBranch();
     this.display.print(c.sageGreen("Waiting for next task..."));
     return "task-complete";
   }
@@ -347,8 +324,8 @@ export class WorkerController extends EventEmitter {
       this.workspaceController ? () => this.workspaceController!.onReset() : undefined
     );
     this._activeWsFactory = options?.wsFactory ?? this.buildWsFactory();
-    this._activePingIntervalMs = options?.pingIntervalMs ?? getConfig().pingIntervalMs ?? 25_000;
-    this._activeMaxReconnectDelayMs = options?.maxReconnectDelayMs ?? getConfig().maxReconnectDelayMs ?? 300_000;
+    this._activePingIntervalMs = getConfig().pingIntervalMs ?? 25_000;
+    this._activeMaxReconnectDelayMs = getConfig().maxReconnectDelayMs ?? 300_000;
 
     this._stopped = false;
     this._isActive = true;
@@ -356,9 +333,12 @@ export class WorkerController extends EventEmitter {
     this.agentStatus.update({ model: getConfig().model, effort: getConfig().effort });
     this.agentStatus.setWorkerModeActive(true);
     this.agentStatus.setOnToolResult((toolName) => {
-      if (toolName === "Bash") void this.refreshBranch();
+      // Refresh the branch display after each Bash tool completes so the status
+      // bar reflects branch changes (e.g. git checkout) without waiting for the
+      // full query to finish.
+      if (toolName === "Bash") void this.agentStatus.refreshBranch();
     });
-    void this.refreshBranch();
+    void this.agentStatus.refreshBranch();
     this.connect();
   }
 
@@ -382,7 +362,7 @@ export class WorkerController extends EventEmitter {
     this._isActive = false;
     this.agentStatus.setWorkerModeActive(false);
     this.display.print(c.sageGreen("Worker mode stopped."));
-    await this.refreshBranch();
+    await this.agentStatus.refreshBranch();
   }
 
   /** Run worker teardown: send goodbye, destroy workspace, tear down I/O. */
@@ -429,11 +409,6 @@ export class WorkerController extends EventEmitter {
   private pickFnOrDefault(): (opts: string[]) => Promise<number> {
     if (this.options?.pickFn) return this.options.pickFn;
     return (opts) => this.picker!.pick(opts);
-  }
-
-  private async refreshBranch(): Promise<void> {
-    const getBranch = this.options?.getBranch ?? AgentStatus.getCurrentBranch;
-    this.agentStatus.update({ branch: await getBranch() });
   }
 
   private buildWsFactory(): WsFactory {
@@ -525,6 +500,11 @@ export class WorkerController extends EventEmitter {
 
       isAlive = true;
 
+      // Heartbeat: detect silent connection drops (network loss, laptop sleep, etc.)
+      // Each tick sends a ping. If no pong/ping arrives before the next tick, the
+      // connection is terminated so the status bar updates and reconnect runs.
+      // Receiving any frame (pong from our ping, or ping from the foreman's heartbeat)
+      // resets the timer so the next check is a full interval away.
       const startPingTimer = () => {
         clearPingTimer();
         pingTimer = setInterval(() => {
@@ -555,21 +535,25 @@ export class WorkerController extends EventEmitter {
     });
 
     ws.on("close", (code: number, _reason: Buffer) => {
-      clearPingTimer();
-      if (ws !== this.ws) return;
-      if (this._stopped) return;
+      clearPingTimer(); // always clean up the ping timer when this socket closes
+      if (ws !== this.ws) return; // stale close from a previous connection
+      if (this._stopped) return; // fatal error received; don't reconnect
+      // Full Jitter (Brooker 2015): spread = entire [0, cap] window at high attempt counts.
       const delay = Math.random() * Math.min(this._activeMaxReconnectDelayMs, 1000 * Math.pow(2, this.reconnectAttempts));
       this.reconnectAttempts++;
       this.agentStatus.update({
         connectionStatus: "disconnected",
         disconnectCode: code,
+        // Setting reconnectAt starts a 1-second countdown timer in the model.
         reconnectAt: Date.now() + delay,
       });
       setTimeout(() => this.connect(), delay);
     });
 
     ws.on("error", (err: Error) => {
-      if (ws !== this.ws) return;
+      if (ws !== this.ws) return; // stale error from a previous connection
+      // Ensure close fires even for errors that don't automatically close the socket
+      // (e.g. some TLS negotiation failures on older Node.js / ws versions).
       this.display.print(c.amber(`WebSocket error: ${err.message}`));
       ws.terminate();
     });
@@ -581,7 +565,7 @@ export class WorkerController extends EventEmitter {
     if (msg.type === "foreman_error") {
       if (msg.fatal) {
         this._stopped = true;
-        this.currentAc?.abort();
+        this.currentAc?.abort(); // abort any running query immediately
         this.ws?.close();
         this.emit("fatal");
       }
@@ -594,9 +578,10 @@ export class WorkerController extends EventEmitter {
     }
 
     if (msg.type === "hello_ack") {
-      this.reconnectAttempts = 0;
+      this.reconnectAttempts = 0; // connection succeeded; reset backoff
       if (msg.status === "cancelled") {
-        this.currentAc?.abort();
+        // Task was reassigned while worker was disconnected — stop and reset.
+        this.currentAc?.abort(); // abort any running query immediately
         this.connectionState = "registered";
         this.bufferedMessages = [];
         this.pendingPrompts = [];
@@ -614,6 +599,8 @@ export class WorkerController extends EventEmitter {
         this.display.print(c.amber("Task cancelled (reassigned to another worker)."));
         const workspace = this.workspaceController?.workspace;
         if (workspace?.isCreated) {
+          // Track the reset promise so that task_assigned prompts are deferred until
+          // the workspace is clean — preventing a new task from running in a dirty state.
           this._resetPromise = workspace.reset().then(() => {
             this.display.print(c.amber("Workspace reset."));
           }).catch((err: unknown) => {
@@ -623,16 +610,23 @@ export class WorkerController extends EventEmitter {
           });
         }
       } else if (msg.repoStatus === "new") {
+        // Show "Connected" in the status bar before waiting for user input — the
+        // worker IS connected, it just needs activation. connectionState stays
+        // "hello_sent" so buffered messages are not flushed prematurely.
         this.agentStatus.update({ connectionStatus: "connected", disconnectCode: undefined });
+        // Repo is new — ask the user whether to activate it before proceeding.
         this.display.print(c.amber(`Repo ${this.repo} is new — activate it?`));
         const idx = await this.pickFnOrDefault()(["Yes, activate", "No, skip"]);
         if (idx === 0) {
+          // Send activate_repo — foreman will reply with a repo_activated message.
           this.ws?.send(JSON.stringify({ type: "activate_repo", workerId: this.agentId } satisfies Wire.WorkerMessage));
-          return;
+          return; // wait for repo_activated
         }
+        // User declined — transition to idle without activating.
         this.display.print(c.darkGray("Repo not activated. Staying idle."));
         this.transitionToRegistered();
       } else {
+        // "idle" or "busy" with repoStatus 'active' (or no repoStatus for back-compat).
         this.transitionToRegistered();
       }
       return;
@@ -645,17 +639,20 @@ export class WorkerController extends EventEmitter {
       this.issueClosed = false;
       this.agentStatus.update({ taskNumber: msg.issue.number, prNumber: undefined });
       this.agentStatus.resetTaskStats();
-      void this.refreshBranch();
+      void this.agentStatus.refreshBranch();
       const initialPrompt = buildInitialPrompt(msg.issue, !!this.workspaceController?.workspace);
       this.display.print(c.sageGreen(initialPrompt));
       const enqueue = () => this.enqueuePrompt(initialPrompt, true);
+      // If a workspace reset is in progress (from a cancelled hello_ack), defer the
+      // prompt until the reset finishes — otherwise the task could run in a dirty workspace.
       if (this._resetPromise) {
         void this._resetPromise.then(enqueue, enqueue);
       } else {
-        enqueue();
+        enqueue(); // fresh=true: new task, reset session
       }
     } else if (msg.type === "event_notification") {
       if (msg.taskId !== this.currentTaskId) {
+        // Ignore stale events forwarded for tasks we're no longer working on.
         this.display.print(c.darkGray(`[worker] ignoring event_notification for task ${msg.taskId} (current: ${this.currentTaskId ?? "none"})`));
         return;
       }
@@ -666,14 +663,17 @@ export class WorkerController extends EventEmitter {
       if (event.name === "pull_request") {
         const pr = event.payload["pull_request"] as { number?: number; merged?: boolean } | undefined;
         if (action === "closed" && !pr?.merged) {
+          // PR was closed without merging — clear the PR from the status bar.
           this.agentStatus.update({ prNumber: undefined });
         } else if (pr?.number != null) {
+          // Track PR number for the status bar.
           this.agentStatus.update({ prNumber: pr.number });
         }
+        // Track prIsClosed flag.
         if (action === "closed") {
-          this.prIsClosed = true;
+          this.prIsClosed = true; // process normally (cleanup prompt still fires)
         } else if (action === "reopened") {
-          this.prIsClosed = false;
+          this.prIsClosed = false; // process normally
         }
       } else if (event.name === "issues") {
         if (action === "closed") {
@@ -682,17 +682,22 @@ export class WorkerController extends EventEmitter {
           this.issueClosed = false;
         }
       } else if (this.prIsClosed && event.name === "check_suite") {
+        // Post-merge check suite: already logged via printForemanMessage; silently drop.
         return;
       }
 
       const classification = classifyEvent(event);
       if (classification === "log_only") {
+        // Already logged via printForemanMessage above; no further action.
         return;
       }
 
+      // Actionable event: queue it for debounced dispatch.
       this.pendingEvents.push(event);
 
       if (!this._queryRunning && this.currentTaskId && this.currentIssue) {
+        // No query running: set up/reset debounce timer to batch rapid events.
+        // When the timer fires, events are enqueued and main()'s ask() is signalled.
         if (this.debounceTimer) clearTimeout(this.debounceTimer);
         this.debounceTimer = setTimeout(() => {
           this.debounceTimer = null;
@@ -701,9 +706,12 @@ export class WorkerController extends EventEmitter {
             if (events.length > 0) {
               this.enqueuePrompt(this.buildAndLogEventPrompt(events), false);
             }
+            // If _queryRunning became true while debounce was pending, events stay in
+            // pendingEvents to be drained by notifyQueryEnd().
           }
         }, debounceMs(this.pendingEvents));
       }
+      // If _queryRunning: events stay in pendingEvents, drained in notifyQueryEnd().
     }
   }
 

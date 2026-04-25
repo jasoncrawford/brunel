@@ -73,9 +73,9 @@ export class AgentStatus extends EventEmitter {
   // Used by the worker to refresh git branch in the status bar after Bash.
   private _onToolResult: ((toolName: string) => void) | null = null;
 
-  constructor({ agentId, settings, ...initial }: { agentId: string; settings?: Settings } & Omit<WorkerStatusPatch, "reconnectAt">) {
+  constructor({ agentId, settings, ...initial }: { agentId?: string; settings?: Settings } & Omit<WorkerStatusPatch, "reconnectAt">) {
     super();
-    this.agentId = agentId;
+    this.agentId = agentId ?? AgentStatus.generateAgentId();
     if ("connectionStatus" in initial) this._connectionStatus = initial.connectionStatus!;
     if ("disconnectCode" in initial) this._disconnectCode = initial.disconnectCode;
     if ("taskNumber" in initial) this._taskNumber = initial.taskNumber;
@@ -173,6 +173,11 @@ export class AgentStatus extends EventEmitter {
   /** Invoke the tool-result callback (if registered) with the tool name. */
   fireOnToolResult(name: string): void {
     this._onToolResult?.(name);
+  }
+
+  /** Refresh the branch field from the current git repo. */
+  async refreshBranch(): Promise<void> {
+    this.update({ branch: await AgentStatus.getCurrentBranch() });
   }
 
   // ── Static git/id utilities ────────────────────────────────────────────────

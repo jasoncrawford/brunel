@@ -41,7 +41,7 @@ export class BrunelAgent {
   constructor(config: BrunelConfig) {
     this.config = config;
     this.settings = new Settings(config);
-    this.agentStatus = new AgentStatus({ agentId: AgentStatus.generateAgentId(), settings: this.settings });
+    this.agentStatus = new AgentStatus({ settings: this.settings });
     this.display = new Display(config, this.agentStatus);
     this.input = new Input(this.display);
     this.picker = new Picker(this.display, () => this.input.cancel());
@@ -70,7 +70,7 @@ export class BrunelAgent {
     // Always detect the repo so /worker:start can use it at runtime.
     const repo = await AgentStatus.getRemoteRepo();
     // Show current branch in the minimal status bar before worker mode activates.
-    this.agentStatus.update({ branch: await AgentStatus.getCurrentBranch() });
+    await this.agentStatus.refreshBranch();
 
     // Build workspace config after repo detection. repoUrl can be set explicitly
     // in config; otherwise it's derived from the detected git remote + token.
@@ -122,7 +122,7 @@ export class BrunelAgent {
 
     // ── Worker controller ─────────────────────────────────────────────────────
 
-    const workerController = new WorkerController(this.display, this.picker, workspaceController, repo);
+    const workerController = new WorkerController(this.agentStatus, this.display, this.picker, workspaceController, repo);
     workerController.on("prompts_ready", () => {
       this.input.cancel();
       enqueueRoutingEvent({ type: "session", event: "prompts_ready" });
