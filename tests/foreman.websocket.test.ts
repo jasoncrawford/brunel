@@ -1029,7 +1029,7 @@ describe("issues/closed — close persistence", () => {
 
 describe("worker_hello — reclaim complete task for finalization work", () => {
   it("allows worker to reclaim complete task", async () => {
-    await Task.upsert("1", 1, "test/repo", "T", "b", []);
+    await Task.upsert("1", 1, "owner/repo", "T", "b", []);
     const t = await Task.get("1");
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
     await t!.assign(Worker.register("w1", fakeWs, fakeRepo()));
