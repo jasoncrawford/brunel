@@ -244,9 +244,9 @@ export class ForemanWss {
     });
   }
 
-  sendMsg(worker: Worker, msg: Wire.ForemanMessage, logTaskId?: string): boolean {
+  sendMsg(worker: Worker, msg: Wire.ForemanMessage, logTaskId?: string, onError?: (err: Error) => void): boolean {
     const taskId = logTaskId ?? (("taskId" in msg ? msg.taskId : null) ?? null);
-    const sent = worker.send(msg);
+    const sent = worker.send(msg, onError);
     if (sent) {
       this.logAndBroadcastSent(worker.workerId, taskId, msg.type, msg as unknown as Record<string, unknown>, worker.repo.id, worker.repo.fullName);
     }
@@ -303,7 +303,15 @@ export class ForemanWss {
 
   private flushQueuedEvents(worker: Worker, task: Task): void {
     for (const evt of task.drainEvents()) {
-      const sent = this.sendMsg(worker, { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload() });
+      const sent = this.sendMsg(
+        worker,
+        { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload() },
+        undefined,
+        (err) => {
+          task.queueEvent(evt);
+          this.workerLog(worker.workerId, `✗ event_notification send error — requeued #${task.issueNumber} ${evt.eventName}: ${fmtError(err)}`);
+        },
+      );
       if (sent) {
         this.workerLog(worker.workerId, `→ event_notification #${task.issueNumber} ${evt.eventName} (queued)`);
       } else {
@@ -516,7 +524,15 @@ export class ForemanWss {
         task.queueEvent(evt);
         log(`[task ${ref}] ${evt.eventName} queued (worker ${shortWorkerId(task.workerId)} disconnected)`);
       } else if (worker) {
-        const sent = this.sendMsg(worker, { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload() });
+        const sent = this.sendMsg(
+          worker,
+          { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload() },
+          undefined,
+          (err) => {
+            task.queueEvent(evt);
+            log(`[task ${ref}] ${evt.eventName} requeued (send error: ${fmtError(err)})`);
+          },
+        );
         if (sent) {
           log(`[worker ${shortWorkerId(task.workerId)}] → event_notification ${ref} ${evt.eventName}`);
         } else {
