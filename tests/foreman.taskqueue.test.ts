@@ -378,3 +378,38 @@ describe("TaskManager changed events", () => {
     await expect(t!.unregisterPr()).resolves.not.toThrow();
   });
 });
+
+// ── getAllTasksForBroadcast — multi-repo deduplication ────────────────────────
+
+describe("TaskManager.getAllTasksForBroadcast — multi-repo", () => {
+  beforeEach(() => {
+    Worker._reset();
+    resetDb();
+  });
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it("returns each task exactly once across two active repos", async () => {
+    const m1 = await createTestTaskManager("owner/repo-a");
+    const m2 = await createTestTaskManager("owner/repo-b");
+    await Task.upsert("1", 1, m1.repo.fullName, "Task A", "Body", ["brunel:ready"]);
+    await Task.upsert("2", 2, m2.repo.fullName, "Task B", "Body", ["brunel:ready"]);
+
+    const all = await TaskManager.getAllTasksForBroadcast();
+
+    expect(all).toHaveLength(2);
+    expect(all.map((t) => t.taskId).sort()).toEqual(["1", "2"]);
+  });
+
+  it("getTasksForBroadcast only returns tasks for its own repo", async () => {
+    const m1 = await createTestTaskManager("owner/repo-a");
+    const m2 = await createTestTaskManager("owner/repo-b");
+    await Task.upsert("1", 1, m1.repo.fullName, "Task A", "Body", ["brunel:ready"]);
+    await Task.upsert("2", 2, m2.repo.fullName, "Task B", "Body", ["brunel:ready"]);
+
+    const snap1 = await m1.getTasksForBroadcast();
+    const snap2 = await m2.getTasksForBroadcast();
+
+    expect(snap1.map((t) => t.taskId)).toEqual(["1"]);
+    expect(snap2.map((t) => t.taskId)).toEqual(["2"]);
+  });
+});

@@ -246,10 +246,10 @@ export class TaskManager extends EventEmitter {
     return blockers.some(b => this._openIssues.has(b));
   }
 
-  /** Active tasks with open-issue state baked in — for admin broadcasts.
+  /** Active tasks for this repo with open-issue state baked in — for admin broadcasts.
    *  Complete tasks are excluded: the dashboard only shows active tasks. */
   async getTasksForBroadcast(): Promise<Wire.Task[]> {
-    const tasks = await Task.list();
+    const tasks = await Task.list({ repoId: this.repo.id });
     return tasks.filter((t) => !t.completedAt).map((t) => {
       this.hydrateBlockers(t);
       return t.toWire();
