@@ -134,6 +134,8 @@ export type WorkerSessionOptions = {
   repo: string;
   /** Maximum reconnect delay in ms. Default lives in config schema; always provided in production. */
   maxReconnectDelayMs: number;
+  /** Injectable branch getter for testing. Defaults to getCurrentBranch. */
+  getBranch?: () => Promise<string>;
 };
 
 /** Task state needed to decide whether and how to prompt before quitting. */
@@ -194,7 +196,8 @@ export class WorkerSession extends EventEmitter {
   get agentId(): string { return this.agentStatus.agentId; }
 
   private async refreshBranch(): Promise<void> {
-    this.agentStatus.update({ branch: await getCurrentBranch() });
+    const getBranch = this.options.getBranch ?? getCurrentBranch;
+    this.agentStatus.update({ branch: await getBranch() });
   }
 
   /**
@@ -297,7 +300,8 @@ export class WorkerSession extends EventEmitter {
     const statsStr = fmtTaskStats(this.agentStatus.taskInputTokens, this.agentStatus.taskOutputTokens, this.agentStatus.taskCostUsd);
     this.display.print(c.sageGreen(`Task #${taskNumber} complete, ${statsStr}`));
     this.agentStatus.resetTaskStats();
-    this.agentStatus.update({ taskNumber: undefined, prNumber: undefined, branch: "" });
+    this.agentStatus.update({ taskNumber: undefined, prNumber: undefined });
+    await this.refreshBranch();
     this.display.print(c.sageGreen("Waiting for next task..."));
     return "task-complete";
   }
@@ -745,6 +749,7 @@ export class WorkerController extends EventEmitter {
     this._cleanup = undefined; // cleared so later exit takes the non-worker path
     this.display.agentStatus.setWorkerModeActive(false);
     this.display.print(c.sageGreen("Worker mode stopped."));
+    this.display.agentStatus.update({ branch: await getCurrentBranch() });
   }
 
   /** Run worker teardown: send goodbye, destroy workspace, tear down I/O. */
