@@ -1,37 +1,16 @@
-import { exec } from "node:child_process";
-import { randomInt } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { promisify } from "node:util";
 import { WebSocket } from "ws";
 import { c } from "../views/style.js";
 import { AgentStatus } from "../models/agent-status.js";
 import type { Display } from "../views/display.js";
 import { buildInitialPrompt, buildEventPrompt } from "../worker-prompts.js";
-import type { EffortValue } from "../models/settings.js";
 import * as Wire from "../../../shared/wire.js";
 import { fmtError } from "../../utils.js";
-import { fmtNum } from "../../../shared/formatters.js";
+import { fmtNum, fmtTaskStats } from "../../../shared/formatters.js";
 import { getConfig } from "../../config.js";
 import type { CommandRegistry } from "./command-controller.js";
 import { Picker } from "../views/picker.js";
 import { WorkspaceController } from "./workspace-controller.js";
-
-const execAsync = promisify(exec);
-
-async function getCurrentBranch(): Promise<string> {
-  try {
-    const { stdout } = await execAsync("git rev-parse --abbrev-ref HEAD");
-    return stdout.trim();
-  } catch {
-    return "";
-  }
-}
-
-function fmtTaskStats(inputTokens: number, outputTokens: number, costUsd: number | undefined): string {
-  const parts = [`tokens: ${fmtNum(inputTokens)} in / ${fmtNum(outputTokens)} out`];
-  if (costUsd != null) parts.push(`cost: $${costUsd.toFixed(2)}`);
-  return parts.join(", ");
-}
 
 // ── WorkerDisplay interface ───────────────────────────────────────────────────
 
@@ -44,27 +23,32 @@ export interface WorkerDisplay {
   printForemanMessage(msg: Wire.ForemanMessage): void;
 }
 
-// ── Agent ID generation ────────────────────────────────────────────────────────
+// ── Wire types ────────────────────────────────────────────────────────────────
 
-const WORKER_NAMES = [
-  "abner", "adelaide", "albert", "alden", "alfred", "amelia", "amity", "amos",
-  "andrew", "arthur", "asa", "augustus", "aurelia", "beatrice", "benjamin",
-  "boaz", "caleb", "calvin", "cassandra", "cassius", "cecilia", "charity",
-  "charlotte", "chauncey", "clara", "clarence", "clement", "constance",
-  "cornelius", "cressida", "daniel", "deliverance", "dinah", "ebenezer",
-  "edmund", "edwin", "eleanor", "elihu", "endeavour", "ephraim", "ernest",
-  "esther", "experience", "ezekiel", "faith", "felicity", "frances",
-  "franklin", "frederick", "gideon", "grace", "harold", "harriet", "henry",
-  "herbert", "hezekiah", "hiram", "honour", "hope", "horatio", "humility",
-  "ichabod", "increase", "jedediah", "jeremiah", "jethro", "josephine",
-  "justice", "lavinia", "lawrence", "lemuel", "levi", "lucius", "lydia",
-  "mabel", "martha", "matilda", "mercy", "micah", "miles", "naomi", "obadiah",
-  "oliver", "parthenia", "patience", "peregrine", "perseverance", "philip",
-  "phineas", "priscilla", "prosper", "prudence", "resolve", "rosalind",
-  "roscoe", "rufus", "rupert", "ruth", "silas", "simon", "susannah", "tabitha",
-  "temperance", "thaddeus", "thankful", "theodore", "theophilus", "titus",
-  "tobias", "verity", "victor", "violet", "warren", "zephaniah",
-];
+export type WsFactory = (agentId: string, taskId?: string) => WebSocket;
+
+/** Task state needed to decide whether and how to prompt before quitting. */
+export type TaskQuitInfo = {
+  taskNumber: number;
+  workerId: string;
+  issueClosed: boolean;
+};
+
+/** A prompt queued by WorkerController for main() to execute. */
+export type QueuedPrompt = { prompt: string; fresh: boolean };
+
+/** Options for overriding WorkerController internals, primarily for testing. */
+export type WorkerControllerOptions = {
+  /** Inject a WS factory (default: builds from config in start()). */
+  wsFactory?: WsFactory;
+  /** Override the afterTask hook (default: derived from workspaceController.onReset). */
+  afterTask?: () => Promise<void>;
+  /** Override pick function for repo activation and quit confirmation. */
+  pickFn?: (options: string[]) => Promise<number>;
+};
+
+// Messages that must wait for hello_ack before being sent.
+type BufferableMessage = Extract<Wire.WorkerMessage, { type: "task_complete" }>;
 
 // ── Event classification ───────────────────────────────────────────────────────
 
@@ -118,114 +102,74 @@ function debounceMs(events: Wire.WebhookEvent[]): number {
   return 3000;
 }
 
-// ── WorkerSession ─────────────────────────────────────────────────────────────
-
-export type WsFactory = (agentId: string, taskId?: string) => WebSocket;
-
-export type WorkerSessionOptions = {
-  afterTask?: () => Promise<void>;
-  workspaceController?: WorkspaceController;
-  /** Interval in ms between worker-sent pings. Dead connections are detected after
-   * one interval with no pong. Default is set in the config schema (pingIntervalMs). */
-  pingIntervalMs?: number;
-  /** Pick function used by confirmTaskQuit and repo activation. Supplied by startWorkerMode via picker.pick. */
-  pickFn?: (options: string[]) => Promise<number>;
-  /** Repo name (owner/name) — sent in worker_hello and shown in the activation prompt. */
-  repo: string;
-  /** Maximum reconnect delay in ms. Default lives in config schema; always provided in production. */
-  maxReconnectDelayMs: number;
-  /** Injectable branch getter for testing. Defaults to getCurrentBranch. */
-  getBranch?: () => Promise<string>;
-};
-
-/** Task state needed to decide whether and how to prompt before quitting. */
-export type TaskQuitInfo = {
-  taskNumber: number;
-  workerId: string;
-  issueClosed: boolean;
-};
-
-/** A prompt queued by WorkerSession for main() to execute. */
-export type QueuedPrompt = { prompt: string; fresh: boolean };
-
-// Messages that must wait for hello_ack before being sent.
-type BufferableMessage = Extract<Wire.WorkerMessage, { type: "task_complete" }>;
+// ── WorkerController ──────────────────────────────────────────────────────────
 
 /**
- * WebSocket client and task lifecycle manager. WorkerSession owns the foreman
- * connection, handshake protocol, task state, event debouncing, and prompt
- * queuing. It does NOT execute queries — instead it queues prompts for
- * main() in index.ts to run via the injected runQueryFn.
+ * Worker mode lifecycle manager, WebSocket client, and task protocol handler.
+ * Owns the foreman connection, handshake protocol, task state, event debouncing,
+ * and prompt queuing. Does NOT execute queries — instead queues prompts and
+ * emits "prompts_ready" for index.ts to run via AgentController.
  *
- * When a task is assigned or a debounced event fires, WorkerSession pushes a
- * QueuedPrompt and emits `"prompts_ready"`. main() listens for this event once
- * at startup, calls input.cancel() to interrupt any live ask(), then drains
- * the queue by calling takeNextPrompt() and running each prompt.
- * On a fatal foreman error, WorkerSession emits `"fatal"`.
+ * Call start() to activate worker mode and connect to the foreman.
+ * Call stop() to gracefully disconnect. The class handles reconnect internally.
+ *
+ * On a fatal foreman error, emits "fatal". When prompts are ready, emits
+ * "prompts_ready" — index.ts cancels any live ask() and drains the queue
+ * by calling hasPendingPrompts() / takeNextPrompt().
  */
-export class WorkerSession extends EventEmitter {
+export class WorkerController extends EventEmitter {
+  // ── Active session state (set by start(), cleared by stop()) ───────────────
+  private _isActive = false;
+  private _activeWsFactory: WsFactory | undefined;
+  private _activeAfterTask: (() => Promise<void>) | undefined;
+  private _activePingIntervalMs = 25_000;
+  private _activeMaxReconnectDelayMs = 300_000;
+
+  // ── Task state (cleared by stop()) ────────────────────────────────────────
   private currentTaskId: string | undefined;
   private currentIssue: Wire.TaskIssue | undefined;
   private pendingEvents: Wire.WebhookEvent[] = [];
   private pendingPrompts: QueuedPrompt[] = [];
-  private ws: WebSocket | undefined;
-  private currentAc: AbortController | null = null;
-  private _queryRunning = false;
-  private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private prIsClosed = false;
   private issueClosed = false;
   private _resetPromise: Promise<void> | null = null;
-  private stopped = false;
+
+  // ── Connection state (cleared by stop()) ──────────────────────────────────
+  private ws: WebSocket | undefined;
   // Handshake lifecycle: "registered" = hello_ack received (or initial state);
   // "hello_sent" = worker_hello was sent but hello_ack not yet received.
-  // Initialized to "registered" so sessions that never emit "open" (e.g. tests)
-  // behave as if already registered.
+  // Initialized to "registered" so instances that never connect (e.g. tests
+  // that exercise only task state) behave as if already registered.
   private connectionState: "hello_sent" | "registered" = "registered";
   private bufferedMessages: BufferableMessage[] = [];
   private reconnectAttempts = 0;
+  private _stopped = false;
+
+  // ── Query state ───────────────────────────────────────────────────────────
+  private currentAc: AbortController | null = null;
+  private _queryRunning = false;
+  private debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     readonly agentStatus: AgentStatus,
-    private wsFactory: WsFactory,
-    private display: WorkerDisplay,
-    private options: WorkerSessionOptions,
+    private readonly display: WorkerDisplay,
+    private readonly picker: Picker | undefined,
+    private readonly workspaceController: WorkspaceController | undefined,
+    private readonly repo: string,
+    private readonly options?: WorkerControllerOptions,
   ) {
     super();
   }
 
+  // ── Public getters ────────────────────────────────────────────────────────
+
   get agentId(): string { return this.agentStatus.agentId; }
+  /** True when worker mode is active (connected or connecting). */
+  get isActive(): boolean { return this._isActive; }
+  /** True when a worker cleanup must run on exit (i.e., worker is active). */
+  get isCleanupPending(): boolean { return this._isActive; }
 
-  private async refreshBranch(): Promise<void> {
-    const getBranch = this.options.getBranch ?? getCurrentBranch;
-    this.agentStatus.update({ branch: await getBranch() });
-  }
-
-  /**
-   * Returns the repo in "owner/name" format by parsing the git remote origin URL.
-   * Handles both HTTPS (https://github.com/owner/repo.git) and SSH
-   * (git@github.com:owner/repo.git) URL formats. Returns "" on any error.
-   */
-  static async getRemoteRepo(): Promise<string> {
-    try {
-      const { stdout } = await execAsync("git remote get-url origin");
-      const url = stdout.trim();
-      const match = url.match(/[:/]([^/]+\/[^/]+?)(?:\.git)?$/);
-      return match ? match[1] : "";
-    } catch {
-      return "";
-    }
-  }
-
-  start(): void {
-    this.agentStatus.setOnToolResult((toolName) => {
-      // Refresh the branch display after each Bash tool completes so the status
-      // bar reflects branch changes (e.g. git checkout) without waiting for the
-      // full query to finish.
-      if (toolName === "Bash") void this.refreshBranch();
-    });
-    void this.refreshBranch();
-    this.connect();
-  }
+  // ── Protocol methods (previously required reaching through .session) ───────
 
   /**
    * Called by main() just before executing a prompt. Stores the AbortController
@@ -255,7 +199,7 @@ export class WorkerSession extends EventEmitter {
       const events = this.pendingEvents.splice(0);
       this.enqueuePrompt(this.buildAndLogEventPrompt(events), false);
     }
-    void this.refreshBranch();
+    void this.agentStatus.refreshBranch();
   }
 
   /** Returns true if there are queued prompts for main() to execute. */
@@ -263,47 +207,45 @@ export class WorkerSession extends EventEmitter {
     return this.pendingPrompts.length > 0;
   }
 
-  /** Returns true if a task is currently assigned to this worker. */
-  hasTask(): boolean {
-    return this.currentTaskId !== undefined;
-  }
-
   /** Dequeues and returns the next prompt, or undefined if empty. */
   takeNextPrompt(): QueuedPrompt | undefined {
     return this.pendingPrompts.shift();
   }
 
+  // ── Task lifecycle methods ────────────────────────────────────────────────
+
+  /** Returns true if a task is currently assigned to this worker. */
+  hasTask(): boolean {
+    return this.currentTaskId !== undefined;
+  }
+
   /**
-   * Complete the current task: call afterTask hook, send task_complete, reset state.
-   * Returns 'task-complete' if a task was active, undefined if no task was assigned.
+   * Abort the currently running query, if any.
+   * Returns true if a query was aborted, false if no query was running.
+   * Called by the SIGINT handler so ^C interrupts the current query
+   * rather than shutting down the worker.
    */
-  async completeCurrentTask(): Promise<"task-complete" | undefined> {
-    if (!this.currentTaskId) return undefined;
-    if (this.options.afterTask) {
-      try { await this.options.afterTask(); } catch (err) {
-        // Log but don't abort — the task IS complete even if workspace cleanup fails.
-        // Returning early here would leave the task stuck on the foreman forever.
-        this.display.print(c.amber(`afterTask failed: ${fmtError(err)}`));
-      }
+  interrupt(): boolean {
+    if (this.currentAc) {
+      this.currentAc.abort();
+      return true;
     }
-    const { taskInputTokens, taskOutputTokens, taskCostUsd } = this.agentStatus;
-    const hasStats = taskInputTokens > 0 || taskOutputTokens > 0 || taskCostUsd != null;
-    this.sendTaskMessage({
-      type: "task_complete",
-      workerId: this.agentStatus.agentId,
-      taskId: this.currentTaskId,
-      ...(hasStats && { stats: { inputTokens: taskInputTokens, outputTokens: taskOutputTokens, costUsd: taskCostUsd } }),
-    });
-    const taskNumber = this.currentIssue!.number;
-    this.currentTaskId = undefined;
-    this.currentIssue = undefined;
-    const statsStr = fmtTaskStats(this.agentStatus.taskInputTokens, this.agentStatus.taskOutputTokens, this.agentStatus.taskCostUsd);
-    this.display.print(c.sageGreen(`Task #${taskNumber} complete, ${statsStr}`));
-    this.agentStatus.resetTaskStats();
-    this.agentStatus.update({ taskNumber: undefined, prNumber: undefined });
-    await this.refreshBranch();
-    this.display.print(c.sageGreen("Waiting for next task..."));
-    return "task-complete";
+    return false;
+  }
+
+  /**
+   * Send worker_goodbye to the foreman if the WebSocket is currently open.
+   * Called before clean exits (SIGTERM, /quit) so the foreman can immediately
+   * revert the task to pending without waiting for the reclaim timeout.
+   */
+  sendGoodbye(): void {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({
+        type: "worker_goodbye",
+        workerId: this.agentStatus.agentId,
+        taskId: this.currentTaskId,
+      }));
+    }
   }
 
   /**
@@ -332,7 +274,7 @@ export class WorkerSession extends EventEmitter {
    */
   async confirmTaskQuit(
     info: TaskQuitInfo,
-    pickFn: (options: string[]) => Promise<number> = this.options.pickFn!,
+    pickFn: (options: string[]) => Promise<number> = this.pickFnOrDefault(),
   ): Promise<"quit" | "complete-and-quit" | "cancel"> {
     if (info.issueClosed) {
       this.display.print(c.amber(`\nTask #${info.taskNumber} is closed but not complete. Complete it before exiting?`));
@@ -349,28 +291,170 @@ export class WorkerSession extends EventEmitter {
   }
 
   /**
-   * Abort the currently running query, if any.
-   * Returns true if a query was aborted, false if no query was running.
-   * Called by the SIGINT handler so ^C interrupts the current query
-   * rather than shutting down the worker.
+   * Complete the current task: call afterTask hook, send task_complete, reset state.
+   * Returns 'task-complete' if a task was active, undefined if no task was assigned.
    */
-  interrupt(): boolean {
-    if (this.currentAc) {
-      this.currentAc.abort();
-      return true;
+  async completeCurrentTask(): Promise<"task-complete" | undefined> {
+    if (!this.currentTaskId) return undefined;
+    if (this._activeAfterTask) {
+      try { await this._activeAfterTask(); } catch (err) {
+        // Log but don't abort — the task IS complete even if workspace cleanup fails.
+        // Returning early here would leave the task stuck on the foreman forever.
+        this.display.print(c.amber(`afterTask failed: ${fmtError(err)}`));
+      }
     }
-    return false;
+    const { taskInputTokens, taskOutputTokens, taskCostUsd } = this.agentStatus;
+    const hasStats = taskInputTokens > 0 || taskOutputTokens > 0 || taskCostUsd != null;
+    this.sendTaskMessage({
+      type: "task_complete",
+      workerId: this.agentStatus.agentId,
+      taskId: this.currentTaskId,
+      ...(hasStats && { stats: { inputTokens: taskInputTokens, outputTokens: taskOutputTokens, costUsd: taskCostUsd } }),
+    });
+    const taskNumber = this.currentIssue!.number;
+    this.currentTaskId = undefined;
+    this.currentIssue = undefined;
+    const statsStr = fmtTaskStats(this.agentStatus.taskInputTokens, this.agentStatus.taskOutputTokens, this.agentStatus.taskCostUsd);
+    this.display.print(c.sageGreen(`Task #${taskNumber} complete, ${statsStr}`));
+    this.agentStatus.resetTaskStats();
+    this.agentStatus.update({ taskNumber: undefined, prNumber: undefined });
+    await this.agentStatus.refreshBranch();
+    this.display.print(c.sageGreen("Waiting for next task..."));
+    return "task-complete";
   }
 
-  /**
-   * Gracefully stop this session: prevent reconnection, send goodbye, close
-   * the WebSocket, and cancel any pending debounce timer. Called by
-   * /worker:stop and the idle-^C handler to deactivate worker mode at runtime.
-   */
-  stop(): void {
-    this.stopped = true; // prevents reconnect on close
+  // ── Lifecycle ─────────────────────────────────────────────────────────────
+
+  /** Connect to the foreman and begin accepting tasks. */
+  async start(): Promise<void> {
+    if (this._isActive) {
+      this.display.print(c.amber("Worker mode is already active."));
+      return;
+    }
+    await this.workspaceController?.onCreate();
+
+    const { options } = this;
+    this._activeAfterTask = options?.afterTask ?? (
+      this.workspaceController ? () => this.workspaceController!.onReset() : undefined
+    );
+    this._activeWsFactory = options?.wsFactory ?? this.buildWsFactory();
+    this._activePingIntervalMs = getConfig().pingIntervalMs ?? 25_000;
+    this._activeMaxReconnectDelayMs = getConfig().maxReconnectDelayMs ?? 300_000;
+
+    this._stopped = false;
+    this._isActive = true;
+
+    this.agentStatus.update({ model: getConfig().model, effort: getConfig().effort });
+    this.agentStatus.setWorkerModeActive(true);
+    this.agentStatus.setOnToolResult((toolName) => {
+      // Refresh the branch display after each Bash tool completes so the status
+      // bar reflects branch changes (e.g. git checkout) without waiting for the
+      // full query to finish.
+      if (toolName === "Bash") void this.agentStatus.refreshBranch();
+    });
+    void this.agentStatus.refreshBranch();
+    this.connect();
+  }
+
+  /** Disconnect from the foreman. Prompts if a task is in progress. */
+  async stop(): Promise<void> {
+    if (!this._isActive) return;
+    const taskInfo = this.getTaskQuitInfo();
+    if (taskInfo) {
+      const choice = await this.confirmTaskQuit(taskInfo);
+      if (choice === "cancel") return;
+      if (choice === "complete-and-quit") await this.completeCurrentTask();
+    }
+    this._stopped = true;
     this.sendGoodbye();
     this.ws?.close();
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
+    }
+    this.resetSessionState();
+    this._isActive = false;
+    this.agentStatus.setWorkerModeActive(false);
+    this.display.print(c.sageGreen("Worker mode stopped."));
+    await this.agentStatus.refreshBranch();
+  }
+
+  /** Run worker teardown: send goodbye, destroy workspace, tear down I/O. */
+  async cleanup(): Promise<void> {
+    if (this._isActive) {
+      this.sendGoodbye();
+      await this.workspaceController?.onDestroy();
+      process.stdout.write("\x1b[?2004l\r\n");
+      if (process.stdin.isTTY) process.stdin.setRawMode(false);
+      process.stdin.pause();
+    }
+  }
+
+  /** Register /worker:complete, /worker:start, /worker:stop into the given (already-scoped) registry. */
+  registerCommands(registry: CommandRegistry): void {
+    registry.register("complete", {
+      description: "Mark the current task as done",
+      handler: async () => {
+        if (!this._isActive) {
+          this.display.print(c.boldRed("Not connected to a foreman."));
+          return undefined;
+        }
+        return this.completeCurrentTask();
+      },
+    });
+    registry.register("start", {
+      description: "Connect to the foreman and start accepting tasks",
+      handler: async () => { await this.start(); },
+    });
+    registry.register("stop", {
+      description: "Disconnect from the foreman",
+      handler: async () => {
+        if (!this._isActive) {
+          this.display.print(c.amber("Worker mode is not active."));
+          return undefined;
+        }
+        await this.stop();
+      },
+    });
+  }
+
+  // ── Private ───────────────────────────────────────────────────────────────
+
+  private pickFnOrDefault(): (opts: string[]) => Promise<number> {
+    if (this.options?.pickFn) return this.options.pickFn;
+    return (opts) => this.picker!.pick(opts);
+  }
+
+  private buildWsFactory(): WsFactory {
+    return (agentId, taskId) => {
+      const ws = new WebSocket(`${getConfig().foremanUrl}/worker`);
+      ws.on("open", () => {
+        ws.send(JSON.stringify({
+          type: "worker_hello",
+          workerId: agentId,
+          repo: this.repo,
+          taskId,
+          status: taskId ? "busy" : "idle",
+        }));
+      });
+      return ws;
+    };
+  }
+
+  private resetSessionState(): void {
+    this.currentTaskId = undefined;
+    this.currentIssue = undefined;
+    this.pendingEvents = [];
+    this.pendingPrompts = [];
+    this.prIsClosed = false;
+    this.issueClosed = false;
+    this._resetPromise = null;
+    this.ws = undefined;
+    this.connectionState = "registered";
+    this.bufferedMessages = [];
+    this.reconnectAttempts = 0;
+    this.currentAc = null;
+    this._queryRunning = false;
     if (this.debounceTimer) {
       clearTimeout(this.debounceTimer);
       this.debounceTimer = null;
@@ -378,33 +462,9 @@ export class WorkerSession extends EventEmitter {
   }
 
   /**
-   * Send worker_goodbye to the foreman if the WebSocket is currently open.
-   * Called before clean exits (SIGTERM, /quit) so the foreman can immediately
-   * revert the task to pending without waiting for the reclaim timeout.
-   */
-  sendGoodbye(): void {
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({
-        type: "worker_goodbye",
-        workerId: this.agentStatus.agentId,
-        taskId: this.currentTaskId,
-      }));
-    }
-  }
-
-  /** Generate a human-readable agent ID by prepending a random human name to a UUID.
-   * E.g. "patience-a9bdda00-1234-5678-abcd-ef0123456789" */
-  static generateAgentId(): string {
-    const idx = randomInt(WORKER_NAMES.length);
-    return `${WORKER_NAMES[idx]}-${crypto.randomUUID()}`;
-  }
-
-  // ── Private ───────────────────────────────────────────────────────────────
-
-  /**
-   * Push a prompt to the queue and emit `"prompts_ready"` so main()'s routing
+   * Push a prompt to the queue and emit "prompts_ready" so index.ts's routing
    * loop can cancel any live ask() and drain the queue.
-   * fresh=true means main() should reset its sessionId (new task conversation).
+   * fresh=true means the session should reset its conversationId (new task).
    */
   private enqueuePrompt(prompt: string, fresh: boolean): void {
     this.pendingPrompts.push({ prompt, fresh });
@@ -443,10 +503,10 @@ export class WorkerSession extends EventEmitter {
   private connect(): void {
     // Clearing reconnectAt stops the countdown timer in the model.
     this.agentStatus.update({ connectionStatus: "reconnecting", reconnectAt: undefined });
-    const ws = this.wsFactory(this.agentStatus.agentId, this.currentTaskId);
+    const ws = this._activeWsFactory!(this.agentStatus.agentId, this.currentTaskId);
     this.ws = ws;
 
-    const pingIntervalMs = this.options.pingIntervalMs ?? 25_000;
+    const pingIntervalMs = this._activePingIntervalMs;
     let isAlive = false;
     let pingTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -497,9 +557,9 @@ export class WorkerSession extends EventEmitter {
     ws.on("close", (code: number, _reason: Buffer) => {
       clearPingTimer(); // always clean up the ping timer when this socket closes
       if (ws !== this.ws) return; // stale close from a previous connection
-      if (this.stopped) return; // fatal error received; don't reconnect
+      if (this._stopped) return; // fatal error received; don't reconnect
       // Full Jitter (Brooker 2015): spread = entire [0, cap] window at high attempt counts.
-      const delay = Math.random() * Math.min(this.options.maxReconnectDelayMs, 1000 * Math.pow(2, this.reconnectAttempts));
+      const delay = Math.random() * Math.min(this._activeMaxReconnectDelayMs, 1000 * Math.pow(2, this.reconnectAttempts));
       this.reconnectAttempts++;
       // Setting reconnectAt starts a 1-second countdown timer in the model.
       this.agentStatus.update({
@@ -524,7 +584,7 @@ export class WorkerSession extends EventEmitter {
 
     if (msg.type === "foreman_error") {
       if (msg.fatal) {
-        this.stopped = true;
+        this._stopped = true;
         this.currentAc?.abort(); // abort any running query immediately
         this.ws?.close();
         this.emit("fatal");
@@ -557,7 +617,7 @@ export class WorkerSession extends EventEmitter {
         });
         this.agentStatus.resetTaskStats();
         this.display.print(c.amber("Task cancelled (reassigned to another worker)."));
-        const workspace = this.options.workspaceController?.workspace;
+        const workspace = this.workspaceController?.workspace;
         if (workspace?.isCreated) {
           // Track the reset promise so that task_assigned prompts are deferred until
           // the workspace is clean — preventing a new task from running in a dirty state.
@@ -575,8 +635,8 @@ export class WorkerSession extends EventEmitter {
         // "hello_sent" so buffered messages are not flushed prematurely.
         this.agentStatus.update({ connectionStatus: "connected", disconnectCode: undefined });
         // Repo is new — ask the user whether to activate it before proceeding.
-        this.display.print(c.amber(`Repo ${this.options.repo} is new — activate it?`));
-        const idx = await this.options.pickFn!(["Yes, activate", "No, skip"]);
+        this.display.print(c.amber(`Repo ${this.repo} is new — activate it?`));
+        const idx = await this.pickFnOrDefault()(["Yes, activate", "No, skip"]);
         if (idx === 0) {
           // Send activate_repo — foreman will reply with a repo_activated message.
           this.ws?.send(JSON.stringify({ type: "activate_repo", workerId: this.agentId } satisfies Wire.WorkerMessage));
@@ -599,20 +659,20 @@ export class WorkerSession extends EventEmitter {
       this.issueClosed = false;
       this.agentStatus.update({ taskNumber: msg.issue.number, prNumber: undefined });
       this.agentStatus.resetTaskStats();
-      void this.refreshBranch();
-      const initialPrompt = buildInitialPrompt(msg.issue, !!this.options.workspaceController?.workspace);
+      void this.agentStatus.refreshBranch();
+      const initialPrompt = buildInitialPrompt(msg.issue, !!this.workspaceController?.workspace);
       this.display.print(c.sageGreen(initialPrompt));
+      const enqueue = () => this.enqueuePrompt(initialPrompt, true);
       // If a workspace reset is in progress (from a cancelled hello_ack), defer the
       // prompt until the reset finishes — otherwise the task could run in a dirty workspace.
-      const enqueue = () => this.enqueuePrompt(initialPrompt, true);
       if (this._resetPromise) {
         void this._resetPromise.then(enqueue, enqueue);
       } else {
         enqueue(); // fresh=true: new task, reset session
       }
     } else if (msg.type === "event_notification") {
-      // Ignore stale events forwarded for tasks we're no longer working on.
       if (msg.taskId !== this.currentTaskId) {
+        // Ignore stale events forwarded for tasks we're no longer working on.
         this.display.print(c.darkGray(`[worker] ignoring event_notification for task ${msg.taskId} (current: ${this.currentTaskId ?? "none"})`));
         return;
       }
@@ -621,21 +681,19 @@ export class WorkerSession extends EventEmitter {
       const action = event.payload["action"] as string | undefined;
 
       if (event.name === "pull_request") {
-        // Track PR number for the status bar.
         const pr = event.payload["pull_request"] as { number?: number; merged?: boolean } | undefined;
         if (action === "closed" && !pr?.merged) {
           // PR was closed without merging — clear the PR from the status bar.
           this.agentStatus.update({ prNumber: undefined });
         } else if (pr?.number != null) {
+          // Track PR number for the status bar.
           this.agentStatus.update({ prNumber: pr.number });
         }
         // Track prIsClosed flag.
         if (action === "closed") {
-          this.prIsClosed = true;
-          // process normally (cleanup prompt still fires)
+          this.prIsClosed = true; // process normally (cleanup prompt still fires)
         } else if (action === "reopened") {
-          this.prIsClosed = false;
-          // process normally
+          this.prIsClosed = false; // process normally
         }
       } else if (event.name === "issues") {
         if (action === "closed") {
@@ -668,9 +726,9 @@ export class WorkerSession extends EventEmitter {
             if (events.length > 0) {
               this.enqueuePrompt(this.buildAndLogEventPrompt(events), false);
             }
+            // If _queryRunning became true while debounce was pending, events stay in
+            // pendingEvents to be drained by notifyQueryEnd().
           }
-          // If _queryRunning became true while debounce was pending, events stay in
-          // pendingEvents to be drained by notifyQueryEnd().
         }, debounceMs(this.pendingEvents));
       }
       // If _queryRunning: events stay in pendingEvents, drained in notifyQueryEnd().
@@ -682,168 +740,4 @@ export class WorkerSession extends EventEmitter {
     this.display.print(c.sageGreen(prompt));
     return prompt;
   }
-
-}
-
-// ── Worker command registration ────────────────────────────────────────────────
-
-/**
- * Register the worker-namespace commands into the given registry (which should
- * already be scoped, e.g. registry.scoped("worker")). Commands degrade
- * gracefully when not connected to a foreman.
- */
-export class WorkerController extends EventEmitter {
-  private _session: WorkerSession | undefined;
-  private _cleanup: (() => Promise<void>) | undefined;
-
-  constructor(
-    private readonly display: Display,
-    private readonly picker: Picker,
-    private readonly workspaceController: WorkspaceController | undefined,
-    private readonly repo: string,
-  ) {
-    super();
-  }
-
-  /** The active WorkerSession, or undefined when worker mode is off. */
-  get session(): WorkerSession | undefined { return this._session; }
-  /** True when worker mode is active (connected or connecting). */
-  get isActive(): boolean { return this._session !== undefined; }
-  /** True when a worker cleanup must run on exit (i.e., worker is active). */
-  get isCleanupPending(): boolean { return this._cleanup !== undefined; }
-
-  hasTask(): boolean { return this._session?.hasTask() ?? false; }
-  interrupt(): boolean { return this._session?.interrupt() ?? false; }
-  sendGoodbye(): void { this._session?.sendGoodbye(); }
-  getTaskQuitInfo(): TaskQuitInfo | undefined { return this._session?.getTaskQuitInfo(); }
-  async confirmTaskQuit(info: TaskQuitInfo): Promise<"quit" | "complete-and-quit" | "cancel"> {
-    return this._session!.confirmTaskQuit(info);
-  }
-  async completeCurrentTask(): Promise<void> { await this._session?.completeCurrentTask(); }
-
-  /** Connect to the foreman and begin accepting tasks. Emits "session-started". */
-  async start(): Promise<void> {
-    if (this._session) {
-      this.display.print(c.amber("Worker mode is already active."));
-      return;
-    }
-    const { session, cleanup } = await startWorkerMode(
-      this.display, this.picker, this.workspaceController, this.repo,
-    );
-    this._session = session;
-    this._cleanup = cleanup;
-    this.emit("session-started", session);
-  }
-
-  /** Disconnect from the foreman. Prompts if a task is in progress. */
-  async stop(): Promise<void> {
-    if (!this._session) return;
-    const taskInfo = this._session.getTaskQuitInfo();
-    if (taskInfo) {
-      const choice = await this._session.confirmTaskQuit(taskInfo);
-      if (choice === "cancel") return;
-      if (choice === "complete-and-quit") await this._session.completeCurrentTask();
-    }
-    this._session.stop();
-    this._session = undefined;
-    this._cleanup = undefined; // cleared so later exit takes the non-worker path
-    this.display.agentStatus.setWorkerModeActive(false);
-    this.display.print(c.sageGreen("Worker mode stopped."));
-    this.display.agentStatus.update({ branch: await getCurrentBranch() });
-  }
-
-  /** Run worker teardown: send goodbye, destroy workspace, tear down I/O. */
-  async cleanup(): Promise<void> {
-    if (this._cleanup) await this._cleanup();
-  }
-
-  /** Register /worker:complete, /worker:start, /worker:stop into the given (already-scoped) registry. */
-  registerCommands(registry: CommandRegistry): void {
-    registry.register("complete", {
-      description: "Mark the current task as done",
-      handler: async () => {
-        if (!this._session) {
-          this.display.print(c.boldRed("Not connected to a foreman."));
-          return undefined;
-        }
-        return this._session.completeCurrentTask();
-      },
-    });
-    registry.register("start", {
-      description: "Connect to the foreman and start accepting tasks",
-      handler: async () => { await this.start(); },
-    });
-    registry.register("stop", {
-      description: "Disconnect from the foreman",
-      handler: async () => {
-        if (!this._session) {
-          this.display.print(c.amber("Worker mode is not active."));
-          return undefined;
-        }
-        await this.stop();
-      },
-    });
-  }
-
-  /** Returns the current git branch name, or "" on any error. */
-  static getCurrentBranch = getCurrentBranch;
-}
-
-// ── startWorkerMode ───────────────────────────────────────────────────────────
-
-/**
- * Create and start a WorkerSession. Sets workerModeActive on agentStatus.
- * Returns the session and a cleanup function for use by WorkerController.
- */
-export async function startWorkerMode(
-  display: Display,
-  picker: Picker,
-  workspaceController: WorkspaceController | undefined,
-  repo: string,
-): Promise<{
-  session: WorkerSession;
-  cleanup: () => Promise<void>;
-}> {
-  await workspaceController?.onCreate();
-
-  const afterTask = workspaceController ? () => workspaceController.onReset() : undefined;
-
-  const wsFactory: WsFactory = (agentId, taskId) => {
-    const ws = new WebSocket(`${getConfig().foremanUrl}/worker`);
-    ws.on("open", () => {
-      ws.send(JSON.stringify({
-        type: "worker_hello",
-        workerId: agentId,
-        repo,
-        taskId,
-        status: taskId ? "busy" : "idle",
-      }));
-    });
-    return ws;
-  };
-
-  const { agentStatus } = display;
-  agentStatus.update({ model: getConfig().model, effort: getConfig().effort });
-  agentStatus.setWorkerModeActive(true);
-
-  const session = new WorkerSession(agentStatus, wsFactory, display, {
-    afterTask,
-    workspaceController,
-    pingIntervalMs: getConfig().pingIntervalMs,
-    maxReconnectDelayMs: getConfig().maxReconnectDelayMs,
-    pickFn: (opts) => picker.pick(opts),
-    repo,
-  });
-
-  session.start();
-
-  const cleanup = async () => {
-    session.sendGoodbye();
-    await workspaceController?.onDestroy();
-    process.stdout.write("\x1b[?2004l\r\n");
-    if (process.stdin.isTTY) process.stdin.setRawMode(false);
-    process.stdin.pause();
-  };
-
-  return { session, cleanup };
 }

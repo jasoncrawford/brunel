@@ -49,16 +49,16 @@ const fakeWorkspace = vi.hoisted(() => {
   return ws;
 });
 
-// Captures the WorkerSession created by WorkerController.start() so tests can emit
-// session events directly (e.g. "prompts_ready") without a real foreman connection.
-const capturedSession = vi.hoisted(() => ({ current: null as import("../src/agent/controllers/worker-controller.js").WorkerSession | null }));
+// Captures the WorkerController instance so tests can emit events directly
+// (e.g. "prompts_ready") and inspect task state without a real foreman connection.
+const capturedSession = vi.hoisted(() => ({ current: null as import("../src/agent/controllers/worker-controller.js").WorkerController | null }));
 
 vi.mock("../src/agent/controllers/worker-controller.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/agent/controllers/worker-controller.js")>();
   class CapturingController extends actual.WorkerController {
     override async start(): Promise<void> {
       await super.start();
-      capturedSession.current = this.session ?? null;
+      capturedSession.current = this;
     }
   }
   return { ...actual, WorkerController: CapturingController };

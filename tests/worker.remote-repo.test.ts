@@ -6,7 +6,7 @@ vi.mock("node:child_process", () => ({
 
 // Import after mock is set up
 import * as childProcess from "node:child_process";
-import { WorkerSession } from "../src/agent/controllers/worker-controller.js";
+import { AgentStatus } from "../src/agent/models/agent-status.js";
 
 type ExecCallback = (err: Error | null, result: { stdout: string; stderr: string }) => void;
 
@@ -32,34 +32,34 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("WorkerSession.getRemoteRepo", () => {
+describe("AgentStatus.getRemoteRepo", () => {
   it("parses HTTPS URL with .git suffix", async () => {
     setExecResult("https://github.com/owner/repo.git\n");
-    expect(await WorkerSession.getRemoteRepo()).toBe("owner/repo");
+    expect(await AgentStatus.getRemoteRepo()).toBe("owner/repo");
   });
 
   it("parses HTTPS URL without .git suffix", async () => {
     setExecResult("https://github.com/owner/repo\n");
-    expect(await WorkerSession.getRemoteRepo()).toBe("owner/repo");
+    expect(await AgentStatus.getRemoteRepo()).toBe("owner/repo");
   });
 
   it("parses SSH URL", async () => {
     setExecResult("git@github.com:owner/repo.git\n");
-    expect(await WorkerSession.getRemoteRepo()).toBe("owner/repo");
+    expect(await AgentStatus.getRemoteRepo()).toBe("owner/repo");
   });
 
   it("parses SSH URL without .git suffix", async () => {
     setExecResult("git@github.com:owner/repo\n");
-    expect(await WorkerSession.getRemoteRepo()).toBe("owner/repo");
+    expect(await AgentStatus.getRemoteRepo()).toBe("owner/repo");
   });
 
   it("returns empty string when git command fails", async () => {
     setExecError(new Error("not a git repo"));
-    expect(await WorkerSession.getRemoteRepo()).toBe("");
+    expect(await AgentStatus.getRemoteRepo()).toBe("");
   });
 
   it("returns empty string for unrecognized URL format", async () => {
     setExecResult("not-a-url\n");
-    expect(await WorkerSession.getRemoteRepo()).toBe("");
+    expect(await AgentStatus.getRemoteRepo()).toBe("");
   });
 });
