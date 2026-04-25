@@ -78,6 +78,7 @@ describe("handleBusyHello", () => {
       await seedTask({
         task_id: "10",
         issue_number: 10,
+        repo_id: taskManager.repo.id,
         worker_id: "w1",
         completed_at: new Date().toISOString(),
         assigned_at: new Date().toISOString(),
@@ -98,6 +99,7 @@ describe("handleBusyHello", () => {
       await seedTask({
         task_id: "10",
         issue_number: 10,
+        repo_id: taskManager.repo.id,
         worker_id: "w2",
         completed_at: new Date().toISOString(),
         assigned_at: new Date().toISOString(),
@@ -116,6 +118,7 @@ describe("handleBusyHello", () => {
       await seedTask({
         task_id: "10",
         issue_number: 10,
+        repo_id: taskManager.repo.id,
         worker_id: "w2",
         assigned_at: new Date().toISOString(),
       });
@@ -131,6 +134,7 @@ describe("handleBusyHello", () => {
       await seedTask({
         task_id: "10",
         issue_number: 10,
+        repo_id: taskManager.repo.id,
         worker_id: "w1",
         assigned_at: new Date().toISOString(),
       });
@@ -151,7 +155,7 @@ describe("handleBusyHello", () => {
     });
 
     it("unassigned — reclaims (busy ack, task.assign called)", async () => {
-      await seedTask({ task_id: "10", issue_number: 10 });
+      await seedTask({ task_id: "10", issue_number: 10, repo_id: taskManager.repo.id });
       const assignSpy = vi.spyOn(Task.prototype, "assign");
 
       const { wss, sendMsg } = makeWss(taskManager);
@@ -279,7 +283,7 @@ describe("repo stored on Worker", () => {
   });
 
   it("handleBusyHello stores repo on registered Worker", async () => {
-    await seedTask({ task_id: "10", issue_number: 10, worker_id: "w1", assigned_at: new Date().toISOString() });
+    await seedTask({ task_id: "10", issue_number: 10, repo_id: taskManager.repo.id, worker_id: "w1", assigned_at: new Date().toISOString() });
     const { wss } = makeWss(taskManager);
     const repo = fakeRepo("acme/widget");
     await wss.handleBusyHello("w1", "10", fakeWs(), repo);
@@ -345,6 +349,7 @@ describe("handleBusyHello — error handling", () => {
     await seedTask({
       task_id: "10",
       issue_number: 10,
+      repo_id: taskManager.repo.id,
       worker_id: "w1",
       assigned_at: new Date().toISOString(),
     });
@@ -436,6 +441,7 @@ describe("sendError — ForemanMessage.log() is called", () => {
     await seedTask({
       task_id: "10",
       issue_number: 10,
+      repo_id: taskManager.repo.id,
       worker_id: "w1",
       assigned_at: new Date().toISOString(),
     });
@@ -480,7 +486,7 @@ describe("repoStatus in hello_ack", () => {
   });
 
   it("cancelWorker includes repoStatus from the worker's repo", async () => {
-    await seedTask({ task_id: "10", issue_number: 10, worker_id: "w2", assigned_at: new Date().toISOString() });
+    await seedTask({ task_id: "10", issue_number: 10, repo_id: taskManager.repo.id, worker_id: "w2", assigned_at: new Date().toISOString() });
     const { wss, sendMsg } = makeWss(taskManager);
     const repo = fakeRepo("some/repo", 1, "active");
     await wss.handleBusyHello("w1", "10", fakeWs(), repo);
@@ -491,7 +497,7 @@ describe("repoStatus in hello_ack", () => {
   });
 
   it("reclaimWorker includes repoStatus from the worker's repo", async () => {
-    await seedTask({ task_id: "10", issue_number: 10, worker_id: "w1", assigned_at: new Date().toISOString() });
+    await seedTask({ task_id: "10", issue_number: 10, repo_id: taskManager.repo.id, worker_id: "w1", assigned_at: new Date().toISOString() });
     const { wss, sendMsg } = makeWss(taskManager);
     const repo = fakeRepo("some/repo", 1, "active");
     await wss.handleBusyHello("w1", "10", fakeWs(), repo);

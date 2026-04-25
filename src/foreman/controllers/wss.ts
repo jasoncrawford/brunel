@@ -371,14 +371,15 @@ export class ForemanWss {
 
   /**
    * Handles the "busy" branch of a worker_hello — the worker is reconnecting
-   * and claims to be mid-task. Decides among six cases:
+   * and claims to be mid-task. Decides among seven cases:
    *
    * 1. Unknown task (numeric taskId) → create placeholder, reclaim
    * 2. Unknown task (non-numeric taskId) → cancel
-   * 3. Complete task, same worker → reclaim for finalization
-   * 4. Complete task, different worker → cancel
-   * 5. Live task, different worker → cancel
-   * 6. Otherwise (live task, same or no worker) → reclaim
+   * 3. Task belongs to a different repo → cancel
+   * 4. Complete task, same worker → reclaim for finalization
+   * 5. Complete task, different worker → cancel
+   * 6. Live task, different worker → cancel
+   * 7. Otherwise (live task, same or no worker) → reclaim
    */
   async handleBusyHello(workerId: string, claimedTaskId: string, ws: WebSocket, repo: Repo): Promise<void> {
     try {
@@ -397,6 +398,9 @@ export class ForemanWss {
         } else {
           this.cancelWorker(worker, null);
         }
+      } else if (existing.repoId !== repo.id) {
+        this.workerLog(workerId, `hello busy task=#${claimedTaskId} — task belongs to repo ${existing.repo}, worker is from ${repo.fullName}`);
+        this.cancelWorker(worker, existing);
       } else if (existing.status === "complete") {
         if (existing.workerId && existing.workerId !== workerId) {
           this.workerLog(workerId, `hello busy task=#${claimedTaskId} — task complete but owned by another worker, cancelling`);
