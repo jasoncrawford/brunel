@@ -244,9 +244,9 @@ export class ForemanWss {
     });
   }
 
-  sendMsg(worker: Worker, msg: Wire.ForemanMessage, logTaskId?: string, onError?: (err: Error) => void): boolean {
-    const taskId = logTaskId ?? (("taskId" in msg ? msg.taskId : null) ?? null);
-    const sent = worker.send(msg, onError);
+  sendMsg(worker: Worker, msg: Wire.ForemanMessage, opts: { logTaskId?: string; onError?: (err: Error) => void } = {}): boolean {
+    const taskId = opts.logTaskId ?? (("taskId" in msg ? msg.taskId : null) ?? null);
+    const sent = worker.send(msg, opts.onError);
     if (sent) {
       this.logAndBroadcastSent(worker.workerId, taskId, msg.type, msg as unknown as Record<string, unknown>, worker.repo.id, worker.repo.fullName);
     }
@@ -306,11 +306,10 @@ export class ForemanWss {
       const sent = this.sendMsg(
         worker,
         { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload() },
-        undefined,
-        (err) => {
+        { onError: (err) => {
           task.queueEvent(evt);
           this.workerLog(worker.workerId, `✗ event_notification send error — requeued #${task.issueNumber} ${evt.eventName}: ${fmtError(err)}`);
-        },
+        } },
       );
       if (sent) {
         this.workerLog(worker.workerId, `→ event_notification #${task.issueNumber} ${evt.eventName} (queued)`);
@@ -322,7 +321,7 @@ export class ForemanWss {
   }
 
   private cancelWorker(worker: Worker, task: Task | null): void {
-    this.sendMsg(worker, { type: "hello_ack", workerId: worker.workerId, status: "cancelled", repoStatus: worker.repo.status }, task?.taskId);
+    this.sendMsg(worker, { type: "hello_ack", workerId: worker.workerId, status: "cancelled", repoStatus: worker.repo.status }, { logTaskId: task?.taskId });
   }
 
   private async reclaimWorker(worker: Worker, task: Task): Promise<void> {
@@ -332,7 +331,7 @@ export class ForemanWss {
       await task.assign(worker);
     }
     // For complete tasks, the task stays complete while worker finishes cleanup/finalization work
-    this.sendMsg(worker, { type: "hello_ack", workerId: worker.workerId, status: "busy", repoStatus: worker.repo.status }, task.taskId);
+    this.sendMsg(worker, { type: "hello_ack", workerId: worker.workerId, status: "busy", repoStatus: worker.repo.status }, { logTaskId: task.taskId });
     this.flushQueuedEvents(worker, task);
   }
 
@@ -527,11 +526,10 @@ export class ForemanWss {
         const sent = this.sendMsg(
           worker,
           { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload() },
-          undefined,
-          (err) => {
+          { onError: (err) => {
             task.queueEvent(evt);
             log(`[task ${ref}] ${evt.eventName} requeued (send error: ${fmtError(err)})`);
-          },
+          } },
         );
         if (sent) {
           log(`[worker ${shortWorkerId(task.workerId)}] → event_notification ${ref} ${evt.eventName}`);
