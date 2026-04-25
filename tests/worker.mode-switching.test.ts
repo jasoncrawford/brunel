@@ -14,21 +14,21 @@ vi.mock("ws", async () => {
   };
 });
 
-// Captures sessions created by startWorkerMode so tests can inspect state.
+// Captures sessions created by WorkerController.start() so tests can inspect state.
 const capturedSessions = vi.hoisted(() => ({
   list: [] as import("../src/agent/controllers/worker-controller.js").WorkerSession[],
 }));
 
 vi.mock("../src/agent/controllers/worker-controller.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/agent/controllers/worker-controller.js")>();
-  return {
-    ...actual,
-    startWorkerMode: async (...args: Parameters<typeof actual.startWorkerMode>) => {
-      const result = await actual.startWorkerMode(...args);
-      capturedSessions.list.push(result.session);
-      return result;
-    },
-  };
+  class CapturingController extends actual.WorkerController {
+    override async start(): Promise<void> {
+      const hadSession = this.session !== undefined;
+      await super.start();
+      if (!hadSession && this.session) capturedSessions.list.push(this.session);
+    }
+  }
+  return { ...actual, WorkerController: CapturingController };
 });
 
 vi.mock("../src/agent/models/workspace.js", async (importOriginal) => {

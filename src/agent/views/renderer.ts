@@ -575,6 +575,10 @@ export class Renderer {
    * Called by Display._updatePersistent() and Display._handleResize().
    */
   fmtStatusBar(status: AgentStatus, width: number): string {
+    // Dim sage-green bg + bright-white text. No trailing reset: drawRaw() appends
+    // \x1b[K (fills remaining width with the same bg) then \x1b[0m.
+    const styledBar = (content: string) => `\x1b[48;5;22m\x1b[97m${content}`;
+
     const modelName = (!status.model || status.model === "default") ? "sonnet" : status.model;
     const effortStr = status.effort ? ` (${status.effort})` : "";
     // Base parts shared by both modes: worker id + model/effort.
@@ -586,9 +590,7 @@ export class Renderer {
       if (status.branch) parts.push(status.branch);
       let leftText = parts.join(" ∙ ");
       if (leftText.length > width) leftText = leftText.slice(0, Math.max(0, width - 1)) + "…";
-      // Dim sage-green background + bright-white text. No trailing reset: drawRaw()
-      // appends \x1b[K (fills remaining width with the same background) then \x1b[0m.
-      return `\x1b[48;5;22m\x1b[97m${leftText.padEnd(width)}`;
+      return styledBar(leftText.padEnd(width));
     }
 
     // Right side: connection status
@@ -626,8 +628,6 @@ export class Renderer {
     }
 
     const gap = Math.max(1, width - leftText.length - rightText.length);
-    // Dim sage-green background + bright-white text. No trailing reset: drawRaw()
-    // appends \x1b[K (fills remaining width with the same background) then \x1b[0m.
-    return `\x1b[48;5;22m\x1b[97m${leftText + " ".repeat(gap) + rightText}`;
+    return styledBar(leftText + " ".repeat(gap) + rightText);
   }
 }

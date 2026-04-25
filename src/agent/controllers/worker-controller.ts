@@ -18,6 +18,15 @@ import { WorkspaceController } from "./workspace-controller.js";
 
 const execAsync = promisify(exec);
 
+async function getCurrentBranch(): Promise<string> {
+  try {
+    const { stdout } = await execAsync("git rev-parse --abbrev-ref HEAD");
+    return stdout.trim();
+  } catch {
+    return "";
+  }
+}
+
 function fmtTaskStats(inputTokens: number, outputTokens: number, costUsd: number | undefined): string {
   const parts = [`tokens: ${fmtNum(inputTokens)} in / ${fmtNum(outputTokens)} out`];
   if (costUsd != null) parts.push(`cost: $${costUsd.toFixed(2)}`);
@@ -185,24 +194,7 @@ export class WorkerSession extends EventEmitter {
   get agentId(): string { return this.agentStatus.agentId; }
 
   private async refreshBranch(): Promise<void> {
-    let branch = "";
-    try {
-      const { stdout } = await execAsync("git rev-parse --abbrev-ref HEAD");
-      branch = stdout.trim();
-    } catch {
-      branch = "";
-    }
-    this.agentStatus.update({ branch });
-  }
-
-  /** Returns the current git branch name, or "" on any error. */
-  static async getCurrentBranch(): Promise<string> {
-    try {
-      const { stdout } = await execAsync("git rev-parse --abbrev-ref HEAD");
-      return stdout.trim();
-    } catch {
-      return "";
-    }
+    this.agentStatus.update({ branch: await getCurrentBranch() });
   }
 
   /**
@@ -695,51 +687,108 @@ export class WorkerSession extends EventEmitter {
  * Register the worker-namespace commands into the given registry (which should
  * already be scoped, e.g. registry.scoped("worker")). Commands degrade
  * gracefully when not connected to a foreman.
- *
- * Accepts a getter so handlers always resolve the current session even when
- * worker mode is started or stopped at runtime after registration. onStart and
- * onStop are called by the /worker:start and /worker:stop command handlers.
  */
-export function registerWorkerCommands(
-  getSession: () => WorkerSession | undefined,
-  registry: CommandRegistry,
-  display: WorkerDisplay,
-  onStart: () => Promise<void>,
-  onStop: () => Promise<void>,
-): void {
-  registry.register("complete", {
-    description: "Mark the current task as done",
-    handler: async () => {
-      const session = getSession();
-      if (!session) {
-        display.print(c.boldRed("Not connected to a foreman."));
-        return undefined;
-      }
-      return session.completeCurrentTask();
-    },
-  });
-  registry.register("start", {
-    description: "Connect to the foreman and start accepting tasks",
-    handler: async () => { await onStart(); },
-  });
-  registry.register("stop", {
-    description: "Disconnect from the foreman",
-    handler: async () => {
-      if (!getSession()) {
-        display.print(c.amber("Worker mode is not active."));
-        return undefined;
-      }
-      await onStop();
-    },
-  });
+export class WorkerController extends EventEmitter {
+  private _session: WorkerSession | undefined;
+  private _cleanup: (() => Promise<void>) | undefined;
+
+  constructor(
+    private readonly display: Display,
+    private readonly picker: Picker,
+    private readonly workspaceController: WorkspaceController | undefined,
+    private readonly repo: string,
+  ) {
+    super();
+  }
+
+  /** The active WorkerSession, or undefined when worker mode is off. */
+  get session(): WorkerSession | undefined { return this._session; }
+  /** True when worker mode is active (connected or connecting). */
+  get isActive(): boolean { return this._session !== undefined; }
+  /** True when a worker cleanup must run on exit (i.e., worker is active). */
+  get isCleanupPending(): boolean { return this._cleanup !== undefined; }
+
+  hasTask(): boolean { return this._session?.hasTask() ?? false; }
+  interrupt(): boolean { return this._session?.interrupt() ?? false; }
+  sendGoodbye(): void { this._session?.sendGoodbye(); }
+  getTaskQuitInfo(): TaskQuitInfo | undefined { return this._session?.getTaskQuitInfo(); }
+  async confirmTaskQuit(info: TaskQuitInfo): Promise<"quit" | "complete-and-quit" | "cancel"> {
+    return this._session!.confirmTaskQuit(info);
+  }
+  async completeCurrentTask(): Promise<void> { await this._session?.completeCurrentTask(); }
+
+  /** Connect to the foreman and begin accepting tasks. Emits "session-started". */
+  async start(): Promise<void> {
+    if (this._session) {
+      this.display.print(c.amber("Worker mode is already active."));
+      return;
+    }
+    const { session, cleanup } = await startWorkerMode(
+      this.display, this.picker, this.workspaceController, this.repo,
+    );
+    this._session = session;
+    this._cleanup = cleanup;
+    this.emit("session-started", session);
+  }
+
+  /** Disconnect from the foreman. Prompts if a task is in progress. */
+  async stop(): Promise<void> {
+    if (!this._session) return;
+    const taskInfo = this._session.getTaskQuitInfo();
+    if (taskInfo) {
+      const choice = await this._session.confirmTaskQuit(taskInfo);
+      if (choice === "cancel") return;
+      if (choice === "complete-and-quit") await this._session.completeCurrentTask();
+    }
+    this._session.stop();
+    this._session = undefined;
+    this._cleanup = undefined; // cleared so later exit takes the non-worker path
+    this.display.agentStatus.setWorkerModeActive(false);
+    this.display.print(c.sageGreen("Worker mode stopped."));
+  }
+
+  /** Run worker teardown: send goodbye, destroy workspace, tear down I/O. */
+  async cleanup(): Promise<void> {
+    if (this._cleanup) await this._cleanup();
+  }
+
+  /** Register /worker:complete, /worker:start, /worker:stop into the given (already-scoped) registry. */
+  registerCommands(registry: CommandRegistry): void {
+    registry.register("complete", {
+      description: "Mark the current task as done",
+      handler: async () => {
+        if (!this._session) {
+          this.display.print(c.boldRed("Not connected to a foreman."));
+          return undefined;
+        }
+        return this._session.completeCurrentTask();
+      },
+    });
+    registry.register("start", {
+      description: "Connect to the foreman and start accepting tasks",
+      handler: async () => { await this.start(); },
+    });
+    registry.register("stop", {
+      description: "Disconnect from the foreman",
+      handler: async () => {
+        if (!this._session) {
+          this.display.print(c.amber("Worker mode is not active."));
+          return undefined;
+        }
+        await this.stop();
+      },
+    });
+  }
+
+  /** Returns the current git branch name, or "" on any error. */
+  static getCurrentBranch = getCurrentBranch;
 }
 
+// ── startWorkerMode ───────────────────────────────────────────────────────────
+
 /**
- * Set up worker mode: configure the WorkerSession and start the session.
- * Receives the full Display (which owns agentStatus and bar rendering) and a
- * WorkspaceController. Returns the session and a cleanup function — does NOT
- * call main(). The caller (main itself) owns the query loop, installs signal
- * handlers, and calls cleanup() after the loop exits.
+ * Create and start a WorkerSession. Sets workerModeActive on agentStatus.
+ * Returns the session and a cleanup function for use by WorkerController.
  */
 export async function startWorkerMode(
   display: Display,

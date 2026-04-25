@@ -7,7 +7,7 @@ import { c, hr } from "./views/style.js";
 import { AgentStatus } from "./models/agent-status.js";
 import { Input } from "./views/input.js";
 import { Picker } from "./views/picker.js";
-import { registerWorkerCommands, startWorkerMode, WorkerSession } from "./controllers/worker-controller.js";
+import { WorkerController, WorkerSession } from "./controllers/worker-controller.js";
 import { loadConfig, getConfig, type BrunelConfig } from "../config.js";
 import { Workspace } from "./models/workspace.js";
 import { fmtError } from "../utils.js";
@@ -70,7 +70,7 @@ export class BrunelAgent {
     // Always detect the repo so /worker:start can use it at runtime.
     const repo = await WorkerSession.getRemoteRepo();
     // Show current branch in the minimal status bar before worker mode activates.
-    this.agentStatus.update({ branch: await WorkerSession.getCurrentBranch() });
+    this.agentStatus.update({ branch: await WorkerController.getCurrentBranch() });
 
     // Build workspace config after repo detection. repoUrl can be set explicitly
     // in config; otherwise it's derived from the detected git remote + token.
@@ -89,10 +89,6 @@ export class BrunelAgent {
       : undefined;
     const workspaceController = new WorkspaceController(workspace, this.display, config);
 
-    // Mutable session and cleanup refs — updated when worker mode is started/stopped.
-    let session: WorkerSession | undefined;
-    let workerCleanup: (() => Promise<void>) | undefined;
-
     // doExit handles workspace cleanup and stdin/stdout teardown.
     // Called on exit from pure REPL mode (no active worker session).
     const doExit = async () => {
@@ -104,8 +100,8 @@ export class BrunelAgent {
 
     // ── Routing queue ─────────────────────────────────────────────────────────
     //
-    // Defined early so attachSessionListeners (which is called by startWorker)
-    // can enqueue session events before the routing loop is reached.
+    // Defined early so the session-started listener (which fires before the
+    // routing loop starts) can enqueue session events into it.
 
     type RoutingEvent =
       | { type: "line"; value: string }
@@ -124,9 +120,10 @@ export class BrunelAgent {
       return new Promise((resolve) => { routingWaiter = resolve; });
     };
 
-    // ── Session listener attachment ────────────────────────────────────────────
+    // ── Worker controller ─────────────────────────────────────────────────────
 
-    const attachSessionListeners = (s: WorkerSession): void => {
+    const workerController = new WorkerController(this.display, this.picker, workspaceController, repo);
+    workerController.on("session-started", (s: WorkerSession) => {
       s.on("prompts_ready", () => {
         this.input.cancel();
         enqueueRoutingEvent({ type: "session", event: "prompts_ready" });
@@ -135,35 +132,7 @@ export class BrunelAgent {
         this.input.cancel();
         enqueueRoutingEvent({ type: "session", event: "fatal" });
       });
-    };
-
-    // ── Worker mode start/stop helpers ────────────────────────────────────────
-
-    const stopWorker = async (): Promise<void> => {
-      if (!session) return;
-      const taskInfo = session.getTaskQuitInfo();
-      if (taskInfo) {
-        const choice = await session.confirmTaskQuit(taskInfo);
-        if (choice === "cancel") return;
-        if (choice === "complete-and-quit") await session.completeCurrentTask();
-      }
-      session.stop();
-      session = undefined;
-      workerCleanup = undefined; // prevent double-cleanup on later exit
-      this.agentStatus.setWorkerModeActive(false);
-      this.display.print(c.sageGreen("Worker mode stopped."));
-    };
-
-    const startWorker = async (): Promise<void> => {
-      if (session) {
-        this.display.print(c.amber("Worker mode is already active."));
-        return;
-      }
-      const ctx = await startWorkerMode(this.display, this.picker, workspaceController, repo);
-      session = ctx.session;
-      workerCleanup = ctx.cleanup;
-      attachSessionListeners(session);
-    };
+    });
 
     // ── Signal handlers ───────────────────────────────────────────────────────
     //
@@ -171,20 +140,20 @@ export class BrunelAgent {
     // regardless of when worker mode is started or stopped.
 
     process.on("SIGINT", () => {
-      if (!session?.interrupt()) {
+      if (!workerController.interrupt()) {
         // Nothing to interrupt — print a newline to keep the terminal tidy.
         process.stdout.write("\n");
       }
     });
     process.on("SIGTERM", async () => {
-      session?.sendGoodbye();
+      workerController.sendGoodbye();
       await doExit();
       process.exit(0);
     });
 
     // Start worker mode immediately if requested via --worker-mode flag.
     if (runWorkerMode) {
-      await startWorker();
+      await workerController.start();
     }
 
     // Status bar is always shown regardless of worker mode.
@@ -207,17 +176,16 @@ export class BrunelAgent {
     // modes; commands that require a foreman connection degrade gracefully.
     const registry = this.controller.registry;
     workspaceController.registerCommands(registry.scoped("workspace"));
-    const workerRegistry = registry.scoped("worker");
-    registerWorkerCommands(() => session, workerRegistry, this.display, startWorker, stopWorker);
+    workerController.registerCommands(registry.scoped("worker"));
     registry.register("exit", {
       description: "Exit",
       handler: async () => {
-        if (!session) { await doExit(); return "exit"; }
-        const taskInfo = session.getTaskQuitInfo();
+        if (!workerController.isActive) { await doExit(); return "exit"; }
+        const taskInfo = workerController.getTaskQuitInfo();
         if (taskInfo) {
-          const choice = await session.confirmTaskQuit(taskInfo);
+          const choice = await workerController.confirmTaskQuit(taskInfo);
           if (choice === "cancel") return undefined;
-          if (choice === "complete-and-quit") await session.completeCurrentTask();
+          if (choice === "complete-and-quit") await workerController.completeCurrentTask();
         }
         return "exit";
       },
@@ -266,11 +234,11 @@ export class BrunelAgent {
      */
     const runPrompt = async (prompt: string): Promise<boolean> => {
       const ac = new AbortController();
-      session?.notifyQueryStart(ac);
+      workerController.session?.notifyQueryStart(ac);
       try {
         const { sessionId: newId, stats } = await this.agentController.runQuery(prompt, sessionId, ac);
         sessionId = newId ?? sessionId;
-        if (session) {
+        if (workerController.isActive) {
           this.agentStatus.addQueryStats(stats.inputTokens, stats.outputTokens, stats.costUsd);
         }
         return !ac.signal.aborted;
@@ -279,7 +247,7 @@ export class BrunelAgent {
         logFull("ERROR", err instanceof Error ? { message: err.message, stack: err.stack } : err);
         return false;
       } finally {
-        session?.notifyQueryEnd(ac.signal.aborted);
+        workerController.session?.notifyQueryEnd(ac.signal.aborted);
       }
     };
 
@@ -288,8 +256,8 @@ export class BrunelAgent {
      * draining if a prompt is interrupted or errors.
      */
     const drainPendingPrompts = async (): Promise<void> => {
-      while (session?.hasPendingPrompts()) {
-        const item = session.takeNextPrompt()!;
+      while (workerController.session?.hasPendingPrompts()) {
+        const item = workerController.session.takeNextPrompt()!;
         if (item.fresh) sessionId = undefined; // new task → fresh conversation
         const ok = await runPrompt(item.prompt);
         if (!ok) break;
@@ -306,8 +274,8 @@ export class BrunelAgent {
     // In worker mode with no active task, use an empty prompt so stdin remains
     // active (^D / ^C still work) but no "[agent] > " is displayed while waiting.
     const listenForInput = (): void => {
-      const promptStr = session
-        ? (session.hasTask() ? "\n[agent] > " : "")
+      const promptStr = workerController.isActive
+        ? (workerController.hasTask() ? "\n[agent] > " : "")
         : "\n> ";
       void this.input.ask(promptStr, () => this.controller.listCommands()).then((line) => {
         if (line !== null) enqueueRoutingEvent({ type: "line", value: line });
@@ -317,7 +285,7 @@ export class BrunelAgent {
     while (true) {
       // Skip showing the prompt when session prompts are already queued
       // (avoids briefly flashing the prompt before immediately cancelling it).
-      if (session?.hasPendingPrompts()) {
+      if (workerController.session?.hasPendingPrompts()) {
         await drainPendingPrompts();
         continue;
       }
@@ -342,12 +310,12 @@ export class BrunelAgent {
 
       // ^D on empty buffer — treat as exit.
       if (userInput === "__eof__") {
-        if (!session) { await doExit(); break; }
-        const taskInfo = session.getTaskQuitInfo();
+        if (!workerController.isActive) { await doExit(); break; }
+        const taskInfo = workerController.getTaskQuitInfo();
         if (taskInfo) {
-          const choice = await session.confirmTaskQuit(taskInfo);
+          const choice = await workerController.confirmTaskQuit(taskInfo);
           if (choice === "cancel") continue;
-          if (choice === "complete-and-quit") await session.completeCurrentTask();
+          if (choice === "complete-and-quit") await workerController.completeCurrentTask();
         }
         break;
       }
@@ -355,8 +323,8 @@ export class BrunelAgent {
       // ^C on empty buffer — stop worker mode if idle; otherwise ignore
       // (the running query was already interrupted by the SIGINT handler).
       if (userInput === "__ctrl_c__") {
-        if (session && !session.hasTask()) {
-          await stopWorker();
+        if (workerController.isActive && !workerController.hasTask()) {
+          await workerController.stop();
         }
         continue;
       }
@@ -386,8 +354,8 @@ export class BrunelAgent {
     }
 
     // Worker mode post-loop: send goodbye, destroy workspace, tear down I/O, exit.
-    if (workerCleanup) {
-      await workerCleanup();
+    if (workerController.isCleanupPending) {
+      await workerController.cleanup();
       process.exit(0);
     }
   }
