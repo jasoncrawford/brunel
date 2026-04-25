@@ -167,6 +167,54 @@ describe("fetchNativeBlockers", () => {
   });
 });
 
+describe("loadIssuesToQueue cleanup scoping", () => {
+  it("does not delete pending tasks from other repos during cleanup", async () => {
+    // Repo A: issue #1 is labeled
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => [{ number: 1, title: "Issue 1", body: "", labels: [{ name: "brunel:ready" }] }],
+    } as any);
+
+    resetDb();
+    const tmA = await createTestTaskManager("owner/repo-a");
+    const tmB = await createTestTaskManager("owner/repo-b");
+    vi.spyOn(tmA, "fetchBlockers").mockResolvedValue([]);
+
+    // Seed a pending task for Repo B with issue #7
+    await Task.upsert("repo-b-7", 7, "owner/repo-b", "Repo B issue", "", ["brunel:ready"]);
+    const repoBTask = await Task.getByRepoIssue(tmB.repo.id, 7);
+    expect(repoBTask).not.toBeNull();
+
+    // loadIssuesToQueue runs for Repo A — should only clean up Repo A's tasks
+    await loadIssuesToQueue(tmA);
+
+    // Repo B's task #7 must still exist
+    const afterCleanup = await Task.getByRepoIssue(tmB.repo.id, 7);
+    expect(afterCleanup).not.toBeNull();
+  });
+
+  it("still deletes stale tasks from the current repo", async () => {
+    // Repo A: issue #1 is labeled, but #99 is not (stale)
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => [{ number: 1, title: "Issue 1", body: "", labels: [{ name: "brunel:ready" }] }],
+    } as any);
+
+    resetDb();
+    const tmA = await createTestTaskManager("owner/repo-a");
+    vi.spyOn(tmA, "fetchBlockers").mockResolvedValue([]);
+
+    // Seed a stale pending task for Repo A with issue #99 (no longer labeled)
+    await Task.upsert("repo-a-99", 99, "owner/repo-a", "Stale issue", "", []);
+    expect(await Task.getByRepoIssue(tmA.repo.id, 99)).not.toBeNull();
+
+    await loadIssuesToQueue(tmA);
+
+    // Stale task from Repo A should be deleted
+    expect(await Task.getByRepoIssue(tmA.repo.id, 99)).toBeNull();
+  });
+});
+
 describe("loadIssuesToQueue with blockers", () => {
   it("populates taskManager blockers from fetchBlockers result", async () => {
     vi.mocked(fetch)
