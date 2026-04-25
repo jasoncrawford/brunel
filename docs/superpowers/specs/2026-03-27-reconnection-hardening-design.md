@@ -100,7 +100,7 @@ Close code and reason are discarded. Error object is discarded. This makes it im
 
 All workers reconnect after exactly 3 seconds. If many workers disconnect simultaneously (e.g., foreman restart), they all hammer the foreman at the same moment 3 seconds later. Not a root cause, but can amplify other problems.
 
-**Resolution:** PR #866 replaced the fixed delay with exponential backoff: the delay starts at 2s and doubles on each consecutive failure (2s → 4s → 8s → … → 5min cap), with up to 1s of jitter. The counter resets to 0 on a successful `hello_ack` so a stable connection always starts from the shortest delay.
+**Resolution:** PR #866 replaced the fixed delay with Full Jitter exponential backoff (Brooker 2015): `delay = random(0, min(300s, 1s × 2^attempt))`. Jitter scales with the full delay window rather than a fixed band, which decisively spreads concurrent reconnects. The attempt counter resets to 0 on a successful `hello_ack`.
 
 ---
 
