@@ -273,6 +273,30 @@ describe("worker mode switching", () => {
     expect(capturedStatus?.workerModeActive).toBe(true);
   });
 
+  it("/worker:stop refreshes agentStatus.branch to current git branch", async () => {
+    let capturedStatus: AgentStatus | undefined;
+    vi.mocked(AgentController).mockImplementation(function(this: unknown, display: unknown) {
+      capturedStatus = (display as { agentStatus: AgentStatus }).agentStatus;
+      return { runQuery: vi.fn().mockResolvedValue(undefined) } as unknown as AgentController;
+    });
+
+    let askCallCount = 0;
+    mockInput.ask.mockImplementation(() => {
+      askCallCount++;
+      if (askCallCount === 1) return Promise.resolve("/worker:start");
+      if (askCallCount === 2) {
+        // Simulate the branch being cleared after a task completes
+        if (capturedStatus) capturedStatus.update({ branch: "" });
+        return Promise.resolve("/worker:stop");
+      }
+      return Promise.resolve("__eof__");
+    });
+
+    await runAgent(false);
+
+    expect(capturedStatus?.branch).not.toBe("");
+  });
+
   it("after /worker:stop, exiting does not call process.exit(0)", async () => {
     // When worker mode is stopped before exit, workerCleanup is cleared.
     // The exit path should go through doExit() which does NOT call process.exit.

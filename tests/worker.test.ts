@@ -281,6 +281,24 @@ describe("state after task_complete", () => {
     await session.completeCurrentTask();
     expect(fakeWs.send).not.toHaveBeenCalled();
   });
+
+  it("restores current branch in agentStatus after task completion (not empty string)", async () => {
+    const getBranch = vi.fn().mockResolvedValue("feature-branch");
+    const localSb = new AgentStatus({ agentId: AGENT_ID });
+    const localSession = new WorkerSession(localSb, wsFactory, display, {
+      repo: "owner/repo",
+      maxReconnectDelayMs: 300_000,
+      getBranch,
+    });
+    localSession.start();
+
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
+    localSession.takeNextPrompt();
+
+    await localSession.completeCurrentTask();
+
+    expect(localSb.branch).toBe("feature-branch");
+  });
 });
 
 // ── Prompt queuing API ────────────────────────────────────────────────────────
