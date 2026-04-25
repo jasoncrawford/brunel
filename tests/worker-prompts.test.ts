@@ -88,6 +88,101 @@ describe("buildInitialPrompt", () => {
 
 });
 
+describe("buildInitialPrompt — status-dependent prompts", () => {
+  const baseIssue = {
+    number: 99,
+    title: "My Task",
+    body: "Some work to do",
+    labels: ["feature"],
+    repoUrl: "https://github.com/x/y",
+  };
+
+  describe("status: assigned (default, no PR)", () => {
+    it("uses the standard new-task prompt", () => {
+      const p = buildInitialPrompt({ ...baseIssue, status: "assigned" }, true);
+      expect(p).toContain("#99");
+      expect(p).toContain("Please work on GitHub issue");
+      expect(p).toContain("Create a PR when done");
+    });
+
+    it("default (no status field) behaves like assigned", () => {
+      const p = buildInitialPrompt({ ...baseIssue }, true);
+      expect(p).toContain("Please work on GitHub issue");
+      expect(p).toContain("Create a PR when done");
+    });
+  });
+
+  describe("status: pushed (open PR exists)", () => {
+    it("mentions the open PR and its number", () => {
+      const p = buildInitialPrompt(
+        { ...baseIssue, status: "pushed", prNumber: 42, branch: "fix/my-task" },
+        true,
+      );
+      expect(p).toContain("PR #42");
+    });
+
+    it("tells the worker to fetch and switch to the branch", () => {
+      const p = buildInitialPrompt(
+        { ...baseIssue, status: "pushed", prNumber: 42, branch: "fix/my-task" },
+        true,
+      );
+      expect(p).toContain("fix/my-task");
+      expect(p).toMatch(/fetch/i);
+    });
+
+    it("tells the worker to review code review comments", () => {
+      const p = buildInitialPrompt(
+        { ...baseIssue, status: "pushed", prNumber: 42, branch: "fix/my-task" },
+        true,
+      );
+      expect(p).toMatch(/code review/i);
+    });
+
+    it("does NOT include the standard new-task Create-a-PR instruction", () => {
+      const p = buildInitialPrompt(
+        { ...baseIssue, status: "pushed", prNumber: 42, branch: "fix/my-task" },
+        true,
+      );
+      expect(p).not.toContain("Create a PR when done");
+    });
+  });
+
+  describe("status: merged (PR merged, issue still open)", () => {
+    it("tells the worker the PR was merged", () => {
+      const p = buildInitialPrompt({ ...baseIssue, status: "merged" }, true);
+      expect(p).toMatch(/PR.*merged|merged.*PR/i);
+    });
+
+    it("tells the worker the issue was not closed and to determine next steps", () => {
+      const p = buildInitialPrompt({ ...baseIssue, status: "merged" }, true);
+      expect(p).toMatch(/not closed/i);
+      expect(p).toMatch(/next steps?/i);
+    });
+
+    it("does NOT include the standard new-task Create-a-PR instruction", () => {
+      const p = buildInitialPrompt({ ...baseIssue, status: "merged" }, true);
+      expect(p).not.toContain("Create a PR when done");
+    });
+  });
+
+  describe("status: closed (issue is closed)", () => {
+    it("tells the worker the issue is closed", () => {
+      const p = buildInitialPrompt({ ...baseIssue, status: "closed" }, true);
+      expect(p).toMatch(/issue.*closed|closed.*issue/i);
+    });
+
+    it("instructs the worker to look for followup work", () => {
+      const p = buildInitialPrompt({ ...baseIssue, status: "closed" }, true);
+      expect(p).toMatch(/follow.?up/i);
+    });
+
+    it("does NOT include the standard new-task Create-a-PR instruction", () => {
+      const p = buildInitialPrompt({ ...baseIssue, status: "closed" }, true);
+      expect(p).not.toContain("Create a PR when done");
+    });
+  });
+});
+
 describe("buildEventPrompt", () => {
   it("returns multi-event fallback for 2+ events", () => {
     const events: Wire.WebhookEvent[] = [

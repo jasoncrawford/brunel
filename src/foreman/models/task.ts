@@ -103,13 +103,16 @@ export class Task extends ActiveRecord {
     };
   }
 
-  toAssignmentPayload(): { number: number; title: string; body: string; labels: string[]; repoUrl: string } {
+  toAssignmentPayload(): Wire.TaskIssue {
     return {
       number: this.issueNumber,
       title: this.title,
       body: this.body,
       labels: this.labels,
       repoUrl: this.repoUrl,
+      status: this.status,
+      prNumber: this.prNumber,
+      branch: this.branch,
     };
   }
 

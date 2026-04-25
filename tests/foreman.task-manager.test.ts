@@ -687,6 +687,9 @@ describe("Task.toAssignmentPayload", () => {
       body: "It is broken",
       labels: ["bug", "brunel:ready"],
       repoUrl: "https://github.com/owner/repo",
+      status: "pending",
+      prNumber: null,
+      branch: null,
     });
   });
 });
