@@ -7,6 +7,7 @@ import type { Repo } from "./repo.js";
 import type { Database } from "../../database.types.js";
 import { log } from "../../utils.js";
 import { ActiveRecord } from "./active-record.js";
+import { db } from "../clients/db-client.js";
 
 type WorkerDbRow = Database["public"]["Tables"]["workers"]["Row"];
 
@@ -30,6 +31,11 @@ export class Worker extends ActiveRecord {
 
   protected static readonly tableName = "workers";
   protected static readonly primaryKey = "worker_id";
+
+  /** Join repos so that repoFullName is available on DB-fetched instances. */
+  protected static select() {
+    return (db.from as any)(this.tableName).select("*, repos(full_name)");
+  }
 
   readonly workerId: string;
   status: "idle" | "busy" | "disconnected";
@@ -57,7 +63,7 @@ export class Worker extends ActiveRecord {
     super();
     this.workerId = row.worker_id;
     this.status = row.status as "idle" | "busy" | "disconnected";
-    this.repoFullName = row.repo_full_name ?? undefined;
+    this.repoFullName = (row as any).repos?.full_name ?? undefined;
     this.numConnections = row.num_connections ?? undefined;
     this.firstConnectedAt = row.first_connected_at ?? undefined;
     this.lastConnectedAt = row.last_connected_at ?? undefined;
@@ -86,7 +92,6 @@ export class Worker extends ActiveRecord {
         status: "idle",
         current_task_id: null,
         repo_id: repo.id,
-        repo_full_name: repo.fullName,
         first_connected_at: null,
         last_connected_at: null,
         num_connections: null,
@@ -167,7 +172,6 @@ export class Worker extends ActiveRecord {
     if (existing) {
       await existing.update({
         repo_id: repo.id,
-        repo_full_name: repo.fullName,
         status: "idle",
         current_task_id: null,
         last_connected_at: now,
@@ -179,7 +183,6 @@ export class Worker extends ActiveRecord {
       await Worker.insert({
         worker_id: workerId,
         repo_id: repo.id,
-        repo_full_name: repo.fullName,
         status: "idle",
         current_task_id: null,
         first_connected_at: now,

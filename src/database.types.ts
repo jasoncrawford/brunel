@@ -37,7 +37,6 @@ export type Database = {
         Row: {
           worker_id: string
           repo_id: number
-          repo_full_name: string
           status: string
           current_task_id: string | null
           first_connected_at: string
@@ -49,7 +48,6 @@ export type Database = {
         Insert: {
           worker_id: string
           repo_id: number
-          repo_full_name: string
           status?: string
           current_task_id?: string | null
           first_connected_at?: string
@@ -61,7 +59,6 @@ export type Database = {
         Update: {
           worker_id?: string
           repo_id?: number
-          repo_full_name?: string
           status?: string
           current_task_id?: string | null
           first_connected_at?: string

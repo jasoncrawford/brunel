@@ -5,15 +5,16 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { Worker } from "../src/foreman/models/worker.js";
 import { db } from "../src/foreman/clients/db-client.js";
-import { fakeRepo, resetDb } from "./helpers/task.js";
+import { fakeRepo, resetDb, createTestRepo } from "./helpers/task.js";
 
 function fakeWs() {
   return { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   Worker._reset();
   resetDb();
+  await createTestRepo("owner/repo");
 });
 
 describe("Worker DB persistence", () => {
@@ -23,7 +24,7 @@ describe("Worker DB persistence", () => {
     await new Promise((r) => setTimeout(r, 20));
     const { data } = await (db.from as any)("workers")
       .select("*").eq("worker_id", "w1").maybeSingle();
-    expect(data).toMatchObject({ worker_id: "w1", status: "idle", repo_full_name: "owner/repo", num_connections: 1 });
+    expect(data).toMatchObject({ worker_id: "w1", status: "idle", num_connections: 1 });
   });
 
   it("reconnect increments num_connections", async () => {

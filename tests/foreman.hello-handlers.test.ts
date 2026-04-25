@@ -143,6 +143,11 @@ describe("handleBusyHello", () => {
       expect(ack?.status).toBe("busy");
       expect(assignSpy).toHaveBeenCalledWith(expect.objectContaining({ workerId: "w1" }));
       expect(Worker.fromRegistry("w1")?.currentTaskId).toBe("10");
+
+      await new Promise((r) => setTimeout(r, 20));
+      const dbWorker = await Worker.get("w1");
+      expect(dbWorker?.workerId).toBe("w1");
+      expect(dbWorker?.status).toBe("busy");
     });
 
     it("unassigned — reclaims (busy ack, task.assign called)", async () => {
@@ -192,6 +197,11 @@ describe("handleIdleHello", () => {
     const ack = helloAck(sendMsg);
     expect(ack?.status).toBe("idle");
     expect(Worker.fromRegistry("w1")?.status).toBe("idle");
+
+    await new Promise((r) => setTimeout(r, 20));
+    const dbWorker = await Worker.get("w1");
+    expect(dbWorker?.workerId).toBe("w1");
+    expect(dbWorker?.status).toBe("idle");
   });
 
   it("has prior task — reverts it and sends idle ack", async () => {

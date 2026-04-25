@@ -51,6 +51,11 @@ export function createMemoryTaskDb(): SupabaseClient<Database> {
   }
 
   function buildWorkersTable() {
+    function withReposJoin(row: WorkerRow) {
+      const repo = [...reposStore.values()].find((r) => r.id === row.repo_id);
+      return repo ? { ...row, repos: { full_name: repo.full_name } } : { ...row, repos: null };
+    }
+
     return {
       insert(rowData: WorkerRow) {
         const now = new Date().toISOString();
@@ -120,11 +125,11 @@ export function createMemoryTaskDb(): SupabaseClient<Database> {
             return sb;
           },
           order(_col: string, _opts?: unknown) { return sb; },
-          limit(n: number) { return ok(rows.slice(0, n)); },
-          maybeSingle() { return ok(rows[0] ?? null); },
-          single() { return ok(rows[0] ?? null); },
-          then(resolve: (v: { data: WorkerRow[]; error: null }) => void) {
-            resolve({ data: rows, error: null });
+          limit(n: number) { return ok(rows.slice(0, n).map(withReposJoin)); },
+          maybeSingle() { return ok(rows[0] ? withReposJoin(rows[0]) : null); },
+          single() { return ok(rows[0] ? withReposJoin(rows[0]) : null); },
+          then(resolve: (v: { data: ReturnType<typeof withReposJoin>[]; error: null }) => void) {
+            resolve({ data: rows.map(withReposJoin), error: null });
           },
         };
         return sb;
