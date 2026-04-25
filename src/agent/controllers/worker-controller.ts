@@ -594,6 +594,10 @@ export class WorkerController extends EventEmitter {
 
     if (msg.type === "repo_activated") {
       this.transitionToRegistered();
+      // Re-start the main routing loop's stdin listening. The activation picker
+      // cancelled the active ask(); without this, the loop stays blocked at
+      // nextRoutingEvent() with no stdin listener until a task arrives.
+      this.emit("prompts_ready");
       return;
     }
 
