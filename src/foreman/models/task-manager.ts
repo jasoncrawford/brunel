@@ -254,7 +254,7 @@ export class TaskManager extends EventEmitter {
 
   /** Register ephemeral branch mappings from DB at startup. */
   async loadActiveTasksFromDb(): Promise<void> {
-    const tasks = await Task.list();
+    const tasks = await Task.list({ repoId: this.repo.id });
     for (const task of tasks) {
       if (task.completedAt) continue;
       if (task.branch) this.registerBranch(task.branch, task);

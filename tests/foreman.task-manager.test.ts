@@ -3,7 +3,7 @@ import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
 import { Repo } from "../src/foreman/models/repo.js";
 import { Worker } from "../src/foreman/models/worker.js";
-import { fakeRepo, resetDb, createTestTaskManager } from "./helpers/task.js";
+import { fakeRepo, resetDb, createTestTaskManager, seedTask } from "./helpers/task.js";
 
 const REPO = "test/repo";
 
@@ -260,6 +260,56 @@ describe("Task.list", () => {
     const result = await Task.list();
     expect(result).toHaveLength(1);
     expect(result[0].taskId).toBe("1");
+  });
+});
+
+// ── TaskManager.loadActiveTasksFromDb ─────────────────────────────────────────
+
+describe("TaskManager.loadActiveTasksFromDb", () => {
+  beforeEach(() => {
+    resetDb();
+  });
+
+  it("calls Task.list with its own repoId", async () => {
+    const manager = await createTestTaskManager("owner/repo-a");
+    const spy = vi.spyOn(Task, "list");
+    await manager.loadActiveTasksFromDb();
+    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ repoId: manager.repo.id }));
+  });
+
+  it("does not register branches from other repos", async () => {
+    const managerA = await createTestTaskManager("owner/repo-a");
+    const repoB = await createTestTaskManager("owner/repo-b");
+
+    // Seed a task with a branch belonging to repo-b
+    await seedTask({
+      task_id: "task-b",
+      issue_number: 2,
+      repo: "owner/repo-b",
+      repo_id: repoB.repo.id,
+      branch: "fix/task-b",
+    });
+
+    await managerA.loadActiveTasksFromDb();
+
+    // managerA must not have registered the branch from repo-b
+    expect(await managerA.getTaskForBranch("fix/task-b")).toBeNull();
+  });
+
+  it("registers branches from its own repo", async () => {
+    const managerA = await createTestTaskManager("owner/repo-a");
+
+    await seedTask({
+      task_id: "task-a",
+      issue_number: 1,
+      repo: "owner/repo-a",
+      repo_id: managerA.repo.id,
+      branch: "fix/task-a",
+    });
+
+    await managerA.loadActiveTasksFromDb();
+
+    expect(await managerA.getTaskForBranch("fix/task-a")).not.toBeNull();
   });
 });
 
