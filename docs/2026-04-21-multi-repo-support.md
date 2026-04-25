@@ -88,6 +88,24 @@ The current singleton TaskManager created in `src/foreman/index.ts` goes away. C
 - User accounts or credentials on the foreman
 - Private repo support (public repos only for now)
 
+## Phase 3+: Public server security
+
+When opening the foreman as a public server (any user can connect their repo), two attack surfaces need hardening:
+
+### Webhook authentication
+
+The current single `webhookSecret` doesn't scale — anyone with the secret can forge events for any repo. Options:
+
+- **Per-repo webhook secrets** — generate a unique secret per repo on activation, store in DB, verify incoming webhooks against the secret for that repo. Users paste their secret into GitHub's webhook settings. Strong, no shared-secret problem, but adds a setup step.
+- **GitHub IP allowlisting** — GitHub publishes its webhook source CIDR ranges at `https://api.github.com/meta` (`hooks` key). No setup step for users, but weaker (IP spoofing isn't cryptographically impossible; the list needs periodic refresh).
+- **GitHub App** — single App-level webhook secret you control; the installation model handles per-repo authorization automatically. The cleanest long-term answer for a true public service.
+
+No direction chosen yet. Per-repo secrets + GitHub App migration later is a reasonable phased path.
+
+### Worker authentication
+
+The current `workerSecret` is a single shared secret — anyone with it can connect a worker to any repo. For a public server, replace with **GitHub token verification**: the worker sends its GitHub token in `worker_hello`; the foreman calls the GitHub API to confirm that token has push access to the claimed repo. No shared secret needed; authorization is naturally scoped per-repo.
+
 ## Issue breakdown
 
 | # | Title | Depends on |
