@@ -575,6 +575,18 @@ export class Renderer {
    * Called by Display._updatePersistent() and Display._handleResize().
    */
   fmtStatusBar(status: AgentStatus, width: number): string {
+    const modelName = (!status.model || status.model === "default") ? "sonnet" : status.model;
+    const effortStr = status.effort ? ` (${status.effort})` : "";
+
+    if (!status.workerModeActive) {
+      // Minimal bar when worker mode is off: agent ID + model/effort only.
+      let leftText = [`worker ${shortWorkerId(status.agentId)}`, `${modelName}${effortStr}`].join(" ∙ ");
+      if (leftText.length > width) leftText = leftText.slice(0, Math.max(0, width - 1)) + "…";
+      // Dim sage-green background + bright-white text. No trailing reset: drawRaw()
+      // appends \x1b[K (fills remaining width with the same background) then \x1b[0m.
+      return `\x1b[48;5;22m\x1b[97m${leftText.padEnd(width)}`;
+    }
+
     // Right side: connection status
     const retryInSeconds = status.reconnectAt != null
       ? Math.max(0, Math.ceil((status.reconnectAt - Date.now()) / 1000))
@@ -590,8 +602,6 @@ export class Renderer {
                                                    `Disconnected${codeStr}`;
 
     // Left side: worker {id8} ∙ {model} ∙ {task info}
-    const modelName = (!status.model || status.model === "default") ? "sonnet" : status.model;
-    const effortStr = status.effort ? ` (${status.effort})` : "";
     const parts: string[] = [`worker ${shortWorkerId(status.agentId)}`, `${modelName}${effortStr}`];
     if (status.taskNumber != null) parts.push(`task #${status.taskNumber}`);
     else parts.push("no current task");

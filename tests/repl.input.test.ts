@@ -328,13 +328,13 @@ describe("ask() - exit conditions", () => {
     });
   });
 
-  it("^C with empty buffer → resolves with '__eof__' (does not call process.exit)", async () => {
+  it("^C with empty buffer → resolves with '__ctrl_c__' (does not call process.exit)", async () => {
     const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => {}) as any);
     await withFakeStdin(async (stdin) => {
       const p = testInput.ask("> ", () => []);
       stdin.push("\x03"); // ^C with empty buffer
       const result = await p;
-      expect(result).toBe("__eof__");
+      expect(result).toBe("__ctrl_c__");
       expect(exitSpy).not.toHaveBeenCalled();
     });
     exitSpy.mockRestore();

@@ -357,6 +357,21 @@ export class WorkerSession extends EventEmitter {
   }
 
   /**
+   * Gracefully stop this session: prevent reconnection, send goodbye, close
+   * the WebSocket, and cancel any pending debounce timer. Called by
+   * /worker:stop and the idle-^C handler to deactivate worker mode at runtime.
+   */
+  stop(): void {
+    this.stopped = true; // prevents reconnect on close
+    this.sendGoodbye();
+    this.ws?.close();
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
+    }
+  }
+
+  /**
    * Send worker_goodbye to the foreman if the WebSocket is currently open.
    * Called before clean exits (SIGTERM, /quit) so the foreman can immediately
    * revert the task to pending without waiting for the reclaim timeout.
@@ -670,11 +685,15 @@ export class WorkerSession extends EventEmitter {
  * Register the worker-namespace commands into the given registry (which should
  * already be scoped, e.g. registry.scoped("worker")). Commands degrade
  * gracefully when not connected to a foreman.
+ *
+ * Accepts a getter so the command handlers always resolve the current session,
+ * even when worker mode is started or stopped at runtime after registration.
  */
-export function registerWorkerCommands(session: WorkerSession | undefined, registry: CommandRegistry, display: WorkerDisplay): void {
+export function registerWorkerCommands(getSession: () => WorkerSession | undefined, registry: CommandRegistry, display: WorkerDisplay): void {
   registry.register("complete", {
     description: "Mark the current task as done",
     handler: async () => {
+      const session = getSession();
       if (!session) {
         display.print(c.boldRed("Not connected to a foreman."));
         return undefined;
@@ -685,11 +704,11 @@ export function registerWorkerCommands(session: WorkerSession | undefined, regis
 }
 
 /**
- * Set up worker mode: configure the WorkerSession, install signal handlers,
- * and start the session. Receives the full Display (which owns agentStatus and
- * bar rendering) and a WorkspaceController. Returns the session and a cleanup
- * function — does NOT call main(). The caller (main itself) owns the query
- * loop and calls cleanup() after it exits.
+ * Set up worker mode: configure the WorkerSession and start the session.
+ * Receives the full Display (which owns agentStatus and bar rendering) and a
+ * WorkspaceController. Returns the session and a cleanup function — does NOT
+ * call main(). The caller (main itself) owns the query loop, installs signal
+ * handlers, and calls cleanup() after the loop exits.
  */
 export async function startWorkerMode(
   display: Display,
@@ -703,8 +722,6 @@ export async function startWorkerMode(
   await workspaceController?.onCreate();
 
   const afterTask = workspaceController ? () => workspaceController.onReset() : undefined;
-
-  let shuttingDown = false;
 
   const wsFactory: WsFactory = (agentId, taskId) => {
     const ws = new WebSocket(`${getConfig().foremanUrl}/worker`);
@@ -722,6 +739,7 @@ export async function startWorkerMode(
 
   const { agentStatus } = display;
   agentStatus.update({ model: getConfig().model, effort: getConfig().effort });
+  agentStatus.setWorkerModeActive(true);
 
   const session = new WorkerSession(agentStatus, wsFactory, display, {
     afterTask,
@@ -732,43 +750,10 @@ export async function startWorkerMode(
     repo,
   });
 
-  const shutdown = async () => {
-    if (shuttingDown) return;
-    shuttingDown = true;
-    const taskInfo = session.getTaskQuitInfo();
-    if (taskInfo) {
-      const choice = await session.confirmTaskQuit(taskInfo);
-      if (choice === "cancel") { shuttingDown = false; return; }
-      if (choice === "complete-and-quit") await session.completeCurrentTask();
-    }
-    await workspaceController?.onDestroy();
-    process.exit(0);
-  };
-
-  // SIGINT: interrupt the running query if one is active; otherwise prompt and shut down.
-  // This lets the user press ^C to interrupt a running tool without killing the worker.
-  process.on("SIGINT", () => {
-    if (!session.interrupt()) {
-      void shutdown();
-    }
-  });
-
-  // SIGTERM is a system/orchestrator signal: send goodbye then force-destroy without prompting.
-  process.on("SIGTERM", () => {
-    session.sendGoodbye();
-    if (workspaceController) {
-      void workspaceController.onForceDestroy().then(() => process.exit(0));
-    } else {
-      process.exit(0);
-    }
-  });
-
-  display.startPersistentBar();
   session.start();
 
   const cleanup = async () => {
     session.sendGoodbye();
-    shuttingDown = true;
     await workspaceController?.onDestroy();
     process.stdout.write("\x1b[?2004l\r\n");
     if (process.stdin.isTTY) process.stdin.setRawMode(false);

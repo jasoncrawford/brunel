@@ -40,6 +40,7 @@ function sendMsg(ws: FakeWs, msg: Wire.ForemanMessage) {
 }
 
 function fmtStatus(status: AgentStatus): string {
+  status.setWorkerModeActive(true);
   return stripAnsi(new Display(getConfig(), status).renderer.fmtStatusBar(status, 100));
 }
 

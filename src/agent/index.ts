@@ -62,15 +62,13 @@ export class BrunelAgent {
   /**
    * Complete setup and enter the routing loop.
    *
-   * If runWorkerMode is true, subscribes to workspace events, clones the repo,
-   * connects to the foreman, and installs signal handlers before starting the
-   * loop. In REPL mode the loop starts immediately with no foreman connection.
+   * If runWorkerMode is true, connects to the foreman immediately (equivalent
+   * to running /worker:start on startup). Worker mode can also be toggled at
+   * runtime via /worker:start and /worker:stop. The status bar is always shown.
    */
   async start(runWorkerMode: boolean): Promise<void> {
-    // Worker mode setup: discover the repo at startup, then subscribe to
-    // workspace events, create the clone, configure the WorkerSession, and
-    // install signal handlers.
-    const repo = runWorkerMode ? await WorkerSession.getRemoteRepo() : "";
+    // Always detect the repo so /worker:start can use it at runtime.
+    const repo = await WorkerSession.getRemoteRepo();
 
     // Build workspace config after repo detection. repoUrl can be set explicitly
     // in config; otherwise it's derived from the detected git remote + token.
@@ -89,20 +87,106 @@ export class BrunelAgent {
       : undefined;
     const workspaceController = new WorkspaceController(workspace, this.display, config);
 
-    const workerCtx = runWorkerMode
-      ? await startWorkerMode(this.display, this.picker, workspaceController, repo)
-      : undefined;
-    const session = workerCtx?.session;
-    const workerCleanup = workerCtx?.cleanup;
+    // Mutable session and cleanup refs — updated when worker mode is started/stopped.
+    let session: WorkerSession | undefined;
+    let workerCleanup: (() => Promise<void>) | undefined;
 
-    // doExit handles REPL workspace cleanup and stdin/stdout teardown.
-    // Only called in REPL mode (worker mode cleanup goes through workerCleanup()).
+    // doExit handles workspace cleanup and stdin/stdout teardown.
+    // Called on exit from pure REPL mode (no active worker session).
     const doExit = async () => {
       await workspaceController.onDestroy();
       process.stdout.write("\x1b[?2004l\r\n");
       if (process.stdin.isTTY) process.stdin.setRawMode(false);
       process.stdin.pause();
     };
+
+    // ── Routing queue ─────────────────────────────────────────────────────────
+    //
+    // Defined early so attachSessionListeners (which is called by startWorker)
+    // can enqueue session events before the routing loop is reached.
+
+    type RoutingEvent =
+      | { type: "line"; value: string }
+      | { type: "session"; event: "prompts_ready" | "fatal" };
+
+    const routingQueue: RoutingEvent[] = [];
+    let routingWaiter: ((e: RoutingEvent) => void) | null = null;
+
+    const enqueueRoutingEvent = (event: RoutingEvent): void => {
+      if (routingWaiter) { const w = routingWaiter; routingWaiter = null; w(event); }
+      else routingQueue.push(event);
+    };
+
+    const nextRoutingEvent = (): Promise<RoutingEvent> => {
+      if (routingQueue.length) return Promise.resolve(routingQueue.shift()!);
+      return new Promise((resolve) => { routingWaiter = resolve; });
+    };
+
+    // ── Session listener attachment ────────────────────────────────────────────
+
+    const attachSessionListeners = (s: WorkerSession): void => {
+      s.on("prompts_ready", () => {
+        this.input.cancel();
+        enqueueRoutingEvent({ type: "session", event: "prompts_ready" });
+      });
+      s.on("fatal", () => {
+        this.input.cancel();
+        enqueueRoutingEvent({ type: "session", event: "fatal" });
+      });
+    };
+
+    // ── Worker mode start/stop helpers ────────────────────────────────────────
+
+    const stopWorker = async (): Promise<void> => {
+      if (!session) return;
+      const taskInfo = session.getTaskQuitInfo();
+      if (taskInfo) {
+        const choice = await session.confirmTaskQuit(taskInfo);
+        if (choice === "cancel") return;
+        if (choice === "complete-and-quit") await session.completeCurrentTask();
+      }
+      session.stop();
+      session = undefined;
+      workerCleanup = undefined; // prevent double-cleanup on later exit
+      this.agentStatus.setWorkerModeActive(false);
+      this.display.print(c.sageGreen("Worker mode stopped."));
+    };
+
+    const startWorker = async (): Promise<void> => {
+      if (session) {
+        this.display.print(c.amber("Worker mode is already active."));
+        return;
+      }
+      const ctx = await startWorkerMode(this.display, this.picker, workspaceController, repo);
+      session = ctx.session;
+      workerCleanup = ctx.cleanup;
+      attachSessionListeners(session);
+    };
+
+    // ── Signal handlers ───────────────────────────────────────────────────────
+    //
+    // Registered once; close over `session` so they always see the current state
+    // regardless of when worker mode is started or stopped.
+
+    process.on("SIGINT", () => {
+      if (!session?.interrupt()) {
+        // Nothing to interrupt — print a newline to keep the terminal tidy.
+        process.stdout.write("\n");
+      }
+    });
+    process.on("SIGTERM", async () => {
+      session?.sendGoodbye();
+      await doExit();
+      process.exit(0);
+    });
+
+    // Start worker mode immediately if requested via --worker-mode flag.
+    if (runWorkerMode) {
+      await startWorker();
+    }
+
+    // Status bar is always shown regardless of worker mode.
+    this.display.startPersistentBar();
 
     // Print the startup banner.
     this.display.print(c.sageGreen(hr("═")));
@@ -119,11 +203,24 @@ export class BrunelAgent {
 
     // Register all commands. All commands are present in both REPL and worker
     // modes; commands that require a foreman connection degrade gracefully.
-    // Registration happens here rather than the constructor because some
-    // handlers close over start()-local state (sessionId, doExit, session).
     const registry = this.controller.registry;
     workspaceController.registerCommands(registry.scoped("workspace"));
-    registerWorkerCommands(session, registry.scoped("worker"), this.display);
+    const workerRegistry = registry.scoped("worker");
+    registerWorkerCommands(() => session, workerRegistry, this.display);
+    workerRegistry.register("start", {
+      description: "Connect to the foreman and start accepting tasks",
+      handler: async () => { await startWorker(); },
+    });
+    workerRegistry.register("stop", {
+      description: "Disconnect from the foreman",
+      handler: async () => {
+        if (!session) {
+          this.display.print(c.amber("Worker mode is not active."));
+          return undefined;
+        }
+        await stopWorker();
+      },
+    });
     registry.register("exit", {
       description: "Exit",
       handler: async () => {
@@ -211,42 +308,10 @@ export class BrunelAgent {
       }
     };
 
-    // ── Routing ─────────────────────────────────────────────────────────────
+    // ── Routing loop ──────────────────────────────────────────────────────────
     //
-    // Session events and user input flow through a shared async event channel.
-    // No promise-racing or event-to-promise adapters needed: session events push
-    // directly to the channel, and ask() pushes when it receives real input.
-    // The routing loop sleeps until the next event arrives.
-
-    type RoutingEvent =
-      | { type: "line"; value: string }
-      | { type: "session"; event: "prompts_ready" | "fatal" };
-
-    // Minimal async FIFO queue.
-    const routingQueue: RoutingEvent[] = [];
-    let routingWaiter: ((e: RoutingEvent) => void) | null = null;
-
-    const enqueueRoutingEvent = (event: RoutingEvent): void => {
-      if (routingWaiter) { const w = routingWaiter; routingWaiter = null; w(event); }
-      else routingQueue.push(event);
-    };
-
-    const nextRoutingEvent = (): Promise<RoutingEvent> => {
-      if (routingQueue.length) return Promise.resolve(routingQueue.shift()!);
-      return new Promise((resolve) => { routingWaiter = resolve; });
-    };
-
-    // Session events push directly to the channel (and cancel any active prompt).
-    if (session) {
-      session.on("prompts_ready", () => {
-        this.input.cancel();
-        enqueueRoutingEvent({ type: "session", event: "prompts_ready" });
-      });
-      session.on("fatal", () => {
-        this.input.cancel();
-        enqueueRoutingEvent({ type: "session", event: "fatal" });
-      });
-    }
+    // Session events and user input flow through the shared async event channel
+    // defined above. The routing loop sleeps until the next event arrives.
 
     // One round of readline: shows the prompt and pushes to the channel when the
     // user submits real input. Fire-and-forget — the loop calls this when ready.
@@ -260,9 +325,6 @@ export class BrunelAgent {
         if (line !== null) enqueueRoutingEvent({ type: "line", value: line });
       });
     };
-
-    // ── Routing loop ─────────────────────────────────────────────────────
-    // Sleeps until the next routing event arrives, then dispatches it.
 
     while (true) {
       // Skip showing the prompt when session prompts are already queued
@@ -290,7 +352,7 @@ export class BrunelAgent {
       // event.type === "line" — real user input
       const userInput = event.value;
 
-      // ^D / ^C on empty buffer — treat as exit.
+      // ^D on empty buffer — treat as exit.
       if (userInput === "__eof__") {
         if (!session) { await doExit(); break; }
         const taskInfo = session.getTaskQuitInfo();
@@ -300,6 +362,15 @@ export class BrunelAgent {
           if (choice === "complete-and-quit") await session.completeCurrentTask();
         }
         break;
+      }
+
+      // ^C on empty buffer — stop worker mode if idle; otherwise ignore
+      // (the running query was already interrupted by the SIGINT handler).
+      if (userInput === "__ctrl_c__") {
+        if (session && !session.hasTask()) {
+          await stopWorker();
+        }
+        continue;
       }
 
       const action = await this.controller.dispatch(userInput);

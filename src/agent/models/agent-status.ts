@@ -42,6 +42,7 @@ export class AgentStatus extends EventEmitter {
   private _taskInputTokens = 0;
   private _taskOutputTokens = 0;
   private _taskCostUsd: number | undefined;
+  private _workerModeActive = false;
 
   // Fired after a tool result is printed (tool has just finished running).
   // Used by the worker to refresh git branch in the status bar after Bash.
@@ -81,6 +82,7 @@ export class AgentStatus extends EventEmitter {
   get taskInputTokens(): number { return this._taskInputTokens; }
   get taskOutputTokens(): number { return this._taskOutputTokens; }
   get taskCostUsd(): number | undefined { return this._taskCostUsd; }
+  get workerModeActive(): boolean { return this._workerModeActive; }
 
   /** Apply a partial status update and emit "change". */
   update(patch: WorkerStatusPatch): void {
@@ -105,6 +107,12 @@ export class AgentStatus extends EventEmitter {
     if (costUsd != null) {
       this._taskCostUsd = (this._taskCostUsd ?? 0) + costUsd;
     }
+    this.emit("change");
+  }
+
+  /** Set whether worker mode is active and emit "change". */
+  setWorkerModeActive(active: boolean): void {
+    this._workerModeActive = active;
     this.emit("change");
   }
 

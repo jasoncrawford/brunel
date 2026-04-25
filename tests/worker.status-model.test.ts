@@ -5,6 +5,7 @@ import { getConfig } from "../src/config.js";
 import { stripAnsi } from "./helpers.js";
 
 function fmtStatus(status: AgentStatus): string {
+  status.setWorkerModeActive(true);
   return stripAnsi(new Display(getConfig(), status).renderer.fmtStatusBar(status, 100));
 }
 
