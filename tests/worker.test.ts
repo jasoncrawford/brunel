@@ -369,14 +369,94 @@ describe("reconnect", () => {
     vi.useRealTimers();
   });
 
-  it("reconnect delay is at most 5 seconds (jitter upper bound)", async () => {
+  it("first reconnect delay is at most 3 seconds (base 2s + up to 1s jitter)", async () => {
     vi.useFakeTimers();
 
     fakeWs.emit("close");
-    // Even with maximum jitter (random approaching 1.0), delay is always < 5000ms
-    vi.advanceTimersByTime(5000);
+    // Attempt 0: min(300000, 2000 * 2^0) + random*1000 = 2000 + up to 1000ms
+    vi.advanceTimersByTime(3001);
     expect(wsFactory).toHaveBeenCalledTimes(2);
 
+    vi.useRealTimers();
+  });
+
+  it("second reconnect delay is double the first (exponential backoff)", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0);
+
+    const ws2 = new FakeWs();
+    wsFactory.mockReturnValueOnce(ws2);
+
+    // First disconnect: attempt 0 → delay = 2000ms
+    fakeWs.emit("close", 1006, Buffer.from(""));
+    vi.advanceTimersByTime(2001); // reconnect fires, ws2 is now active
+    expect(wsFactory).toHaveBeenCalledTimes(2);
+
+    // Second disconnect: attempt 1 → delay = min(300000, 4000) = 4000ms
+    ws2.emit("close", 1006, Buffer.from(""));
+    vi.advanceTimersByTime(3999);
+    expect(wsFactory).toHaveBeenCalledTimes(2); // not yet
+
+    vi.advanceTimersByTime(2);
+    expect(wsFactory).toHaveBeenCalledTimes(3); // reconnected at 4000ms
+
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it("reconnect delay is capped at maxReconnectDelayMs", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0);
+
+    // Use a dedicated factory so each connect() gets a fresh WS (avoids stale-handler issues)
+    const capFactory = vi.fn().mockImplementation(() => new FakeWs());
+    const cappedSession = new WorkerSession(
+      new AgentStatus({ agentId: AGENT_ID }),
+      capFactory,
+      display,
+      { repo: "owner/repo", maxReconnectDelayMs: 6000 },
+    );
+    cappedSession.start();
+    expect(capFactory).toHaveBeenCalledTimes(1);
+
+    // Simulate 5 disconnects. At attempt 2+: min(6000, 2000*2^k) = 6000ms.
+    // Without the cap, attempt 2 would take 8000ms — but 6001ms advances must still trigger it.
+    for (let i = 0; i < 5; i++) {
+      const latestWs = capFactory.mock.results.at(-1)!.value as FakeWs;
+      latestWs.emit("close", 1006, Buffer.from(""));
+      vi.advanceTimersByTime(6001); // cap (6000ms) + 1ms buffer, with random=0
+      expect(capFactory).toHaveBeenCalledTimes(i + 2);
+    }
+
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it("reconnect attempt counter resets to 0 after successful hello_ack", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0);
+
+    const ws2 = new FakeWs();
+    const ws3 = new FakeWs();
+    wsFactory.mockReturnValueOnce(ws2).mockReturnValueOnce(ws3);
+
+    // First disconnect (attempt 0 → delay 2000ms)
+    fakeWs.emit("close", 1006, Buffer.from(""));
+    vi.advanceTimersByTime(2001);
+    expect(wsFactory).toHaveBeenCalledTimes(2);
+
+    // Simulate successful reconnect — hello_ack resets attempts
+    sendMsg(ws2, { type: "hello_ack", status: "idle" });
+
+    // Now disconnect again — should use attempt 0 delay (2000ms), not attempt 1 (4000ms)
+    ws2.emit("close", 1006, Buffer.from(""));
+    vi.advanceTimersByTime(1999);
+    expect(wsFactory).toHaveBeenCalledTimes(2); // not yet at 2000ms
+
+    vi.advanceTimersByTime(2);
+    expect(wsFactory).toHaveBeenCalledTimes(3); // fired at ~2000ms, not 4000ms
+
+    vi.restoreAllMocks();
     vi.useRealTimers();
   });
 });
