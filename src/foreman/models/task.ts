@@ -214,12 +214,15 @@ export class Task extends ActiveRecord {
     return data ? new Task(data) : null;
   }
 
-  // Overrides base list() to add created_at ordering and the cancelable filter.
-  static async list(opts?: { cancelable?: boolean; limit?: number }): Promise<Task[]> {
+  // Overrides base list() to add created_at ordering and the cancelable/repoId filters.
+  static async list(opts?: { cancelable?: boolean; repoId?: number; limit?: number }): Promise<Task[]> {
     const limit = opts?.limit ?? 200;
     let q = Task.select();
     if (opts?.cancelable) {
       q = q.is("worker_id", null).is("completed_at", null).is("issue_closed_at", null).is("pr_merged_at", null);
+    }
+    if (opts?.repoId !== undefined) {
+      q = q.eq("repo_id", opts.repoId);
     }
     const { data, error } = await q.order("created_at", { ascending: false }).limit(limit);
     if (error) throw error;
