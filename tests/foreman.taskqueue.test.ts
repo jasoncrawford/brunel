@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
 import { Worker } from "../src/foreman/models/worker.js";
-import { fakeRepo, resetDb, createTestTaskManager } from "./helpers/task.js";
+import { fakeRepo, resetDb, createTestTaskManager, seedTask } from "./helpers/task.js";
 import { WebhookEvent } from "../src/foreman/models/webhook-event.js";
 
 const repoSlug = "test/repo";
@@ -250,6 +250,18 @@ describe("TaskManager — nextPending with predicate", () => {
     await Task.upsert("2", 2, repoSlug, "T2", "B", []);
     // list sorts by createdAt desc, so "2" was upserted last → appears first
     expect((await m.nextPending())?.taskId).toBeDefined();
+  });
+
+  it("does not return pending tasks from other repos", async () => {
+    const otherManager = await createTestTaskManager("other/repo");
+    await seedTask({
+      task_id: "other-1",
+      issue_number: 99,
+      repo: "other/repo",
+      repo_id: otherManager.repo.id,
+    });
+
+    expect(await m.nextPending()).toBeNull();
   });
 });
 

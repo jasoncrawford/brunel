@@ -108,7 +108,7 @@ export class TaskManager extends EventEmitter {
   }
 
   async nextPending(isReady?: (t: Task) => boolean): Promise<Task | null> {
-    const tasks = await Task.list({ cancelable: true });
+    const tasks = await Task.list({ cancelable: true, repoId: this.repo.id });
     for (const task of tasks) {
       this.hydrateBlockers(task);
       if (isReady === undefined || isReady(task)) return task;
