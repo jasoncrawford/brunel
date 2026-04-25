@@ -240,10 +240,10 @@ export class Worker extends ActiveRecord {
     return sockets.get(this.workerId) === ws;
   }
 
-  send(msg: Wire.ForemanMessage): boolean {
+  send(msg: Wire.ForemanMessage, onError?: (err: Error) => void): boolean {
     const ws = sockets.get(this.workerId);
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify(msg));
+      ws.send(JSON.stringify(msg), (err) => { if (err && onError) onError(err); });
       return true;
     }
     return false;

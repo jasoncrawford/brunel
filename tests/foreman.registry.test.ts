@@ -70,7 +70,7 @@ describe("Worker", () => {
     const w = Worker.register("w1", ws, fakeRepo());
     const msg: Wire.ForemanMessage = { type: "task_assigned", taskId: "1", issue: { number: 1, title: "T", body: "", labels: [], repoUrl: "https://github.com/o/r" } };
     w.send(msg);
-    expect(ws.send).toHaveBeenCalledWith(JSON.stringify(msg));
+    expect(ws.send).toHaveBeenCalledWith(JSON.stringify(msg), expect.any(Function));
   });
 
   it("send returns true when OPEN", () => {

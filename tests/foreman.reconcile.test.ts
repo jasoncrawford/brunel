@@ -60,7 +60,7 @@ describe("reconcile()", () => {
 
     await new Promise((r) => setImmediate(r));
 
-    expect(fakeWs.send).toHaveBeenCalledWith(expect.stringContaining('"task_assigned"'));
+    expect(fakeWs.send).toHaveBeenCalledWith(expect.stringContaining('"task_assigned"'), expect.any(Function));
     expect((await Task.get("42"))?.status).toBe("assigned");
     expect(Worker.fromRegistry("w1")?.status).toBe("busy");
   });

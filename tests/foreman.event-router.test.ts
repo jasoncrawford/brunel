@@ -33,7 +33,7 @@ function makeWss(_taskManager?: any): { wss: ForemanWss; sendMsg: ReturnType<typ
     config: { taskLabel: "brunel:ready", githubToken: "token", workerSecret: undefined, pingIntervalMs: 1e9 },
     server: http.createServer(),
   });
-  const sendMsg = vi.spyOn(wss, "sendMsg").mockImplementation(() => {});
+  const sendMsg = vi.spyOn(wss, "sendMsg").mockImplementation(() => true);
   return { wss, sendMsg };
 }
 
@@ -131,6 +131,7 @@ describe("forwardEvent — active tasks still receive events", () => {
     expect(sendMsg).toHaveBeenCalledWith(
       expect.objectContaining({ workerId: "worker-1" }),
       expect.objectContaining({ type: "event_notification" }),
+      expect.objectContaining({ onError: expect.any(Function) }),
     );
   });
 
@@ -181,5 +182,47 @@ describe("forwardEvent — active tasks still receive events", () => {
 
     expect(queueSpy).toHaveBeenCalledOnce();
     expect(sendMsg).not.toHaveBeenCalled();
+  });
+});
+
+// ── Send-failure recovery ──────────────────────────────────────────────────────
+
+describe("forwardEvent — send failure recovery", () => {
+  it("queues event when sendMsg returns false (socket not open)", () => {
+    const task = Task.fromTest({
+      task_id: "42",
+      issue_number: 42,
+      repo_id: testRepoId,
+      worker_id: "worker-1",
+    });
+    const w = Worker.register("worker-1", fakeWs(), fakeRepo());
+    w.assign(task);
+    const queueSpy = vi.spyOn(task.manager, "queueEvent");
+    const { wss, sendMsg } = makeWss();
+    sendMsg.mockImplementation(() => false); // simulate closed socket
+
+    wss.forwardEvent(task, makeEvent(), "#42");
+
+    expect(sendMsg).toHaveBeenCalledOnce();
+    expect(queueSpy).toHaveBeenCalledOnce();
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("queued (worker send failed)"));
+  });
+
+  it("queues event when worker is not in registry", () => {
+    const task = Task.fromTest({
+      task_id: "42",
+      issue_number: 42,
+      repo_id: testRepoId,
+      worker_id: "worker-1",
+    });
+    // worker-1 not registered — simulates post-remove race or stale workerId
+    const queueSpy = vi.spyOn(task.manager, "queueEvent");
+    const { wss, sendMsg } = makeWss();
+
+    wss.forwardEvent(task, makeEvent(), "#42");
+
+    expect(sendMsg).not.toHaveBeenCalled();
+    expect(queueSpy).toHaveBeenCalledOnce();
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("not in registry"));
   });
 });

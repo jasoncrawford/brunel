@@ -1,7 +1,7 @@
 # Reconnection Hardening: Findings and Plan
 
 **Date:** 2026-03-27
-**Status:** Stages 1 + 2 shipped (PR #295, PR #297). Stage 3 tracked in #298.
+**Status:** Stages 1 + 2 shipped (PR #295, PR #297). Stage 3 item 1 shipped (PR #870). Remainder tracked in #298.
 
 ---
 
@@ -133,17 +133,9 @@ Goal: Get enough signal to confirm hypotheses before investing in fixes.
 
 Goal: Stop the disconnections from happening in the first place.
 
-1. **Add foreman-side WebSocket ping** — use `ws` library's built-in ping support on the `WebSocketServer`:
-   ```typescript
-   const wss = new WebSocketServer({ noServer: true });
-   const PING_INTERVAL = 25_000; // 25s, safely under any 30s proxy timeout
-   const pingInterval = setInterval(() => {
-     for (const client of wss.clients) {
-       if (client.readyState === WebSocket.OPEN) client.ping();
-     }
-   }, PING_INTERVAL);
-   ```
-   Workers respond with pong automatically (built into the `ws` library). This keeps connections alive through Railway's proxy.
+1. **Add foreman-side WebSocket ping** — sends pings on a configurable interval (default 25 s, safely under any 30 s proxy timeout). Workers respond with pong automatically. This keeps connections alive through Railway's proxy.
+
+   Note: Stage 2 sent pings but did not track pong responses, so zombie connections (network silently dead but TCP not yet reset) could persist until the OS TCP keepalive timer fired — potentially minutes.
 
 2. **Add jitter to reconnect delay** — randomize the reconnect wait between 2–5 seconds to avoid thundering-herd on foreman restart. *(Subsequently upgraded in PR #866 to full exponential backoff — see H5 above.)*
 
@@ -153,7 +145,10 @@ Goal: Stop the disconnections from happening in the first place.
 
 Goal: Reduce the impact of disconnections, foreman restarts, and worker interruptions.
 
-1. **Fix the event-drop bug (H2)** — On worker disconnect in the foreman's `ws.on("close")` handler: if the worker had an assigned task, set the task status back to `"pending"`. Events arriving during reconnection will queue normally and be forwarded when the worker reclaims the task.
+1. **Fix the event-drop bug (H2)** ✅ (PR #870) — Three-part fix:
+   - **Foreman-side heartbeat**: track pong responses with a `WeakMap<WebSocket, boolean>`. On each timer tick, terminate connections that have not ponged since the previous ping. This mirrors the existing worker-side heartbeat and limits the zombie-connection window to ~one ping interval (25 s) instead of the OS TCP keepalive timeout (potentially minutes).
+   - **Queue on send failure**: `sendMsg()` now returns a boolean. `forwardEvent()` and `flushQueuedEvents()` check the result and queue any event whose underlying send failed (socket was not OPEN), so it is replayed on the worker's next reconnect.
+   - **Queue instead of drop for unknown-registry workers**: the previous code dropped events when `task.workerId` pointed to a worker no longer in the registry; these are now queued for replay, since the worker may be mid-reconnect.
 
 2. **Address double-assignment on foreman restart (H3)** — Two approaches (in order of complexity):
    - **Grace period:** Delay `reconcile()` on startup by a configurable number of seconds (e.g., 10s) to allow reconnecting workers to claim their tasks before new assignments are made.
