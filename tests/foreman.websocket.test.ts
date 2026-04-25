@@ -769,10 +769,9 @@ describe("worker disconnect DB logging", () => {
   it("includes the current taskId in the disconnect event when worker had an active task", async () => {
     const logSpy = vi.spyOn(ForemanMessage, "log").mockReturnValue(undefined);
 
-    const localTm = await createTestTaskManager();
     await Task.upsert("42", 42, "owner/repo", "Some task", "Body", []);
-    localTm.trackIssue(42);
-    localTm.markBlockersLoaded(42);
+    taskManager.trackIssue(42);
+    taskManager.markBlockersLoaded(42);
 
     const server = http.createServer();
     const { wss: testWss } = new ForemanWss({ server, config: defaultCfg });
