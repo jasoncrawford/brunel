@@ -38,6 +38,7 @@ describe("AgentStatus getStatusText", () => {
   it("shows worker id and no current task when idle", () => {
     const status = new AgentStatus({ agentId: "7c254628-abcd-1234-efgh-000000000000" });
     status.update({ connectionStatus: "connected" });
+    status.setWorkerModeActive(true);
     const display = new Display(getConfig(), status);
     const result = stripAnsi(display.renderer.fmtStatusBar(status, 119));
     expect(result).toContain("worker 7c254628");
@@ -49,6 +50,7 @@ describe("AgentStatus getStatusText", () => {
     const status = new AgentStatus({ agentId: "abc12345-0000-0000-0000-000000000000" });
     getConfig().verbose = true;
     status.update({ connectionStatus: "disconnected", disconnectCode: 1006, reconnectAt: Date.now() + 2000 });
+    status.setWorkerModeActive(true);
     const display = new Display(getConfig(), status);
     const result = stripAnsi(display.renderer.fmtStatusBar(status, 119));
     expect(result).toContain("Disconnected (1006)");
@@ -58,6 +60,7 @@ describe("AgentStatus getStatusText", () => {
     const status = new AgentStatus({ agentId: "abc12345-0000-0000-0000-000000000000" });
     getConfig().verbose = false;
     status.update({ connectionStatus: "disconnected", disconnectCode: 1006 });
+    status.setWorkerModeActive(true);
     const display = new Display(getConfig(), status);
     const result = stripAnsi(display.renderer.fmtStatusBar(status, 119));
     expect(result).toContain("Disconnected");
@@ -67,6 +70,7 @@ describe("AgentStatus getStatusText", () => {
   it("shows task, PR, and branch when set", () => {
     const status = new AgentStatus({ agentId: "7c254628-abcd-1234-efgh-000000000000" });
     status.update({ taskNumber: 374, prNumber: 406, branch: "db-single-source-of-truth", connectionStatus: "connected" });
+    status.setWorkerModeActive(true);
     const display = new Display(getConfig(), status);
     const result = stripAnsi(display.renderer.fmtStatusBar(status, 119));
     expect(result).toContain("task #374");

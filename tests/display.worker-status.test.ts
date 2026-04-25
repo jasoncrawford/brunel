@@ -34,6 +34,7 @@ function getStatusText(opts: {
     disconnectCode: opts.disconnectCode,
     reconnectAt: opts.reconnectAt,
   });
+  status.setWorkerModeActive(true);
   const display = new Display(getConfig(), status);
   return stripAnsi(display.renderer.fmtStatusBar(status, opts.width ?? 119));
 }
@@ -265,6 +266,7 @@ describe("Display persistent status bar", () => {
 
   beforeEach(() => {
     agentStatus = new AgentStatus({ agentId: "test-agent" });
+    agentStatus.setWorkerModeActive(true);
     display = new Display(getConfig(), agentStatus);
     stdoutWrite = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     // Ensure clean state

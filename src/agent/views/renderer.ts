@@ -575,6 +575,24 @@ export class Renderer {
    * Called by Display._updatePersistent() and Display._handleResize().
    */
   fmtStatusBar(status: AgentStatus, width: number): string {
+    // Dim sage-green bg + bright-white text. No trailing reset: drawRaw() appends
+    // \x1b[K (fills remaining width with the same bg) then \x1b[0m.
+    const styledBar = (content: string) => `\x1b[48;5;22m\x1b[97m${content}`;
+
+    const modelName = (!status.model || status.model === "default") ? "sonnet" : status.model;
+    const effortStr = status.effort ? ` (${status.effort})` : "";
+    // Base parts shared by both modes: worker id + model/effort.
+    const baseParts = [`worker ${shortWorkerId(status.agentId)}`, `${modelName}${effortStr}`];
+
+    if (!status.workerModeActive) {
+      // Minimal bar: agent ID + model/effort + branch (if known).
+      const parts = [...baseParts];
+      if (status.branch) parts.push(status.branch);
+      let leftText = parts.join(" ∙ ");
+      if (leftText.length > width) leftText = leftText.slice(0, Math.max(0, width - 1)) + "…";
+      return styledBar(leftText.padEnd(width));
+    }
+
     // Right side: connection status
     const retryInSeconds = status.reconnectAt != null
       ? Math.max(0, Math.ceil((status.reconnectAt - Date.now()) / 1000))
@@ -590,9 +608,7 @@ export class Renderer {
                                                    `Disconnected${codeStr}`;
 
     // Left side: worker {id8} ∙ {model} ∙ {task info}
-    const modelName = (!status.model || status.model === "default") ? "sonnet" : status.model;
-    const effortStr = status.effort ? ` (${status.effort})` : "";
-    const parts: string[] = [`worker ${shortWorkerId(status.agentId)}`, `${modelName}${effortStr}`];
+    const parts = [...baseParts];
     if (status.taskNumber != null) parts.push(`task #${status.taskNumber}`);
     else parts.push("no current task");
     if (status.prNumber != null) parts.push(`PR #${status.prNumber}`);
@@ -612,8 +628,6 @@ export class Renderer {
     }
 
     const gap = Math.max(1, width - leftText.length - rightText.length);
-    // Dim sage-green background + bright-white text. No trailing reset: drawRaw()
-    // appends \x1b[K (fills remaining width with the same background) then \x1b[0m.
-    return `\x1b[48;5;22m\x1b[97m${leftText + " ".repeat(gap) + rightText}`;
+    return styledBar(leftText + " ".repeat(gap) + rightText);
   }
 }

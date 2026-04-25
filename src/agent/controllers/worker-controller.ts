@@ -18,6 +18,15 @@ import { WorkspaceController } from "./workspace-controller.js";
 
 const execAsync = promisify(exec);
 
+async function getCurrentBranch(): Promise<string> {
+  try {
+    const { stdout } = await execAsync("git rev-parse --abbrev-ref HEAD");
+    return stdout.trim();
+  } catch {
+    return "";
+  }
+}
+
 function fmtTaskStats(inputTokens: number, outputTokens: number, costUsd: number | undefined): string {
   const parts = [`tokens: ${fmtNum(inputTokens)} in / ${fmtNum(outputTokens)} out`];
   if (costUsd != null) parts.push(`cost: $${costUsd.toFixed(2)}`);
@@ -185,14 +194,7 @@ export class WorkerSession extends EventEmitter {
   get agentId(): string { return this.agentStatus.agentId; }
 
   private async refreshBranch(): Promise<void> {
-    let branch = "";
-    try {
-      const { stdout } = await execAsync("git rev-parse --abbrev-ref HEAD");
-      branch = stdout.trim();
-    } catch {
-      branch = "";
-    }
-    this.agentStatus.update({ branch });
+    this.agentStatus.update({ branch: await getCurrentBranch() });
   }
 
   /**
@@ -354,6 +356,21 @@ export class WorkerSession extends EventEmitter {
       return true;
     }
     return false;
+  }
+
+  /**
+   * Gracefully stop this session: prevent reconnection, send goodbye, close
+   * the WebSocket, and cancel any pending debounce timer. Called by
+   * /worker:stop and the idle-^C handler to deactivate worker mode at runtime.
+   */
+  stop(): void {
+    this.stopped = true; // prevents reconnect on close
+    this.sendGoodbye();
+    this.ws?.close();
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
+    }
   }
 
   /**
@@ -671,25 +688,107 @@ export class WorkerSession extends EventEmitter {
  * already be scoped, e.g. registry.scoped("worker")). Commands degrade
  * gracefully when not connected to a foreman.
  */
-export function registerWorkerCommands(session: WorkerSession | undefined, registry: CommandRegistry, display: WorkerDisplay): void {
-  registry.register("complete", {
-    description: "Mark the current task as done",
-    handler: async () => {
-      if (!session) {
-        display.print(c.boldRed("Not connected to a foreman."));
-        return undefined;
-      }
-      return session.completeCurrentTask();
-    },
-  });
+export class WorkerController extends EventEmitter {
+  private _session: WorkerSession | undefined;
+  private _cleanup: (() => Promise<void>) | undefined;
+
+  constructor(
+    private readonly display: Display,
+    private readonly picker: Picker,
+    private readonly workspaceController: WorkspaceController | undefined,
+    private readonly repo: string,
+  ) {
+    super();
+  }
+
+  /** The active WorkerSession, or undefined when worker mode is off. */
+  get session(): WorkerSession | undefined { return this._session; }
+  /** True when worker mode is active (connected or connecting). */
+  get isActive(): boolean { return this._session !== undefined; }
+  /** True when a worker cleanup must run on exit (i.e., worker is active). */
+  get isCleanupPending(): boolean { return this._cleanup !== undefined; }
+
+  hasTask(): boolean { return this._session?.hasTask() ?? false; }
+  interrupt(): boolean { return this._session?.interrupt() ?? false; }
+  sendGoodbye(): void { this._session?.sendGoodbye(); }
+  getTaskQuitInfo(): TaskQuitInfo | undefined { return this._session?.getTaskQuitInfo(); }
+  async confirmTaskQuit(info: TaskQuitInfo): Promise<"quit" | "complete-and-quit" | "cancel"> {
+    return this._session!.confirmTaskQuit(info);
+  }
+  async completeCurrentTask(): Promise<void> { await this._session?.completeCurrentTask(); }
+
+  /** Connect to the foreman and begin accepting tasks. Emits "session-started". */
+  async start(): Promise<void> {
+    if (this._session) {
+      this.display.print(c.amber("Worker mode is already active."));
+      return;
+    }
+    const { session, cleanup } = await startWorkerMode(
+      this.display, this.picker, this.workspaceController, this.repo,
+    );
+    this._session = session;
+    this._cleanup = cleanup;
+    this.emit("session-started", session);
+  }
+
+  /** Disconnect from the foreman. Prompts if a task is in progress. */
+  async stop(): Promise<void> {
+    if (!this._session) return;
+    const taskInfo = this._session.getTaskQuitInfo();
+    if (taskInfo) {
+      const choice = await this._session.confirmTaskQuit(taskInfo);
+      if (choice === "cancel") return;
+      if (choice === "complete-and-quit") await this._session.completeCurrentTask();
+    }
+    this._session.stop();
+    this._session = undefined;
+    this._cleanup = undefined; // cleared so later exit takes the non-worker path
+    this.display.agentStatus.setWorkerModeActive(false);
+    this.display.print(c.sageGreen("Worker mode stopped."));
+  }
+
+  /** Run worker teardown: send goodbye, destroy workspace, tear down I/O. */
+  async cleanup(): Promise<void> {
+    if (this._cleanup) await this._cleanup();
+  }
+
+  /** Register /worker:complete, /worker:start, /worker:stop into the given (already-scoped) registry. */
+  registerCommands(registry: CommandRegistry): void {
+    registry.register("complete", {
+      description: "Mark the current task as done",
+      handler: async () => {
+        if (!this._session) {
+          this.display.print(c.boldRed("Not connected to a foreman."));
+          return undefined;
+        }
+        return this._session.completeCurrentTask();
+      },
+    });
+    registry.register("start", {
+      description: "Connect to the foreman and start accepting tasks",
+      handler: async () => { await this.start(); },
+    });
+    registry.register("stop", {
+      description: "Disconnect from the foreman",
+      handler: async () => {
+        if (!this._session) {
+          this.display.print(c.amber("Worker mode is not active."));
+          return undefined;
+        }
+        await this.stop();
+      },
+    });
+  }
+
+  /** Returns the current git branch name, or "" on any error. */
+  static getCurrentBranch = getCurrentBranch;
 }
 
+// ── startWorkerMode ───────────────────────────────────────────────────────────
+
 /**
- * Set up worker mode: configure the WorkerSession, install signal handlers,
- * and start the session. Receives the full Display (which owns agentStatus and
- * bar rendering) and a WorkspaceController. Returns the session and a cleanup
- * function — does NOT call main(). The caller (main itself) owns the query
- * loop and calls cleanup() after it exits.
+ * Create and start a WorkerSession. Sets workerModeActive on agentStatus.
+ * Returns the session and a cleanup function for use by WorkerController.
  */
 export async function startWorkerMode(
   display: Display,
@@ -703,8 +802,6 @@ export async function startWorkerMode(
   await workspaceController?.onCreate();
 
   const afterTask = workspaceController ? () => workspaceController.onReset() : undefined;
-
-  let shuttingDown = false;
 
   const wsFactory: WsFactory = (agentId, taskId) => {
     const ws = new WebSocket(`${getConfig().foremanUrl}/worker`);
@@ -722,6 +819,7 @@ export async function startWorkerMode(
 
   const { agentStatus } = display;
   agentStatus.update({ model: getConfig().model, effort: getConfig().effort });
+  agentStatus.setWorkerModeActive(true);
 
   const session = new WorkerSession(agentStatus, wsFactory, display, {
     afterTask,
@@ -732,43 +830,10 @@ export async function startWorkerMode(
     repo,
   });
 
-  const shutdown = async () => {
-    if (shuttingDown) return;
-    shuttingDown = true;
-    const taskInfo = session.getTaskQuitInfo();
-    if (taskInfo) {
-      const choice = await session.confirmTaskQuit(taskInfo);
-      if (choice === "cancel") { shuttingDown = false; return; }
-      if (choice === "complete-and-quit") await session.completeCurrentTask();
-    }
-    await workspaceController?.onDestroy();
-    process.exit(0);
-  };
-
-  // SIGINT: interrupt the running query if one is active; otherwise prompt and shut down.
-  // This lets the user press ^C to interrupt a running tool without killing the worker.
-  process.on("SIGINT", () => {
-    if (!session.interrupt()) {
-      void shutdown();
-    }
-  });
-
-  // SIGTERM is a system/orchestrator signal: send goodbye then force-destroy without prompting.
-  process.on("SIGTERM", () => {
-    session.sendGoodbye();
-    if (workspaceController) {
-      void workspaceController.onForceDestroy().then(() => process.exit(0));
-    } else {
-      process.exit(0);
-    }
-  });
-
-  display.startPersistentBar();
   session.start();
 
   const cleanup = async () => {
     session.sendGoodbye();
-    shuttingDown = true;
     await workspaceController?.onDestroy();
     process.stdout.write("\x1b[?2004l\r\n");
     if (process.stdin.isTTY) process.stdin.setRawMode(false);

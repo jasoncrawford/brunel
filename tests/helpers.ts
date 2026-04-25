@@ -30,9 +30,13 @@ export async function registerTestCommands(): Promise<CommandController> {
   registry.register("clear",  { description: "Clear the conversation", handler: noop });
   registry.register("model",  { description: "Select the Claude model to use", handler: noop });
   registry.register("effort", { description: "Set the effort level for Claude's thinking", handler: noop });
-  registry.scoped("worker").register("complete", {
+  registry.register("permissions", { description: "Set the permission mode for tool use", handler: noop });
+  const workerRegistry = registry.scoped("worker");
+  workerRegistry.register("complete", {
     description: "Mark the current task as done",
     handler: async () => "task-complete",
   });
+  workerRegistry.register("start", { description: "Connect to the foreman and start accepting tasks", handler: noop });
+  workerRegistry.register("stop", { description: "Disconnect from the foreman", handler: noop });
   return controller;
 }
