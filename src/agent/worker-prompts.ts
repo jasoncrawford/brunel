@@ -48,12 +48,12 @@ function sectionB(issue: Wire.TaskIssue): string {
 
   if (status === "pushed") {
     const detail = prRef && branchRef ? ` — ${prRef} on ${branchRef}` : prRef ? ` — ${prRef}` : branchRef ? ` on ${branchRef}` : "";
-    return `There is already an open PR for this task${detail}. You are picking up where a previous worker left off.`;
+    return `There is already an open PR for this task${detail}. You are picking up work in progress.`;
   }
 
   if (status === "merged") {
     const detail = prRef && branchRef ? ` (${prRef}, ${branchRef})` : prRef ? ` (${prRef})` : branchRef ? ` (${branchRef})` : "";
-    return `The PR for this task has already been merged${detail}, but the issue is still open. This is an edge case.`;
+    return `The PR for this task has already been merged${detail}, but the issue is still open.`;
   }
 
   if (status === "closed" || status === "complete") {
