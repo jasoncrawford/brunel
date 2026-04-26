@@ -7,7 +7,7 @@ import { Picker, PickerCancelledError } from "../views/picker.js";
 import type { PickQuestionResult } from "../views/picker.js";
 import { Settings } from "../models/settings.js";
 import type { ModelInfo } from "../models/settings.js";
-import { QueryStats } from "../models/query-stats.js";
+import { QueryStats, STALL_THRESHOLD_SECS } from "../models/query-stats.js";
 
 // ── Log file ──────────────────────────────────────────────────────────────────
 
@@ -144,8 +144,23 @@ export class AgentController {
     let capturedSessionId = sessionId;
     let resultReceived = false;
 
+    // Log a single warning when no SDK message has arrived for STALL_THRESHOLD_SECS.
+    // This fires via a watchdog so it captures hangs inside the for-await wait itself.
+    let stallLogged = false;
+    const stallWatcher = setInterval(() => {
+      if (!stallLogged && stats.secsSinceLastActivity >= STALL_THRESHOLD_SECS) {
+        stallLogged = true;
+        logFull("STALL_DETECTED", {
+          secsSinceLastActivity: stats.secsSinceLastActivity,
+          totalElapsedSecs: stats.elapsedSecs,
+        });
+      }
+    }, 10_000);
+
     try {
       for await (const message of iterable) {
+        stats.noteActivity();
+
         if (!(message.type === "stream_event" && (message.event as { type?: string }).type === "content_block_delta")) {
           logFull("MESSAGE", message);
         }
@@ -172,6 +187,7 @@ export class AgentController {
     } catch (err) {
       if (!(err instanceof Error && /aborted by user/i.test(err.message))) throw err;
     } finally {
+      clearInterval(stallWatcher);
       process.stdin.removeListener("data", onInterrupt);
       this.currentAbortController = null;
     }

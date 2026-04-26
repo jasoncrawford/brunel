@@ -1,5 +1,10 @@
 import { EventEmitter } from "node:events";
 
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+/** Seconds of SDK silence before the status bar shows a stall warning and the watchdog logs it. */
+export const STALL_THRESHOLD_SECS = 120;
+
 // ── Working verbs ─────────────────────────────────────────────────────────────
 
 const WORKING_VERBS = [
@@ -88,10 +93,12 @@ export class QueryStats extends EventEmitter {
   private _costUsd: number | undefined;
   private readonly _startTime: number;
   private readonly _workingVerb: string;
+  private _lastActivityTime: number;
 
   constructor(startTime = Date.now()) {
     super();
     this._startTime = startTime;
+    this._lastActivityTime = startTime;
     this._workingVerb = pickWorkingVerb();
   }
 
@@ -100,6 +107,12 @@ export class QueryStats extends EventEmitter {
   get outputTokens(): number { return this._completedOutputTokens + this._currentOutputTokens; }
   get costUsd(): number | undefined { return this._costUsd; }
   get elapsedSecs(): number { return Math.floor((Date.now() - this._startTime) / 1000); }
+  get secsSinceLastActivity(): number { return Math.floor((Date.now() - this._lastActivityTime) / 1000); }
+
+  /** Record that an SDK message was received; resets the stall timer. */
+  noteActivity(): void {
+    this._lastActivityTime = Date.now();
+  }
 
   /**
    * Process a single top-level stream event. Emits "change" for stat-bearing
@@ -126,6 +139,10 @@ export class QueryStats extends EventEmitter {
   getStatusText(): string {
     const secs = this.elapsedSecs;
     const outTokens = this.outputTokens;
-    return `${this._workingVerb}… ${fmtStats(secs, this._turns || undefined, outTokens || undefined, this._inputTokens || undefined, this._costUsd)}`;
+    const stalled = this.secsSinceLastActivity;
+    const stallSuffix = stalled >= STALL_THRESHOLD_SECS
+      ? ` ⚠ no activity ${fmtDuration(stalled)}`
+      : "";
+    return `${this._workingVerb}… ${fmtStats(secs, this._turns || undefined, outTokens || undefined, this._inputTokens || undefined, this._costUsd)}${stallSuffix}`;
   }
 }

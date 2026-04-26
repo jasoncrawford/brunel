@@ -22,6 +22,7 @@ import { Input } from "../src/agent/views/input.js";
 import { Picker } from "../src/agent/views/picker.js";
 import { Display } from "../src/agent/views/display.js";
 import { AgentStatus } from "../src/agent/models/agent-status.js";
+import type { QueryStats } from "../src/agent/models/query-stats.js";
 
 let testDisplay: Display;
 let testSettings: Settings;
@@ -755,5 +756,87 @@ describe("runQuery - prompt redraw after query (worker mode integration)", () =>
       Object.defineProperty(process, "stdin", { value: origStdin, configurable: true });
       vi.restoreAllMocks();
     }
+  });
+});
+
+describe("runQuery - stall detection", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("secsSinceLastActivity is 0 after normal query (noteActivity called on each message)", async () => {
+    vi.useFakeTimers();
+    mockQueryMessages([
+      { type: "system", subtype: "init", session_id: "s1" },
+      { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 5, output_tokens: 5 } },
+    ]);
+    const cap = captureConsole();
+    let returnedStats: QueryStats;
+    try {
+      ({ stats: returnedStats } = await testController.runQuery("test", undefined));
+    } finally {
+      cap.restore();
+    }
+    expect(returnedStats.secsSinceLastActivity).toBe(0);
+  });
+
+  it("stall watchdog logs STALL_DETECTED after 120s without any SDK messages", async () => {
+    vi.useFakeTimers();
+    const { default: fs } = await import("fs");
+
+    (query as any).mockImplementation((opts: any) => {
+      return (async function* () {
+        await new Promise<void>((resolve) => {
+          opts.options.abortController.signal.addEventListener("abort", resolve, { once: true });
+        });
+      })();
+    });
+
+    const ac = new AbortController();
+    const cap = captureConsole();
+    const queryPromise = testController.runQuery("test", undefined, ac);
+
+    // Advance past stall threshold (120s) plus watchdog check interval (10s)
+    await vi.advanceTimersByTimeAsync(130_000);
+
+    const stallCalls = (fs.appendFileSync as any).mock.calls.filter(
+      (call: any[]) => String(call[1]).includes("STALL_DETECTED")
+    );
+    expect(stallCalls.length).toBeGreaterThan(0);
+
+    // Clean up
+    ac.abort();
+    try { await queryPromise; } catch { /* aborted */ }
+    cap.restore();
+  });
+
+  it("stall watchdog does NOT log before threshold (90s)", async () => {
+    vi.useFakeTimers();
+    const { default: fs } = await import("fs");
+
+    (query as any).mockImplementation((opts: any) => {
+      return (async function* () {
+        await new Promise<void>((resolve) => {
+          opts.options.abortController.signal.addEventListener("abort", resolve, { once: true });
+        });
+      })();
+    });
+
+    const ac = new AbortController();
+    const cap = captureConsole();
+    const queryPromise = testController.runQuery("test", undefined, ac);
+
+    // Advance to just under threshold
+    await vi.advanceTimersByTimeAsync(90_000);
+
+    const stallCalls = (fs.appendFileSync as any).mock.calls.filter(
+      (call: any[]) => String(call[1]).includes("STALL_DETECTED")
+    );
+    expect(stallCalls.length).toBe(0);
+
+    // Clean up
+    ac.abort();
+    try { await queryPromise; } catch { /* aborted */ }
+    cap.restore();
   });
 });
