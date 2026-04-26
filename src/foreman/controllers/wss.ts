@@ -4,6 +4,8 @@ import * as Wire from "../../../shared/wire.js";
 import { ForemanMessage } from "../models/foreman-message.js";
 import { WebhookEvent } from "../models/webhook-event.js";
 import type { AdminWss } from "./admin-ws.js";
+
+type AdminWssLike = Pick<AdminWss, "broadcastLogEvent">;
 import { fmtError, log } from "../../utils.js";
 import { shortWorkerId } from "../../../shared/utils.js";
 import type { BrunelConfig } from "../../config.js";
@@ -14,14 +16,6 @@ import { Worker } from "../models/worker.js";
 import { loadIssuesToQueue } from "../clients/github.js";
 
 type R = Record<string, unknown>;
-
-function debounce(fn: () => void | Promise<void>, delayMs: number): () => void {
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  return () => {
-    if (timer !== null) clearTimeout(timer);
-    timer = setTimeout(() => { timer = null; void fn(); }, delayMs);
-  };
-}
 
 // ── Routing helpers ───────────────────────────────────────────────────────────
 
@@ -48,23 +42,19 @@ function routeResult(task: { taskId: string; workerId: string | null } | null | 
 type ForemanWssOptions = {
   config: Pick<BrunelConfig, "taskLabel" | "githubToken" | "githubApiUrl" | "workerSecret" | "pingIntervalMs">;
   server: http.Server;
-  adminWss?: AdminWss;
+  adminWss?: AdminWssLike;
 };
 
 export class ForemanWss {
   readonly wss: WebSocketServer;
   private readonly config: Pick<BrunelConfig, "taskLabel" | "githubToken" | "githubApiUrl" | "workerSecret" | "pingIntervalMs">;
-  private readonly adminWss?: AdminWss;
+  private readonly adminWss?: AdminWssLike;
   private nextBroadcastId = 1;
 
   constructor({ config, server, adminWss }: ForemanWssOptions) {
     this.config = config;
     this.adminWss = adminWss;
 
-    const debouncedBroadcast = debounce(() => this.broadcastSnapshot(), 10);
-    TaskManager.events.on("changed", debouncedBroadcast);
-    Worker.events.on("changed", debouncedBroadcast);
-    Repo.events.on("changed", debouncedBroadcast);
     TaskManager.events.on("deps_loaded", (taskManager: TaskManager) => {
       this.assignWorkForRepo(taskManager).catch((err) => log(`ERROR assignWork after deps_loaded: ${fmtError(err)}`));
     });
@@ -271,15 +261,6 @@ export class ForemanWss {
       workerId: data.workerId,
       repo: data.repo,
       summary,
-    });
-  }
-
-  private async broadcastSnapshot(): Promise<void> {
-    if (!this.adminWss) return;
-    this.adminWss.broadcastSnapshot({
-      tasks: await TaskManager.getAllTasksForBroadcast(),
-      workers: await Worker.allForDashboard(),
-      repos: (await Repo.list()).map((r) => r.toWire()),
     });
   }
 

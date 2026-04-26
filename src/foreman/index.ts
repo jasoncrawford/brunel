@@ -8,10 +8,9 @@ import { loadConfig } from "../config.js";
 import { TaskManager } from "./models/task-manager.js";
 import { Repo } from "./models/repo.js";
 import { initDb } from "./clients/db-client.js";
-import { Worker } from "./models/worker.js";
-import { createHttpServer } from "./controllers/http-server.js";
+import { HttpServer } from "./controllers/http-server.js";
 import { ForemanWss } from "./controllers/wss.js";
-import { createAdminWss } from "./controllers/admin-ws.js";
+import { AdminWss } from "./controllers/admin-ws.js";
 import { fmtError, log } from "../utils.js";
 
 // Only start listening when run directly (not when imported by tests)
@@ -33,14 +32,11 @@ if (isMain) {
   initDb(supabase);
 
   let foremanWss: ForemanWss;
-  const server = createHttpServer({ webhooks, routeEvent: (id, name, payload) => foremanWss.routeEvent(id, name, payload) });
+  const httpServer = new HttpServer({ webhooks, routeEvent: (id, name, payload) => foremanWss.routeEvent(id, name, payload) });
+  const { server } = httpServer;
 
-  // Admin WebSocket broadcaster — aggregates tasks from all per-repo TaskManagers
-  const adminWss = createAdminWss(server, async () => ({
-    tasks: await TaskManager.getAllTasksForBroadcast(),
-    workers: Worker.all().map((w) => w.toWire()),
-    repos: (await Repo.list()).map((r) => r.toWire()),
-  }));
+  // Admin WebSocket broadcaster — owns snapshot lifecycle and event subscriptions
+  const adminWss = new AdminWss(server);
 
   foremanWss = new ForemanWss({ config, server, adminWss });
 

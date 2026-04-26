@@ -36,16 +36,12 @@ const _realFetch = globalThis.fetch;
 import http from "http";
 import type { AddressInfo } from "net";
 import { WebSocket } from "ws";
-import { Worker } from "../../src/foreman/models/worker.js";
 import { ForemanWss } from "../../src/foreman/controllers/wss.js";
-import { createHttpServer } from "../../src/foreman/controllers/http-server.js";
-import { Task } from "../../src/foreman/models/task.js";
-import { Repo } from "../../src/foreman/models/repo.js";
+import { HttpServer } from "../../src/foreman/controllers/http-server.js";
 import { initDb } from "../../src/foreman/clients/db-client.js";
 import { createMemoryTaskDb } from "../helpers/memory-db.js";
 import { createTestTaskManager } from "../helpers/task.js";
-import { TaskManager } from "../../src/foreman/models/task-manager.js";
-import { createAdminWss } from "../../src/foreman/controllers/admin-ws.js";
+import { AdminWss } from "../../src/foreman/controllers/admin-ws.js";
 import { loadDefaultConfig } from "../../src/config.js";
 
 const PORT = parseInt(process.env.PORT ?? "14567", 10);
@@ -66,7 +62,7 @@ const mockWorkers = new Map<string, WebSocket>();
 let foremanWss: ForemanWss;
 
 // Build the foreman HTTP server (handles /webhook, /health, /api/*, static dist/)
-const server = createHttpServer({
+const { server } = new HttpServer({
   webhooks: null,
   routeEvent: (id, name, payload) => foremanWss.routeEvent(id, name, payload),
 });
@@ -142,11 +138,7 @@ async function handleTestRoute(
 
 // ── Admin WebSocket ───────────────────────────────────────────────────────────
 
-const adminWss = createAdminWss(server, async () => ({
-  tasks: await TaskManager.getAllTasksForBroadcast(),
-  workers: await Worker.allForDashboard(),
-  repos: (await Repo.list()).map((r) => r.toWire()),
-}));
+const adminWss = new AdminWss(server);
 
 // ── Foreman WebSocket ─────────────────────────────────────────────────────────
 
