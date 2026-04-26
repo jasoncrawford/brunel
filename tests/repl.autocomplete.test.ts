@@ -61,7 +61,7 @@ describe("listCommandNames", () => {
 
   it("returns only builtins when directory is missing", () => {
     const result = registry.listCommandNames(() => null);
-    expect(result).toEqual(["clear", "effort", "exit", "model", "permissions", "worker:complete", "worker:start", "worker:stop", "workspace:create", "workspace:prune", "workspace:remove", "workspace:reset"]);
+    expect(result).toEqual(["clear", "effort", "exit", "model", "permissions", "worker:claim", "worker:complete", "worker:start", "worker:stop", "workspace:create", "workspace:prune", "workspace:remove", "workspace:reset"]);
   });
 
   it("includes a file at root level", () => {

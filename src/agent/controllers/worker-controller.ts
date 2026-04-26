@@ -134,6 +134,9 @@ export class WorkerController extends EventEmitter {
   private issueClosed = false;
   private _resetPromise: Promise<void> | null = null;
 
+  // ── Pending claim (cleared by stop() and after sending) ───────────────────
+  private _pendingClaimTaskId: string | undefined;
+
   // ── Connection state (cleared by stop()) ──────────────────────────────────
   private ws: WebSocket | undefined;
   // Handshake lifecycle: "registered" = hello_ack received (or initial state);
@@ -390,7 +393,7 @@ export class WorkerController extends EventEmitter {
     }
   }
 
-  /** Register /worker:complete, /worker:start, /worker:stop into the given (already-scoped) registry. */
+  /** Register /worker:complete, /worker:start, /worker:stop, /worker:claim into the given (already-scoped) registry. */
   registerCommands(registry: CommandRegistry): void {
     registry.register("complete", {
       description: "Mark the current task as done",
@@ -414,6 +417,30 @@ export class WorkerController extends EventEmitter {
           return undefined;
         }
         await this.stop();
+      },
+    });
+    registry.register("claim", {
+      description: "Claim a specific task by ID",
+      handler: async (args: string) => {
+        const taskId = args.trim();
+        if (!taskId) {
+          this.display.print(c.boldRed("Usage: /worker:claim <taskId>"));
+          return undefined;
+        }
+        if (this.hasTask()) {
+          this.display.print(c.boldRed(`Already working on task ${this.currentTaskId!}. Complete this task or stop worker mode first.`));
+          return undefined;
+        }
+        if (!this._isActive) {
+          await this.start();
+          if (!this._isActive) return undefined;
+        }
+        if (this.connectionState === "registered") {
+          this.sendClaimTask(taskId);
+        } else {
+          this._pendingClaimTaskId = taskId;
+        }
+        return undefined;
       },
     });
   }
@@ -449,6 +476,7 @@ export class WorkerController extends EventEmitter {
     this.prIsClosed = false;
     this.issueClosed = false;
     this._resetPromise = null;
+    this._pendingClaimTaskId = undefined;
     this.ws = undefined;
     this.connectionState = "registered";
     this.bufferedMessages = [];
@@ -485,6 +513,11 @@ export class WorkerController extends EventEmitter {
     this.connectionState = "registered";
     this.agentStatus.update({ connectionStatus: "connected", disconnectCode: undefined });
     this.flushBuffer();
+    if (this._pendingClaimTaskId) {
+      const taskId = this._pendingClaimTaskId;
+      this._pendingClaimTaskId = undefined;
+      this.sendClaimTask(taskId);
+    }
   }
 
   /**
@@ -497,6 +530,16 @@ export class WorkerController extends EventEmitter {
     const pending = this.bufferedMessages.splice(0);
     for (const m of pending) {
       this.ws.send(JSON.stringify(m));
+    }
+  }
+
+  private sendClaimTask(taskId: string): void {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({
+        type: "claim_task",
+        workerId: this.agentStatus.agentId,
+        taskId,
+      } satisfies Wire.WorkerMessage));
     }
   }
 
