@@ -51,12 +51,8 @@ export default function RepoDetail() {
         <section style={{ marginBottom: "2rem", padding: "1rem", background: "#fff8e1", border: "1px solid #ffe082", borderRadius: "4px" }}>
           <strong>This repo is not yet activated.</strong>
           <p style={{ margin: "0.5rem 0 0" }}>
-            No tasks will be assigned until the repo is activated. To activate it, start a{" "}
-            <code>brunel</code> worker in this repo:
-          </p>
-          <pre style={{ margin: "0.5rem 0 0", padding: "0.5rem", background: "#f5f5f5", borderRadius: "3px" }}>npm run worker</pre>
-          <p style={{ margin: "0.5rem 0 0" }}>
-            The worker will prompt you to activate the repo on first connection.
+            No tasks will be assigned until the repo is activated. To activate it, run{" "}
+            <code>brunel</code> in this repo — the worker will prompt you to activate on first connection.
           </p>
         </section>
       )}
