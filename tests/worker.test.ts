@@ -2001,4 +2001,20 @@ describe("repo activation flow", () => {
     const printedLines = disp.print.mock.calls.map(([l]: [string]) => l);
     expect(printedLines.some((l) => l.includes("acme/my-project"))).toBe(true);
   });
+
+  it("emits prompts_ready after repo_activated so the main loop can re-start stdin listening", async () => {
+    const pickFn = vi.fn().mockResolvedValue(0); // "Yes, activate"
+    const { sess, ws } = await makeSessionWithPick(pickFn);
+    sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "idle", repoStatus: "new" });
+    await new Promise((r) => setTimeout(r, 10));
+
+    let emitted = false;
+    sess.once("prompts_ready", () => { emitted = true; });
+
+    sendMsg(ws, { type: "repo_activated", workerId: AGENT_ID });
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(emitted).toBe(true);
+  });
+
 });

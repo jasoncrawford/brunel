@@ -199,6 +199,20 @@ describe("printForemanMessage - foreman_error", () => {
   });
 });
 
+describe("printForemanMessage - repo_activated", () => {
+  it("repo_activated prints a visible confirmation message (not verbose-only)", () => {
+    const msg: Wire.ForemanMessage = { type: "repo_activated", workerId: "w-1" };
+    const output = captureOutput(() => testDisplay.printForemanMessage(msg));
+    expect(stripAnsi(output).trim()).not.toBe("");
+  });
+
+  it("repo_activated does not print 'Unknown foreman message'", () => {
+    const msg: Wire.ForemanMessage = { type: "repo_activated", workerId: "w-1" };
+    const output = captureOutput(() => testDisplay.printForemanMessage(msg));
+    expect(stripAnsi(output)).not.toContain("Unknown foreman message");
+  });
+});
+
 describe("printForemanMessage - _default", () => {
   it("unknown type prints <type>", () => {
     const output = captureOutput(() => testDisplay.printForemanMessage({ type: "unknown_future_type" } as any));
