@@ -38,5 +38,6 @@ export async function registerTestCommands(): Promise<CommandController> {
   });
   workerRegistry.register("start", { description: "Connect to the foreman and start accepting tasks", handler: noop });
   workerRegistry.register("stop", { description: "Disconnect from the foreman", handler: noop });
+  workerRegistry.register("claim", { description: "Claim a specific task by ID", handler: noop });
   return controller;
 }

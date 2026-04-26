@@ -123,6 +123,8 @@ export class ForemanWss {
             await this.handleWorkerGoodbye(workerId, msg);
           } else if (msg.type === "activate_repo") {
             await this.handleActivateRepo(workerId, ws);
+          } else if (msg.type === "claim_task") {
+            await this.handleClaimTask(workerId, msg);
           } else {
             log(`[worker ${workerId}] unknown message type: ${(msg as R).type}`);
             return;
@@ -508,6 +510,27 @@ export class ForemanWss {
       // Non-fatal: repo is active, tasks can still be created via webhooks.
     }
     this.sendMsg(worker, { type: "repo_activated", workerId: worker.workerId });
+  }
+
+  async handleClaimTask(workerId: string, msg: Extract<Wire.WorkerMessage, { type: "claim_task" }>): Promise<void> {
+    const worker = Worker.fromRegistry(workerId);
+    if (!worker) {
+      log(`[worker ${shortWorkerId(workerId)}] claim_task received but worker not in registry`);
+      return;
+    }
+    this.workerLog(workerId, `claim_task #${msg.taskId}`);
+    const outcome = await worker.repo.taskManager.claimTask(worker, msg.taskId);
+    if (!outcome.ok) {
+      this.sendMsg(worker, { type: "foreman_error", message: outcome.error, fatal: false }, { logTaskId: msg.taskId });
+      return;
+    }
+    const { task, queued } = outcome;
+    this.sendMsg(worker, { type: "task_assigned", taskId: task.taskId, issue: task.toAssignmentPayload() });
+    this.workerLog(workerId, `→ claim task_assigned #${task.issueNumber} "${task.title}"`);
+    for (const evt of queued) {
+      this.sendMsg(worker, { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload() });
+      this.workerLog(workerId, `→ event_notification #${task.issueNumber} ${evt.eventName} (queued)`);
+    }
   }
 
   // ── Routing ─────────────────────────────────────────────────────────────────

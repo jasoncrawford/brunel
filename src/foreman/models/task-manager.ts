@@ -23,6 +23,10 @@ export type AssignOutcome =
   | { ok: true; task: Task; queued: WebhookEvent[]; worker: Worker }
   | { ok: false; worker: Worker; err: unknown };
 
+export type ClaimOutcome =
+  | { ok: true; task: Task; queued: WebhookEvent[] }
+  | { ok: false; error: string };
+
 export class TaskManager extends EventEmitter {
   // ── Static registry ──────────────────────────────────────────────────────
   private static registry = new Map<number, TaskManager>();
@@ -128,6 +132,45 @@ export class TaskManager extends EventEmitter {
           if (outcome) outcomes.push(outcome);
         }
         resolve(outcomes);
+      });
+    });
+  }
+
+  /** Claim a specific task for a worker.
+   *  Uses the same mutex as assignIdleWorkers() to prevent double-assignment.
+   *  Allows claiming unassigned tasks or tasks assigned to disconnected workers.
+   *  Rejects if the task is assigned to an active (non-disconnected) worker. */
+  async claimTask(worker: Worker, taskId: string): Promise<ClaimOutcome> {
+    return new Promise((resolve) => {
+      this.assignLock = this.assignLock.then(async () => {
+        try {
+          const task = await Task.get(taskId);
+          if (!task) {
+            resolve({ ok: false, error: `Task ${taskId} not found` });
+            return;
+          }
+          if (task.repoId !== this.repo.id) {
+            resolve({ ok: false, error: `Task ${taskId} belongs to a different repo` });
+            return;
+          }
+          if (task.workerId && task.workerId !== worker.workerId) {
+            const assignedWorker = Worker.fromRegistry(task.workerId);
+            if (assignedWorker && assignedWorker.status !== "disconnected") {
+              resolve({ ok: false, error: `Task ${taskId} is already assigned to an active worker` });
+              return;
+            }
+          }
+          worker.assign(task);
+          try {
+            await task.assign(worker);
+            resolve({ ok: true, task, queued: this.drainEvents(task) });
+          } catch (err) {
+            worker.release();
+            resolve({ ok: false, error: `Failed to persist assignment: ${String(err)}` });
+          }
+        } catch (err) {
+          resolve({ ok: false, error: `Internal error: ${String(err)}` });
+        }
       });
     });
   }
