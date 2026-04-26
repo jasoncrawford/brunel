@@ -118,13 +118,18 @@ async function handleTestRoute(
   }
 
   // DELETE /test/workers/:id
-  // Closes the mock worker connection.
+  // Closes the mock worker connection and waits for the close handshake to
+  // complete before responding, so the foreman has already broadcast
+  // worker_disconnected by the time the caller's await resolves.
   const workerMatch = /^\/test\/workers\/(.+)$/.exec(url);
   if (req.method === "DELETE" && workerMatch) {
     const id = workerMatch[1];
     const ws = mockWorkers.get(id);
     if (ws) {
-      ws.close();
+      await new Promise<void>((resolve) => {
+        ws.once("close", resolve);
+        ws.close();
+      });
       mockWorkers.delete(id);
     }
     res.writeHead(200);
