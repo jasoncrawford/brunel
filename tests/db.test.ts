@@ -275,19 +275,19 @@ describe("queryActivityLog", () => {
       WebhookEvent.log({
         deliveryId: null, eventName: "push", action: null,
         repoId: null, sender: null, issueNumber: null,
-        prNumber: null, branch: null, taskId: null, workerId: "w1", payload: {},
+        prNumber: null, branch: null, taskId: null, workerId: "db-w1", payload: {},
       }),
       WebhookEvent.log({
         deliveryId: null, eventName: "push", action: null,
         repoId: null, sender: null, issueNumber: null,
-        prNumber: null, branch: null, taskId: null, workerId: "w2", payload: {},
+        prNumber: null, branch: null, taskId: null, workerId: "db-w2", payload: {},
       }),
     ]);
 
-    const entries = await queryActivityLog({ workerId: "w1" });
+    const entries = await queryActivityLog({ workerId: "db-w1" });
     expect(entries).toHaveLength(1);
     expect(entries[0].kind).toBe("webhook");
-    expect(entries[0].workerId).toBe("w1");
+    expect(entries[0].workerId).toBe("db-w1");
   });
 
   it("returns entries with workerId from webhook rows in queryLog", async () => {
