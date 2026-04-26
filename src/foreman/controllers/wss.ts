@@ -524,13 +524,9 @@ export class ForemanWss {
       this.sendMsg(worker, { type: "foreman_error", message: outcome.error, fatal: false }, { logTaskId: msg.taskId });
       return;
     }
-    const { task, queued } = outcome;
+    const { task } = outcome;
     this.sendMsg(worker, { type: "task_assigned", taskId: task.taskId, issue: task.toAssignmentPayload() });
     this.workerLog(workerId, `→ claim task_assigned #${task.issueNumber} "${task.title}"`);
-    for (const evt of queued) {
-      this.sendMsg(worker, { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload() });
-      this.workerLog(workerId, `→ event_notification #${task.issueNumber} ${evt.eventName} (queued)`);
-    }
   }
 
   // ── Routing ─────────────────────────────────────────────────────────────────

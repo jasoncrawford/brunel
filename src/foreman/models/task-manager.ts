@@ -24,7 +24,7 @@ export type AssignOutcome =
   | { ok: false; worker: Worker; err: unknown };
 
 export type ClaimOutcome =
-  | { ok: true; task: Task; queued: WebhookEvent[] }
+  | { ok: true; task: Task }
   | { ok: false; error: string };
 
 export class TaskManager extends EventEmitter {
@@ -163,7 +163,8 @@ export class TaskManager extends EventEmitter {
           worker.assign(task);
           try {
             await task.assign(worker);
-            resolve({ ok: true, task, queued: this.drainEvents(task) });
+            this.drainEvents(task); // clear any queued events; new worker reads state fresh
+            resolve({ ok: true, task });
           } catch (err) {
             worker.release();
             resolve({ ok: false, error: `Failed to persist assignment: ${String(err)}` });

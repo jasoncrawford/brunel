@@ -156,19 +156,21 @@ describe("handleClaimTask", () => {
     expect(msg?.fatal).toBe(false);
   });
 
-  it("delivers queued events after task_assigned", async () => {
+  it("drains (clears) queued events without forwarding them to the new worker", async () => {
     const { wss, sendMsg } = makeWss();
     const repo = taskManager.repo;
     Worker.register("w1", fakeWs(), repo);
     const task = await seedTask({ task_id: "10", issue_number: 10, repo_id: repo.id, repo: repo.fullName });
-    // Queue a fake event
+    // Queue a fake event on the task
     const fakeEvent = { id: "evt-1", name: "issue_comment", payload: {}, toWorkerPayload: () => ({ id: "evt-1", name: "issue_comment", payload: {} }), eventName: "issue_comment", summary: () => "" } as any;
     task.queueEvent(fakeEvent);
 
     await wss.handleClaimTask("w1", { type: "claim_task", workerId: "w1", taskId: "10" });
 
-    const eventMsg = sentMsgOfType(sendMsg, "event_notification");
-    expect(eventMsg).toBeDefined();
+    // Events must NOT be forwarded — new worker reads task state fresh
+    expect(sentMsgOfType(sendMsg, "event_notification")).toBeUndefined();
+    // But the queue should be cleared (drain was called)
+    expect(task.drainEvents()).toHaveLength(0);
   });
 });
 
