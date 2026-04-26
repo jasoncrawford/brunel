@@ -252,6 +252,67 @@ describe("ask() - up/down arrow navigation", () => {
   });
 });
 
+// ── Issue #893: residual green bar after multi-line paste ─────────────────────
+//
+// When a multi-line paste causes the buffer to grow past the old status bar
+// row, the new buffer content is written over those rows but only replaces
+// the characters actually typed. The columns past the last written character
+// retain the old green background from the previous drawRaw() \x1b[K.
+// Fix: insert \x1b[K before each \r\n    in the display string so every
+// intermediate buffer line is cleared to end-of-line before continuing.
+
+describe("ask() - intermediate buffer lines cleared after multi-line paste (issue #893)", () => {
+  it("each intermediate buffer line emits \\x1b[K before moving to next row", async () => {
+    // cols=80, prompt="> " (2 chars), persistent bar active.
+    // Paste "a\nb\nc" → 3 rows. The display writes "a\x1b[K\r\n    b\x1b[K\r\n    c".
+    // Each \x1b[K clears the rest of the row with default bg, removing any
+    // residual green from the old status bar that those rows may have had.
+    setColumns(80);
+    const writeSpy = vi.mocked(process.stdout.write);
+
+    testDisplay.startPersistentBar();
+
+    await withFakeStdin(async (stdin) => {
+      const p = testInput.ask("> ", () => []);
+      writeSpy.mockClear();
+
+      // Paste multi-line content — the first newline moves into what was the
+      // old blank-separator row; deeper lines move into the old status-bar row.
+      stdin.push("\x1b[200~a\nb\nc\x1b[201~");
+
+      const output = collectOutput(writeSpy);
+
+      // The two intermediate lines ("a" and "b") must each be followed by
+      // \x1b[K before the \r\n that advances to the next display row.
+      // We look for the pattern <char>\x1b[K\r\n
+      expect(output).toMatch(/a\x1b\[K\r\n/);
+      expect(output).toMatch(/b\x1b\[K\r\n/);
+
+      stdin.push("\r");
+      expect(await p).toBe("a\nb\nc");
+    });
+
+    testDisplay.stopPersistentBar();
+  });
+
+  it("buffer value is correct after multi-line paste with persistent bar active", async () => {
+    // Regression: paste should not corrupt the buffer value even when the
+    // pasted content spans rows that previously held the status bar.
+    setColumns(80);
+
+    testDisplay.startPersistentBar();
+
+    await withFakeStdin(async (stdin) => {
+      const p = testInput.ask("> ", () => []);
+      stdin.push("\x1b[200~foo\nbar\nbaz\x1b[201~");
+      stdin.push("\r");
+      expect(await p).toBe("foo\nbar\nbaz");
+    });
+
+    testDisplay.stopPersistentBar();
+  });
+});
+
 // ── Status update callback (issue #486: paste + status bar) ──────────────────
 //
 // When the persistent status bar changes while ask() has a multiline buffer

@@ -176,8 +176,11 @@ export class Input {
     if (prevRow > 0) process.stdout.write(`\x1b[${prevRow}A`);
     process.stdout.write("\r");
 
-    // 2. Write prompt + buffer (pasted \n → visual continuation "... ")
-    const displayStr = this._buffer.replace(/\n/g, "\r\n    ");
+    // 2. Write prompt + buffer (pasted \n → visual continuation "... ").
+    // \x1b[K before each \r\n clears the rest of each intermediate buffer row
+    // with the default background, erasing any residual colored cells left by
+    // a previous status bar that occupied those rows (issue #893).
+    const displayStr = this._buffer.replace(/\n/g, "\x1b[K\r\n    ");
     process.stdout.write(this._promptLine + displayStr);
 
     const { row: endRow } = this._screenPosOf(this._buffer.length);
@@ -229,7 +232,7 @@ export class Input {
   private _drawFresh() {
     if (this._done) return;
     this._totalDrawnRows = 0; // reset: we're drawing from a new position
-    const displayStr = this._buffer.replace(/\n/g, "\r\n    ");
+    const displayStr = this._buffer.replace(/\n/g, "\x1b[K\r\n    ");
     // print() already moved the cursor to a new line via console.log's
     // trailing \n; \r ensures we're at column 0 without adding an extra blank line.
     process.stdout.write("\r" + this._promptLine + displayStr);
