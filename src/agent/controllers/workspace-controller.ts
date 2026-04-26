@@ -18,7 +18,41 @@ export class WorkspaceController {
     readonly workspace: Workspace | undefined,
     private display: WorkerDisplay,
     private config: { verbose: boolean },
-  ) {}
+  ) {
+    this._setupListeners();
+  }
+
+  private _setupListeners(): void {
+    const { workspace } = this;
+    if (!workspace) return;
+    workspace.on("create-start", () => {
+      if (!this.config.verbose) this.display.print(c.sageGreen("Creating workspace..."));
+    });
+    workspace.on("clone-start", ({ repoUrl: url, dir }: { repoUrl: string; dir: string }) => {
+      if (this.config.verbose) this.display.print(c.sageGreen(`Cloning ${url} → ${dir}`));
+    });
+    workspace.on("npm-install", ({ dir }: { dir: string }) => {
+      if (this.config.verbose) this.display.print(c.sageGreen(`Installing dependencies in ${dir}`));
+    });
+    workspace.on("reset-start", ({ dir }: { dir: string }) => {
+      this.display.print(c.sageGreen(this.config.verbose ? `Resetting ${dir}` : "Resetting workspace..."));
+    });
+    workspace.on("reset-retry", ({ error }: { dir: string; error: string }) => {
+      this.display.print(c.amber(`Reset failed, retrying: ${error}`));
+    });
+    workspace.on("reset-reclone", ({ dir, error }: { dir: string; error: string; repoUrl: string }) => {
+      this.display.print(c.amber(this.config.verbose ? `Reset failed again, re-cloning ${dir}: ${error}` : `Reset failed again, re-cloning: ${error}`));
+    });
+    workspace.on("destroy", ({ dir }: { dir: string }) => {
+      this.display.print(c.sageGreen(this.config.verbose ? `Destroying ${dir}` : "Destroying workspace..."));
+    });
+    workspace.on("prune-start", ({ workspaceDir: dir }: { workspaceDir: string }) => {
+      this.display.print(c.sageGreen(this.config.verbose ? `Pruning orphaned workspaces in ${dir}` : "Pruning orphaned workspaces..."));
+    });
+    workspace.on("prune-remove", ({ dir }: { dir: string }) => {
+      this.display.print(c.darkGray(`  Removed: ${dir}`));
+    });
+  }
 
   /**
    * Register workspace commands into the given registry (which should already
@@ -91,44 +125,13 @@ export class WorkspaceController {
   }
 
   /**
-   * Subscribe to workspace events (for progress display) and create the
-   * workspace directory. Changes the process working directory to the workspace.
+   * Create the workspace directory and change into it.
+   * Event listeners for progress display are registered once in the constructor.
    * No-op if no workspace is configured.
    */
   async onCreate(): Promise<void> {
-    const { workspace, display } = this;
+    const { workspace } = this;
     if (!workspace) return;
-
-    const verbose = this.config.verbose;
-
-    workspace.on("create-start", () => {
-      if (!verbose) display.print(c.sageGreen("Creating workspace..."));
-    });
-    workspace.on("clone-start", ({ repoUrl: url, dir }: { repoUrl: string; dir: string }) => {
-      if (verbose) display.print(c.sageGreen(`Cloning ${url} → ${dir}`));
-    });
-    workspace.on("npm-install", ({ dir }: { dir: string }) => {
-      if (verbose) display.print(c.sageGreen(`Installing dependencies in ${dir}`));
-    });
-    workspace.on("reset-start", ({ dir }: { dir: string }) => {
-      display.print(c.sageGreen(verbose ? `Resetting ${dir}` : "Resetting workspace..."));
-    });
-    workspace.on("reset-retry", ({ error }: { dir: string; error: string }) => {
-      display.print(c.amber(`Reset failed, retrying: ${error}`));
-    });
-    workspace.on("reset-reclone", ({ dir, error }: { dir: string; error: string; repoUrl: string }) => {
-      display.print(c.amber(verbose ? `Reset failed again, re-cloning ${dir}: ${error}` : `Reset failed again, re-cloning: ${error}`));
-    });
-    workspace.on("destroy", ({ dir }: { dir: string }) => {
-      display.print(c.sageGreen(verbose ? `Destroying ${dir}` : "Destroying workspace..."));
-    });
-    workspace.on("prune-start", ({ workspaceDir: dir }: { workspaceDir: string }) => {
-      display.print(c.sageGreen(verbose ? `Pruning orphaned workspaces in ${dir}` : "Pruning orphaned workspaces..."));
-    });
-    workspace.on("prune-remove", ({ dir }: { dir: string }) => {
-      display.print(c.darkGray(`  Removed: ${dir}`));
-    });
-
     await workspace.create();
     process.chdir(workspace.dir);
   }

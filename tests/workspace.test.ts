@@ -302,6 +302,26 @@ describe("confirmIfUnsafe", () => {
   });
 });
 
+// ── create: git excludes ────────────────────────────────────────────────────
+
+describe("Workspace.create git excludes", () => {
+  it("adds .brunel.lock to .git/info/exclude so it never appears in git status", async () => {
+    const ws = await makeWorkspace();
+    const excludePath = path.join(ws.dir, ".git", "info", "exclude");
+    expect(fs.existsSync(excludePath)).toBe(true);
+    const lines = fs.readFileSync(excludePath, "utf8").split("\n").map(l => l.trim());
+    expect(lines).toContain(".brunel.lock");
+  });
+
+  it("does not duplicate .brunel.lock in .git/info/exclude when create is called again", async () => {
+    const ws = await makeWorkspace();
+    await ws.create(); // second call (simulate stop → start cycle)
+    const excludePath = path.join(ws.dir, ".git", "info", "exclude");
+    const lines = fs.readFileSync(excludePath, "utf8").split("\n").map(l => l.trim()).filter(Boolean);
+    expect(lines.filter(l => l === ".brunel.lock")).toHaveLength(1);
+  });
+});
+
 // ── prune ──────────────────────────────────────────────────────────────────
 
 function makeWorkspaceForPrune(workspaceDir: string): Workspace {

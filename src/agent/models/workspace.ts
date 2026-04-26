@@ -63,7 +63,21 @@ export class Workspace extends EventEmitter {
       await this._npmInstall();
     }
     fs.writeFileSync(path.join(this.dir, ".brunel.lock"), String(process.pid));
+    // Keep .brunel.lock out of git status so it never triggers the data-loss
+    // warning in checkSafety() — even when the cloned repo's .gitignore omits it.
+    this._ensureLocallyIgnored(".brunel.lock");
     this.isCreated = true;
+  }
+
+  private _ensureLocallyIgnored(pattern: string): void {
+    const infoDir = path.join(this.dir, ".git", "info");
+    fs.mkdirSync(infoDir, { recursive: true });
+    const excludesPath = path.join(infoDir, "exclude");
+    const existing = fs.existsSync(excludesPath) ? fs.readFileSync(excludesPath, "utf8") : "";
+    const lines = existing.split("\n").map(l => l.trim());
+    if (lines.includes(pattern)) return;
+    const sep = existing.length > 0 && !existing.endsWith("\n") ? "\n" : "";
+    fs.appendFileSync(excludesPath, sep + pattern + "\n");
   }
 
   /**

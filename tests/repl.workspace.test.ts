@@ -238,6 +238,24 @@ describe("WorkspaceController.onCreate", () => {
   });
 });
 
+// ── onCreate: double-listener regression ─────────────────────────────────────
+
+describe("WorkspaceController double-start regression", () => {
+  it("prints 'Destroying workspace...' exactly once even when onCreate is called twice", async () => {
+    const ws = makeWorkspace();
+    ws.isCreated = true;
+    const controller = new WorkspaceController(ws, testDisplay, testConfig);
+    await controller.onCreate();
+    await controller.onCreate(); // simulate stop → /worker:start again
+    testDisplay.print.mockClear();
+    ws.emit("destroy", { dir: ws.dir });
+    const destroyMessages = testDisplay.print.mock.calls
+      .map(([l]: [string]) => stripAnsi(l))
+      .filter((m: string) => m.includes("Destroying workspace"));
+    expect(destroyMessages).toHaveLength(1);
+  });
+});
+
 // ── workspace:prune ───────────────────────────────────────────────────────────
 
 describe("workspace:prune", () => {
