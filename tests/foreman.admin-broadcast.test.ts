@@ -1,16 +1,12 @@
 /**
- * Tests for snapshot-broadcasting behavior: reactive dispatch, debounce, and
- * prNumber propagation when a PR is opened.
+ * Tests for log-event broadcasting behavior in ForemanWss.
  *
- * The per-event-type log-entry format tests were removed in issue #383 — they
- * are covered by foreman.logging.test.ts (pure-function) and by the Playwright
- * admin-dashboard tests (end-to-end). What remains are edge cases that neither
- * of those suites exercises:
- *   - snapshot debounce: burst mutations collapse to one broadcast
- *   - reactive wiring: snapshot fires automatically on state change, not via
- *     manual callsites
- *   - prNumber propagation: opening a PR updates the task's prNumber in the
- *     snapshot
+ * Snapshot-broadcasting tests (reactive dispatch, debounce, prNumber propagation,
+ * complete task exclusion) moved to admin-ws.test.ts — AdminWss now owns the full
+ * snapshot lifecycle via event subscriptions.
+ *
+ * What remains here: edge cases in the log-event summaries that ForemanWss emits
+ * via adminWss.broadcastLogEvent() for hello_ack messages.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import http from "http";
@@ -23,34 +19,19 @@ import { Task } from "../src/foreman/models/task.js";
 import { fakeRepo, resetDb, createTestTaskManager } from "./helpers/task.js";
 import { loadDefaultConfig } from "../src/config.js";
 const defaultCfg = await loadDefaultConfig();
-import type { AdminWss, AdminSnapshot, LogEntry } from "../src/foreman/controllers/admin-ws.js";
+import type { AdminWss } from "../src/foreman/controllers/admin-ws.js";
+import type { LogEntry } from "../shared/wire.js";
 import { waitUntil } from "./helpers.js";
 
 // ── Mock AdminWss ─────────────────────────────────────────────────────────────
 
-function makeMockAdminWss(): AdminWss {
+function makeMockAdminWss(): Pick<AdminWss, "broadcastLogEvent"> {
   return {
-    broadcastSnapshot() {},
     broadcastLogEvent() {},
   };
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-/** Register a task and mark its deps as loaded so tryAssignWork will pick it up. */
-async function registerReady(
-  tm: TaskManager,
-  taskId: string,
-  issueNumber: number,
-  repoSlug: string,
-  title: string,
-  body: string,
-  labels: string[],
-): Promise<void> {
-  await Task.upsert(taskId, issueNumber, repoSlug, title, body, labels);
-  tm.trackIssue(issueNumber);
-  tm.markBlockersLoaded(issueNumber);
-}
 
 function connectWorker(port: number): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
@@ -70,7 +51,7 @@ let taskManager: TaskManager;
 
 let httpServer: http.Server;
 let wss: WebSocketServer;
-let adminWss: AdminWss;
+let adminWss: Pick<AdminWss, "broadcastLogEvent">;
 let foremanWss: ForemanWss;
 let port: number;
 const openClients: WebSocket[] = [];
@@ -131,71 +112,6 @@ afterEach(() => {
 
 // ── Scenarios ─────────────────────────────────────────────────────────────────
 
-describe("foreman admin broadcast — snapshot on PR registration", () => {
-  it("broadcasts updated snapshot with prNumber when a PR is opened for a task", async () => {
-    await registerReady(taskManager, "42", 42, "owner/repo", "Fix the bug", "", []);
-
-    const snapshots: AdminSnapshot[] = [];
-    adminWss.broadcastSnapshot = (snapshot) => snapshots.push(snapshot);
-
-    foremanWss.routeEvent("evt-1", "pull_request", {
-      action: "opened",
-      pull_request: {
-        number: 101,
-        body: "Closes #42",
-        head: { ref: "fix-the-bug" },
-      },
-      repository: { full_name: "owner/repo", html_url: "https://github.com/owner/repo" },
-    });
-
-    await waitUntil(() => snapshots.length > 0);
-    const task = snapshots[snapshots.length - 1].tasks.find((t) => t.taskId === "42");
-    expect(task?.prNumber).toBe(101);
-  });
-});
-
-describe("foreman admin broadcast — reactive snapshot pipeline", () => {
-  it("broadcasts snapshot when a worker connects (reactive, not manual callsite)", async () => {
-    const snapshots: AdminSnapshot[] = [];
-    adminWss.broadcastSnapshot = (snapshot) => snapshots.push(snapshot);
-
-    const ws = await connect();
-    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "worker-abc", status: "idle" });
-    await waitUntil(() => snapshots.some((s) => s.workers.some((w) => w.workerId === "worker-abc")));
-
-    const last = snapshots[snapshots.length - 1];
-    expect(last.workers.find((w) => w.workerId === "worker-abc")).toBeDefined();
-  });
-
-  it("collapses burst mutations into a single snapshot broadcast", async () => {
-    const snapshots: AdminSnapshot[] = [];
-    adminWss.broadcastSnapshot = (snapshot) => snapshots.push(snapshot);
-
-    await Task.upsert("1", 1, "owner/repo", "T1", "", []);
-    await Task.upsert("2", 2, "owner/repo", "T2", "", []);
-    await Task.upsert("3", 3, "owner/repo", "T3", "", []);
-
-    await waitUntil(() => snapshots.length > 0);
-    // All three upsert calls are within the same tick, so debounce collapses them
-    expect(snapshots.length).toBe(1);
-    expect(snapshots[0].tasks).toHaveLength(3);
-  });
-
-  it("excludes complete tasks from the snapshot", async () => {
-    const snapshots: AdminSnapshot[] = [];
-    adminWss.broadcastSnapshot = (snapshot) => snapshots.push(snapshot);
-
-    await Task.upsert("10", 10, "owner/repo", "Active", "", []);
-    const t11 = await Task.upsert("11", 11, "owner/repo", "Done", "", []);
-    await t11.complete();
-
-    await waitUntil(() => snapshots.length > 0);
-    const last = snapshots[snapshots.length - 1];
-    expect(last.tasks.map((t) => t.taskId)).toContain("10");
-    expect(last.tasks.map((t) => t.taskId)).not.toContain("11");
-  });
-});
-
 describe("foreman admin broadcast — hello_ack log event summary", () => {
   it("hello_ack idle includes status in summary", async () => {
     const logEntries: LogEntry[] = [];
@@ -210,7 +126,9 @@ describe("foreman admin broadcast — hello_ack log event summary", () => {
   });
 
   it("hello_ack busy includes status and taskId in summary", async () => {
-    await registerReady(taskManager, "42", 42, "owner/repo", "Fix the bug", "", []);
+    await Task.upsert("42", 42, "owner/repo", "Fix the bug", "", []);
+    taskManager.trackIssue(42);
+    taskManager.markBlockersLoaded(42);
     const t = await Task.get("42");
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
     await t!.assign(Worker.register("worker-abc", fakeWs, fakeRepo()));
@@ -228,7 +146,9 @@ describe("foreman admin broadcast — hello_ack log event summary", () => {
   });
 
   it("hello_ack with task transfer shows cancelled status in summary", async () => {
-    await registerReady(taskManager, "42", 42, "owner/repo", "Fix the bug", "", []);
+    await Task.upsert("42", 42, "owner/repo", "Fix the bug", "", []);
+    taskManager.trackIssue(42);
+    taskManager.markBlockersLoaded(42);
     const t = await Task.get("42");
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
     await t!.assign(Worker.register("worker-xyz", fakeWs, fakeRepo()));

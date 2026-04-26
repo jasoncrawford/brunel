@@ -17,8 +17,11 @@ export interface HttpServerOptions {
   routeEvent: (id: string, name: string, payload: unknown) => void | Promise<void>;
 }
 
-export function createHttpServer({ webhooks, routeEvent }: HttpServerOptions): http.Server {
-  const app = new Hono();
+export class HttpServer {
+  readonly server: http.Server;
+
+  constructor({ webhooks, routeEvent }: HttpServerOptions) {
+    const app = new Hono();
 
   // ── Webhook ────────────────────────────────────────────────────────────────
   app.post("/webhook", async (c) => {
@@ -187,5 +190,6 @@ export function createHttpServer({ webhooks, routeEvent }: HttpServerOptions): h
     });
   });
 
-  return http.createServer(getRequestListener(app.fetch));
+    this.server = http.createServer(getRequestListener(app.fetch));
+  }
 }

@@ -1,5 +1,5 @@
 /**
- * Tests for the HTTP routes in createHttpServer.
+ * Tests for the HTTP routes in new HttpServer.
  *
  * Verifies that Hono routing correctly handles:
  * - POST /webhook: GitHub webhook ingestion
@@ -12,7 +12,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import http from "http";
 import type { AddressInfo } from "net";
-import { createHttpServer } from "../src/foreman/controllers/http-server.js";
+import { HttpServer } from "../src/foreman/controllers/http-server.js";
 import { Task } from "../src/foreman/models/task.js";
 import { resetDb, createTestTaskManager } from "./helpers/task.js";
 
@@ -74,7 +74,7 @@ let routeEvent: ReturnType<typeof vi.fn>;
 beforeEach(async () => {
   routeEvent = vi.fn();
   vi.mocked(queryActivityLog).mockResolvedValue([]);
-  server = createHttpServer({ webhooks: null, routeEvent });
+  server = new HttpServer({ webhooks: null, routeEvent }).server;
   port = await startServer(server);
 });
 
@@ -147,7 +147,7 @@ describe("GET /api/log", () => {
 describe("GET /api/tasks/:id", () => {
   it("returns 404 when task does not exist", async () => {
     resetDb();
-    const s = createHttpServer({ webhooks: null, routeEvent: vi.fn() });
+    const s = new HttpServer({ webhooks: null, routeEvent: vi.fn() }).server;
     const p = await startServer(s);
     try {
       const res = await request(p, "GET", "/api/tasks/nonexistent");
@@ -164,7 +164,7 @@ describe("GET /api/tasks/:id", () => {
     const t = await Task.upsert("http-t1", 9901, "test/repo", "Fix bug", "body", []);
     await t.complete({ inputTokens: 1000, outputTokens: 500, costUsd: 0.05 });
 
-    const s = createHttpServer({ webhooks: null, routeEvent: vi.fn() });
+    const s = new HttpServer({ webhooks: null, routeEvent: vi.fn() }).server;
     const p = await startServer(s);
     try {
       const res = await request(p, "GET", "/api/tasks/http-t1");
@@ -233,7 +233,7 @@ describe("GET /api/tasks", () => {
     const t2 = await Task.upsert("2", 2, "test/repo", "Done bug", "Description", []);
     await t2.complete();
 
-    const s = createHttpServer({ webhooks: null, routeEvent: vi.fn() });
+    const s = new HttpServer({ webhooks: null, routeEvent: vi.fn() }).server;
     const p = await startServer(s);
     try {
       const res = await request(p, "GET", "/api/tasks");
@@ -261,7 +261,7 @@ describe("GET /api/tasks", () => {
     const t = await Task.upsert("42", 42, "test/repo", "Fix bug", "Description", []);
     await t.complete();
 
-    const s = createHttpServer({ webhooks: null, routeEvent: vi.fn() });
+    const s = new HttpServer({ webhooks: null, routeEvent: vi.fn() }).server;
     const p = await startServer(s);
     try {
       const res = await request(p, "GET", "/api/tasks?status=complete");
@@ -283,7 +283,7 @@ describe("GET /api/tasks", () => {
     await t1.complete();
     await Task.upsert("2", 2, "test/repo", "T2", "b", []);
 
-    const s = createHttpServer({ webhooks: null, routeEvent: vi.fn() });
+    const s = new HttpServer({ webhooks: null, routeEvent: vi.fn() }).server;
     const p = await startServer(s);
     try {
       const res = await request(p, "GET", "/api/tasks?status=complete");
