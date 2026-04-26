@@ -1957,7 +1957,7 @@ describe("repo activation flow", () => {
     expect(sess.hasPendingPrompts()).toBe(true);
   });
 
-  it("when user declines activation, transitions to registered without sending activate_repo", async () => {
+  it("when user declines activation, does not send activate_repo to the foreman", async () => {
     const pickFn = vi.fn().mockResolvedValue(1); // "No, skip"
     const { sess, ws } = await makeSessionWithPick(pickFn);
     sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "idle", repoStatus: "new" });
@@ -1967,14 +1967,22 @@ describe("repo activation flow", () => {
     expect(activateMsg).toBeUndefined();
   });
 
-  it("when user declines, session is still registered (can receive tasks later)", async () => {
+  it("when user declines activation, worker mode ends (isActive = false)", async () => {
     const pickFn = vi.fn().mockResolvedValue(1); // "No, skip"
     const { sess, ws } = await makeSessionWithPick(pickFn);
     sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "idle", repoStatus: "new" });
     await new Promise((r) => setTimeout(r, 10));
-    // After declining, a follow-up task_assigned should be enqueued (session is registered)
-    sendMsg(ws, { type: "task_assigned", taskId: "99", issue: makeIssue(99) });
-    expect(sess.hasPendingPrompts()).toBe(true);
+    expect(sess.isActive).toBe(false);
+  });
+
+  it("when user declines activation, emits prompts_ready to wake the routing loop", async () => {
+    const pickFn = vi.fn().mockResolvedValue(1); // "No, skip"
+    const { sess, ws } = await makeSessionWithPick(pickFn);
+    const onPromptsReady = vi.fn();
+    sess.on("prompts_ready", onPromptsReady);
+    sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "idle", repoStatus: "new" });
+    // stop() awaits refreshBranch() (a git command) before we emit, so wait longer
+    await vi.waitFor(() => expect(onPromptsReady).toHaveBeenCalled(), { timeout: 2000 });
   });
 
   it("when repoStatus is 'active', transitions normally without showing activation prompt", async () => {

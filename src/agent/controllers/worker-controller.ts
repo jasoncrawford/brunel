@@ -642,9 +642,12 @@ export class WorkerController extends EventEmitter {
           this.ws?.send(JSON.stringify({ type: "activate_repo", workerId: this.agentId } satisfies Wire.WorkerMessage));
           return; // wait for repo_activated
         }
-        // User declined — transition to idle without activating.
-        this.display.print(c.darkGray("Repo not activated. Staying idle."));
-        this.transitionToRegistered();
+        // User declined — exit worker mode and wake the routing loop so stdin
+        // is re-established. Without this, the routing loop stays stuck at
+        // nextRoutingEvent() with no stdin listeners after the picker finishes.
+        this.display.print(c.darkGray("Repo not activated."));
+        await this.stop();
+        this.emit("prompts_ready");
       } else {
         // "idle" or "busy" with repoStatus 'active' (or no repoStatus for back-compat).
         this.transitionToRegistered();
