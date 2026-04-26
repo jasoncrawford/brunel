@@ -279,7 +279,7 @@ export class ForemanWss {
     this.adminWss.broadcastSnapshot({
       tasks: await TaskManager.getAllTasksForBroadcast(),
       workers: await Worker.allForDashboard(),
-      repos: (await Repo.listActive()).map((r) => r.toWire()),
+      repos: (await Repo.list()).map((r) => r.toWire()),
     });
   }
 

@@ -47,6 +47,16 @@ export default function RepoDetail() {
       <h2>{repo ? repo.fullName : `Repo #${id}`}</h2>
       <p><Link to="/">← Dashboard</Link></p>
 
+      {repo?.status === "new" && (
+        <section style={{ marginBottom: "2rem", padding: "1rem", background: "#fff8e1", border: "1px solid #ffe082", borderRadius: "4px" }}>
+          <strong>This repo is not yet activated.</strong>
+          <p style={{ margin: "0.5rem 0 0" }}>
+            No tasks will be assigned until the repo is activated. To activate it, run{" "}
+            <code>brunel</code> in this repo — the worker will prompt you to activate on first connection.
+          </p>
+        </section>
+      )}
+
       <section>
         <h3>Tasks ({tasks.length})</h3>
         {tasks.length === 0 ? <p>No tasks.</p> : (

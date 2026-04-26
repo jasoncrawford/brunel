@@ -49,6 +49,9 @@ export default function Dashboard() {
             {repos.map((r) => (
               <li key={r.repoId}>
                 <Link to={`/repos/${r.repoId}`}>{r.fullName}</Link>
+                {r.status === "new" && (
+                  <span style={{ marginLeft: "0.5rem", color: "#999", fontSize: "0.85em" }}>not activated</span>
+                )}
               </li>
             ))}
           </ul>

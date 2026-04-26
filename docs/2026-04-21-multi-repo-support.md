@@ -40,6 +40,8 @@ A `'new'` repo is known to the foreman but not yet in play:
 
 Only `'active'` repos have tasks processed and workers assigned.
 
+**Update (issue #882):** The original spec said new repos should not appear on the admin dashboard until activated. This was reversed: new repos are now shown on the dashboard, clearly labeled "not activated". The repo detail page explains that no tasks will be assigned until a `brunel` worker connects and activates the repo.
+
 ### Activation is worker-driven (not dashboard-driven)
 
 All interaction happens through the agent, not the dashboard. Flow:
