@@ -130,7 +130,7 @@ export function createHttpServer({ webhooks, routeEvent }: HttpServerOptions): h
 
   app.get("/api/repos", async (c) => {
     try {
-      const repos = await Repo.listActive();
+      const repos = await Repo.list();
       return c.json(repos.map((r) => r.toWire()));
     } catch (err) {
       log(`ERROR API query failed: ${fmtError(err)}`);

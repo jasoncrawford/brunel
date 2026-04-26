@@ -123,3 +123,47 @@ test("worker detail page: shows repo info", async ({ page }) => {
     await disconnectWorker(workerId);
   }
 });
+
+test("dashboard: shows new (unactivated) repo with 'not activated' label", async ({ page }) => {
+  // Posting a webhook from a new repo creates it with status "new"
+  await postWebhook("issues", {
+    action: "labeled",
+    label: { name: "brunel:ready" },
+    issue: {
+      number: 9001,
+      title: "Test issue for unactivated repo",
+      body: "",
+      labels: [{ name: "brunel:ready" }],
+    },
+    repository: { full_name: "owner/new-repo-9001" },
+  });
+
+  await page.goto("/");
+  const reposSection = page.locator("section").filter({ has: page.locator("h3").filter({ hasText: /Repos/ }) });
+  await expect(reposSection.getByRole("link", { name: "owner/new-repo-9001" })).toBeVisible();
+  // The new repo should be labeled "not activated"
+  const repoItem = reposSection.getByRole("listitem").filter({ has: page.getByRole("link", { name: "owner/new-repo-9001" }) });
+  await expect(repoItem.getByText("not activated")).toBeVisible();
+});
+
+test("repo detail page: shows activation banner for new (unactivated) repo", async ({ page }) => {
+  await postWebhook("issues", {
+    action: "labeled",
+    label: { name: "brunel:ready" },
+    issue: {
+      number: 9002,
+      title: "Test issue for activation banner",
+      body: "",
+      labels: [{ name: "brunel:ready" }],
+    },
+    repository: { full_name: "owner/new-repo-9002" },
+  });
+
+  await page.goto("/");
+  const reposSection = page.locator("section").filter({ has: page.locator("h3").filter({ hasText: /Repos/ }) });
+  await reposSection.getByRole("link", { name: "owner/new-repo-9002" }).click();
+
+  // Repo detail should show the activation banner
+  await expect(page.getByText(/This repo is not yet activated/)).toBeVisible();
+  await expect(page.getByText("npm run worker")).toBeVisible();
+});
