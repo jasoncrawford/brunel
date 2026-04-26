@@ -669,32 +669,6 @@ describe("ask() - status bar repositioning on start (issue #757)", () => {
   });
 });
 
-describe("promptLine()", () => {
-  it("resolves with typed text on Enter", async () => {
-    await withFakeStdin(async (stdin) => {
-      const p = testPicker.promptLine("Enter: ");
-      stdin.push("hello\r");
-      expect(await p).toBe("hello");
-    });
-  });
-
-  it("supports backspace", async () => {
-    await withFakeStdin(async (stdin) => {
-      const p = testPicker.promptLine("Enter: ");
-      stdin.push("hellp\x7fo\r"); // type "hellp", backspace → "hell", type "o" → "hello"
-      expect(await p).toBe("hello");
-    });
-  });
-
-  it("returns empty string for bare Enter", async () => {
-    await withFakeStdin(async (stdin) => {
-      const p = testPicker.promptLine("Enter: ");
-      stdin.push("\r");
-      expect(await p).toBe("");
-    });
-  });
-});
-
 describe("pickQuestion()", () => {
   const opts = [
     { label: "Blue",  description: "A cool color" },

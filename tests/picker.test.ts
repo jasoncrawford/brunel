@@ -189,7 +189,6 @@ describe("Picker: status bar not corrupted when ask() is active (issue #832)", (
 // - pick() with config → resolves with { type: "cancelled" } (same as Escape)
 // - pickMultiple() → rejects with PickerCancelledError
 // - pickQuestion() → rejects with PickerCancelledError
-// - promptLine() → rejects with PickerCancelledError
 
 describe("Picker: ^C cancels cleanly without calling process.exit (issue #887)", () => {
   afterEach(() => {
@@ -264,15 +263,6 @@ describe("Picker: ^C cancels cleanly without calling process.exit (issue #887)",
     // "Other:" is second-to-last, "Let's discuss" is last
     // Down twice from "Yes" → past "Let's discuss" ... actually let's just send ^C directly in normal mode
     process.stdin.emit("data", "\x11"); // down → "Other:" (text mode)
-    process.stdin.emit("data", "\x03");
-    await expect(promise).rejects.toBeInstanceOf(PickerCancelledError);
-  });
-
-  it("promptLine(): ^C rejects with PickerCancelledError instead of exiting", async () => {
-    vi.spyOn(process.stdout, "write").mockReturnValue(true);
-    const picker = new Picker();
-
-    const promise = picker.promptLine("Enter value: ");
     process.stdin.emit("data", "\x03");
     await expect(promise).rejects.toBeInstanceOf(PickerCancelledError);
   });

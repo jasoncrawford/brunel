@@ -76,7 +76,7 @@ describe("ForemanMessage.log", () => {
     ForemanMessage.log({
       direction: "sent",
       workerId: "wid",
-      taskId: "42",
+      taskId: "999",
       msgType: "task_assigned",
       payload: { type: "task_assigned" },
     });
@@ -91,7 +91,7 @@ describe("ForemanMessage.log", () => {
     expect(data![0]).toMatchObject({
       direction: "sent",
       worker_id: "wid",
-      task_id: "42",
+      task_id: "999",
       msg_type: "task_assigned",
     });
   });

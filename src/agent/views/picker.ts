@@ -254,45 +254,6 @@ export class Picker {
   }
 
   /**
-   * Minimal single-line text prompt. Reads characters until Enter,
-   * supporting backspace. No autocomplete or multiline support.
-   */
-  promptLine(prompt: string): Promise<string> {
-    return new Promise((resolve, reject) => {
-      let buf = "";
-      process.stdout.write(prompt);
-
-      function onData(raw: string) {
-        const data = raw
-          .replace(/\x1b\[[0-9;]*[A-Za-z]/g, "")
-          .replace(/\x1b./gs, "");
-        for (const ch of data) {
-          if (ch === "\r" || ch === "\n") {
-            process.stdout.write("\r\n");
-            process.stdin.removeListener("data", onData);
-            resolve(buf);
-            return;
-          } else if (ch === "\x7f" || ch === "\x08") {
-            if (buf.length > 0) {
-              buf = buf.slice(0, -1);
-              process.stdout.write("\x08 \x08");
-            }
-          } else if (ch === "\x03") {
-            process.stdin.removeListener("data", onData);
-            reject(new PickerCancelledError());
-            return;
-          } else if (ch.charCodeAt(0) >= 32) {
-            buf += ch;
-            process.stdout.write(ch);
-          }
-        }
-      }
-
-      process.stdin.on("data", onData);
-    });
-  }
-
-  /**
    * Single-selection picker for AskUserQuestion tool calls.
    * Options are rendered as numbered items with bold label and description.
    * Non-selected rows are dim; the selected row is normal weight.
