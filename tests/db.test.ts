@@ -10,10 +10,12 @@ initDb(supabase);
 
 beforeEach(async () => {
   await Promise.all([
-    // Only delete rows this file owns — pipeline.test.ts uses delivery_ids like "evt-*"
-    // and runs in a parallel Vitest worker; blanket truncation would delete its rows mid-test.
+    // Only delete rows this file owns — pipeline.test.ts runs in a parallel Vitest worker
+    // and also writes to these tables; blanket deletes would delete its rows mid-test.
+    // webhook_events: scope to null delivery_id rows and the literal "abc" used by the log test.
+    // foreman_messages: scope to worker_ids unique to this file ("wid", "db-w1").
     supabase.from("webhook_events").delete().or("delivery_id.is.null,delivery_id.eq.abc"),
-    supabase.from("foreman_messages").delete().gt("id", 0),
+    supabase.from("foreman_messages").delete().in("worker_id", ["wid", "db-w1"]),
   ]);
 });
 
@@ -221,7 +223,7 @@ describe("queryActivityLog", () => {
       received_at: "2026-03-27T01:00:00Z",
     });
     await supabase.from("foreman_messages").insert({
-      direction: "sent", worker_id: "w1", task_id: SORT_TASK_ID,
+      direction: "sent", worker_id: "db-w1", task_id: SORT_TASK_ID,
       msg_type: "task_assigned", payload: {},
       created_at: "2026-03-27T02:00:00Z",
     });
@@ -254,15 +256,15 @@ describe("queryActivityLog", () => {
       WebhookEvent.log({
         deliveryId: null, eventName: "issues", action: "labeled",
         repoId: null, sender: null, issueNumber: 42,
-        prNumber: null, branch: null, taskId: "42", workerId: "w1", payload: {},
+        prNumber: null, branch: null, taskId: "db-filter-42", workerId: "db-w1", payload: {},
       }),
       ForemanMessage.log({
-        direction: "sent", workerId: "w1", taskId: "42",
+        direction: "sent", workerId: "db-w1", taskId: "db-filter-42",
         msgType: "task_assigned", payload: {},
       }),
     ]);
 
-    const entries = await queryActivityLog({ workerId: "w1" });
+    const entries = await queryActivityLog({ workerId: "db-w1" });
     const kinds = entries.map((e) => e.kind);
     expect(kinds).toContain("webhook");
     expect(kinds).toContain("message");
@@ -273,19 +275,19 @@ describe("queryActivityLog", () => {
       WebhookEvent.log({
         deliveryId: null, eventName: "push", action: null,
         repoId: null, sender: null, issueNumber: null,
-        prNumber: null, branch: null, taskId: null, workerId: "w1", payload: {},
+        prNumber: null, branch: null, taskId: null, workerId: "db-w1", payload: {},
       }),
       WebhookEvent.log({
         deliveryId: null, eventName: "push", action: null,
         repoId: null, sender: null, issueNumber: null,
-        prNumber: null, branch: null, taskId: null, workerId: "w2", payload: {},
+        prNumber: null, branch: null, taskId: null, workerId: "db-w2", payload: {},
       }),
     ]);
 
-    const entries = await queryActivityLog({ workerId: "w1" });
+    const entries = await queryActivityLog({ workerId: "db-w1" });
     expect(entries).toHaveLength(1);
     expect(entries[0].kind).toBe("webhook");
-    expect(entries[0].workerId).toBe("w1");
+    expect(entries[0].workerId).toBe("db-w1");
   });
 
   it("returns entries with workerId from webhook rows in queryLog", async () => {
