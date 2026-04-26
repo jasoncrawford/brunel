@@ -1,5 +1,15 @@
 import { s } from "./style.js";
 
+// ── Errors ────────────────────────────────────────────────────────────────────
+
+/** Thrown when the user cancels a picker with Ctrl+C. */
+export class PickerCancelledError extends Error {
+  constructor() {
+    super("Picker cancelled by user");
+    this.name = "PickerCancelledError";
+  }
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export type PickConfig = {
@@ -68,7 +78,7 @@ export class Picker {
     this.onStart?.();
     display?.clearBar();
 
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       let idx = hasConfig && currentIdx >= 0 ? currentIdx : 0;
       let done = false;
       const count = options.length;
@@ -149,8 +159,11 @@ export class Picker {
             else if (ch === "\x11")   { navigateTo((idx + 1) % count); }
             else if (ch === "\x7f" || ch === "\x08") {
               if (textBuf.length > 0) { textBuf = textBuf.slice(0, -1); process.stdout.write("\x08 \x08"); }
-            } else if (ch === "\x03") { process.stdout.write("^C\r\n"); process.exit(0); }
-            else if (ch.charCodeAt(0) >= 32) { textBuf += ch; process.stdout.write(ch); }
+            } else if (ch === "\x03") {
+              eraseMenu();
+              if (hasConfig) { finish({ type: "cancelled" }); } else { finish(-1); }
+              return;
+            } else if (ch.charCodeAt(0) >= 32) { textBuf += ch; process.stdout.write(ch); }
           } else {
             if (ch === "\x10") { navigateTo((idx - 1 + count) % count); }
             else if (ch === "\x11") { navigateTo((idx + 1) % count); }
@@ -164,7 +177,11 @@ export class Picker {
                 finish(idx);
               }
               return;
-            } else if (ch === "\x03") { process.stdout.write("^C\r\n"); process.exit(0); }
+            } else if (ch === "\x03") {
+              eraseMenu();
+              if (hasConfig) { finish({ type: "cancelled" }); } else { finish(-1); }
+              return;
+            }
           }
         }
       }
@@ -183,7 +200,7 @@ export class Picker {
     this.onStart?.();
     display?.clearBar();
 
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       let idx = 0;
       let done = false;
       const count = options.length;
@@ -223,8 +240,11 @@ export class Picker {
             display?.drawBar();
             resolve([...selected].sort((a, b) => a - b));
           } else if (ch === "\x03") {
-            process.stdout.write("^C\r\n");
-            process.exit(0);
+            done = true;
+            process.stdin.removeListener("data", onData);
+            display?.drawBar();
+            reject(new PickerCancelledError());
+            return;
           }
         }
       }
@@ -238,7 +258,7 @@ export class Picker {
    * supporting backspace. No autocomplete or multiline support.
    */
   promptLine(prompt: string): Promise<string> {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       let buf = "";
       process.stdout.write(prompt);
 
@@ -258,8 +278,9 @@ export class Picker {
               process.stdout.write("\x08 \x08");
             }
           } else if (ch === "\x03") {
-            process.stdout.write("^C\r\n");
-            process.exit(0);
+            process.stdin.removeListener("data", onData);
+            reject(new PickerCancelledError());
+            return;
           } else if (ch.charCodeAt(0) >= 32) {
             buf += ch;
             process.stdout.write(ch);
@@ -285,7 +306,7 @@ export class Picker {
     this.onStart?.();
     display?.clearBar();
 
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const extras = [
         { label: "Other:",        description: "" },
         { label: "Let's discuss", description: "" },
@@ -382,8 +403,11 @@ export class Picker {
                 process.stdout.write("\x08 \x08");
               }
             } else if (ch === "\x03") {
-              process.stdout.write("^C\r\n");
-              process.exit(0);
+              done = true;
+              process.stdin.removeListener("data", onData);
+              display?.drawBar();
+              reject(new PickerCancelledError());
+              return;
             } else if (ch.charCodeAt(0) >= 32) {
               textBuf += ch;
               process.stdout.write(ch);
@@ -402,8 +426,11 @@ export class Picker {
               }
               return;
             } else if (ch === "\x03") {
-              process.stdout.write("^C\r\n");
-              process.exit(0);
+              done = true;
+              process.stdin.removeListener("data", onData);
+              display?.drawBar();
+              reject(new PickerCancelledError());
+              return;
             } else if (ch >= "1" && ch <= "9") {
               const n = parseInt(ch, 10) - 1;
               if (n < count) { navigateTo(n); }
