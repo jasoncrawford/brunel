@@ -341,6 +341,8 @@ export class ForemanWss {
 
     if (msg.status === "busy" && msg.taskId) {
       await this.handleBusyHello(workerId, msg.taskId, ws, repo);
+    } else if (msg.claimTaskId) {
+      await this.handleClaimHello(workerId, msg.claimTaskId, ws, repo);
     } else {
       await this.handleIdleHello(workerId, ws, repo);
     }
@@ -465,6 +467,27 @@ export class ForemanWss {
       // Worker retries on reconnect and the operation succeeds once the DB recovers.
       this.sendError(ws, `Internal error during idle hello: ${fmtError(err)}`, false, workerId, repo.id);
     }
+  }
+
+  /**
+   * Handles a worker_hello that carries claimTaskId — the worker is connecting
+   * fresh and wants to be assigned a specific task. Registers as idle first
+   * (reverting any prior stale assignment and sending hello_ack), then
+   * immediately processes the claim exactly like handleClaimTask does.
+   */
+  async handleClaimHello(workerId: string, claimTaskId: string, ws: WebSocket, repo: Repo): Promise<void> {
+    await this.handleIdleHello(workerId, ws, repo);
+    const worker = Worker.fromRegistry(workerId);
+    if (!worker) return; // handleIdleHello failed; error already sent to ws
+    this.workerLog(workerId, `hello claim task=#${claimTaskId}`);
+    const outcome = await worker.repo.taskManager.claimTask(worker, claimTaskId);
+    if (!outcome.ok) {
+      this.sendMsg(worker, { type: "foreman_error", message: outcome.error, fatal: false }, { logTaskId: claimTaskId });
+      return;
+    }
+    const { task } = outcome;
+    this.sendMsg(worker, { type: "task_assigned", taskId: task.taskId, issue: task.toAssignmentPayload() });
+    this.workerLog(workerId, `→ claim task_assigned #${task.issueNumber} "${task.title}"`);
   }
 
   async handleActivateRepo(workerId: string, ws: WebSocket): Promise<void> {

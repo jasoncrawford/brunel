@@ -47,6 +47,16 @@ function sentClaimTask(ws: FakeWs): { type: string; taskId: string; workerId: st
   return undefined;
 }
 
+function sentHello(ws: FakeWs): Record<string, unknown> | undefined {
+  for (const call of ws.send.mock.calls) {
+    try {
+      const msg = JSON.parse(call[0] as string);
+      if (msg.type === "worker_hello") return msg as Record<string, unknown>;
+    } catch { /* ignore */ }
+  }
+  return undefined;
+}
+
 function printedMessages(display: { print: ReturnType<typeof vi.fn> }): string[] {
   return display.print.mock.calls.map((a) => stripAnsi(String(a[0])));
 }
@@ -204,12 +214,40 @@ describe("when worker mode is not active", () => {
     expect(session.isActive).toBe(true);
   });
 
-  it("sends claim_task after starting (connectionState becomes registered)", async () => {
-    // start() leaves connectionState as "registered" since FakeWs never fires "open"
+  it("includes claimTaskId in the worker_hello when connecting", async () => {
     const handler = await getClaimHandler(session);
     await handler("42");
-    const msg = sentClaimTask(fakeWs);
-    expect(msg).toBeDefined();
-    expect(msg?.taskId).toBe("42");
+    // Fire the open event — this triggers the hello send in connect()'s open handler
+    fakeWs.emit("open");
+    await new Promise<void>((r) => setImmediate(r));
+
+    const hello = sentHello(fakeWs);
+    expect(hello).toBeDefined();
+    expect(hello?.claimTaskId).toBe("42");
+    expect(hello?.status).toBe("idle");
+  });
+
+  it("does not send a separate claim_task message when fresh-connecting", async () => {
+    const handler = await getClaimHandler(session);
+    await handler("42");
+    fakeWs.emit("open");
+    await new Promise<void>((r) => setImmediate(r));
+
+    expect(sentClaimTask(fakeWs)).toBeUndefined();
+  });
+
+  it("clears the pending claim after the hello so reconnect does not re-send claimTaskId", async () => {
+    const handler = await getClaimHandler(session);
+    await handler("42");
+    fakeWs.emit("open");
+    await new Promise<void>((r) => setImmediate(r));
+
+    // Simulate reconnect: reset the send mock and fire open again
+    fakeWs.send.mockClear();
+    fakeWs.emit("open");
+    await new Promise<void>((r) => setImmediate(r));
+
+    const hello2 = sentHello(fakeWs);
+    expect(hello2?.claimTaskId).toBeUndefined();
   });
 });

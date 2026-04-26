@@ -432,8 +432,11 @@ export class WorkerController extends EventEmitter {
           return undefined;
         }
         if (!this._isActive) {
+          // Include the claim in the hello so it's atomic with registration.
+          this._pendingClaimTaskId = taskId;
           await this.start();
-          if (!this._isActive) return undefined;
+          if (!this._isActive) this._pendingClaimTaskId = undefined;
+          return undefined;
         }
         if (this.connectionState === "registered") {
           this.sendClaimTask(taskId);
@@ -453,19 +456,7 @@ export class WorkerController extends EventEmitter {
   }
 
   private buildWsFactory(): WsFactory {
-    return (agentId, taskId) => {
-      const ws = new WebSocket(`${getConfig().foremanUrl}/worker`);
-      ws.on("open", () => {
-        ws.send(JSON.stringify({
-          type: "worker_hello",
-          workerId: agentId,
-          repo: this.repo,
-          taskId,
-          status: taskId ? "busy" : "idle",
-        }));
-      });
-      return ws;
-    };
+    return () => new WebSocket(`${getConfig().foremanUrl}/worker`);
   }
 
   private resetSessionState(): void {
@@ -558,6 +549,18 @@ export class WorkerController extends EventEmitter {
     };
 
     ws.on("open", () => {
+      // Read and consume any pending claim so it's included in this hello exactly once.
+      const claimTaskId = this._pendingClaimTaskId;
+      this._pendingClaimTaskId = undefined;
+      ws.send(JSON.stringify({
+        type: "worker_hello",
+        workerId: this.agentStatus.agentId,
+        repo: this.repo,
+        ...(this.currentTaskId !== undefined && { taskId: this.currentTaskId }),
+        ...(claimTaskId && { claimTaskId }),
+        status: this.currentTaskId ? "busy" : "idle",
+      } satisfies Wire.WorkerMessage));
+
       this.connectionState = "hello_sent";
       this.agentStatus.update({ connectionStatus: "handshaking" });
 

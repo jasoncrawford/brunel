@@ -577,6 +577,108 @@ describe("activate_repo", () => {
   });
 });
 
+// ── handleClaimHello ───────────────────────────────────────────────────────────
+
+describe("handleClaimHello", () => {
+  beforeEach(async () => {
+    await taskManager.repo.activate();
+  });
+
+  it("sends idle hello_ack then task_assigned for a valid unassigned task", async () => {
+    await seedTask({ task_id: "77", issue_number: 77, repo_id: taskManager.repo.id });
+    const { wss, sendMsg } = makeWss(taskManager);
+
+    await wss.handleClaimHello("w1", "77", fakeWs(), taskManager.repo);
+
+    const ack = helloAck(sendMsg);
+    expect(ack?.status).toBe("idle");
+
+    const assignedCall = sendMsg.mock.calls.find(([, msg]) => (msg as { type: string }).type === "task_assigned");
+    expect(assignedCall).toBeDefined();
+    expect((assignedCall![1] as { taskId: string }).taskId).toBe("77");
+  });
+
+  it("registers worker as busy with the claimed task", async () => {
+    await seedTask({ task_id: "77", issue_number: 77, repo_id: taskManager.repo.id });
+    const { wss } = makeWss(taskManager);
+
+    await wss.handleClaimHello("w1", "77", fakeWs(), taskManager.repo);
+
+    expect(Worker.fromRegistry("w1")?.status).toBe("busy");
+    expect(Worker.fromRegistry("w1")?.currentTaskId).toBe("77");
+  });
+
+  it("sends foreman_error (non-fatal) when task does not exist", async () => {
+    const { wss, sendMsg } = makeWss(taskManager);
+
+    await wss.handleClaimHello("w1", "999", fakeWs(), taskManager.repo);
+
+    const ack = helloAck(sendMsg);
+    expect(ack?.status).toBe("idle");
+
+    const errorCall = sendMsg.mock.calls.find(([, msg]) => (msg as { type: string }).type === "foreman_error");
+    expect(errorCall).toBeDefined();
+    expect((errorCall![1] as { fatal: boolean }).fatal).toBe(false);
+    expect((errorCall![1] as { message: string }).message).toContain("999");
+  });
+
+  it("worker is idle when claim fails", async () => {
+    const { wss } = makeWss(taskManager);
+    await wss.handleClaimHello("w1", "nonexistent", fakeWs(), taskManager.repo);
+    expect(Worker.fromRegistry("w1")?.status).toBe("idle");
+  });
+
+  it("sends foreman_error when task is held by an active worker", async () => {
+    const repo = taskManager.repo;
+    // Seed task with worker_id set so claimTask sees it as assigned in the DB
+    const task = await seedTask({ task_id: "77", issue_number: 77, repo_id: repo.id, worker_id: "w2", assigned_at: new Date().toISOString() });
+    const w2 = Worker.register("w2", fakeWs(), repo);
+    w2.assign(task);
+
+    const { wss, sendMsg } = makeWss(taskManager);
+    await wss.handleClaimHello("w1", "77", fakeWs(), repo);
+
+    const errorCall = sendMsg.mock.calls.find(([, msg]) => (msg as { type: string }).type === "foreman_error");
+    expect(errorCall).toBeDefined();
+    expect((errorCall![1] as { fatal: boolean }).fatal).toBe(false);
+  });
+});
+
+// ── handleWorkerHello routing for claimTaskId ──────────────────────────────────
+
+describe("handleWorkerHello with claimTaskId", () => {
+  it("routes to handleClaimHello when hello has claimTaskId and status is idle", async () => {
+    const { wss } = makeWss(taskManager);
+    vi.spyOn(Repo, "findOrCreate").mockResolvedValue(taskManager.repo as unknown as Repo);
+    const claimHelloSpy = vi.spyOn(wss, "handleClaimHello").mockResolvedValue();
+
+    await wss.handleWorkerHello("w1", fakeWs(), {
+      type: "worker_hello",
+      workerId: "w1",
+      repo: "owner/repo",
+      status: "idle",
+      claimTaskId: "77",
+    });
+
+    expect(claimHelloSpy).toHaveBeenCalledWith("w1", "77", expect.anything(), taskManager.repo);
+  });
+
+  it("routes to handleIdleHello when hello has no claimTaskId", async () => {
+    const { wss } = makeWss(taskManager);
+    vi.spyOn(Repo, "findOrCreate").mockResolvedValue(taskManager.repo as unknown as Repo);
+    const idleHelloSpy = vi.spyOn(wss, "handleIdleHello").mockResolvedValue();
+
+    await wss.handleWorkerHello("w1", fakeWs(), {
+      type: "worker_hello",
+      workerId: "w1",
+      repo: "owner/repo",
+      status: "idle",
+    });
+
+    expect(idleHelloSpy).toHaveBeenCalled();
+  });
+});
+
 // ── ForemanMessage.buildSummary — foreman_error ────────────────────────────────
 
 describe("ForemanMessage.buildSummary — foreman_error", () => {
