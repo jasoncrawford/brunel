@@ -95,7 +95,7 @@ export interface TaskIssue {
 
 // Worker → Foreman messages
 export type WorkerMessage =
-  | { type: "worker_hello"; workerId: string; repo: string; taskId?: string; status: "idle" | "busy"; workerSecret?: string }
+  | { type: "worker_hello"; workerId: string; repo: string; taskId?: string; claimTaskId?: string; status: "idle" | "busy"; workerSecret?: string }
   | { type: "task_complete"; workerId: string; taskId: string; stats?: { inputTokens: number; outputTokens: number; costUsd?: number } }
   | { type: "worker_goodbye"; workerId: string; taskId?: string }
   | { type: "activate_repo"; workerId: string }

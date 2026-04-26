@@ -763,8 +763,9 @@ describe("hello_ack handshake — buffering", () => {
       // Reconnect: new WS is created
       const newWs = reconnectWithNewWs();
 
-      // Open event → hello_sent state
+      // Open event → hello_sent state (hello is sent here)
       newWs.emit("open");
+      newWs.send.mockClear();
 
       // Try to send task_complete — should be buffered (hello_ack not yet received)
       await session.completeCurrentTask();
@@ -790,6 +791,7 @@ describe("hello_ack handshake — buffering", () => {
 
       const newWs = reconnectWithNewWs();
       newWs.emit("open");
+      newWs.send.mockClear();
 
       // Buffer a task_complete
       await session.completeCurrentTask();
@@ -962,6 +964,7 @@ describe("hello_ack handshake — buffering", () => {
 
       const newWs = reconnectWithNewWs();
       newWs.emit("open");
+      newWs.send.mockClear();
 
       await session.completeCurrentTask();
       expect(newWs.send).not.toHaveBeenCalled();

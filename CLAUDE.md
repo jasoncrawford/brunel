@@ -50,6 +50,8 @@ Every `worker_hello` gets a `hello_ack` with one of three statuses before any ta
 - `busy` — reconnection accepted, worker may resume
 - `cancelled` — task was taken or completed; worker should reset and become idle
 
+An idle `worker_hello` may include `claimTaskId` to atomically register and claim a specific task (used by the `/worker:claim` command on first connect). The foreman sends `hello_ack { status: "idle" }` first, then immediately sends `task_assigned` or a non-fatal `foreman_error`.
+
 `hello_ack` also carries `repoStatus: "new" | "active"`. If `"new"`, the worker prompts the user to activate the repo. On confirmation the worker sends `activate_repo`; the foreman activates the repo, seeds tasks from open labeled issues, and replies with `repo_activated`. The worker then transitions to idle and normal task assignment proceeds. If the user declines activation, the worker exits worker mode and returns to the interactive REPL.
 
 If a catastrophic error occurs, the foreman sends `foreman_error` (`{ type, message, fatal }`). `fatal: true` causes the worker to stop reconnecting and return to interactive REPL mode.
