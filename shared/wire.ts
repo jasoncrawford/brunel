@@ -88,7 +88,7 @@ export interface TaskIssue {
   body: string;
   labels: string[];
   repoUrl: string;
-  status?: TaskStatus;
+  status: TaskStatus;
   prNumber?: number | null;
   branch?: string | null;
 }

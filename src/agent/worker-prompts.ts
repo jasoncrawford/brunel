@@ -11,23 +11,26 @@ function formatCommentLocation(
   return `${pathStr} line ${line}`;
 }
 
-export function buildInitialPrompt(issue: Wire.TaskIssue, isolatedCheckout: boolean): string {
-  const status = issue.status ?? "assigned";
+// ── buildInitialPrompt ────────────────────────────────────────────────────────
+// Structured as five sections:
+//   A. Issue header (generic)
+//   B. Status-specific context, including PR/branch details if relevant
+//   C. Workspace context (generic)
+//   D. Action guidance, specific to task status
+//   E. Standing instructions (generic)
 
-  if (status === "closed" || status === "complete") {
-    return buildClosedPrompt(issue);
-  }
-  if (status === "merged") {
-    return buildMergedPrompt(issue);
-  }
-  if (status === "pushed") {
-    return buildPushedPrompt(issue, isolatedCheckout);
-  }
-  return buildAssignedPrompt(issue, isolatedCheckout);
+export function buildInitialPrompt(issue: Wire.TaskIssue, isolatedCheckout: boolean): string {
+  return [
+    sectionA(issue),
+    sectionB(issue),
+    sectionC(isolatedCheckout),
+    sectionD(issue, isolatedCheckout),
+    SECTION_E,
+  ].filter(Boolean).join("\n\n");
 }
 
-function issueHeader(issue: Wire.TaskIssue): string {
-  return `GitHub issue #${issue.number}: "${issue.title}" in ${issue.repoUrl}.
+function sectionA(issue: Wire.TaskIssue): string {
+  return `You are being assigned GitHub issue #${issue.number}: "${issue.title}" in ${issue.repoUrl}.
 
 Issue description:
 
@@ -38,64 +41,88 @@ ${issue.body || "(no description)"}
 Labels: ${issue.labels.join(", ") || "(none)"}`;
 }
 
-function buildAssignedPrompt(issue: Wire.TaskIssue, isolatedCheckout: boolean): string {
-  const workspaceContext = isolatedCheckout ? "an isolated workspace with your own checkout of the repo" : "a potentially shared workspace";
+function sectionB(issue: Wire.TaskIssue): string {
+  const { status, prNumber, branch } = issue;
+  const prRef = prNumber != null ? `PR #${prNumber}` : null;
+  const branchRef = branch ? `branch \`${branch}\`` : null;
+
+  if (status === "pushed") {
+    const detail = prRef && branchRef ? ` — ${prRef} on ${branchRef}` : prRef ? ` — ${prRef}` : branchRef ? ` on ${branchRef}` : "";
+    return `There is already an open PR for this task${detail}. You are picking up where a previous worker left off.`;
+  }
+
+  if (status === "merged") {
+    const detail = prRef && branchRef ? ` (${prRef}, ${branchRef})` : prRef ? ` (${prRef})` : branchRef ? ` (${branchRef})` : "";
+    return `The PR for this task has already been merged${detail}, but the issue is still open. This is an edge case.`;
+  }
+
+  if (status === "closed" || status === "complete") {
+    const detail = prRef && branchRef ? ` ${prRef} on ${branchRef} was merged.` : prRef ? ` ${prRef} was merged.` : "";
+    return `The issue is now closed.${detail}`;
+  }
+
+  return "";
+}
+
+function sectionC(isolatedCheckout: boolean): string {
+  return isolatedCheckout
+    ? "You are working in an isolated workspace with your own checkout of the repo."
+    : "You are working in a potentially shared workspace.";
+}
+
+function sectionD(issue: Wire.TaskIssue, isolatedCheckout: boolean): string {
+  const { status } = issue;
+
+  if (status === "pushed") return sectionDPushed(issue, isolatedCheckout);
+  if (status === "merged") return sectionDMerged();
+  if (status === "closed" || status === "complete") return sectionDClosed();
+  return sectionDAssigned(issue, isolatedCheckout);
+}
+
+function sectionDAssigned(issue: Wire.TaskIssue, isolatedCheckout: boolean): string {
   const branchInstruction = isolatedCheckout
     ? "Create a new branch for this task (no need for a worktree). Make all changes on the branch."
     : "Create a new branch and an isolated worktree for this task. Make no changes in the main workspace, only in the worktree.";
 
-  return `Please work on ${issueHeader(issue)}
+  return `You should ask for any clarifications you need about requirements or product spec, but you should decide on the technical implementation on your own. If the technical design is complex enough to need review, use a subagent instead of asking the user.
 
-You should ask for any clarifications you need about requirements or product spec, but you should decide on the technical implementation on your own. If the technical design is complex enough to need review, use a subagent instead of asking the user.
-
-You are working in ${workspaceContext}. Use your branch-discipline skill, and remember key practices:
+Use your branch-discipline skill, and remember key practices:
 
 1. Pull main to get the latest before making any edits.
 2. ${branchInstruction}
 3. As much as possible, use test-driven development.
 4. Before creating a PR, check whether your changes call for updates to project documentation. Include any doc updates in the same PR as the code changes.
-5. Create a PR when done, and include the text "Closes #${issue.number}".
-
-Do not work on any other issues: leave task assignment to the foreman. Do not merge any PRs or set them to auto-merge: leave merging to the user after UAT.`;
+5. Create a PR when done, and include the text "Closes #${issue.number}".`;
 }
 
-function buildPushedPrompt(issue: Wire.TaskIssue, isolatedCheckout: boolean): string {
-  const workspaceContext = isolatedCheckout ? "an isolated workspace with your own checkout of the repo" : "a potentially shared workspace";
-  const branchInstruction = isolatedCheckout
-    ? "No worktree is needed — you're already in an isolated checkout."
-    : "Work in an isolated worktree for this branch. Make no changes in the main workspace.";
+function sectionDPushed(issue: Wire.TaskIssue, isolatedCheckout: boolean): string {
+  const { prNumber, branch } = issue;
+  const prRef = prNumber != null ? ` #${prNumber}` : "";
+  const step1 = isolatedCheckout
+    ? branch
+      ? `Fetch and switch to the branch: \`git fetch origin ${branch} && git checkout ${branch}\``
+      : "Fetch and switch to the existing branch for this PR."
+    : branch
+      ? `Create a worktree for the branch and work within it: \`git fetch origin ${branch} && git worktree add <path> ${branch}\`. Make no changes in the main workspace, only in the worktree.`
+      : "Create a worktree for the existing branch and work within it. Make no changes in the main workspace, only in the worktree.";
 
-  return `You are being assigned to continue work on ${issueHeader(issue)}
+  return `Use your branch-discipline skill, and please do the following:
 
-There is already an open PR #${issue.prNumber} for this task on branch \`${issue.branch}\`. You are picking up where a previous worker left off.
-
-You are working in ${workspaceContext}. ${branchInstruction}
-
-Please do the following:
-
-1. Fetch the branch and switch to it: \`git fetch origin ${issue.branch} && git checkout ${issue.branch}\`
-2. Review the open PR and any code review comments on it.
+1. ${step1}
+2. Review the open PR${prRef} and any code review comments on it.
 3. Determine whether any more work needs to be done on this PR right now, and do it if so.
-4. Before creating any new commits, check whether any project documentation should be updated to reflect your changes.
-
-Do not work on any other issues: leave task assignment to the foreman. Do not merge any PRs or set them to auto-merge: leave merging to the user after UAT.`;
+4. Before creating any new commits, check whether any project documentation should be updated to reflect your changes.`;
 }
 
-function buildMergedPrompt(issue: Wire.TaskIssue): string {
-  return `You are being assigned to follow up on ${issueHeader(issue)}
-
-The PR for this task has already been merged, but the issue is still open. This is an edge case — please inspect the issue to understand why it was not closed when the PR was merged, and determine the appropriate next steps.
-
-Do not work on any other issues: leave task assignment to the foreman. Do not merge any PRs or set them to auto-merge: leave merging to the user after UAT.`;
+function sectionDMerged(): string {
+  return "Please inspect the issue to understand why it was not closed when the PR was merged, and determine the appropriate next steps.";
 }
 
-function buildClosedPrompt(issue: Wire.TaskIssue): string {
-  return `You are being assigned to review the completed work for ${issueHeader(issue)}
-
-The issue is now closed. Please review the issue and the PR that was merged, and look for any followup work that should be done (such as filing follow-up issues, updating skills or documentation, or other cleanup).
-
-Do not work on any other issues: leave task assignment to the foreman. Do not merge any PRs or set them to auto-merge: leave merging to the user after UAT.`;
+function sectionDClosed(): string {
+  return "Please review the issue and the PR that was merged, and look for any followup work that should be done (such as filing follow-up issues, updating skills or documentation, or other cleanup).";
 }
+
+const SECTION_E = "Do not work on any other issues: leave task assignment to the foreman. Do not merge any PRs or set them to auto-merge: leave merging to the user after UAT.";
 
 export function buildEventPrompt(events: Wire.WebhookEvent[]): string {
   const coalesced = coalesceEvents(events);
