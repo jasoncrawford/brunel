@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { Picker } from "../src/agent/views/picker.js";
+import { Picker, PickerCancelledError } from "../src/agent/views/picker.js";
 import { AgentStatus } from "../src/agent/models/agent-status.js";
 import { Display } from "../src/agent/views/display.js";
 import { getConfig } from "../src/config.js";
@@ -176,5 +176,116 @@ describe("Picker: status bar not corrupted when ask() is active (issue #832)", (
     const all = written.join("");
     const afterOptions = all.indexOf(BAR_MARKER, all.indexOf("Yes"));
     expect(afterOptions).toBeGreaterThan(-1);
+  });
+});
+
+// ── Issue #887: ^C at picker should not exit the process ──────────────────────
+//
+// Bug: All picker methods called process.exit(0) when Ctrl+C was pressed, which
+// killed the whole agent instead of just cancelling the current operation.
+//
+// Fix: On ^C, picker methods should clean up and resolve/reject gracefully:
+// - pick() without config → resolves with -1 (sentinel for "cancelled")
+// - pick() with config → resolves with { type: "cancelled" } (same as Escape)
+// - pickMultiple() → rejects with PickerCancelledError
+// - pickQuestion() → rejects with PickerCancelledError
+// - promptLine() → rejects with PickerCancelledError
+
+describe("Picker: ^C cancels cleanly without calling process.exit (issue #887)", () => {
+  afterEach(() => {
+    process.stdin.removeAllListeners("data");
+    vi.restoreAllMocks();
+  });
+
+  it("pick() without config: ^C resolves with -1 instead of exiting", async () => {
+    vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    const picker = new Picker();
+
+    const promise = picker.pick(["Allow", "Deny"]);
+    process.stdin.emit("data", "\x03");
+    await expect(promise).resolves.toBe(-1);
+  });
+
+  it("pick() with config: ^C resolves with { type: 'cancelled' } instead of exiting", async () => {
+    vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    const picker = new Picker();
+
+    const promise = picker.pick(["Allow", "Deny"], { escapable: true });
+    process.stdin.emit("data", "\x03");
+    await expect(promise).resolves.toEqual({ type: "cancelled" });
+  });
+
+  it("pick() with config (non-escapable): ^C resolves with { type: 'cancelled' } instead of exiting", async () => {
+    vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    const picker = new Picker();
+
+    const promise = picker.pick(["Allow", "Deny"], {});
+    process.stdin.emit("data", "\x03");
+    await expect(promise).resolves.toEqual({ type: "cancelled" });
+  });
+
+  it("pick() without config in text mode: ^C resolves with -1 instead of exiting", async () => {
+    vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    const picker = new Picker();
+
+    const promise = picker.pick(["Option A", "Other"], { lastIsTextEntry: true });
+    // Navigate to "Other" to enter text mode, then ^C
+    process.stdin.emit("data", "\x11"); // down arrow → select "Other" (text mode)
+    process.stdin.emit("data", "\x03");
+    await expect(promise).resolves.toEqual({ type: "cancelled" });
+  });
+
+  it("pickMultiple(): ^C rejects with PickerCancelledError instead of exiting", async () => {
+    vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    const picker = new Picker();
+
+    const promise = picker.pickMultiple(["A", "B"]);
+    process.stdin.emit("data", "\x03");
+    await expect(promise).rejects.toBeInstanceOf(PickerCancelledError);
+  });
+
+  it("pickQuestion(): ^C rejects with PickerCancelledError instead of exiting", async () => {
+    vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    const picker = new Picker();
+    const opts = [{ label: "Yes", description: "Proceed" }];
+
+    const promise = picker.pickQuestion(opts);
+    process.stdin.emit("data", "\x03");
+    await expect(promise).rejects.toBeInstanceOf(PickerCancelledError);
+  });
+
+  it("pickQuestion() in text mode: ^C rejects with PickerCancelledError instead of exiting", async () => {
+    vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    const picker = new Picker();
+    const opts = [{ label: "Yes", description: "Proceed" }];
+
+    const promise = picker.pickQuestion(opts);
+    // Navigate to "Other:" option to enter text mode, then ^C
+    // "Other:" is second-to-last, "Let's discuss" is last
+    // Down twice from "Yes" → past "Let's discuss" ... actually let's just send ^C directly in normal mode
+    process.stdin.emit("data", "\x11"); // down → "Other:" (text mode)
+    process.stdin.emit("data", "\x03");
+    await expect(promise).rejects.toBeInstanceOf(PickerCancelledError);
+  });
+
+  it("promptLine(): ^C rejects with PickerCancelledError instead of exiting", async () => {
+    vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    const picker = new Picker();
+
+    const promise = picker.promptLine("Enter value: ");
+    process.stdin.emit("data", "\x03");
+    await expect(promise).rejects.toBeInstanceOf(PickerCancelledError);
+  });
+
+  it("pick() without config: drawBar() is called after ^C cancellation", async () => {
+    vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    const display = { clearBar: vi.fn(), drawBar: vi.fn() };
+    const picker = new Picker(display);
+
+    const promise = picker.pick(["Allow", "Deny"]);
+    process.stdin.emit("data", "\x03");
+    await promise;
+
+    expect(display.drawBar).toHaveBeenCalled();
   });
 });

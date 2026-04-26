@@ -3,7 +3,7 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { CanUseTool, PermissionResult } from "@anthropic-ai/claude-agent-sdk";
 import { c } from "../views/style.js";
 import type { Display } from "../views/display.js";
-import { Picker } from "../views/picker.js";
+import { Picker, PickerCancelledError } from "../views/picker.js";
 import type { PickQuestionResult } from "../views/picker.js";
 import { Settings } from "../models/settings.js";
 import type { ModelInfo } from "../models/settings.js";
@@ -44,6 +44,8 @@ type QueryWithModels = { supportedModels?: () => Promise<ModelInfo[]> };
  * AgentController owns the single action of executing one query turn.
  */
 export class AgentController {
+  private currentAbortController: AbortController | null = null;
+
   constructor(
     private display: Display,
     private picker: Picker,
@@ -105,6 +107,7 @@ export class AgentController {
 
     // Use caller-provided AbortController (worker mode) or create our own (REPL mode).
     const ac = abortController ?? new AbortController();
+    this.currentAbortController = ac;
 
     const iterable = query({
       prompt,
@@ -170,6 +173,7 @@ export class AgentController {
       if (!(err instanceof Error && /aborted by user/i.test(err.message))) throw err;
     } finally {
       process.stdin.removeListener("data", onInterrupt);
+      this.currentAbortController = null;
     }
 
     display.stopBar();
@@ -197,20 +201,29 @@ export class AgentController {
     const questions = (input.questions as Question[]) ?? [];
     const answers: Record<string, string> = {};
 
-    for (const q of questions) {
-      display.print(c.yellow(`\n? ${q.question}`));
-      if (q.multiSelect) {
-        const lines = q.options.map((o: QuestionOption) => o.description ? `${o.label} — ${o.description}` : o.label);
-        const idxs = await this.picker.pickMultiple(lines);
-        answers[q.question] = idxs.map((i: number) => q.options[i].label).join(", ");
-      } else {
-        const result: PickQuestionResult = await this.picker.pickQuestion(q.options);
-        if (result.type === "discuss") {
-          display.startBar(getStatusText);
-          return { behavior: "deny", message: "The user would like to discuss more before answering. Prompt them to begin the discussion." };
+    try {
+      for (const q of questions) {
+        display.print(c.yellow(`\n? ${q.question}`));
+        if (q.multiSelect) {
+          const lines = q.options.map((o: QuestionOption) => o.description ? `${o.label} — ${o.description}` : o.label);
+          const idxs = await this.picker.pickMultiple(lines);
+          answers[q.question] = idxs.map((i: number) => q.options[i].label).join(", ");
+        } else {
+          const result: PickQuestionResult = await this.picker.pickQuestion(q.options);
+          if (result.type === "discuss") {
+            display.startBar(getStatusText);
+            return { behavior: "deny", message: "The user would like to discuss more before answering. Prompt them to begin the discussion." };
+          }
+          answers[q.question] = result.type === "answer" ? result.value : result.text;
         }
-        answers[q.question] = result.type === "answer" ? result.value : result.text;
       }
+    } catch (err) {
+      if (err instanceof PickerCancelledError) {
+        display.startBar(getStatusText);
+        this.currentAbortController?.abort();
+        return { behavior: "deny", message: "User cancelled" };
+      }
+      throw err;
     }
 
     display.startBar(getStatusText);
@@ -227,6 +240,11 @@ export class AgentController {
     display.print(c.amber(`\n⚠ ${toolName}(${display.fmtArgs(input)})`));
     const idx = await this.picker.pick(["Allow", "Deny"]);
     display.startBar(getStatusText);
+    if (idx === -1) {
+      // ^C pressed — abort the running query
+      this.currentAbortController?.abort();
+      return { behavior: "deny", message: "User cancelled" };
+    }
     if (idx === 0) return { behavior: "allow", updatedInput: input };
     return { behavior: "deny", message: "User denied tool request" };
   }
