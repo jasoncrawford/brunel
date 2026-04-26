@@ -6,6 +6,8 @@ A GitHub-driven autonomous agent. Labels a GitHub issue `brunel:ready` → the f
 
 CLAUDE.md should contain high-level information about project structure, conventions, and workflows — things that help orient a developer quickly and that aren't obvious from reading the code. It should **not** document individual file APIs, method signatures, or implementation details; those belong in the code itself. Keep it concise so it doesn't consume unnecessary context tokens or drift out of date.
 
+When making a change, check whether it affects anything documented here and update this file in the same PR.
+
 ## Architecture
 
 Two independent processes: **foreman** (server) and **worker** (agent). They communicate over WebSocket. The foreman has **zero imports from agent code** — `src/agent/` belongs entirely to the worker side.
