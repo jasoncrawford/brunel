@@ -681,12 +681,15 @@ describe("Task.toAssignmentPayload", () => {
       body: "It is broken",
       labels: ["bug", "brunel:ready"],
     });
-    expect(task.toAssignmentPayload()).toEqual({
+    expect(task.toAssignmentPayload()).toMatchObject({
       number: 42,
       title: "Fix the bug",
       body: "It is broken",
       labels: ["bug", "brunel:ready"],
       repoUrl: "https://github.com/owner/repo",
+      status: "pending",
+      prNumber: null,
+      branch: null,
     });
   });
 });

@@ -10,6 +10,7 @@ describe("buildInitialPrompt", () => {
       body: "It crashes",
       labels: ["bug"],
       repoUrl: "https://github.com/x/y",
+      status: "assigned",
     });
     expect(p).toContain("#42");
     expect(p).toContain("Fix bug");
@@ -25,6 +26,7 @@ describe("buildInitialPrompt", () => {
       body: null as unknown as string,
       labels: [],
       repoUrl: "https://github.com/x/y",
+      status: "assigned",
     });
     expect(p).toContain("no description");
   });
@@ -36,6 +38,7 @@ describe("buildInitialPrompt", () => {
       body: "",
       labels: [],
       repoUrl: "https://github.com/x/y",
+      status: "assigned",
     });
     expect(p).toContain("no description");
   });
@@ -47,6 +50,7 @@ describe("buildInitialPrompt", () => {
       body: "body",
       labels: [],
       repoUrl: "https://github.com/x/y",
+      status: "assigned",
     });
     expect(p).toContain("(none)");
   });
@@ -58,6 +62,7 @@ describe("buildInitialPrompt", () => {
       body: "body",
       labels: ["bug", "help wanted", "brunel:ready"],
       repoUrl: "https://github.com/x/y",
+      status: "assigned",
     }, true);
     expect(p).toContain("bug");
     expect(p).toContain("help wanted");
@@ -66,7 +71,7 @@ describe("buildInitialPrompt", () => {
 
   it("isolated checkout — says 'own checkout' and clarifies no worktree needed", () => {
     const p = buildInitialPrompt({
-      number: 1, title: "T", body: "body", labels: [], repoUrl: "https://github.com/x/y",
+      number: 1, title: "T", body: "body", labels: [], repoUrl: "https://github.com/x/y", status: "assigned",
     }, true);
     expect(p).toContain("own checkout");
     expect(p).not.toContain("isolated worktree");
@@ -74,18 +79,223 @@ describe("buildInitialPrompt", () => {
 
   it("reminds worker to update project docs alongside code changes", () => {
     const p = buildInitialPrompt({
-      number: 1, title: "T", body: "body", labels: [], repoUrl: "https://github.com/x/y",
+      number: 1, title: "T", body: "body", labels: [], repoUrl: "https://github.com/x/y", status: "assigned",
     }, true);
     expect(p).toMatch(/project doc/i);
   });
 
   it("shared checkout — mentions worktree", () => {
     const p = buildInitialPrompt({
-      number: 1, title: "T", body: "body", labels: [], repoUrl: "https://github.com/x/y",
+      number: 1, title: "T", body: "body", labels: [], repoUrl: "https://github.com/x/y", status: "assigned",
     }, false);
     expect(p).toContain("worktree");
   });
 
+});
+
+describe("buildInitialPrompt — status-dependent prompts", () => {
+  const baseIssue: Wire.TaskIssue = {
+    number: 99,
+    title: "My Task",
+    body: "Some work to do",
+    labels: ["feature"],
+    repoUrl: "https://github.com/x/y",
+    status: "assigned",
+  };
+
+  describe("status: assigned (default, no PR)", () => {
+    it("includes issue number and title", () => {
+      const p = buildInitialPrompt({ ...baseIssue, status: "assigned" }, true);
+      expect(p).toContain("#99");
+      expect(p).toContain("My Task");
+    });
+
+    it("instructs to create a PR when done", () => {
+      const p = buildInitialPrompt({ ...baseIssue, status: "assigned" }, true);
+      expect(p).toContain("Create a PR when done");
+    });
+  });
+
+  describe("workspace context — present in all status variants", () => {
+    it("assigned + isolated — mentions own checkout", () => {
+      const p = buildInitialPrompt({ ...baseIssue, status: "assigned" }, true);
+      expect(p).toMatch(/own checkout/i);
+    });
+
+    it("pushed + isolated — mentions own checkout", () => {
+      const p = buildInitialPrompt(
+        { ...baseIssue, status: "pushed", prNumber: 42, branch: "fix/my-task" },
+        true,
+      );
+      expect(p).toMatch(/own checkout/i);
+    });
+
+    it("merged + isolated — mentions own checkout", () => {
+      const p = buildInitialPrompt(
+        { ...baseIssue, status: "merged", prNumber: 42, branch: "fix/my-task" },
+        true,
+      );
+      expect(p).toMatch(/own checkout/i);
+    });
+
+    it("closed + isolated — mentions own checkout", () => {
+      const p = buildInitialPrompt(
+        { ...baseIssue, status: "closed", prNumber: 42, branch: "fix/my-task" },
+        true,
+      );
+      expect(p).toMatch(/own checkout/i);
+    });
+
+    it("assigned + shared — mentions shared workspace", () => {
+      const p = buildInitialPrompt({ ...baseIssue, status: "assigned" }, false);
+      expect(p).toMatch(/shared workspace/i);
+    });
+
+    it("pushed + shared — mentions shared workspace", () => {
+      const p = buildInitialPrompt(
+        { ...baseIssue, status: "pushed", prNumber: 42, branch: "fix/my-task" },
+        false,
+      );
+      expect(p).toMatch(/shared workspace/i);
+    });
+  });
+
+  describe("status: pushed (open PR exists)", () => {
+    it("mentions the open PR and its number", () => {
+      const p = buildInitialPrompt(
+        { ...baseIssue, status: "pushed", prNumber: 42, branch: "fix/my-task" },
+        true,
+      );
+      expect(p).toContain("PR #42");
+    });
+
+    it("tells the worker to fetch and switch to the branch (isolated)", () => {
+      const p = buildInitialPrompt(
+        { ...baseIssue, status: "pushed", prNumber: 42, branch: "fix/my-task" },
+        true,
+      );
+      expect(p).toContain("fix/my-task");
+      expect(p).toMatch(/fetch/i);
+    });
+
+    it("tells the worker to create a worktree for the branch (shared workspace)", () => {
+      const p = buildInitialPrompt(
+        { ...baseIssue, status: "pushed", prNumber: 42, branch: "fix/my-task" },
+        false,
+      );
+      expect(p).toMatch(/worktree/i);
+      expect(p).toContain("fix/my-task");
+    });
+
+    it("shared workspace pushed — does not say to fetch/checkout as step 1 without worktree", () => {
+      const p = buildInitialPrompt(
+        { ...baseIssue, status: "pushed", prNumber: 42, branch: "fix/my-task" },
+        false,
+      );
+      expect(p).not.toMatch(/git checkout fix\/my-task(?!\s)/);
+    });
+
+    it("tells the worker to review code review comments", () => {
+      const p = buildInitialPrompt(
+        { ...baseIssue, status: "pushed", prNumber: 42, branch: "fix/my-task" },
+        true,
+      );
+      expect(p).toMatch(/code review/i);
+    });
+
+    it("does NOT include the standard new-task Create-a-PR instruction", () => {
+      const p = buildInitialPrompt(
+        { ...baseIssue, status: "pushed", prNumber: 42, branch: "fix/my-task" },
+        true,
+      );
+      expect(p).not.toContain("Create a PR when done");
+    });
+  });
+
+  describe("status: merged (PR merged, issue still open)", () => {
+    it("tells the worker the PR was merged", () => {
+      const p = buildInitialPrompt(
+        { ...baseIssue, status: "merged", prNumber: 42, branch: "fix/my-task" },
+        true,
+      );
+      expect(p).toMatch(/PR.*merged|merged.*PR/i);
+    });
+
+    it("includes the PR number", () => {
+      const p = buildInitialPrompt(
+        { ...baseIssue, status: "merged", prNumber: 42, branch: "fix/my-task" },
+        true,
+      );
+      expect(p).toContain("PR #42");
+    });
+
+    it("includes the branch name", () => {
+      const p = buildInitialPrompt(
+        { ...baseIssue, status: "merged", prNumber: 42, branch: "fix/my-task" },
+        true,
+      );
+      expect(p).toContain("fix/my-task");
+    });
+
+    it("tells the worker the issue was not closed and to determine next steps", () => {
+      const p = buildInitialPrompt(
+        { ...baseIssue, status: "merged", prNumber: 42, branch: "fix/my-task" },
+        true,
+      );
+      expect(p).toMatch(/not closed/i);
+      expect(p).toMatch(/next steps?/i);
+    });
+
+    it("does NOT include the standard new-task Create-a-PR instruction", () => {
+      const p = buildInitialPrompt(
+        { ...baseIssue, status: "merged", prNumber: 42, branch: "fix/my-task" },
+        true,
+      );
+      expect(p).not.toContain("Create a PR when done");
+    });
+  });
+
+  describe("status: closed (issue is closed)", () => {
+    it("tells the worker the issue is closed", () => {
+      const p = buildInitialPrompt(
+        { ...baseIssue, status: "closed", prNumber: 42, branch: "fix/my-task" },
+        true,
+      );
+      expect(p).toMatch(/issue.*closed|closed.*issue/i);
+    });
+
+    it("includes the PR number", () => {
+      const p = buildInitialPrompt(
+        { ...baseIssue, status: "closed", prNumber: 42, branch: "fix/my-task" },
+        true,
+      );
+      expect(p).toContain("PR #42");
+    });
+
+    it("includes the branch name", () => {
+      const p = buildInitialPrompt(
+        { ...baseIssue, status: "closed", prNumber: 42, branch: "fix/my-task" },
+        true,
+      );
+      expect(p).toContain("fix/my-task");
+    });
+
+    it("instructs the worker to look for followup work", () => {
+      const p = buildInitialPrompt(
+        { ...baseIssue, status: "closed", prNumber: 42, branch: "fix/my-task" },
+        true,
+      );
+      expect(p).toMatch(/follow.?up/i);
+    });
+
+    it("does NOT include the standard new-task Create-a-PR instruction", () => {
+      const p = buildInitialPrompt(
+        { ...baseIssue, status: "closed", prNumber: 42, branch: "fix/my-task" },
+        true,
+      );
+      expect(p).not.toContain("Create a PR when done");
+    });
+  });
 });
 
 describe("buildEventPrompt", () => {

@@ -11,13 +11,26 @@ function formatCommentLocation(
   return `${pathStr} line ${line}`;
 }
 
-export function buildInitialPrompt(issue: Wire.TaskIssue, isolatedCheckout: boolean): string {
-  const workspaceContext = isolatedCheckout ? "an isolated workspace with your own checkout of the repo" : "a potentially shared workspace";
-  const branchInstruction = isolatedCheckout
-    ? "Create a new branch for this task (no need for a worktree). Make all changes on the branch."
-    : "Create a new branch and an isolated worktree for this task. Make no changes in the main workspace, only in the worktree.";
+// ── buildInitialPrompt ────────────────────────────────────────────────────────
+// Structured as five sections:
+//   1. Issue header (generic)
+//   2. Task status context, including PR/branch details if relevant
+//   3. Workspace context (generic)
+//   4. Action guidance, specific to task status
+//   5. Standing instructions (generic)
 
-  return `Please work on GitHub issue #${issue.number}: "${issue.title}" in ${issue.repoUrl}.
+export function buildInitialPrompt(issue: Wire.TaskIssue, isolatedCheckout: boolean): string {
+  return [
+    section1IssueHeader(issue),
+    section2TaskStatus(issue),
+    section3WorkspaceContext(isolatedCheckout),
+    section4ActionGuidance(issue, isolatedCheckout),
+    SECTION_5_STANDING_INSTRUCTIONS,
+  ].filter(Boolean).join("\n\n");
+}
+
+function section1IssueHeader(issue: Wire.TaskIssue): string {
+  return `You are being assigned GitHub issue #${issue.number}: "${issue.title}" in ${issue.repoUrl}.
 
 Issue description:
 
@@ -25,20 +38,99 @@ Issue description:
 ${issue.body || "(no description)"}
 ---------------
 
-Labels: ${issue.labels.join(", ") || "(none)"}
+Labels: ${issue.labels.join(", ") || "(none)"}`;
+}
 
-You should ask for any clarifications you need about requirements or product spec, but you should decide on the technical implementation on your own. If the technical design is complex enough to need review, use a subagent instead of asking the user.
+function section2TaskStatus(issue: Wire.TaskIssue): string {
+  const { status, prNumber, branch } = issue;
+  const prRef = prNumber != null ? `PR #${prNumber}` : null;
+  const branchRef = branch ? `branch \`${branch}\`` : null;
 
-You are working in ${workspaceContext}. Use your branch-discipline skill, and remember key practices:
+  if (status === "pushed") {
+    const detail = prRef && branchRef ? ` — ${prRef} on ${branchRef}` : prRef ? ` — ${prRef}` : branchRef ? ` on ${branchRef}` : "";
+    return `There is already an open PR for this task${detail}. You are picking up work in progress.`;
+  }
+
+  if (status === "merged") {
+    const detail = prRef && branchRef ? ` (${prRef}, ${branchRef})` : prRef ? ` (${prRef})` : branchRef ? ` (${branchRef})` : "";
+    return `The PR for this task has already been merged${detail}, but the issue is still open.`;
+  }
+
+  if (status === "closed" || status === "complete") {
+    const detail = prRef && branchRef ? ` ${prRef} on ${branchRef} was merged.` : prRef ? ` ${prRef} was merged.` : "";
+    return `The issue is now closed.${detail}`;
+  }
+
+  return "";
+}
+
+function section3WorkspaceContext(isolatedCheckout: boolean): string {
+  return isolatedCheckout
+    ? "You are working in an isolated workspace with your own checkout of the repo."
+    : "You are working in a potentially shared workspace.";
+}
+
+function section4ActionGuidance(issue: Wire.TaskIssue, isolatedCheckout: boolean): string {
+  const { status } = issue;
+
+  if (status === "pushed") return section4Pushed(issue, isolatedCheckout);
+  if (status === "merged") return section4Merged();
+  if (status === "closed" || status === "complete") return section4Closed();
+  return section4Assigned(issue, isolatedCheckout);
+}
+
+function section4Assigned(issue: Wire.TaskIssue, isolatedCheckout: boolean): string {
+  const branchInstruction = isolatedCheckout
+    ? "Create a new branch for this task (no need for a worktree). Make all changes on the branch."
+    : "Create a new branch and an isolated worktree for this task. Make no changes in the main workspace, only in the worktree.";
+
+  return `You should ask for any clarifications you need about requirements or product spec, but you should decide on the technical implementation on your own. If the technical design is complex enough to need review, use a subagent instead of asking the user.
+
+Use your branch-discipline skill, and remember key practices:
 
 1. Pull main to get the latest before making any edits.
 2. ${branchInstruction}
 3. As much as possible, use test-driven development.
 4. Before creating a PR, check whether your changes call for updates to project documentation. Include any doc updates in the same PR as the code changes.
-5. Create a PR when done, and include the text "Closes #${issue.number}".
-
-Do not work on any other issues: leave task assignment to the foreman. Do not merge any PRs or set them to auto-merge: leave merging to the user after UAT.`;
+5. Create a PR when done, and include the text "Closes #${issue.number}".`;
 }
+
+function section4Pushed(issue: Wire.TaskIssue, isolatedCheckout: boolean): string {
+  const { prNumber, branch } = issue;
+  const prRef = prNumber != null ? ` #${prNumber}` : "";
+  const step1 = isolatedCheckout
+    ? branch
+      ? `Fetch and switch to the branch: \`git fetch origin ${branch} && git checkout ${branch}\``
+      : "Fetch and switch to the existing branch for this PR."
+    : branch
+      ? `Create a worktree for the branch and work within it: \`git fetch origin ${branch} && git worktree add <path> ${branch}\`. Make no changes in the main workspace, only in the worktree.`
+      : "Create a worktree for the existing branch and work within it. Make no changes in the main workspace, only in the worktree.";
+
+  return `Use your branch-discipline skill, and please do the following:
+
+1. ${step1}
+2. Review the open PR${prRef} and any code review comments on it.
+3. Determine whether any more work needs to be done on this PR right now, and do it if so.
+4. Before creating any new commits, check whether any project documentation should be updated to reflect your changes.`;
+}
+
+function section4Merged(): string {
+  return "Please inspect the issue to understand why it was not closed when the PR was merged, and determine the appropriate next steps.";
+}
+
+function section4Closed(): string {
+  return `Please review the issue and the PR that was merged.\n\n${FOLLOWUP_CHECKLIST}`;
+}
+
+const SECTION_5_STANDING_INSTRUCTIONS = "Do not work on any other issues: leave task assignment to the foreman. Do not merge any PRs or set them to auto-merge: leave merging to the user after UAT.";
+
+const FOLLOWUP_CHECKLIST = `Before we end this session, consider:
+
+* Are there any followup issues we should file?
+* Are there any updates to skills that we should make, or new skills to record?
+* Are there any updates to be made to project documentation?
+
+Do not use project memories: they may not persist across sessions, and they aren't available to other users or projects. Capture general practices in skills, and project-specific information in project docs.`;
 
 export function buildEventPrompt(events: Wire.WebhookEvent[]): string {
   const coalesced = coalesceEvents(events);
@@ -214,15 +306,7 @@ const EVENT_FMT: EventTemplateFmtTable = {
     if (p.action === "closed") {
       return `PR #${prNumber} was ${pr?.merged ? 'merged' : 'closed without merging'}. Please delete the local branch (no need to delete it from origin, though). Also remove your worktree, if any.
 
-Then, before we end this session, consider:
-
-* Are there any followup issues we should file?
-* Are there any updates to skills that we should make, or new skills to record?
-* Are there any updates to be made to project documentation?
-
-Do not use project memories: they may not persist across sessions, and they aren't available to other users or projects. Capture general practices in skills, and project-specific information in CLAUDE.md or other project docs.
-
-Please do the above if necessary. Then summarize any such followups/updates, and anything else the user should know.`;
+${FOLLOWUP_CHECKLIST}`;
     }
     return "";
   },
