@@ -13,23 +13,23 @@ function formatCommentLocation(
 
 // ── buildInitialPrompt ────────────────────────────────────────────────────────
 // Structured as five sections:
-//   A. Issue header (generic)
-//   B. Status-specific context, including PR/branch details if relevant
-//   C. Workspace context (generic)
-//   D. Action guidance, specific to task status
-//   E. Standing instructions (generic)
+//   1. Issue header (generic)
+//   2. Task status context, including PR/branch details if relevant
+//   3. Workspace context (generic)
+//   4. Action guidance, specific to task status
+//   5. Standing instructions (generic)
 
 export function buildInitialPrompt(issue: Wire.TaskIssue, isolatedCheckout: boolean): string {
   return [
-    sectionA(issue),
-    sectionB(issue),
-    sectionC(isolatedCheckout),
-    sectionD(issue, isolatedCheckout),
-    SECTION_E,
+    section1IssueHeader(issue),
+    section2TaskStatus(issue),
+    section3WorkspaceContext(isolatedCheckout),
+    section4ActionGuidance(issue, isolatedCheckout),
+    SECTION_5_STANDING_INSTRUCTIONS,
   ].filter(Boolean).join("\n\n");
 }
 
-function sectionA(issue: Wire.TaskIssue): string {
+function section1IssueHeader(issue: Wire.TaskIssue): string {
   return `You are being assigned GitHub issue #${issue.number}: "${issue.title}" in ${issue.repoUrl}.
 
 Issue description:
@@ -41,7 +41,7 @@ ${issue.body || "(no description)"}
 Labels: ${issue.labels.join(", ") || "(none)"}`;
 }
 
-function sectionB(issue: Wire.TaskIssue): string {
+function section2TaskStatus(issue: Wire.TaskIssue): string {
   const { status, prNumber, branch } = issue;
   const prRef = prNumber != null ? `PR #${prNumber}` : null;
   const branchRef = branch ? `branch \`${branch}\`` : null;
@@ -64,22 +64,22 @@ function sectionB(issue: Wire.TaskIssue): string {
   return "";
 }
 
-function sectionC(isolatedCheckout: boolean): string {
+function section3WorkspaceContext(isolatedCheckout: boolean): string {
   return isolatedCheckout
     ? "You are working in an isolated workspace with your own checkout of the repo."
     : "You are working in a potentially shared workspace.";
 }
 
-function sectionD(issue: Wire.TaskIssue, isolatedCheckout: boolean): string {
+function section4ActionGuidance(issue: Wire.TaskIssue, isolatedCheckout: boolean): string {
   const { status } = issue;
 
-  if (status === "pushed") return sectionDPushed(issue, isolatedCheckout);
-  if (status === "merged") return sectionDMerged();
-  if (status === "closed" || status === "complete") return sectionDClosed();
-  return sectionDAssigned(issue, isolatedCheckout);
+  if (status === "pushed") return section4Pushed(issue, isolatedCheckout);
+  if (status === "merged") return section4Merged();
+  if (status === "closed" || status === "complete") return section4Closed();
+  return section4Assigned(issue, isolatedCheckout);
 }
 
-function sectionDAssigned(issue: Wire.TaskIssue, isolatedCheckout: boolean): string {
+function section4Assigned(issue: Wire.TaskIssue, isolatedCheckout: boolean): string {
   const branchInstruction = isolatedCheckout
     ? "Create a new branch for this task (no need for a worktree). Make all changes on the branch."
     : "Create a new branch and an isolated worktree for this task. Make no changes in the main workspace, only in the worktree.";
@@ -95,7 +95,7 @@ Use your branch-discipline skill, and remember key practices:
 5. Create a PR when done, and include the text "Closes #${issue.number}".`;
 }
 
-function sectionDPushed(issue: Wire.TaskIssue, isolatedCheckout: boolean): string {
+function section4Pushed(issue: Wire.TaskIssue, isolatedCheckout: boolean): string {
   const { prNumber, branch } = issue;
   const prRef = prNumber != null ? ` #${prNumber}` : "";
   const step1 = isolatedCheckout
@@ -114,15 +114,25 @@ function sectionDPushed(issue: Wire.TaskIssue, isolatedCheckout: boolean): strin
 4. Before creating any new commits, check whether any project documentation should be updated to reflect your changes.`;
 }
 
-function sectionDMerged(): string {
+function section4Merged(): string {
   return "Please inspect the issue to understand why it was not closed when the PR was merged, and determine the appropriate next steps.";
 }
 
-function sectionDClosed(): string {
-  return "Please review the issue and the PR that was merged, and look for any followup work that should be done (such as filing follow-up issues, updating skills or documentation, or other cleanup).";
+function section4Closed(): string {
+  return `Please review the issue and the PR that was merged.\n\n${FOLLOWUP_CHECKLIST}`;
 }
 
-const SECTION_E = "Do not work on any other issues: leave task assignment to the foreman. Do not merge any PRs or set them to auto-merge: leave merging to the user after UAT.";
+const SECTION_5_STANDING_INSTRUCTIONS = "Do not work on any other issues: leave task assignment to the foreman. Do not merge any PRs or set them to auto-merge: leave merging to the user after UAT.";
+
+const FOLLOWUP_CHECKLIST = `Before we end this session, consider:
+
+* Are there any followup issues we should file?
+* Are there any updates to skills that we should make, or new skills to record?
+* Are there any updates to be made to project documentation?
+
+Do not use project memories: they may not persist across sessions, and they aren't available to other users or projects. Capture general practices in skills, and project-specific information in CLAUDE.md or other project docs.
+
+Please do the above if necessary. Then summarize any such followups/updates, and anything else the user should know.`;
 
 export function buildEventPrompt(events: Wire.WebhookEvent[]): string {
   const coalesced = coalesceEvents(events);
@@ -298,15 +308,7 @@ const EVENT_FMT: EventTemplateFmtTable = {
     if (p.action === "closed") {
       return `PR #${prNumber} was ${pr?.merged ? 'merged' : 'closed without merging'}. Please delete the local branch (no need to delete it from origin, though). Also remove your worktree, if any.
 
-Then, before we end this session, consider:
-
-* Are there any followup issues we should file?
-* Are there any updates to skills that we should make, or new skills to record?
-* Are there any updates to be made to project documentation?
-
-Do not use project memories: they may not persist across sessions, and they aren't available to other users or projects. Capture general practices in skills, and project-specific information in CLAUDE.md or other project docs.
-
-Please do the above if necessary. Then summarize any such followups/updates, and anything else the user should know.`;
+${FOLLOWUP_CHECKLIST}`;
     }
     return "";
   },
