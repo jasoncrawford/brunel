@@ -97,7 +97,7 @@ export interface TaskIssue {
 export type WorkerMessage =
   | { type: "worker_hello"; workerId: string; repo: string; taskId?: string; claimTaskId?: string; status: "idle" | "busy"; workerSecret?: string }
   | { type: "task_complete"; workerId: string; taskId: string; stats?: { inputTokens: number; outputTokens: number; costUsd?: number } }
-  | { type: "worker_goodbye"; workerId: string; taskId?: string }
+  | { type: "worker_goodbye"; workerId: string; taskId?: string; task_complete?: boolean; stats?: { inputTokens: number; outputTokens: number; costUsd?: number } }
   | { type: "activate_repo"; workerId: string }
   | { type: "claim_task"; workerId: string; taskId: string };
 

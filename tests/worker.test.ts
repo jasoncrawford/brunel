@@ -1600,6 +1600,84 @@ describe("sendGoodbye", () => {
     session.sendGoodbye();
     expect(fakeWs.send).not.toHaveBeenCalled();
   });
+
+  it("includes task_complete: true when opts.task_complete is true", async () => {
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
+    session.takeNextPrompt();
+    fakeWs.send.mockClear();
+    session.sendGoodbye({ task_complete: true });
+    const sent = JSON.parse(fakeWs.send.mock.calls[0][0]);
+    expect(sent.task_complete).toBe(true);
+    expect(sent.taskId).toBe("42");
+  });
+
+  it("includes stats in goodbye when provided", async () => {
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
+    session.takeNextPrompt();
+    fakeWs.send.mockClear();
+    session.sendGoodbye({ task_complete: true, stats: { inputTokens: 100, outputTokens: 50, costUsd: 0.01 } });
+    const sent = JSON.parse(fakeWs.send.mock.calls[0][0]);
+    expect(sent.stats).toEqual({ inputTokens: 100, outputTokens: 50, costUsd: 0.01 });
+  });
+
+  it("omits task_complete and stats when opts not provided", async () => {
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
+    session.takeNextPrompt();
+    fakeWs.send.mockClear();
+    session.sendGoodbye();
+    const sent = JSON.parse(fakeWs.send.mock.calls[0][0]);
+    expect(sent.task_complete).toBeUndefined();
+    expect(sent.stats).toBeUndefined();
+  });
+});
+
+// ── stop — complete-and-quit ──────────────────────────────────────────────────
+
+describe("stop — complete-and-quit", () => {
+  it("sends worker_goodbye with task_complete: true instead of a separate task_complete message", async () => {
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
+    session.takeNextPrompt();
+    vi.spyOn(session, "confirmTaskQuit").mockResolvedValue("complete-and-quit");
+
+    fakeWs.send.mockClear();
+    await session.stop();
+
+    const msgs = fakeWs.send.mock.calls.map(([d]: [string]) => JSON.parse(d));
+    const goodbye = msgs.find((m: { type: string }) => m.type === "worker_goodbye");
+    const taskComplete = msgs.find((m: { type: string }) => m.type === "task_complete");
+
+    expect(goodbye).toBeDefined();
+    expect(goodbye.task_complete).toBe(true);
+    expect(goodbye.taskId).toBe("42");
+    expect(taskComplete).toBeUndefined();
+  });
+
+  it("includes token stats in the goodbye when tokens were used", async () => {
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
+    session.takeNextPrompt();
+    sb.addQueryStats(1000, 500, 0.05);
+    vi.spyOn(session, "confirmTaskQuit").mockResolvedValue("complete-and-quit");
+
+    fakeWs.send.mockClear();
+    await session.stop();
+
+    const msgs = fakeWs.send.mock.calls.map(([d]: [string]) => JSON.parse(d));
+    const goodbye = msgs.find((m: { type: string }) => m.type === "worker_goodbye");
+    expect(goodbye.stats).toEqual({ inputTokens: 1000, outputTokens: 500, costUsd: 0.05 });
+  });
+
+  it("omits stats from goodbye when no tokens were used", async () => {
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
+    session.takeNextPrompt();
+    vi.spyOn(session, "confirmTaskQuit").mockResolvedValue("complete-and-quit");
+
+    fakeWs.send.mockClear();
+    await session.stop();
+
+    const msgs = fakeWs.send.mock.calls.map(([d]: [string]) => JSON.parse(d));
+    const goodbye = msgs.find((m: { type: string }) => m.type === "worker_goodbye");
+    expect(goodbye.stats).toBeUndefined();
+  });
 });
 
 // ── Heartbeat / ping-pong ──────────────────────────────────────────────────────
