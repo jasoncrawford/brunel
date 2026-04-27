@@ -677,7 +677,10 @@ export class WorkerController extends EventEmitter {
             this.display.print(c.boldRed(`Workspace reset failed: ${err instanceof Error ? err.message : String(err)}`));
           }).finally(() => {
             this._resetPromise = null;
+            this.display.print(c.sageGreen("Waiting for tasks..."));
           });
+        } else {
+          this.display.print(c.sageGreen("Waiting for tasks..."));
         }
       } else if (msg.repoStatus === "new") {
         // Show "Connected" in the status bar before waiting for user input — the
@@ -701,6 +704,9 @@ export class WorkerController extends EventEmitter {
       } else {
         // "idle" or "busy" with repoStatus 'active' (or no repoStatus for back-compat).
         this.transitionToRegistered();
+        if (msg.status === "idle") {
+          this.display.print(c.sageGreen("Waiting for tasks..."));
+        }
       }
       return;
     }

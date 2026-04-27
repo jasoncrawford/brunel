@@ -986,6 +986,102 @@ describe("hello_ack handshake — buffering", () => {
       expect.objectContaining({ type: "hello_ack", workerId: AGENT_ID, status: "idle" })
     );
   });
+
+  it("prints 'Waiting for tasks...' on hello_ack idle", () => {
+    display.print.mockClear();
+    sendMsg(fakeWs, { type: "hello_ack", workerId: AGENT_ID, status: "idle" });
+    const printed = display.print.mock.calls.map(args => stripAnsi(String(args[0]))).join("\n");
+    expect(printed).toContain("Waiting for tasks");
+  });
+
+  it("does not print 'Waiting for tasks...' on hello_ack busy (resuming task)", async () => {
+    const issue = makeIssue();
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+    session.takeNextPrompt();
+
+    display.print.mockClear();
+    sendMsg(fakeWs, { type: "hello_ack", workerId: AGENT_ID, status: "busy" });
+    const printed = display.print.mock.calls.map(args => stripAnsi(String(args[0]))).join("\n");
+    expect(printed).not.toContain("Waiting for tasks");
+  });
+
+  it("prints 'Waiting for tasks...' on hello_ack cancelled (no workspace)", async () => {
+    vi.useFakeTimers();
+    try {
+      const issue = makeIssue();
+      sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+      session.takeNextPrompt();
+
+      const newWs = reconnectWithNewWs();
+      newWs.emit("open");
+
+      display.print.mockClear();
+      sendMsg(newWs, { type: "hello_ack", workerId: AGENT_ID, status: "cancelled" });
+
+      const printed = display.print.mock.calls.map(args => stripAnsi(String(args[0]))).join("\n");
+      expect(printed).toContain("Waiting for tasks");
+    } finally {
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    }
+  });
+
+  it("prints 'Waiting for tasks...' after workspace reset on hello_ack cancelled", async () => {
+    vi.useFakeTimers();
+    const chdirSpy = vi.spyOn(process, "chdir").mockImplementation(() => {});
+    try {
+      let resolveReset!: () => void;
+      const resetPromise = new Promise<void>((resolve) => { resolveReset = resolve; });
+      const workspace = {
+        dir: "/tmp/test-workspace",
+        workspaceDir: "/tmp/workers",
+        sessionId: "test-agent",
+        originalCwd: "/original",
+        isCreated: true,
+        on: vi.fn(),
+        create: vi.fn().mockResolvedValue(undefined),
+        confirm: vi.fn(),
+        reset: vi.fn().mockReturnValue(resetPromise),
+        destroy: vi.fn().mockResolvedValue(undefined),
+        checkSafety: vi.fn().mockResolvedValue({ uncommittedFiles: [], unpushedCommits: [], noUpstream: false }),
+      } as unknown as import("../src/agent/models/workspace.js").Workspace;
+
+      const wsA = new FakeWs();
+      const wsB = new FakeWs();
+      let callCount = 0;
+      const wsFactoryWs = vi.fn().mockImplementation(() => callCount++ === 0 ? wsA : wsB);
+
+      const wc = new WorkspaceController(workspace, display, { verbose: false });
+      const sessionWithWs = new WorkerController(sb, display, undefined, wc, "", { wsFactory: wsFactoryWs });
+      await sessionWithWs.start();
+
+      const issue = makeIssue();
+      sendMsg(wsA, { type: "task_assigned", taskId: "42", issue });
+      sessionWithWs.takeNextPrompt();
+
+      vi.spyOn(Math, "random").mockReturnValue(0);
+      wsA.emit("close", 1006, Buffer.from(""));
+      vi.advanceTimersByTime(2001);
+      wsB.emit("open");
+
+      display.print.mockClear();
+      sendMsg(wsB, { type: "hello_ack", workerId: AGENT_ID, status: "cancelled" });
+
+      // "Waiting for tasks..." should NOT appear before reset completes
+      let printed = display.print.mock.calls.map(args => stripAnsi(String(args[0]))).join("\n");
+      expect(printed).not.toContain("Waiting for tasks");
+
+      // After reset completes, "Waiting for tasks..." should appear
+      resolveReset();
+      await vi.waitFor(() => {
+        printed = display.print.mock.calls.map(args => stripAnsi(String(args[0]))).join("\n");
+        expect(printed).toContain("Waiting for tasks");
+      });
+    } finally {
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    }
+  });
 });
 
 // ── log_only filtering ────────────────────────────────────────────────────────
