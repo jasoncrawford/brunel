@@ -1008,6 +1008,77 @@ describe("worker_goodbye — revert persistence", () => {
   });
 });
 
+describe("worker_goodbye with task_complete: true", () => {
+  it("marks the task complete instead of reverting it to pending", async () => {
+    await makeTask(taskManager, 1);
+    const ws = await connect();
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
+    await nextMsg(ws); // task_assigned
+
+    send(ws, { type: "worker_goodbye", workerId: "w1", taskId: "1", task_complete: true });
+    await waitUntil(() => !Worker.fromRegistry("w1"));
+
+    expect(Worker.fromRegistry("w1")).toBeUndefined();
+    expect((await Task.get("1"))?.status).toBe("complete");
+  });
+
+  it("persists stats when task_complete: true with stats provided", async () => {
+    await makeTask(taskManager, 1);
+    const ws = await connect();
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
+    await nextMsg(ws); // task_assigned
+
+    send(ws, { type: "worker_goodbye", workerId: "w1", taskId: "1", task_complete: true, stats: { inputTokens: 100, outputTokens: 50, costUsd: 0.01 } });
+    await waitUntil(() => !Worker.fromRegistry("w1"));
+
+    const task = await Task.get("1");
+    expect(task?.status).toBe("complete");
+    expect(task?.inputTokens).toBe(100);
+    expect(task?.outputTokens).toBe(50);
+    expect(task?.costUsd).toBe(0.01);
+  });
+
+  it("does not assign a new task to the completing worker (never enters idle pool)", async () => {
+    await makeTask(taskManager, 1001);
+    await new Promise(r => setTimeout(r, 10));
+    await makeTask(taskManager, 1002);
+
+    const ws = await connect();
+    const q = makeQueue(ws);
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
+    await q.next(); // hello_ack
+    await q.next(); // task_assigned (task 1002, most recent)
+
+    send(ws, { type: "worker_goodbye", workerId: "w1", taskId: "1002", task_complete: true });
+    // Give assignWork() time to run — worker should NOT get a second task_assigned
+    const raceResult = await Promise.race([
+      q.next().then(() => "message" as const),
+      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 100)),
+    ]);
+    expect(raceResult).toBe("timeout");
+    expect(Worker.fromRegistry("w1")).toBeUndefined();
+  });
+
+  it("calls task.complete when goodbye carries task_complete: true", async () => {
+    await makeTask(taskManager, 1);
+    const t = await Task.get("1");
+    const spyComplete = vi.spyOn(t!, "complete");
+    vi.spyOn(Task, "get").mockImplementation(async (id) => {
+      if (id === "1") return t!;
+      return null;
+    });
+
+    const ws = await connect();
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
+    await waitUntil(() => Worker.fromRegistry("w1")?.status === "busy");
+
+    send(ws, { type: "worker_goodbye", workerId: "w1", taskId: "1", task_complete: true });
+    await waitUntil(() => Worker.fromRegistry("w1") === undefined);
+
+    expect(spyComplete).toHaveBeenCalled();
+  });
+});
+
 describe("issues/closed — close persistence", () => {
   it("calls task.close when an issue is closed while a worker is active", async () => {
     await Task.upsert("1", 1, "test/repo", "T", "b", []);

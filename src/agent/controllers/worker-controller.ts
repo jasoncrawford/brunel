@@ -241,14 +241,33 @@ export class WorkerController extends EventEmitter {
    * Called before clean exits (SIGTERM, /quit) so the foreman can immediately
    * revert the task to pending without waiting for the reclaim timeout.
    */
-  sendGoodbye(): void {
+  sendGoodbye(opts?: { task_complete?: boolean; stats?: { inputTokens: number; outputTokens: number; costUsd?: number } }): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({
+      const msg: Record<string, unknown> = {
         type: "worker_goodbye",
         workerId: this.agentStatus.agentId,
         taskId: this.currentTaskId,
-      }));
+      };
+      if (opts?.task_complete) msg.task_complete = true;
+      if (opts?.stats) msg.stats = opts.stats;
+      this.ws.send(JSON.stringify(msg));
     }
+  }
+
+  private async buildCompleteGoodbyeOpts(): Promise<{ task_complete: true; stats?: { inputTokens: number; outputTokens: number; costUsd?: number } }> {
+    if (this._activeAfterTask) {
+      try { await this._activeAfterTask(); } catch (err) {
+        this.display.print(c.amber(`afterTask failed: ${fmtError(err)}`));
+      }
+    }
+    const { taskInputTokens, taskOutputTokens, taskCostUsd } = this.agentStatus;
+    const hasStats = taskInputTokens > 0 || taskOutputTokens > 0 || taskCostUsd != null;
+    const statsStr = fmtTaskStats(taskInputTokens, taskOutputTokens, taskCostUsd);
+    this.display.print(c.sageGreen(`Task #${this.currentIssue?.number} complete, ${statsStr}`));
+    return {
+      task_complete: true,
+      ...(hasStats && { stats: { inputTokens: taskInputTokens, outputTokens: taskOutputTokens, costUsd: taskCostUsd } }),
+    };
   }
 
   /**
@@ -363,13 +382,14 @@ export class WorkerController extends EventEmitter {
   async stop(): Promise<void> {
     if (!this._isActive) return;
     const taskInfo = this.getTaskQuitInfo();
+    let goodbyeOpts: { task_complete?: boolean; stats?: { inputTokens: number; outputTokens: number; costUsd?: number } } | undefined;
     if (taskInfo) {
       const choice = await this.confirmTaskQuit(taskInfo);
       if (choice === "cancel") return;
-      if (choice === "complete-and-quit") await this.completeCurrentTask();
+      if (choice === "complete-and-quit") goodbyeOpts = await this.buildCompleteGoodbyeOpts();
     }
     this._stopped = true;
-    this.sendGoodbye();
+    this.sendGoodbye(goodbyeOpts);
     this.ws?.close();
     if (this.debounceTimer) {
       clearTimeout(this.debounceTimer);

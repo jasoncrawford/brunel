@@ -367,14 +367,21 @@ export class ForemanWss {
   }
 
   async handleWorkerGoodbye(workerId: string, msg: Extract<Wire.WorkerMessage, { type: "worker_goodbye" }>): Promise<void> {
-    this.workerLog(workerId, `worker_goodbye (task=${msg.taskId ?? "none"})`);
+    this.workerLog(workerId, `worker_goodbye (task=${msg.taskId ?? "none"}, complete=${msg.task_complete ?? false})`);
     if (msg.taskId) {
       const task = await Task.get(msg.taskId);
       if (task) {
-        this.workerLog(workerId, `reverting task #${task.issueNumber} to pending (worker_goodbye)`);
-        await task.revert().catch((err: unknown) =>
-          log(`ERROR Failed to revert task #${msg.taskId} to pending: ${fmtError(err)}`)
-        );
+        if (msg.task_complete) {
+          this.workerLog(workerId, `completing task #${task.issueNumber} via worker_goodbye`);
+          await task.complete(msg.stats).catch((err: unknown) =>
+            log(`ERROR Failed to complete task #${msg.taskId}: ${fmtError(err)}`)
+          );
+        } else {
+          this.workerLog(workerId, `reverting task #${task.issueNumber} to pending (worker_goodbye)`);
+          await task.revert().catch((err: unknown) =>
+            log(`ERROR Failed to revert task #${msg.taskId} to pending: ${fmtError(err)}`)
+          );
+        }
       }
     }
     Worker.fromRegistry(workerId)?.remove();
