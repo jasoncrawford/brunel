@@ -4,7 +4,6 @@ import { Task } from "../src/foreman/models/task.js";
 import { Repo } from "../src/foreman/models/repo.js";
 import { Worker } from "../src/foreman/models/worker.js";
 import { fakeRepo, resetDb, createTestTaskManager, seedTask } from "./helpers/task.js";
-import { github } from "../src/foreman/clients/github.js";
 import { getConfig } from "../src/config.js";
 
 const REPO = "test/repo";
