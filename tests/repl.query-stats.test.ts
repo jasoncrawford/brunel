@@ -257,6 +257,52 @@ describe("QueryStats - cost from result message", () => {
   });
 });
 
+describe("QueryStats - activity tracking", () => {
+  it("secsSinceLastActivity is 0 at construction", () => {
+    vi.useFakeTimers();
+    const stats = new QueryStats(Date.now());
+    expect(stats.secsSinceLastActivity).toBe(0);
+  });
+
+  it("secsSinceLastActivity increases as time passes with no activity", () => {
+    vi.useFakeTimers();
+    const stats = new QueryStats(Date.now());
+    vi.advanceTimersByTime(90_000);
+    expect(stats.secsSinceLastActivity).toBe(90);
+  });
+
+  it("noteActivity resets secsSinceLastActivity to 0", () => {
+    vi.useFakeTimers();
+    const stats = new QueryStats(Date.now());
+    vi.advanceTimersByTime(90_000);
+    stats.noteActivity();
+    expect(stats.secsSinceLastActivity).toBe(0);
+  });
+
+  it("getStatusText does not show stall warning below threshold (119s)", () => {
+    vi.useFakeTimers();
+    const stats = new QueryStats(Date.now());
+    vi.advanceTimersByTime(119_000);
+    expect(stripAnsi(stats.getStatusText())).not.toContain("no activity");
+  });
+
+  it("getStatusText shows stall warning at threshold (120s)", () => {
+    vi.useFakeTimers();
+    const stats = new QueryStats(Date.now());
+    vi.advanceTimersByTime(120_000);
+    expect(stripAnsi(stats.getStatusText())).toContain("no activity");
+  });
+
+  it("getStatusText clears stall warning after noteActivity", () => {
+    vi.useFakeTimers();
+    const stats = new QueryStats(Date.now());
+    vi.advanceTimersByTime(130_000); // stalled
+    stats.noteActivity(); // reset
+    vi.advanceTimersByTime(30_000); // only 30s since last activity
+    expect(stripAnsi(stats.getStatusText())).not.toContain("no activity");
+  });
+});
+
 describe("QueryStats - integration with cost", () => {
   afterEach(() => {
     vi.useRealTimers();
