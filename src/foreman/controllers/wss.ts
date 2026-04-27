@@ -13,7 +13,6 @@ import { TaskManager } from "../models/task-manager.js";
 import { Repo } from "../models/repo.js";
 import { Task } from "../models/task.js";
 import { Worker } from "../models/worker.js";
-import { github } from "../clients/github.js";
 
 type R = Record<string, unknown>;
 
@@ -514,7 +513,7 @@ export class ForemanWss {
       return;
     }
     try {
-      await github.loadIssuesToQueue(repo.taskManager);
+      await repo.taskManager.loadIssuesFromGithub();
       this.workerLog(workerId, `loaded issues for ${repo.fullName}`);
     } catch (err) {
       log(`ERROR Failed to load issues for ${repo.fullName}: ${fmtError(err)}`);

@@ -1,6 +1,3 @@
-import type { TaskManager } from "../models/task-manager.js";
-import { Task } from "../models/task.js";
-import { fmtError } from "../../utils.js";
 import { getConfig } from "../../config.js";
 
 // ── GitHub API helpers ────────────────────────────────────────────────────────
@@ -13,67 +10,25 @@ function ghHeaders(token: string) {
   };
 }
 
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+export interface GithubIssue {
+  number: number;
+  title: string;
+  body: string | null;
+  labels: Array<{ name: string }>;
+}
+
 // ── GitHub client ─────────────────────────────────────────────────────────────
 
 export const github = {
-  async loadIssuesToQueue(taskModel: TaskManager): Promise<void> {
+  async fetchIssues(repo: string): Promise<GithubIssue[]> {
     const { githubToken: token, taskLabel, githubApiUrl: apiUrl = "https://api.github.com" } = getConfig();
-    const repo = taskModel.repo.fullName;
     const [owner, repoName] = repo.split("/");
     const url = `${apiUrl}/repos/${owner}/${repoName}/issues?labels=${encodeURIComponent(taskLabel)}&state=open&per_page=100`;
     const res = await fetch(url, { headers: ghHeaders(token) });
     if (!res.ok) throw new Error(`GitHub API error: ${res.status}`);
-    const issues = await res.json() as Array<{
-      number: number; title: string; body: string | null; labels: Array<{ name: string }>;
-    }>;
-
-    const allBlockerNumbers = new Set<number>();
-    const loadedIssueNumbers: number[] = [];
-
-    for (const issue of issues) {
-      const body = issue.body ?? "";
-      const labels = issue.labels.map((l) => l.name);
-      const repoUrl = `https://github.com/${owner}/${repoName}`;
-
-      // Log if this task is already assigned so it's visible in startup logs that we're preserving it.
-      const existingTask = await taskModel.repo.getTaskByIssue(issue.number).catch(() => null);
-      if (existingTask?.workerId) {
-        console.log(`[startup] task #${issue.number} already assigned to worker ${existingTask.workerId} — preserving assignment`);
-      }
-
-      // Track as open and upsert into DB (handles both creation and content sync).
-      // NOTE: upsert only updates content fields (title, body, labels); status fields are preserved.
-      await taskModel.enqueueIssue(String(issue.number), issue.number, repo, issue.title, body, labels)
-        .catch((err: unknown) => console.error(`[startup] ERROR upserting task #${issue.number}: ${fmtError(err)}`));
-
-      const blockers = await taskModel.fetchBlockers(issue.number, body);
-      taskModel.setBlockers(issue.number, blockers);
-      for (const b of blockers) allBlockerNumbers.add(b);
-      loadedIssueNumbers.push(issue.number);
-    }
-
-    if (allBlockerNumbers.size > 0) {
-      const states = await github.fetchIssueStates(Array.from(allBlockerNumbers), repo);
-      for (const [num, state] of states) {
-        taskModel.setIssueOpenState(num, state === "open");
-      }
-    }
-
-    // Mark all loaded issues as having their deps resolved.
-    for (const num of loadedIssueNumbers) {
-      taskModel.markBlockersLoaded(num);
-    }
-
-    // Cleanup: delete pending tasks for issues that no longer have the task label.
-    const labeledNums = new Set(loadedIssueNumbers);
-    const repoTasks = await Task.list({ cancelable: true, repoId: taskModel.repo.id });
-    for (const t of repoTasks) {
-      if (!labeledNums.has(t.issueNumber)) {
-        await t.deleteIfUnassigned().catch((err: unknown) =>
-          console.error(`[startup] ERROR deleting stale task #${t.taskId}: ${fmtError(err)}`)
-        );
-      }
-    }
+    return res.json() as Promise<GithubIssue[]>;
   },
 
   async fetchIssueStates(

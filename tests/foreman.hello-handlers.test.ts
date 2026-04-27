@@ -14,7 +14,6 @@ import { ForemanMessage } from "../src/foreman/models/foreman-message.js";
 import { Repo } from "../src/foreman/models/repo.js";
 import { fakeRepo, resetDb, seedTask, createTestTaskManager, createTestRepo } from "./helpers/task.js";
 import * as utils from "../src/utils.js";
-import { github } from "../src/foreman/clients/github.js";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -525,7 +524,7 @@ describe("activate_repo", () => {
     expect(repo.status).toBe("new");
 
     const { wss, sendMsg } = makeWssForActivate();
-    vi.spyOn(github, "loadIssuesToQueue").mockResolvedValue(undefined);
+    vi.spyOn(TaskManager.prototype, "loadIssuesFromGithub").mockResolvedValue(undefined);
 
     const ws = fakeWs();
     await wss.handleIdleHello("w1", ws, repo);
@@ -536,10 +535,10 @@ describe("activate_repo", () => {
     expect((activatedCall![1] as { workerId: string }).workerId).toBe("w1");
   });
 
-  it("activate_repo calls repo.activate() and loadIssuesToQueue", async () => {
+  it("activate_repo calls repo.activate() and loadIssuesFromGithub", async () => {
     const repo = await createTestRepo("activate2/repo");
     const activateSpy = vi.spyOn(repo, "activate").mockResolvedValue(repo);
-    const loadSpy = vi.spyOn(github, "loadIssuesToQueue").mockResolvedValue(undefined);
+    const loadSpy = vi.spyOn(TaskManager.prototype, "loadIssuesFromGithub").mockResolvedValue(undefined);
 
     const { wss } = makeWssForActivate();
     const ws = fakeWs();
