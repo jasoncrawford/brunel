@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { loadIssuesToQueue, fetchIssueStates, fetchNativeBlockers } from "../src/foreman/clients/github.js";
+import { github } from "../src/foreman/clients/github.js";
+const { loadIssuesToQueue, fetchIssueStates, fetchNativeBlockers } = github;
 import { Task } from "../src/foreman/models/task.js";
 import { Worker } from "../src/foreman/models/worker.js";
 import { fakeRepo, resetDb, createTestTaskManager } from "./helpers/task.js";

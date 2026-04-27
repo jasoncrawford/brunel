@@ -16,7 +16,7 @@ import { ForemanWss } from "../src/foreman/controllers/wss.js";
 import { Repo } from "../src/foreman/models/repo.js";
 import { resetDb, createTestTaskManager, seedTask, fakeRepo } from "./helpers/task.js";
 import { loadDefaultConfig } from "../src/config.js";
-import * as github from "../src/foreman/clients/github.js";
+import { github } from "../src/foreman/clients/github.js";
 import { waitUntil } from "./helpers.js";
 
 const defaultCfg = await loadDefaultConfig();

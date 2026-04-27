@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import type { WebhookEvent } from "./webhook-event.js";
 import * as Wire from "../../../shared/wire.js";
-import { loadIssuesToQueue, fetchIssueStates, fetchNativeBlockers } from "../clients/github.js";
+import { github } from "../clients/github.js";
 import { EventQueue } from "./event-queue.js";
 import { Task } from "./task.js";
 import { Worker } from "./worker.js";
@@ -311,7 +311,7 @@ export class TaskManager extends EventEmitter {
   async fetchBlockers(issueNumber: number, body: string): Promise<number[]> {
     const [bodyBlockers, nativeBlockers] = await Promise.all([
       Task.parseBodyBlockers(body),
-      fetchNativeBlockers(issueNumber, this.repo.fullName),
+      github.fetchNativeBlockers(issueNumber, this.repo.fullName),
     ]);
     return Array.from(new Set([...bodyBlockers, ...nativeBlockers]));
   }
@@ -325,7 +325,7 @@ export class TaskManager extends EventEmitter {
     const blockers = await this.fetchBlockers(issueNumber, body);
     this.setBlockers(issueNumber, blockers);
     if (blockers.length > 0) {
-      const states = await fetchIssueStates(blockers, this.repo.fullName);
+      const states = await github.fetchIssueStates(blockers, this.repo.fullName);
       for (const [num, state] of states) {
         this.setIssueOpenState(num, state === "open");
       }
@@ -449,7 +449,7 @@ export class TaskManager extends EventEmitter {
   /** Fetch brunel:ready issues from GitHub and load deps.
    *  Called at startup after loadActiveTasksFromDb. */
   async loadIssuesFromGithub(): Promise<void> {
-    await loadIssuesToQueue(this);
+    await github.loadIssuesToQueue(this);
   }
 
   // ── Private helpers ───────────────────────────────────────────────────────

@@ -14,7 +14,7 @@ import { ForemanMessage } from "../src/foreman/models/foreman-message.js";
 import { Repo } from "../src/foreman/models/repo.js";
 import { fakeRepo, resetDb, seedTask, createTestTaskManager, createTestRepo } from "./helpers/task.js";
 import * as utils from "../src/utils.js";
-import * as github from "../src/foreman/clients/github.js";
+import { github } from "../src/foreman/clients/github.js";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
