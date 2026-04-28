@@ -4,6 +4,7 @@ import { Task } from "../src/foreman/models/task.js";
 import { Repo } from "../src/foreman/models/repo.js";
 import { Worker } from "../src/foreman/models/worker.js";
 import { fakeRepo, resetDb, createTestTaskManager, seedTask } from "./helpers/task.js";
+import { getConfig } from "../src/config.js";
 
 const REPO = "test/repo";
 
@@ -709,5 +710,140 @@ describe("TaskManager listener cleanup", () => {
 
     resetDb();
     expect(Task.events.listenerCount("changed")).toBe(0);
+  });
+});
+
+// ── loadIssuesFromGithub ──────────────────────────────────────────────────────
+
+describe("loadIssuesFromGithub", () => {
+  const mockIssues = [
+    { number: 1, title: "First issue", body: "body 1", labels: [{ name: "brunel:ready" }] },
+    { number: 2, title: "Second issue", body: null, labels: [{ name: "brunel:ready" }] },
+  ];
+
+  beforeEach(() => {
+    Worker._reset();
+    vi.stubGlobal("fetch", vi.fn());
+    getConfig().githubToken = "token";
+    getConfig().taskLabel = "brunel:ready";
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("fetches issues and populates the task manager", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({ ok: true, json: async () => mockIssues } as any);
+
+    resetDb();
+    const taskManager = await createTestTaskManager("owner/repo");
+    vi.spyOn(taskManager, "fetchBlockers").mockResolvedValue([]);
+
+    await taskManager.loadIssuesFromGithub();
+
+    expect((await Task.getByRepoIssue(taskManager.repo.id, 1))?.title).toBe("First issue");
+    expect((await Task.getByRepoIssue(taskManager.repo.id, 2))?.body).toBe(""); // null coerced to ""
+  });
+
+  it("throws on non-ok GitHub response", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({ ok: false, status: 403 } as any);
+    resetDb();
+    const taskManager = await createTestTaskManager("owner/repo");
+    await expect(taskManager.loadIssuesFromGithub()).rejects.toThrow("403");
+  });
+
+  it("preserves existing task assignment (fix for issue #600)", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => [{ number: 1, title: "Updated title", body: "Updated body", labels: [{ name: "brunel:ready" }] }],
+    } as any);
+
+    resetDb();
+    const taskManager = await createTestTaskManager("owner/repo");
+    vi.spyOn(taskManager, "fetchBlockers").mockResolvedValue([]);
+
+    await Task.upsert("1", 1, "owner/repo", "Original title", "Original body", ["brunel:ready"]);
+    const t = await Task.getByRepoIssue(taskManager.repo.id, 1);
+    const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
+    await t!.assign(Worker.register("worker-abc", fakeWs, fakeRepo()));
+
+    await taskManager.loadIssuesFromGithub();
+
+    const task = await Task.getByRepoIssue(taskManager.repo.id, 1);
+    expect(task?.title).toBe("Updated title");
+    expect(task?.workerId).toBe("worker-abc"); // MUST NOT be reset to null
+  });
+
+  it("does not delete pending tasks from other repos during cleanup", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => [{ number: 1, title: "Issue 1", body: "", labels: [{ name: "brunel:ready" }] }],
+    } as any);
+
+    resetDb();
+    const tmA = await createTestTaskManager("owner/repo-a");
+    const tmB = await createTestTaskManager("owner/repo-b");
+    vi.spyOn(tmA, "fetchBlockers").mockResolvedValue([]);
+
+    await Task.upsert("repo-b-7", 7, "owner/repo-b", "Repo B issue", "", ["brunel:ready"]);
+    expect(await Task.getByRepoIssue(tmB.repo.id, 7)).not.toBeNull();
+
+    await tmA.loadIssuesFromGithub();
+
+    expect(await Task.getByRepoIssue(tmB.repo.id, 7)).not.toBeNull();
+  });
+
+  it("still deletes stale tasks from the current repo", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => [{ number: 1, title: "Issue 1", body: "", labels: [{ name: "brunel:ready" }] }],
+    } as any);
+
+    resetDb();
+    const tmA = await createTestTaskManager("owner/repo-a");
+    vi.spyOn(tmA, "fetchBlockers").mockResolvedValue([]);
+
+    await Task.upsert("repo-a-99", 99, "owner/repo-a", "Stale issue", "", []);
+    expect(await Task.getByRepoIssue(tmA.repo.id, 99)).not.toBeNull();
+
+    await tmA.loadIssuesFromGithub();
+
+    expect(await Task.getByRepoIssue(tmA.repo.id, 99)).toBeNull();
+  });
+
+  it("populates blocker state from fetchBlockers result", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [{ number: 1, title: "Do thing", body: "Depends on #99", labels: [{ name: "brunel:ready" }] }],
+      } as any)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ number: 99, state: "open" }) } as any);
+
+    resetDb();
+    const taskManager = await createTestTaskManager("owner/repo");
+    vi.spyOn(taskManager, "fetchBlockers").mockResolvedValueOnce([99]);
+
+    await taskManager.loadIssuesFromGithub();
+
+    expect(taskManager.isBlockersLoaded(1)).toBe(true);
+    expect(taskManager.isBlocked(1)).toBe(true);
+  });
+
+  it("does not mark closed blocker as blocking", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [{ number: 2, title: "Another", body: "Depends on #50", labels: [{ name: "brunel:ready" }] }],
+      } as any)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ number: 50, state: "closed" }) } as any);
+
+    resetDb();
+    const taskManager = await createTestTaskManager("owner/repo");
+    vi.spyOn(taskManager, "fetchBlockers").mockResolvedValueOnce([50]);
+
+    await taskManager.loadIssuesFromGithub();
+
+    expect(taskManager.isBlocked(2)).toBe(false);
   });
 });

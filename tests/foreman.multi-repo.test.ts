@@ -16,7 +16,6 @@ import { ForemanWss } from "../src/foreman/controllers/wss.js";
 import { Repo } from "../src/foreman/models/repo.js";
 import { resetDb, createTestTaskManager, seedTask, fakeRepo } from "./helpers/task.js";
 import { loadDefaultConfig } from "../src/config.js";
-import * as github from "../src/foreman/clients/github.js";
 import { waitUntil } from "./helpers.js";
 
 const defaultCfg = await loadDefaultConfig();
@@ -343,11 +342,11 @@ describe("Full activation → assignment flow", () => {
     // Pre-seed tasks for both repos. Repo-b's task is ready immediately.
     await registerReady(m2, "t70b", 70, "owner/repo-b");
 
-    // Mock loadIssuesToQueue so it sets up repo-a's task during activation.
-    vi.spyOn(github, "loadIssuesToQueue").mockImplementation(async (tm: TaskManager) => {
-      if (tm.repo.fullName === "owner/repo-a") {
-        await tm.enqueueIssue("t60a", 60, "owner/repo-a", "Task A", "", ["brunel:ready"]);
-        tm.markBlockersLoaded(60);
+    // Mock loadIssuesFromGithub so it sets up repo-a's task during activation.
+    vi.spyOn(TaskManager.prototype, "loadIssuesFromGithub").mockImplementation(async function(this: TaskManager) {
+      if (this.repo.fullName === "owner/repo-a") {
+        await this.enqueueIssue("t60a", 60, "owner/repo-a", "Task A", "", ["brunel:ready"]);
+        this.markBlockersLoaded(60);
       }
     });
 

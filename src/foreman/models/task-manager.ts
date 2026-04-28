@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import type { WebhookEvent } from "./webhook-event.js";
 import * as Wire from "../../../shared/wire.js";
-import { loadIssuesToQueue, fetchIssueStates, fetchNativeBlockers } from "../clients/github.js";
+import { GithubClient } from "../clients/github.js";
 import { EventQueue } from "./event-queue.js";
 import { Task } from "./task.js";
 import { Worker } from "./worker.js";
@@ -71,6 +71,7 @@ export class TaskManager extends EventEmitter {
 
   // ── Instance state ───────────────────────────────────────────────────────
   readonly repo: Repo;
+  private readonly github: GithubClient;
 
   // ── Ephemeral in-memory state (no DB backing) ────────────────────────────
   private eventQueue = new EventQueue();
@@ -92,6 +93,7 @@ export class TaskManager extends EventEmitter {
   constructor(repo: Repo) {
     super();
     this.repo = repo;
+    this.github = new GithubClient(repo.fullName);
     this._openIssues = new Set();
     this._blockers = new Map();
     this._blockersLoaded = new Set();
@@ -311,7 +313,7 @@ export class TaskManager extends EventEmitter {
   async fetchBlockers(issueNumber: number, body: string): Promise<number[]> {
     const [bodyBlockers, nativeBlockers] = await Promise.all([
       Task.parseBodyBlockers(body),
-      fetchNativeBlockers(issueNumber, this.repo.fullName),
+      this.github.fetchNativeBlockers(issueNumber),
     ]);
     return Array.from(new Set([...bodyBlockers, ...nativeBlockers]));
   }
@@ -325,7 +327,7 @@ export class TaskManager extends EventEmitter {
     const blockers = await this.fetchBlockers(issueNumber, body);
     this.setBlockers(issueNumber, blockers);
     if (blockers.length > 0) {
-      const states = await fetchIssueStates(blockers, this.repo.fullName);
+      const states = await this.github.fetchIssueStates(blockers);
       for (const [num, state] of states) {
         this.setIssueOpenState(num, state === "open");
       }
@@ -449,7 +451,51 @@ export class TaskManager extends EventEmitter {
   /** Fetch brunel:ready issues from GitHub and load deps.
    *  Called at startup after loadActiveTasksFromDb. */
   async loadIssuesFromGithub(): Promise<void> {
-    await loadIssuesToQueue(this);
+    const repo = this.repo.fullName;
+    const issues = await this.github.fetchIssues();
+
+    const allBlockerNumbers = new Set<number>();
+    const loadedIssueNumbers: number[] = [];
+
+    for (const issue of issues) {
+      const body = issue.body ?? "";
+      const labels = issue.labels.map((l) => l.name);
+
+      const existingTask = await this.repo.getTaskByIssue(issue.number).catch(() => null);
+      if (existingTask?.workerId) {
+        console.log(`[startup] task #${issue.number} already assigned to worker ${existingTask.workerId} — preserving assignment`);
+      }
+
+      await this.enqueueIssue(String(issue.number), issue.number, repo, issue.title, body, labels)
+        .catch((err: unknown) => console.error(`[startup] ERROR upserting task #${issue.number}: ${fmtError(err)}`));
+
+      const blockers = await this.fetchBlockers(issue.number, body);
+      this.setBlockers(issue.number, blockers);
+      for (const b of blockers) allBlockerNumbers.add(b);
+      loadedIssueNumbers.push(issue.number);
+    }
+
+    if (allBlockerNumbers.size > 0) {
+      const states = await this.github.fetchIssueStates(Array.from(allBlockerNumbers));
+      for (const [num, state] of states) {
+        this.setIssueOpenState(num, state === "open");
+      }
+    }
+
+    for (const num of loadedIssueNumbers) {
+      this.markBlockersLoaded(num);
+    }
+
+    // Cleanup: delete pending tasks for issues that no longer have the task label.
+    const labeledNums = new Set(loadedIssueNumbers);
+    const repoTasks = await Task.list({ cancelable: true, repoId: this.repo.id });
+    for (const t of repoTasks) {
+      if (!labeledNums.has(t.issueNumber)) {
+        await t.deleteIfUnassigned().catch((err: unknown) =>
+          console.error(`[startup] ERROR deleting stale task #${t.taskId}: ${fmtError(err)}`)
+        );
+      }
+    }
   }
 
   // ── Private helpers ───────────────────────────────────────────────────────
