@@ -164,7 +164,7 @@ describe("when has an active task", () => {
     (s as any).issueClosed = issueClosed;
   }
 
-  it("shows confirmTaskQuit prompt instead of an error", async () => {
+  it("shows confirmTaskClaim prompt instead of an error", async () => {
     const pickFn = vi.fn().mockResolvedValue(2); // "Don't exit" → cancel
     sessionWithPick = makeSession(pickFn);
     await sessionWithPick.start();

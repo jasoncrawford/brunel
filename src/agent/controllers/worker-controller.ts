@@ -27,8 +27,8 @@ export interface WorkerDisplay {
 
 export type WsFactory = (agentId: string, taskId?: string) => WebSocket;
 
-/** Task state needed to decide whether and how to prompt before quitting. */
-export type TaskQuitInfo = {
+/** Task state needed to decide whether and how to prompt before quitting or claiming. */
+export type TaskConfirmInfo = {
   taskNumber: number;
   workerId: string;
   issueClosed: boolean;
@@ -269,10 +269,10 @@ export class WorkerController extends EventEmitter {
   }
 
   /**
-   * Returns task quit info if a task is currently active, undefined otherwise.
-   * Used by the quit/exit handlers to decide whether to prompt the user.
+   * Returns task confirm info if a task is currently active, undefined otherwise.
+   * Used by the quit/exit and claim handlers to decide whether to prompt the user.
    */
-  getTaskQuitInfo(): TaskQuitInfo | undefined {
+  getTaskQuitInfo(): TaskConfirmInfo | undefined {
     if (!this.currentTaskId || !this.currentIssue) return undefined;
     return {
       taskNumber: this.currentIssue.number,
@@ -293,7 +293,7 @@ export class WorkerController extends EventEmitter {
    * An injectable pickFn is accepted so callers can supply a mock in tests.
    */
   async confirmTaskQuit(
-    info: TaskQuitInfo,
+    info: TaskConfirmInfo,
     pickFn: (options: string[]) => Promise<number> = this.pickFnOrDefault(),
   ): Promise<"quit" | "complete-and-quit" | "cancel"> {
     if (info.issueClosed) {
@@ -305,6 +305,35 @@ export class WorkerController extends EventEmitter {
     } else {
       this.display.print(c.amber(`\nTask #${info.taskNumber} is still open. Quitting now will unassign ${info.workerId}. Quit anyway?`));
       const idx = await pickFn(["No, keep working", "Yes, quit anyway"]);
+      if (idx === 1) return "quit";
+      return "cancel";
+    }
+  }
+
+  /**
+   * Prompt the user before claiming a new task while already working on one.
+   *
+   * - Issue closed but not complete: asks whether to complete first (default yes).
+   * - Issue still open: warns about unassignment and asks to confirm (default no).
+   *
+   * Returns 'complete-and-quit' to complete the current task then claim,
+   * 'quit' to abandon the current task and claim, or 'cancel' to do nothing.
+   *
+   * An injectable pickFn is accepted so callers can supply a mock in tests.
+   */
+  async confirmTaskClaim(
+    info: TaskConfirmInfo,
+    pickFn: (options: string[]) => Promise<number> = this.pickFnOrDefault(),
+  ): Promise<"quit" | "complete-and-quit" | "cancel"> {
+    if (info.issueClosed) {
+      this.display.print(c.amber(`\nTask #${info.taskNumber} is closed but not complete. Complete it before claiming a new task?`));
+      const idx = await pickFn(["Yes, complete first", "No, just claim", "Don't claim"]);
+      if (idx === 0) return "complete-and-quit";
+      if (idx === 1) return "quit";
+      return "cancel";
+    } else {
+      this.display.print(c.amber(`\nTask #${info.taskNumber} is still open. Claiming a new task will unassign ${info.workerId}. Proceed?`));
+      const idx = await pickFn(["No, keep working", "Yes, claim anyway"]);
       if (idx === 1) return "quit";
       return "cancel";
     }
@@ -475,7 +504,7 @@ export class WorkerController extends EventEmitter {
         if (this.hasTask()) {
           const taskInfo = this.getTaskQuitInfo();
           if (taskInfo) {
-            const choice = await this.confirmTaskQuit(taskInfo);
+            const choice = await this.confirmTaskClaim(taskInfo);
             if (choice === "cancel") return undefined;
             if (choice === "complete-and-quit") {
               await this.completeCurrentTask();

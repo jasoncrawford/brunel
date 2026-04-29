@@ -1415,7 +1415,7 @@ describe("stop() with active task", () => {
 import { Workspace } from "../src/agent/models/workspace.js";
 import { WorkspaceController } from "../src/agent/controllers/workspace-controller.js";
 import { CommandRegistry } from "../src/agent/controllers/command-controller.js";
-import type { TaskQuitInfo } from "../src/agent/controllers/worker-controller.js";
+import type { TaskConfirmInfo } from "../src/agent/controllers/worker-controller.js";
 // ── foreman_error ─────────────────────────────────────────────────────────────
 
 describe("foreman_error", () => {
@@ -2005,8 +2005,8 @@ describe("getTaskQuitInfo", () => {
 // ── confirmTaskQuit ───────────────────────────────────────────────────────────
 
 describe("confirmTaskQuit", () => {
-  const openTask: TaskQuitInfo = { taskNumber: 42, workerId: "test-worker", issueClosed: false };
-  const closedTask: TaskQuitInfo = { taskNumber: 42, workerId: "test-worker", issueClosed: true };
+  const openTask: TaskConfirmInfo = { taskNumber: 42, workerId: "test-worker", issueClosed: false };
+  const closedTask: TaskConfirmInfo = { taskNumber: 42, workerId: "test-worker", issueClosed: true };
   const noopAgentStatus = new AgentStatus({ agentId: "test" });
   const noopDisplay = { print: vi.fn(), printForemanMessage: vi.fn() };
 
