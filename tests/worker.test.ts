@@ -2213,3 +2213,29 @@ describe("transitionToIdle — Waiting for tasks message", () => {
     }
   });
 });
+
+// ── onForceDestroy — skips confirmation ───────────────────────────────────────
+
+describe("WorkspaceController.onForceDestroy", () => {
+  it("destroys the workspace without calling checkSafety", async () => {
+    const mockWs = {
+      dir: "/tmp/test",
+      workspaceDir: "/tmp",
+      sessionId: "s",
+      originalCwd: "/",
+      isCreated: true,
+      on: vi.fn(),
+      create: vi.fn(),
+      confirm: vi.fn(),
+      reset: vi.fn(),
+      destroy: vi.fn().mockResolvedValue(undefined),
+      checkSafety: vi.fn(),
+    } as unknown as Workspace;
+
+    const wc = new WorkspaceController(mockWs, display, { verbose: false });
+    await wc.onForceDestroy();
+
+    expect(mockWs.destroy).toHaveBeenCalledOnce();
+    expect(mockWs.checkSafety).not.toHaveBeenCalled();
+  });
+});

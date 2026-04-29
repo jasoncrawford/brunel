@@ -169,8 +169,6 @@ export class WorkerController extends EventEmitter {
   get agentId(): string { return this.agentStatus.agentId; }
   /** True when worker mode is active (connected or connecting). */
   get isActive(): boolean { return this._isActive; }
-  /** True when a worker cleanup must run on exit (i.e., worker is active). */
-  get isCleanupPending(): boolean { return this._isActive; }
 
   // ── Protocol methods (previously required reaching through .session) ───────
 
@@ -400,17 +398,6 @@ export class WorkerController extends EventEmitter {
     this.agentStatus.setWorkerModeActive(false);
     this.display.print(c.sageGreen("Worker mode stopped."));
     await this.agentStatus.refreshBranch();
-  }
-
-  /** Run worker teardown: send goodbye, destroy workspace, tear down I/O. */
-  async cleanup(): Promise<void> {
-    if (this._isActive) {
-      this.sendGoodbye();
-      await this.workspaceController?.onDestroy();
-      process.stdout.write("\x1b[?2004l\r\n");
-      if (process.stdin.isTTY) process.stdin.setRawMode(false);
-      process.stdin.pause();
-    }
   }
 
   /** Register /worker:complete, /worker:start, /worker:stop, /worker:claim into the given (already-scoped) registry. */

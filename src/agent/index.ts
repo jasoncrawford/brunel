@@ -145,7 +145,10 @@ export class BrunelAgent {
     });
     process.on("SIGTERM", async () => {
       workerController.sendGoodbye();
-      await doExit();
+      await workspaceController.onForceDestroy();
+      process.stdout.write("\x1b[?2004l\r\n");
+      if (process.stdin.isTTY) process.stdin.setRawMode(false);
+      process.stdin.pause();
       process.exit(0);
     });
 
@@ -352,8 +355,9 @@ export class BrunelAgent {
     }
 
     // Worker mode post-loop: send goodbye, destroy workspace, tear down I/O, exit.
-    if (workerController.isCleanupPending) {
-      await workerController.cleanup();
+    if (workerController.isActive) {
+      workerController.sendGoodbye();
+      await doExit();
       process.exit(0);
     }
   }
