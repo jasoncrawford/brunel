@@ -27,8 +27,8 @@ class FakeWs extends EventEmitter {
 
 const AGENT_ID = "test-worker-id";
 
-function makeIssue(n = 1): Wire.TaskIssue {
-  return { number: n, title: `Issue ${n}`, body: `Body ${n}`, labels: [], repoUrl: "https://github.com/owner/repo" };
+function makeIssue(n = 1, status: Wire.TaskStatus = "assigned"): Wire.TaskIssue {
+  return { number: n, title: `Issue ${n}`, body: `Body ${n}`, labels: [], repoUrl: "https://github.com/owner/repo", status };
 }
 
 function makeEvent(name = "push"): Wire.WebhookEvent {
@@ -1999,6 +1999,12 @@ describe("getTaskConfirmInfo", () => {
     // Event for a different task — should be ignored entirely
     sendMsg(fakeWs, { type: "event_notification", taskId: "t99", event: { id: "e1", name: "issues", payload: { action: "closed" } } });
     expect(session.getTaskConfirmInfo()?.issueClosed).toBe(false);
+  });
+
+  it("returns issueClosed=true when task_assigned with status 'closed' (e.g. worker claims an already-closed task)", () => {
+    const issue = makeIssue(6, "closed");
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "t6", issue });
+    expect(session.getTaskQuitInfo()?.issueClosed).toBe(true);
   });
 });
 
