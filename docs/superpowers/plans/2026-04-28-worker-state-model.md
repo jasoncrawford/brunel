@@ -620,7 +620,7 @@ Removes the now-redundant `cleanup()` / `isCleanupPending` pair from `WorkerCont
 - Modify: `src/agent/index.ts`
 - Test: `tests/worker.test.ts`
 
-- [ ] **Step 1: Write a test documenting the SIGTERM contract**
+- [x] **Step 1: Write a test documenting the SIGTERM contract**
 
 ```typescript
 // ── onForceDestroy — skips confirmation ───────────────────────────────────────
@@ -653,7 +653,7 @@ describe("WorkspaceController.onForceDestroy", () => {
 });
 ```
 
-- [ ] **Step 2: Run — expect it to pass**
+- [x] **Step 2: Run — expect it to pass**
 
 ```bash
 npm test -- worker
@@ -661,7 +661,7 @@ npm test -- worker
 
 Expected: PASS — `onForceDestroy()` already skips `checkSafety`. This test locks in the contract so a future refactor can't accidentally add a confirmation prompt to the SIGTERM path.
 
-- [ ] **Step 3: Fix SIGTERM in `index.ts`**
+- [x] **Step 3: Fix SIGTERM in `index.ts`**
 
 Find (around line 146):
 
@@ -686,7 +686,7 @@ process.on("SIGTERM", async () => {
 });
 ```
 
-- [ ] **Step 4: Delete `cleanup()` from `worker-controller.ts`**
+- [x] **Step 4: Delete `cleanup()` from `worker-controller.ts`**
 
 Delete the entire `cleanup()` method (currently lines ~386–394):
 
@@ -704,7 +704,7 @@ async cleanup(): Promise<void> {
 }
 ```
 
-- [ ] **Step 5: Delete `isCleanupPending` getter from `worker-controller.ts`**
+- [x] **Step 5: Delete `isCleanupPending` getter from `worker-controller.ts`**
 
 Delete these two lines (currently ~172–173):
 
@@ -714,7 +714,7 @@ Delete these two lines (currently ~172–173):
 get isCleanupPending(): boolean { return this._isActive; }
 ```
 
-- [ ] **Step 6: Delete the dead post-loop block from `index.ts`**
+- [x] **Step 6: Inline the post-loop exit logic (replacing `isCleanupPending`/`cleanup()`) in `index.ts`**
 
 After the `while (true)` loop in `BrunelAgent.start()`, delete:
 
@@ -729,7 +729,7 @@ if (workerController.isCleanupPending) {
 
 This block is now unreachable: every `break` from the loop is preceded by `doExit()` (which pauses stdin), so Node.js exits naturally.
 
-- [ ] **Step 7: Run all tests, type-check, and smoke test**
+- [x] **Step 7: Run all tests, type-check, and smoke test**
 
 ```bash
 npm test
@@ -739,7 +739,7 @@ npm run smoke
 
 Expected: all pass. If `tsc` reports `isCleanupPending` or `cleanup` still referenced somewhere, delete those references too.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/agent/controllers/worker-controller.ts src/agent/index.ts tests/worker.test.ts
