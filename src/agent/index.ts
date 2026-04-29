@@ -349,13 +349,6 @@ export class BrunelAgent {
       // Drain any foreman prompts that arrived during the user's query.
       await drainPendingPrompts();
     }
-
-    // Worker mode post-loop: send goodbye, destroy workspace, tear down I/O, exit.
-    if (workerController.isActive) {
-      workerController.sendGoodbye();
-      await doExit();
-      process.exit(0);
-    }
   }
 }
 
