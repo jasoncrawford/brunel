@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useAdminWs } from "../hooks/useAdminWs.ts";
+import { usePageTitle } from "../hooks/usePageTitle.ts";
 import type { AdminMessage, Task, TaskStatus } from "../types.ts";
 import { shortWorkerId } from "../../../shared/utils.ts";
 
 export default function TaskList() {
+  usePageTitle("Tasks \u2013 Brunel");
   const [searchParams, setSearchParams] = useSearchParams();
   const statusFilter = (searchParams.get("status") ?? "all") as "all" | TaskStatus;
   const [tasks, setTasks] = useState<Task[]>([]);

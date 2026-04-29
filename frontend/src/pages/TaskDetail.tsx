@@ -1,11 +1,13 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useAdminWs } from "../hooks/useAdminWs.ts";
+import { usePageTitle } from "../hooks/usePageTitle.ts";
 import type { LogEntry, AdminMessage, Task } from "../types.ts";
 import { shortWorkerId } from "../../../shared/utils.ts";
 
 export default function TaskDetail() {
   const { id } = useParams<{ id: string }>();
+  usePageTitle(`Task #${id} \u2013 Brunel`);
   const [events, setEvents] = useState<LogEntry[]>([]);
   const [task, setTask] = useState<Task | null>(null);
 

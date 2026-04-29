@@ -48,6 +48,12 @@ describe("EventLog", () => {
     vi.restoreAllMocks();
   });
 
+  it("sets document.title to 'Events – Brunel'", () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ json: () => Promise.resolve([]) }));
+    renderEventLog();
+    expect(document.title).toBe("Events \u2013 Brunel");
+  });
+
   it("fetches from /api/log on mount", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ json: () => Promise.resolve([]) }));
     renderEventLog();

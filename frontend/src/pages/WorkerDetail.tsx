@@ -1,11 +1,13 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useAdminWs } from "../hooks/useAdminWs.ts";
+import { usePageTitle } from "../hooks/usePageTitle.ts";
 import type { LogEntry, Worker, AdminMessage } from "../types.ts";
 import { shortWorkerId } from "../../../shared/utils.ts";
 
 export default function WorkerDetail() {
   const { id } = useParams<{ id: string }>();
+  usePageTitle(id ? `${shortWorkerId(id)} \u2013 Brunel` : "Brunel");
   const [messages, setMessages] = useState<LogEntry[]>([]);
   const [worker, setWorker] = useState<Worker | null>(null);
 
