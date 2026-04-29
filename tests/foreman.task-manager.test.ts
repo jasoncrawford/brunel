@@ -552,7 +552,17 @@ describe("TaskManager.handlePrOpenedEvent", () => {
     Worker._reset();
     resetDb();
     manager = await createTestTaskManager();
-    await Task.upsert("42", 42, REPO, "Fix the bug", "Body", ["brunel:ready"]);
+    await seedTask({
+      task_id: "42",
+      issue_number: 42,
+      repo: REPO,
+      repo_id: manager.repo.id,
+      title: "Fix the bug",
+      body: "Body",
+      labels: ["brunel:ready"],
+      worker_id: "w1",
+      assigned_at: new Date().toISOString(),
+    });
   });
 
   afterEach(() => {
@@ -582,6 +592,92 @@ describe("TaskManager.handlePrOpenedEvent", () => {
     await manager.handlePrOpenedEvent(10, "Fixes #42", "my-fix-branch");
     const found = await manager.getTaskForBranch("my-fix-branch");
     expect(found?.taskId).toBe("42");
+  });
+
+  it("returns null when the linked task is not assigned", async () => {
+    // #99 is pending (no worker); the current code would return it, but shouldn't
+    await Task.upsert("99", 99, REPO, "Another task", "Body", ["brunel:ready"]);
+    const task = await manager.handlePrOpenedEvent(10, "Closes #99", "branch");
+    expect(task).toBeNull();
+  });
+
+  it("finds the correct task when an inline issue mention appears before the closing keyword", async () => {
+    // #916 appears inline but has no task; #42 is the real closing keyword
+    const body = "## Summary\n\n- fix (fixes #916): some detail\n\nCloses #42.";
+    const task = await manager.handlePrOpenedEvent(10, body, "fix-branch");
+    expect(task?.taskId).toBe("42");
+    expect(await Task.getByRepoPr(manager.repo.id, 10)).not.toBeNull();
+  });
+
+  it("skips a pending task match and returns the assigned one", async () => {
+    // #916 has a pending task; #42 (from beforeEach) is assigned
+    await Task.upsert("916", 916, REPO, "Unrelated task", "Body", ["brunel:ready"]);
+    const body = "## Summary\n\n- fix (fixes #916): some detail\n\nCloses #42.";
+    const task = await manager.handlePrOpenedEvent(10, body, "fix-branch");
+    expect(task?.taskId).toBe("42");
+  });
+});
+
+// ── TaskManager.handlePrEditedEvent ──────────────────────────────────────────
+
+describe("TaskManager.handlePrEditedEvent", () => {
+  let manager: TaskManager;
+
+  beforeEach(async () => {
+    Worker._reset();
+    resetDb();
+    manager = await createTestTaskManager();
+    await seedTask({
+      task_id: "42",
+      issue_number: 42,
+      repo: REPO,
+      repo_id: manager.repo.id,
+      title: "Fix the bug",
+      body: "Body",
+      labels: ["brunel:ready"],
+      worker_id: "w1",
+      assigned_at: new Date().toISOString(),
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("registers branch and PR when body links an issue", async () => {
+    const task = await manager.handlePrEditedEvent(10, "Closes #42", "fix-branch");
+    expect(task?.taskId).toBe("42");
+    expect(await Task.getByRepoPr(manager.repo.id, 10)).not.toBeNull();
+  });
+
+  it("returns null when no linked issue in body", async () => {
+    const task = await manager.handlePrEditedEvent(10, "no link", "branch");
+    expect(task).toBeNull();
+  });
+
+  it("returns null when linked issue has no corresponding task", async () => {
+    const task = await manager.handlePrEditedEvent(10, "Closes #999", "branch");
+    expect(task).toBeNull();
+  });
+
+  it("returns null when the linked task is not assigned", async () => {
+    await Task.upsert("99", 99, REPO, "Another task", "Body", ["brunel:ready"]);
+    const task = await manager.handlePrEditedEvent(10, "Closes #99", "branch");
+    expect(task).toBeNull();
+  });
+
+  it("finds the correct task when an inline issue mention appears before the closing keyword", async () => {
+    const body = "## Summary\n\n- fix (fixes #916): some detail\n\nCloses #42.";
+    const task = await manager.handlePrEditedEvent(10, body, "fix-branch");
+    expect(task?.taskId).toBe("42");
+    expect(await Task.getByRepoPr(manager.repo.id, 10)).not.toBeNull();
+  });
+
+  it("skips a pending task match and returns the assigned one", async () => {
+    await Task.upsert("916", 916, REPO, "Unrelated task", "Body", ["brunel:ready"]);
+    const body = "## Summary\n\n- fix (fixes #916): some detail\n\nCloses #42.";
+    const task = await manager.handlePrEditedEvent(10, body, "fix-branch");
+    expect(task?.taskId).toBe("42");
   });
 });
 
