@@ -2004,7 +2004,7 @@ describe("getTaskConfirmInfo", () => {
   it("returns issueClosed=true when task_assigned with status 'closed' (e.g. worker claims an already-closed task)", () => {
     const issue = makeIssue(6, "closed");
     sendMsg(fakeWs, { type: "task_assigned", taskId: "t6", issue });
-    expect(session.getTaskQuitInfo()?.issueClosed).toBe(true);
+    expect(session.getTaskConfirmInfo()?.issueClosed).toBe(true);
   });
 });
 
