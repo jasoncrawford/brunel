@@ -211,18 +211,18 @@ describe("workerMain exit behavior", () => {
     vi.clearAllMocks();
   });
 
-  it("calls process.exit(0) when user presses ^D", async () => {
-    const { exitCalled, exitCode } = await runWorkerMain();
-    expect(exitCalled).toBe(true);
-    expect(exitCode).toBe(0);
+  it("exits cleanly (no process.exit) when user presses ^D in worker mode", async () => {
+    // ^D calls stop() then doExit(), then the loop breaks and start() returns normally.
+    // process.exit(0) is NOT called — Node exits naturally once stdin is paused.
+    const { exitCalled } = await runWorkerMain();
+    expect(exitCalled).toBe(false);
   });
 
-  it("calls process.exit(0) when user types /exit", async () => {
-    // First ask() returns "/exit", which dispatchInput converts to type "exit"
+  it("exits cleanly (no process.exit) when user types /exit in worker mode", async () => {
+    // /exit calls stop() then doExit(), then returns "exit" to break the loop.
     mockInput.ask.mockResolvedValue("/exit");
-    const { exitCalled, exitCode } = await runWorkerMain();
-    expect(exitCalled).toBe(true);
-    expect(exitCode).toBe(0);
+    const { exitCalled } = await runWorkerMain();
+    expect(exitCalled).toBe(false);
   });
 
   it("destroys workspace before exiting when workspace is safe", async () => {

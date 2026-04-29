@@ -1375,6 +1375,43 @@ describe("prIsClosed guard", () => {
   });
 });
 
+// ── stop() with active task ───────────────────────────────────────────────────
+
+describe("stop() with active task", () => {
+  it("remains active if user cancels the quit confirmation", async () => {
+    const ws = new FakeWs();
+    const s = new WorkerController(sb, display, undefined, undefined, "owner/repo", {
+      wsFactory: vi.fn().mockReturnValue(ws),
+      pickFn: async () => 0, // first option = "No, keep working" = cancel
+    });
+    await s.start();
+    sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "idle" });
+    sendMsg(ws, { type: "task_assigned", taskId: "99", issue: makeIssue() });
+    s.takeNextPrompt();
+
+    await s.stop();
+
+    expect(s.isActive).toBe(true);
+    expect(s.hasTask()).toBe(true);
+  });
+
+  it("stops and marks inactive if user confirms quit", async () => {
+    const ws = new FakeWs();
+    const s = new WorkerController(sb, display, undefined, undefined, "owner/repo", {
+      wsFactory: vi.fn().mockReturnValue(ws),
+      pickFn: async () => 1, // second option = "Yes, quit anyway" = quit
+    });
+    await s.start();
+    sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "idle" });
+    sendMsg(ws, { type: "task_assigned", taskId: "99", issue: makeIssue() });
+    s.takeNextPrompt();
+
+    await s.stop();
+
+    expect(s.isActive).toBe(false);
+  });
+});
+
 import { Workspace } from "../src/agent/models/workspace.js";
 import { WorkspaceController } from "../src/agent/controllers/workspace-controller.js";
 import { CommandRegistry } from "../src/agent/controllers/command-controller.js";
