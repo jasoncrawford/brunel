@@ -272,7 +272,7 @@ export class WorkerController extends EventEmitter {
    * Returns task confirm info if a task is currently active, undefined otherwise.
    * Used by the quit/exit and claim handlers to decide whether to prompt the user.
    */
-  getTaskQuitInfo(): TaskConfirmInfo | undefined {
+  getTaskConfirmInfo(): TaskConfirmInfo | undefined {
     if (!this.currentTaskId || !this.currentIssue) return undefined;
     return {
       taskNumber: this.currentIssue.number,
@@ -316,25 +316,25 @@ export class WorkerController extends EventEmitter {
    * - Issue closed but not complete: asks whether to complete first (default yes).
    * - Issue still open: warns about unassignment and asks to confirm (default no).
    *
-   * Returns 'complete-and-quit' to complete the current task then claim,
-   * 'quit' to abandon the current task and claim, or 'cancel' to do nothing.
+   * Returns 'complete-and-claim' to complete the current task then claim,
+   * 'claim' to abandon the current task and claim, or 'cancel' to do nothing.
    *
    * An injectable pickFn is accepted so callers can supply a mock in tests.
    */
   async confirmTaskClaim(
     info: TaskConfirmInfo,
     pickFn: (options: string[]) => Promise<number> = this.pickFnOrDefault(),
-  ): Promise<"quit" | "complete-and-quit" | "cancel"> {
+  ): Promise<"claim" | "complete-and-claim" | "cancel"> {
     if (info.issueClosed) {
       this.display.print(c.amber(`\nTask #${info.taskNumber} is closed but not complete. Complete it before claiming a new task?`));
       const idx = await pickFn(["Yes, complete first", "No, just claim", "Don't claim"]);
-      if (idx === 0) return "complete-and-quit";
-      if (idx === 1) return "quit";
+      if (idx === 0) return "complete-and-claim";
+      if (idx === 1) return "claim";
       return "cancel";
     } else {
       this.display.print(c.amber(`\nTask #${info.taskNumber} is still open. Claiming a new task will unassign ${info.workerId}. Proceed?`));
       const idx = await pickFn(["No, keep working", "Yes, claim anyway"]);
-      if (idx === 1) return "quit";
+      if (idx === 1) return "claim";
       return "cancel";
     }
   }
@@ -446,7 +446,7 @@ export class WorkerController extends EventEmitter {
   /** Disconnect from the foreman. Prompts if a task is in progress. */
   async stop(): Promise<void> {
     if (!this._isActive) return;
-    const taskInfo = this.getTaskQuitInfo();
+    const taskInfo = this.getTaskConfirmInfo();
     let goodbyeOpts: { task_complete?: boolean; stats?: { inputTokens: number; outputTokens: number; costUsd?: number } } | undefined;
     if (taskInfo) {
       const choice = await this.confirmTaskQuit(taskInfo);
@@ -502,15 +502,15 @@ export class WorkerController extends EventEmitter {
           return undefined;
         }
         if (this.hasTask()) {
-          const taskInfo = this.getTaskQuitInfo();
+          const taskInfo = this.getTaskConfirmInfo();
           if (taskInfo) {
             const choice = await this.confirmTaskClaim(taskInfo);
             if (choice === "cancel") return undefined;
-            if (choice === "complete-and-quit") {
+            if (choice === "complete-and-claim") {
               await this.completeCurrentTask();
               // currentTaskId is now cleared; fall through to claim below
             } else {
-              // "quit" — abandon current task: signal foreman and reconnect with new claim
+              // "claim" — abandon current task: signal foreman and reconnect with new claim
               this._pendingClaimTaskId = taskId;
               this.sendGoodbye();
               this.currentTaskId = undefined;

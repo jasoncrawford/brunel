@@ -185,7 +185,7 @@ describe("when has an active task", () => {
     expect(sentClaimTask(fakeWs)).toBeUndefined();
   });
 
-  it("complete-and-quit sends task_complete then claim_task", async () => {
+  it("complete-and-claim sends task_complete then claim_task", async () => {
     const pickFn = vi.fn().mockResolvedValue(0); // "Yes, complete before exiting"
     sessionWithPick = makeSession(pickFn);
     await sessionWithPick.start();
