@@ -810,7 +810,7 @@ export class WorkerController extends EventEmitter {
       this.currentTaskId = msg.taskId;
       this.currentIssue = msg.issue;
       this.prIsClosed = false;
-      this.issueClosed = false;
+      this.issueClosed = msg.issue.status === "closed";
       this.agentStatus.update({ taskNumber: msg.issue.number, prNumber: undefined });
       this.agentStatus.resetTaskStats();
       void this.agentStatus.refreshBranch();
