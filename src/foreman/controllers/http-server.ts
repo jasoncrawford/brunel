@@ -87,7 +87,8 @@ export class HttpServer {
   app.get("/api/tasks/:id/events", async (c) => {
     try {
       const taskId = c.req.param("id");
-      const entries = await queryActivityLog({ taskId });
+      const before = c.req.query("before");
+      const entries = await queryActivityLog({ taskId, limit: 50, ...(before ? { before } : {}) });
       return c.json(entries);
     } catch (err) {
       log(`ERROR API query failed: ${fmtError(err)}`);
@@ -110,7 +111,8 @@ export class HttpServer {
   app.get("/api/workers/:id/messages", async (c) => {
     try {
       const workerId = c.req.param("id");
-      const entries = await queryActivityLog({ workerId });
+      const before = c.req.query("before");
+      const entries = await queryActivityLog({ workerId, limit: 50, ...(before ? { before } : {}) });
       return c.json(entries);
     } catch (err) {
       log(`ERROR API query failed: ${fmtError(err)}`);
@@ -156,7 +158,8 @@ export class HttpServer {
   app.get("/api/repos/:id/log", async (c) => {
     try {
       const repoId = Number(c.req.param("id"));
-      const entries = await queryActivityLog({ repoId });
+      const before = c.req.query("before");
+      const entries = await queryActivityLog({ repoId, limit: 50, ...(before ? { before } : {}) });
       return c.json(entries);
     } catch (err) {
       log(`ERROR API query failed: ${fmtError(err)}`);

@@ -199,13 +199,21 @@ describe("GET /api/tasks/:id/events", () => {
     expect(JSON.parse(res.body)).toEqual([]);
   });
 
-  it("returns task events from queryActivityLog", async () => {
+  it("returns task events from queryActivityLog with limit 50", async () => {
     const entries = [{ id: 1, taskId: "42" }];
     vi.mocked(queryActivityLog).mockResolvedValue(entries as never);
     const res = await request(port, "GET", "/api/tasks/42/events");
     expect(res.status).toBe(200);
     expect(JSON.parse(res.body)).toEqual(entries);
-    expect(queryActivityLog).toHaveBeenCalledWith({ taskId: "42" });
+    expect(queryActivityLog).toHaveBeenCalledWith({ taskId: "42", limit: 50 });
+  });
+
+  it("passes before cursor to queryActivityLog for task events when provided", async () => {
+    const before = "2024-06-01T12:00:00.000Z";
+    vi.mocked(queryActivityLog).mockResolvedValue([]);
+    const res = await request(port, "GET", `/api/tasks/42/events?before=${encodeURIComponent(before)}`);
+    expect(res.status).toBe(200);
+    expect(queryActivityLog).toHaveBeenCalledWith({ taskId: "42", limit: 50, before });
   });
 });
 
@@ -216,13 +224,21 @@ describe("GET /api/workers/:id/messages", () => {
     expect(JSON.parse(res.body)).toEqual([]);
   });
 
-  it("returns worker messages from queryActivityLog", async () => {
+  it("returns worker messages from queryActivityLog with limit 50", async () => {
     const entries = [{ id: 1, workerId: "w1" }];
     vi.mocked(queryActivityLog).mockResolvedValue(entries as never);
     const res = await request(port, "GET", "/api/workers/w1/messages");
     expect(res.status).toBe(200);
     expect(JSON.parse(res.body)).toEqual(entries);
-    expect(queryActivityLog).toHaveBeenCalledWith({ workerId: "w1" });
+    expect(queryActivityLog).toHaveBeenCalledWith({ workerId: "w1", limit: 50 });
+  });
+
+  it("passes before cursor to queryActivityLog for worker messages when provided", async () => {
+    const before = "2024-06-01T12:00:00.000Z";
+    vi.mocked(queryActivityLog).mockResolvedValue([]);
+    const res = await request(port, "GET", `/api/workers/w1/messages?before=${encodeURIComponent(before)}`);
+    expect(res.status).toBe(200);
+    expect(queryActivityLog).toHaveBeenCalledWith({ workerId: "w1", limit: 50, before });
   });
 });
 

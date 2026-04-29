@@ -21,18 +21,18 @@ export async function queryActivityLog(opts: QueryActivityLogOpts = {}): Promise
 
   if (opts.taskId) {
     [webhooks, messages] = await Promise.all([
-      WebhookEvent.queryForTask(opts.taskId),
-      ForemanMessage.queryForTask(opts.taskId),
+      WebhookEvent.queryForTask(opts.taskId, { limit, before: opts.before }),
+      ForemanMessage.queryForTask(opts.taskId, { limit, before: opts.before }),
     ]);
   } else if (opts.workerId) {
     [webhooks, messages] = await Promise.all([
-      WebhookEvent.queryForWorker(opts.workerId),
-      ForemanMessage.queryForWorker(opts.workerId),
+      WebhookEvent.queryForWorker(opts.workerId, { limit, before: opts.before }),
+      ForemanMessage.queryForWorker(opts.workerId, { limit, before: opts.before }),
     ]);
   } else if (opts.repoId != null) {
     [webhooks, messages] = await Promise.all([
-      WebhookEvent.queryForRepo(opts.repoId),
-      ForemanMessage.queryForRepo(opts.repoId),
+      WebhookEvent.queryForRepo(opts.repoId, { limit, before: opts.before }),
+      ForemanMessage.queryForRepo(opts.repoId, { limit, before: opts.before }),
     ]);
   } else {
     [webhooks, messages] = await Promise.all([

@@ -54,27 +54,30 @@ export class ForemanMessage extends ActiveRecord {
 
   // ── Queries ──────────────────────────────────────────────────────────────────
 
-  static async queryForTask(taskId: string): Promise<ForemanMessage[]> {
-    const { data } = await ForemanMessage.select()
+  static async queryForTask(taskId: string, opts: { limit?: number; before?: string } = {}): Promise<ForemanMessage[]> {
+    let query = ForemanMessage.select()
       .eq("task_id", taskId)
-      .order("created_at", { ascending: false })
-      .limit(500);
+      .order("created_at", { ascending: false });
+    if (opts.before) query = query.lt("created_at", opts.before);
+    const { data } = await query.limit(opts.limit ?? 500);
     return (data ?? []).map((r: DbRow) => new ForemanMessage(r));
   }
 
-  static async queryForWorker(workerId: string): Promise<ForemanMessage[]> {
-    const { data } = await ForemanMessage.select()
+  static async queryForWorker(workerId: string, opts: { limit?: number; before?: string } = {}): Promise<ForemanMessage[]> {
+    let query = ForemanMessage.select()
       .eq("worker_id", workerId)
-      .order("created_at", { ascending: false })
-      .limit(500);
+      .order("created_at", { ascending: false });
+    if (opts.before) query = query.lt("created_at", opts.before);
+    const { data } = await query.limit(opts.limit ?? 500);
     return (data ?? []).map((r: DbRow) => new ForemanMessage(r));
   }
 
-  static async queryForRepo(repoId: number): Promise<ForemanMessage[]> {
-    const { data } = await ForemanMessage.select()
+  static async queryForRepo(repoId: number, opts: { limit?: number; before?: string } = {}): Promise<ForemanMessage[]> {
+    let query = ForemanMessage.select()
       .eq("repo_id", repoId)
-      .order("created_at", { ascending: false })
-      .limit(500);
+      .order("created_at", { ascending: false });
+    if (opts.before) query = query.lt("created_at", opts.before);
+    const { data } = await query.limit(opts.limit ?? 500);
     return (data ?? []).map((r: DbRow) => new ForemanMessage(r));
   }
 
