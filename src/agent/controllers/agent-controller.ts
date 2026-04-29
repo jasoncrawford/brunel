@@ -69,7 +69,7 @@ export class AgentController {
     prompt: string,
     sessionId: string | undefined,
     abortController?: AbortController,
-  ): Promise<{ sessionId: string | undefined; stats: QueryStats }> {
+  ): Promise<{ sessionId: string | undefined; stats: QueryStats; stallRetry: boolean }> {
     logFull("QUERY", { prompt, sessionId });
     const { display } = this;
     // Save and clear the input callbacks while the query runs. In worker
@@ -143,9 +143,12 @@ export class AgentController {
 
     let capturedSessionId = sessionId;
     let resultReceived = false;
+    let receivedSubstantiveContent = false;
+    let stallRetry = false;
 
     // Log a single warning when no SDK message has arrived for STALL_THRESHOLD_SECS.
     // This fires via a watchdog so it captures hangs inside the for-await wait itself.
+    // If no substantive content has arrived yet, auto-abort and signal the caller to retry.
     let stallLogged = false;
     const stallWatcher = setInterval(() => {
       if (!stallLogged && stats.secsSinceLastActivity >= STALL_THRESHOLD_SECS) {
@@ -154,12 +157,19 @@ export class AgentController {
           secsSinceLastActivity: stats.secsSinceLastActivity,
           totalElapsedSecs: stats.elapsedSecs,
         });
+        if (!receivedSubstantiveContent) {
+          stallRetry = true;
+          display.print(c.amber("\n⚠ Connection stalled before receiving a response — retrying…"));
+          (iterable as unknown as { close?: () => void }).close?.();
+          ac.abort();
+        }
       }
     }, 10_000);
 
     try {
       for await (const message of iterable) {
         stats.noteActivity();
+        if (message.type !== "system") receivedSubstantiveContent = true;
 
         if (!(message.type === "stream_event" && (message.event as { type?: string }).type === "content_block_delta")) {
           logFull("MESSAGE", message);
@@ -194,7 +204,7 @@ export class AgentController {
 
     display.stopBar();
 
-    if (!resultReceived) {
+    if (!resultReceived && !stallRetry) {
       display.print(c.darkGray("\nInterrupted. What should the agent do instead?"));
     }
 
@@ -203,7 +213,7 @@ export class AgentController {
     display.inputClear = savedClearCallback;
     savedInputCallback?.();
 
-    return { sessionId: capturedSessionId, stats };
+    return { sessionId: capturedSessionId, stats, stallRetry };
   }
 
   // ── Private helpers ────────────────────────────────────────────────────────
