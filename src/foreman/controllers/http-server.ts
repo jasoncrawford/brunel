@@ -64,7 +64,8 @@ export class HttpServer {
   // ── REST API ───────────────────────────────────────────────────────────────
   app.get("/api/log", async (c) => {
     try {
-      const entries = await queryActivityLog({ limit: 100 });
+      const before = c.req.query("before");
+      const entries = await queryActivityLog({ limit: 50, ...(before ? { before } : {}) });
       return c.json(entries);
     } catch (err) {
       log(`ERROR API query failed: ${fmtError(err)}`);
