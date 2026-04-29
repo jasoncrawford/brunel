@@ -694,20 +694,18 @@ export class WorkerController extends EventEmitter {
         this.display.print(c.amber("Task cancelled (reassigned to another worker)."));
         const workspace = this.workspaceController?.workspace;
         if (workspace?.isCreated) {
-          // Track the reset promise so that task_assigned prompts are deferred until
-          // the workspace is clean — preventing a new task from running in a dirty state.
-          // "Waiting for tasks..." is deferred to .finally() so it only prints after reset.
+          this.transitionToRegistered();
+          this.display.print(c.amber("Resetting workspace..."));
           this._resetPromise = workspace.reset().then(() => {
             this.display.print(c.amber("Workspace reset."));
           }).catch((err: unknown) => {
             this.display.print(c.boldRed(`Workspace reset failed: ${err instanceof Error ? err.message : String(err)}`));
           }).finally(() => {
             this._resetPromise = null;
-            this.display.print(c.sageGreen("Waiting for tasks..."));
+            this.transitionToIdle();
           });
-          this.transitionToRegistered(); // "Waiting for tasks..." is in .finally() above
         } else {
-          this.transitionToIdle(); // immediate — no reset needed
+          this.transitionToIdle();
         }
       } else if (msg.repoStatus === "new") {
         // Show "Connected" in the status bar before waiting for user input — the
