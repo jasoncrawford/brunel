@@ -473,8 +473,23 @@ export class WorkerController extends EventEmitter {
           return undefined;
         }
         if (this.hasTask()) {
-          this.display.print(c.boldRed(`Already working on task ${this.currentTaskId!}. Complete this task or stop worker mode first.`));
-          return undefined;
+          const taskInfo = this.getTaskQuitInfo();
+          if (taskInfo) {
+            const choice = await this.confirmTaskQuit(taskInfo);
+            if (choice === "cancel") return undefined;
+            if (choice === "complete-and-quit") {
+              await this.completeCurrentTask();
+              // currentTaskId is now cleared; fall through to claim below
+            } else {
+              // "quit" — abandon current task: signal foreman and reconnect with new claim
+              this._pendingClaimTaskId = taskId;
+              this.sendGoodbye();
+              this.currentTaskId = undefined;
+              this.currentIssue = undefined;
+              this.ws?.close();
+              return undefined;
+            }
+          }
         }
         if (!this._isActive) {
           // Include the claim in the hello so it's atomic with registration.

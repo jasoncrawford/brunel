@@ -13,6 +13,15 @@ import { CommandRegistry } from "../src/agent/controllers/command-controller.js"
 import * as Wire from "../shared/wire.js";
 import { stripAnsi } from "./helpers.js";
 
+const FAKE_ISSUE: Wire.TaskIssue = {
+  number: 595,
+  title: "Some task",
+  body: "Task body",
+  labels: [],
+  repoUrl: "https://github.com/owner/repo",
+  status: "assigned",
+};
+
 // ── Fake WebSocket ─────────────────────────────────────────────────────────────
 
 class FakeWs extends EventEmitter {
@@ -57,6 +66,26 @@ function sentHello(ws: FakeWs): Record<string, unknown> | undefined {
   return undefined;
 }
 
+function sentTaskComplete(ws: FakeWs): Record<string, unknown> | undefined {
+  for (const call of ws.send.mock.calls) {
+    try {
+      const msg = JSON.parse(call[0] as string);
+      if (msg.type === "task_complete") return msg;
+    } catch { /* ignore */ }
+  }
+  return undefined;
+}
+
+function sentGoodbye(ws: FakeWs): Record<string, unknown> | undefined {
+  for (const call of ws.send.mock.calls) {
+    try {
+      const msg = JSON.parse(call[0] as string);
+      if (msg.type === "worker_goodbye") return msg;
+    } catch { /* ignore */ }
+  }
+  return undefined;
+}
+
 function printedMessages(display: { print: ReturnType<typeof vi.fn> }): string[] {
   return display.print.mock.calls.map((a) => stripAnsi(String(a[0])));
 }
@@ -69,14 +98,14 @@ let display: { print: ReturnType<typeof vi.fn>; printForemanMessage: ReturnType<
 let session: WorkerController;
 let registry: CommandRegistry;
 
-function makeSession(): WorkerController {
+function makeSession(pickFn?: (options: string[]) => Promise<number>): WorkerController {
   return new WorkerController(
     new AgentStatus({ agentId: AGENT_ID }),
     display,
     undefined,
     undefined,
     "owner/repo",
-    { wsFactory },
+    { wsFactory, ...(pickFn && { pickFn }) },
   );
 }
 
@@ -122,20 +151,68 @@ describe("error cases", () => {
     expect(printedMessages(display).some(m => m.includes("Usage"))).toBe(true);
   });
 
-  it("prints 'Already working on task' error when session has a task", async () => {
-    (session as any).currentTaskId = "existing-task-id";
-    const handler = await getClaimHandler(session);
+});
+
+// ── Active-task prompt behavior ────────────────────────────────────────────────
+
+describe("when has an active task", () => {
+  let sessionWithPick: WorkerController;
+
+  function setupActiveTask(s: WorkerController, issueClosed = true): void {
+    (s as any).currentTaskId = "existing-task-id";
+    (s as any).currentIssue = FAKE_ISSUE;
+    (s as any).issueClosed = issueClosed;
+  }
+
+  it("shows confirmTaskQuit prompt instead of an error", async () => {
+    const pickFn = vi.fn().mockResolvedValue(2); // "Don't exit" → cancel
+    sessionWithPick = makeSession(pickFn);
+    await sessionWithPick.start();
+    setupActiveTask(sessionWithPick);
+    const handler = await getClaimHandler(sessionWithPick);
     await handler("new-task-id");
-    const msgs = printedMessages(display);
-    expect(msgs.some(m => m.includes("Already working on task") && m.includes("existing-task-id"))).toBe(true);
+    expect(pickFn).toHaveBeenCalled();
   });
 
-  it("does not send claim_task when already has a task", async () => {
-    (session as any).currentTaskId = "existing-task-id";
+  it("cancel from prompt does not send claim_task", async () => {
+    const pickFn = vi.fn().mockResolvedValue(2); // "Don't exit" → cancel
+    sessionWithPick = makeSession(pickFn);
+    await sessionWithPick.start();
+    setupActiveTask(sessionWithPick);
     fakeWs.send.mockClear();
-    const handler = await getClaimHandler(session);
+    const handler = await getClaimHandler(sessionWithPick);
     await handler("new-task-id");
     expect(sentClaimTask(fakeWs)).toBeUndefined();
+  });
+
+  it("complete-and-quit sends task_complete then claim_task", async () => {
+    const pickFn = vi.fn().mockResolvedValue(0); // "Yes, complete before exiting"
+    sessionWithPick = makeSession(pickFn);
+    await sessionWithPick.start();
+    setupActiveTask(sessionWithPick);
+    fakeWs.send.mockClear();
+    const handler = await getClaimHandler(sessionWithPick);
+    await handler("new-task-id");
+    expect(sentTaskComplete(fakeWs)).toBeDefined();
+    const claim = sentClaimTask(fakeWs);
+    expect(claim).toBeDefined();
+    expect(claim?.taskId).toBe("new-task-id");
+  });
+
+  it("quit sends goodbye, clears current task, and sets pending claim for reconnect", async () => {
+    const pickFn = vi.fn().mockResolvedValue(1); // "No, just exit" → quit (issue closed)
+    sessionWithPick = makeSession(pickFn);
+    await sessionWithPick.start();
+    setupActiveTask(sessionWithPick, true);
+    fakeWs.send.mockClear();
+    const handler = await getClaimHandler(sessionWithPick);
+    await handler("new-task-id");
+    expect(sentGoodbye(fakeWs)).toBeDefined();
+    expect(fakeWs.close).toHaveBeenCalled();
+    // Pending claim is set before WS close so reconnect picks it up;
+    // after the open handler fires it gets consumed, but we can verify
+    // currentTaskId was cleared:
+    expect((sessionWithPick as any).currentTaskId).toBeUndefined();
   });
 });
 
