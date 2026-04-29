@@ -259,6 +259,7 @@ export function createMemoryTaskDb(): SupabaseClient<Database> {
     select(_cols?: string) { return emptyBuilder; },
     eq(_col: string, _val: unknown) { return emptyBuilder; },
     is(_col: string, _val: unknown) { return emptyBuilder; },
+    lt(_col: string, _val: unknown) { return emptyBuilder; },
     order(_col: string, _opts?: unknown) { return emptyBuilder; },
     limit(_n: number) { return ok([] as DbRow[]); },
     maybeSingle() { return ok(null as DbRow | null); },

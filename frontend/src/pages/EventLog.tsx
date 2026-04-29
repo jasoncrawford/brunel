@@ -57,7 +57,7 @@ export default function EventLog() {
     if (!sentinel) return;
     const observer = new IntersectionObserver(
       ([entry]) => { if (entry.isIntersecting) loadMore(); },
-      { threshold: 0.1 },
+      { rootMargin: "0px 0px 200px 0px", threshold: 0 },
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
