@@ -311,10 +311,12 @@ export class WorkerController extends EventEmitter {
   }
 
   /**
-   * Complete the current task: call afterTask hook, send task_complete, reset state.
-   * Returns 'task-complete' if a task was active, undefined if no task was assigned.
+   * Complete the current task: call afterTask hook, send task_complete, reset state,
+   * then prompt the user for what to do next.
+   * Returns 'task-complete' if the worker should remain (or become) idle,
+   * 'exit' if the user chose to quit, or undefined if no task was assigned.
    */
-  async completeCurrentTask(): Promise<"task-complete" | undefined> {
+  async completeCurrentTask(): Promise<"task-complete" | "exit" | undefined> {
     if (!this.currentTaskId) return undefined;
     if (this._activeAfterTask) {
       try { await this._activeAfterTask(); } catch (err) {
@@ -339,8 +341,44 @@ export class WorkerController extends EventEmitter {
     this.agentStatus.resetTaskStats();
     this.agentStatus.update({ taskNumber: undefined, prNumber: undefined });
     await this.agentStatus.refreshBranch();
-    this.display.print(c.sageGreen("Waiting for next task..."));
-    return "task-complete";
+    return this.promptAfterTaskComplete();
+  }
+
+  /**
+   * After completing a task, prompt the user for what to do next.
+   * Falls back to "wait for next task" silently when no picker is available
+   * (e.g. non-interactive environments or tests that don't inject a pickFn).
+   */
+  private async promptAfterTaskComplete(): Promise<"task-complete" | "exit"> {
+    const pickFn = this.options?.pickFn ?? (this.picker ? (opts: string[]) => this.picker!.pick(opts) : null);
+
+    if (!pickFn) {
+      this.display.print(c.sageGreen("Waiting for next task..."));
+      return "task-complete";
+    }
+
+    const idx = await pickFn([
+      "Wait to be assigned the next task",
+      "Choose a specific task to work on",
+      "Stop working for now",
+      "Quit and exit",
+    ]);
+
+    switch (idx) {
+      case 1:
+        await this.stop();
+        this.display.print(c.sageGreen("To claim a specific task, use /worker:claim <taskId>."));
+        return "task-complete";
+      case 2:
+        await this.stop();
+        return "task-complete";
+      case 3:
+        await this.stop();
+        return "exit";
+      default:
+        this.display.print(c.sageGreen("Waiting for next task..."));
+        return "task-complete";
+    }
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
