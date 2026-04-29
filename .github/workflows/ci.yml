@@ -20,6 +20,8 @@ jobs:
         with:
           version: latest
 
+      - run: npm ci
+
       - name: Start local Supabase
         run: supabase start
 
@@ -36,8 +38,6 @@ jobs:
             echo "SUPABASE_URL=http://127.0.0.1:54321"
             echo "SUPABASE_SERVICE_ROLE_KEY=${KEY}"
           } >> "$GITHUB_ENV"
-
-      - run: npm ci
 
       - run: npm test
         env:
