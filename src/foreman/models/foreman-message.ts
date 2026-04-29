@@ -78,10 +78,10 @@ export class ForemanMessage extends ActiveRecord {
     return (data ?? []).map((r: DbRow) => new ForemanMessage(r));
   }
 
-  static async list(opts: { limit?: number } = {}): Promise<ForemanMessage[]> {
-    const { data } = await ForemanMessage.select()
-      .order("created_at", { ascending: false })
-      .limit(opts.limit ?? 100);
+  static async list(opts: { limit?: number; before?: string } = {}): Promise<ForemanMessage[]> {
+    let query = ForemanMessage.select().order("created_at", { ascending: false });
+    if (opts.before) query = query.lt("created_at", opts.before);
+    const { data } = await query.limit(opts.limit ?? 100);
     return (data ?? []).map((r: DbRow) => new ForemanMessage(r));
   }
 

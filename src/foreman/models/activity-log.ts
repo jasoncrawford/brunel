@@ -8,6 +8,7 @@ import { Repo } from "./repo.js";
 
 export interface QueryActivityLogOpts {
   limit?: number;
+  before?: string;
   taskId?: string;
   workerId?: string;
   repoId?: number;
@@ -35,8 +36,8 @@ export async function queryActivityLog(opts: QueryActivityLogOpts = {}): Promise
     ]);
   } else {
     [webhooks, messages] = await Promise.all([
-      WebhookEvent.list({ limit }),
-      ForemanMessage.list({ limit }),
+      WebhookEvent.list({ limit, before: opts.before }),
+      ForemanMessage.list({ limit, before: opts.before }),
     ]);
   }
 

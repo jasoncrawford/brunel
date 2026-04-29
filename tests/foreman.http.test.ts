@@ -134,13 +134,21 @@ describe("GET /api/log", () => {
     expect(JSON.parse(res.body)).toEqual([]);
   });
 
-  it("returns log entries from queryActivityLog", async () => {
+  it("returns log entries from queryActivityLog with default limit", async () => {
     const entries = [{ id: 1, summary: "test" }];
     vi.mocked(queryActivityLog).mockResolvedValue(entries as never);
     const res = await request(port, "GET", "/api/log");
     expect(res.status).toBe(200);
     expect(JSON.parse(res.body)).toEqual(entries);
-    expect(queryActivityLog).toHaveBeenCalledWith({ limit: 100 });
+    expect(queryActivityLog).toHaveBeenCalledWith({ limit: 50 });
+  });
+
+  it("passes before cursor to queryActivityLog when provided", async () => {
+    const before = "2024-06-01T12:00:00.000Z";
+    vi.mocked(queryActivityLog).mockResolvedValue([]);
+    const res = await request(port, "GET", `/api/log?before=${encodeURIComponent(before)}`);
+    expect(res.status).toBe(200);
+    expect(queryActivityLog).toHaveBeenCalledWith({ limit: 50, before });
   });
 });
 

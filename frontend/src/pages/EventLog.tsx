@@ -1,31 +1,72 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Link } from "react-router-dom";
 import { useAdminWs } from "../hooks/useAdminWs.ts";
 import type { LogEntry, AdminMessage } from "../types.ts";
 import { shortWorkerId } from "../../../shared/utils.ts";
 
+const PAGE_SIZE = 50;
+
 export default function EventLog() {
   const [entries, setEntries] = useState<LogEntry[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+
+  const fetchPage = useCallback(async (before?: string) => {
+    setLoading(true);
+    try {
+      const url = before ? `/api/log?before=${encodeURIComponent(before)}` : "/api/log";
+      const data = await fetch(url).then((r) => r.json() as Promise<LogEntry[]>);
+      setEntries((prev) => {
+        const seen = new Set(prev.map((e) => `${e.kind}-${e.id}`));
+        const fresh = data.filter((e) => !seen.has(`${e.kind}-${e.id}`));
+        return [...prev, ...fresh];
+      });
+      setHasMore(data.length === PAGE_SIZE);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    fetch("/api/log")
-      .then((r) => r.json() as Promise<LogEntry[]>)
-      .then(setEntries)
-      .catch(console.error);
-  }, []);
+    fetchPage();
+  }, [fetchPage]);
 
   const handleMessage = useCallback((msg: AdminMessage) => {
     if (msg.type === "log_event") {
-      setEntries((prev) => [msg.entry, ...prev]);
+      setEntries((prev) => {
+        const key = `${msg.entry.kind}-${msg.entry.id}`;
+        if (prev.some((e) => `${e.kind}-${e.id}` === key)) return prev;
+        return [msg.entry, ...prev];
+      });
     }
   }, []);
 
   useAdminWs(handleMessage);
 
+  const loadMore = useCallback(() => {
+    if (loading || !hasMore || entries.length === 0) return;
+    fetchPage(entries[entries.length - 1].timestamp);
+  }, [loading, hasMore, entries, fetchPage]);
+
+  useEffect(() => {
+    if (!hasMore || loading) return;
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) loadMore(); },
+      { rootMargin: "0px 0px 200px 0px", threshold: 0 },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMore, loading, loadMore]);
+
   return (
     <div>
       <h2>Event Log</h2>
-      {entries.length === 0 ? <p>No events.</p> : (
+      {entries.length === 0 && !loading ? <p>No events.</p> : (
         <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "monospace", fontSize: "0.85em" }}>
           <thead>
             <tr>
@@ -51,9 +92,22 @@ export default function EventLog() {
           </tbody>
         </table>
       )}
+      {hasMore && (
+        <div ref={sentinelRef} style={{ padding: "8px", textAlign: "center" }}>
+          {loading
+            ? <span style={{ color: "#888", fontFamily: "monospace", fontSize: "0.85em" }}>Loading…</span>
+            : <button onClick={loadMore} style={loadMoreBtn}>Load more</button>}
+        </div>
+      )}
     </div>
   );
 }
 
 const th: React.CSSProperties = { textAlign: "left", borderBottom: "1px solid #ccc", padding: "4px 8px" };
 const td: React.CSSProperties = { padding: "4px 8px", borderBottom: "1px solid #eee" };
+const loadMoreBtn: React.CSSProperties = {
+  padding: "4px 16px",
+  fontFamily: "monospace",
+  fontSize: "0.85em",
+  cursor: "pointer",
+};
