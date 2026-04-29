@@ -49,7 +49,7 @@ test("repo detail page: shows repo name and tasks", async ({ page }) => {
     action: "labeled",
     label: { name: "brunel:ready" },
     issue: {
-      number: 5001,
+      number: 5002,
       title: "Repo detail test task",
       body: "",
       labels: [{ name: "brunel:ready" }],
@@ -65,7 +65,7 @@ test("repo detail page: shows repo name and tasks", async ({ page }) => {
   // Should be on a /repos/:id page showing the repo name
   await expect(page.getByRole("heading", { name: "owner/repo" })).toBeVisible();
   // The task should be visible
-  await expect(page.getByRole("link", { name: "#5001" }).first()).toBeVisible();
+  await expect(page.getByRole("link", { name: "#5002" }).first()).toBeVisible();
   await expect(page.getByText("Repo detail test task")).toBeVisible();
 });
 
