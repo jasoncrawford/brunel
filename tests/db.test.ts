@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { WebhookEvent } from "../src/foreman/models/webhook-event.js";
 import { ForemanMessage } from "../src/foreman/models/foreman-message.js";
 import { queryActivityLog } from "../src/foreman/models/activity-log.js";
@@ -35,14 +35,14 @@ describe("WebhookEvent.log", () => {
       payload: { foo: "bar" },
     });
 
-    // Fire-and-forget: give the insert a tick to land
-    await new Promise((r) => setTimeout(r, 50));
-
-    const { data } = await supabase
-      .from("webhook_events")
-      .select("event_name, action, repo_id, sender, issue_number, task_id, payload")
-      .eq("delivery_id", "abc");
-    expect(data).toHaveLength(1);
+    let data: Record<string, unknown>[] | null = null;
+    await vi.waitFor(async () => {
+      ({ data } = await supabase
+        .from("webhook_events")
+        .select("event_name, action, repo_id, sender, issue_number, task_id, payload")
+        .eq("delivery_id", "abc"));
+      expect(data).toHaveLength(1);
+    });
     expect(data![0]).toMatchObject({
       event_name: "issues",
       action: "labeled",
@@ -83,13 +83,14 @@ describe("ForemanMessage.log", () => {
       payload: { type: "task_assigned" },
     });
 
-    await new Promise((r) => setTimeout(r, 50));
-
-    const { data } = await supabase
-      .from("foreman_messages")
-      .select("direction, worker_id, task_id, msg_type")
-      .eq("worker_id", "wid");
-    expect(data).toHaveLength(1);
+    let data: Record<string, unknown>[] | null = null;
+    await vi.waitFor(async () => {
+      ({ data } = await supabase
+        .from("foreman_messages")
+        .select("direction, worker_id, task_id, msg_type")
+        .eq("worker_id", "wid"));
+      expect(data).toHaveLength(1);
+    });
     expect(data![0]).toMatchObject({
       direction: "sent",
       worker_id: "wid",
