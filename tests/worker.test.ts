@@ -2099,3 +2099,117 @@ describe("repo activation flow", () => {
   });
 
 });
+
+// ── transitionToIdle — single entry for state 2 ───────────────────────────────
+
+function makeSessionWithPickResult(pickResult: number): { s: WorkerController; ws: FakeWs } {
+  const ws = new FakeWs();
+  const localWsFactory = vi.fn().mockReturnValue(ws);
+  const s = new WorkerController(sb, display, undefined, undefined, "owner/repo", {
+    wsFactory: localWsFactory,
+    pickFn: async () => pickResult,
+  });
+  return { s, ws };
+}
+
+describe("transitionToIdle — Waiting for tasks message", () => {
+  it("prints 'Waiting for tasks...' on hello_ack idle", () => {
+    display.print.mockClear();
+    sendMsg(fakeWs, { type: "hello_ack", workerId: AGENT_ID, status: "idle" });
+    const printed = display.print.mock.calls.map(([l]: [string]) => stripAnsi(l)).join("\n");
+    expect(printed).toContain("Waiting for tasks");
+  });
+
+  it("does NOT print 'Waiting for tasks...' on hello_ack busy", () => {
+    const issue = makeIssue();
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+    session.takeNextPrompt();
+    display.print.mockClear();
+    sendMsg(fakeWs, { type: "hello_ack", workerId: AGENT_ID, status: "busy" });
+    const printed = display.print.mock.calls.map(([l]: [string]) => stripAnsi(l)).join("\n");
+    expect(printed).not.toContain("Waiting for tasks");
+  });
+
+  it("prints 'Waiting for tasks...' on hello_ack cancelled with no workspace", () => {
+    const issue = makeIssue();
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+    session.takeNextPrompt();
+    display.print.mockClear();
+    sendMsg(fakeWs, { type: "hello_ack", workerId: AGENT_ID, status: "cancelled" });
+    const printed = display.print.mock.calls.map(([l]: [string]) => stripAnsi(l)).join("\n");
+    expect(printed).toContain("Waiting for tasks");
+  });
+
+  it("prints 'Waiting for tasks...' on repo_activated", async () => {
+    const { s, ws } = makeSessionWithPickResult(0); // 0 = "Yes, activate"
+    await s.start();
+    ws.emit("open");
+    sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "idle", repoStatus: "new" });
+    await new Promise(r => setTimeout(r, 0)); // let async pick resolve
+    display.print.mockClear();
+    sendMsg(ws, { type: "repo_activated", workerId: AGENT_ID });
+    await new Promise(r => setTimeout(r, 0));
+    const printed = display.print.mock.calls.map(([l]: [string]) => stripAnsi(l)).join("\n");
+    expect(printed).toContain("Waiting for tasks");
+  });
+
+  it("does NOT print 'Waiting for tasks...' synchronously on hello_ack cancelled with workspace", async () => {
+    let resolveReset!: () => void;
+    const resetPromise = new Promise<void>((resolve) => { resolveReset = resolve; });
+    const workspace = {
+      isCreated: true,
+      on: vi.fn(),
+      create: vi.fn().mockResolvedValue(undefined),
+      reset: vi.fn().mockReturnValue(resetPromise),
+    } as unknown as Workspace;
+    const ws = new FakeWs();
+    const wc = new WorkspaceController(workspace, display, { verbose: false });
+    const s = new WorkerController(sb, display, undefined, wc, "owner/repo", {
+      wsFactory: vi.fn().mockReturnValue(ws),
+    });
+    const chdirSpy = vi.spyOn(process, "chdir").mockImplementation(() => {});
+    try {
+      await s.start();
+      sendMsg(ws, { type: "task_assigned", taskId: "42", issue: makeIssue() });
+      s.takeNextPrompt();
+      display.print.mockClear();
+      sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "cancelled" });
+      const printed = display.print.mock.calls.map(([l]: [string]) => stripAnsi(l)).join("\n");
+      expect(printed).not.toContain("Waiting for tasks");
+    } finally {
+      resolveReset();
+      chdirSpy.mockRestore();
+    }
+  });
+
+  it("prints 'Waiting for tasks...' after reset completes on hello_ack cancelled with workspace", async () => {
+    let resolveReset!: () => void;
+    const resetPromise = new Promise<void>((resolve) => { resolveReset = resolve; });
+    const workspace = {
+      isCreated: true,
+      on: vi.fn(),
+      create: vi.fn().mockResolvedValue(undefined),
+      reset: vi.fn().mockReturnValue(resetPromise),
+    } as unknown as Workspace;
+    const ws = new FakeWs();
+    const wc = new WorkspaceController(workspace, display, { verbose: false });
+    const s = new WorkerController(sb, display, undefined, wc, "owner/repo", {
+      wsFactory: vi.fn().mockReturnValue(ws),
+    });
+    const chdirSpy = vi.spyOn(process, "chdir").mockImplementation(() => {});
+    try {
+      await s.start();
+      sendMsg(ws, { type: "task_assigned", taskId: "42", issue: makeIssue() });
+      s.takeNextPrompt();
+      display.print.mockClear();
+      sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "cancelled" });
+      resolveReset();
+      await resetPromise;
+      await new Promise(r => setTimeout(r, 0)); // flush .finally() microtask
+      const printed = display.print.mock.calls.map(([l]: [string]) => stripAnsi(l)).join("\n");
+      expect(printed).toContain("Waiting for tasks");
+    } finally {
+      chdirSpy.mockRestore();
+    }
+  });
+});

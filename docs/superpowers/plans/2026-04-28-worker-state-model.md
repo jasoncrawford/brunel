@@ -255,7 +255,7 @@ Any transition into "waiting for tasks" must go through `transitionToIdle()`. Su
 - Modify: `src/agent/controllers/worker-controller.ts`
 - Test: `tests/worker.test.ts`
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Add a new describe block in `tests/worker.test.ts`, near the existing `hello_ack handshake` section:
 
@@ -315,7 +315,7 @@ describe("transitionToIdle — Waiting for tasks message", () => {
 });
 ```
 
-- [ ] **Step 2: Run failing tests**
+- [x] **Step 2: Run failing tests**
 
 ```bash
 npm test -- worker
@@ -323,7 +323,7 @@ npm test -- worker
 
 Expected: FAIL — the idle, cancelled, and repo_activated tests fail because the message is not printed in the current code.
 
-- [ ] **Step 3: Add `transitionToIdle()` to `worker-controller.ts`**
+- [x] **Step 3: Add `transitionToIdle()` to `worker-controller.ts`**
 
 Immediately after the existing `transitionToRegistered()` method, add:
 
@@ -334,7 +334,7 @@ private transitionToIdle(): void {
 }
 ```
 
-- [ ] **Step 4: Wire `hello_ack idle` to `transitionToIdle()`**
+- [x] **Step 4: Wire `hello_ack idle` to `transitionToIdle()`**
 
 In the `hello_ack` handler, find the final `else` branch (currently calls `this.transitionToRegistered()` unconditionally):
 
@@ -358,7 +358,7 @@ Replace with:
 }
 ```
 
-- [ ] **Step 5: Wire `hello_ack cancelled` to `transitionToIdle()`**
+- [x] **Step 5: Wire `hello_ack cancelled` to `transitionToIdle()`**
 
 In the `cancelled` branch, find the block starting with `const workspace = this.workspaceController?.workspace`. Replace it with:
 
@@ -382,7 +382,7 @@ if (workspace?.isCreated) {
 }
 ```
 
-- [ ] **Step 6: Wire `repo_activated` to `transitionToIdle()`**
+- [x] **Step 6: Wire `repo_activated` to `transitionToIdle()`**
 
 Find the `repo_activated` handler:
 
@@ -404,7 +404,7 @@ if (msg.type === "repo_activated") {
 }
 ```
 
-- [ ] **Step 7: Run tests — expect them to pass**
+- [x] **Step 7: Run tests — expect them to pass**
 
 ```bash
 npm test -- worker
@@ -413,7 +413,7 @@ npx tsc --noEmit
 
 Expected: all worker tests pass, no type errors.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/agent/controllers/worker-controller.ts tests/worker.test.ts
