@@ -431,7 +431,7 @@ Implements the keyboard contract from the state model. Closes issue #916. `^D` i
 - Modify: `src/agent/index.ts`
 - Test: `tests/worker.test.ts`
 
-- [ ] **Step 1: Write tests confirming `stop()` contract with active task**
+- [x] **Step 1: Write tests confirming `stop()` contract with active task**
 
 These tests verify the behaviour that `^C` at a task prompt now triggers (calling `stop()` with a task active):
 
@@ -474,7 +474,7 @@ describe("stop() with active task", () => {
 });
 ```
 
-- [ ] **Step 2: Run — expect them to pass already**
+- [x] **Step 2: Run — expect them to pass already**
 
 ```bash
 npm test -- worker
@@ -482,7 +482,7 @@ npm test -- worker
 
 Expected: PASS — `stop()` already has this confirmation logic. These tests document the contract before we update the routing loop to use it.
 
-- [ ] **Step 3: Fix `^D` in `input.ts` — no-op when no visible prompt**
+- [x] **Step 3: Fix `^D` in `input.ts` — no-op when no visible prompt**
 
 In `src/agent/views/input.ts`, find (around line 507):
 
@@ -498,7 +498,7 @@ else if (ch === "\x04") { if (this._buffer) { this._deleteForward(); } else if (
 
 When `ask("")` is called (state 2, worker idle with no task), `this._promptLine` is `""` — falsy — so `^D` does nothing. When `ask("\n[agent] > ")` or `ask("\n> ")` is active, `^D` with an empty buffer still submits `__eof__` as before.
 
-- [ ] **Step 4: Update `__ctrl_c__` handler in `index.ts`**
+- [x] **Step 4: Update `__ctrl_c__` handler in `index.ts`**
 
 Find (around line 323):
 
@@ -524,7 +524,7 @@ if (userInput === "__ctrl_c__") {
 
 `stop()` already handles the task-quit confirmation dialog. Removing `!workerController.hasTask()` means `^C` at `[agent] >` (state 3 at prompt) now triggers the same flow as `/worker:stop`. State 3 with a running query never reaches this branch — `interrupt()` in the SIGINT handler handles that path.
 
-- [ ] **Step 5: Simplify `__eof__` handler in `index.ts`**
+- [x] **Step 5: Simplify `__eof__` handler in `index.ts`**
 
 Find (around line 309):
 
@@ -556,7 +556,7 @@ if (userInput === "__eof__") {
 
 `stop()` already contains the task-completion confirmation. After `doExit()` pauses stdin, Node.js exits naturally.
 
-- [ ] **Step 6: Simplify the `/exit` command handler in `index.ts`**
+- [x] **Step 6: Simplify the `/exit` command handler in `index.ts`**
 
 Find the `/exit` registration (around line 178):
 
@@ -592,7 +592,7 @@ registry.register("exit", {
 });
 ```
 
-- [ ] **Step 7: Run all tests and smoke test**
+- [x] **Step 7: Run all tests and smoke test**
 
 ```bash
 npm test
@@ -602,7 +602,7 @@ npm run smoke
 
 Expected: all unit tests pass, smoke test passes (worker connects, receives and completes a task, exits cleanly).
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/agent/views/input.ts src/agent/index.ts tests/worker.test.ts

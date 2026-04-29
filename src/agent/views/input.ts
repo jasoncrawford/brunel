@@ -504,7 +504,7 @@ export class Input {
       }
       else if (ch === "\x7f" || ch === "\x08")      { this._deleteBack(); }
       else if (ch === "\x03") { if (this._buffer) { this._replaceBuffer(""); } else { process.stdout.write("^C"); this._submit("__ctrl_c__"); } }
-      else if (ch === "\x04") { if (!this._buffer) this._exit(); else this._deleteForward(); }
+      else if (ch === "\x04") { if (this._buffer) { this._deleteForward(); } else if (this._promptLine) { this._exit(); } }
       else if (ch === "\x01")                       { this._moveTo(0); }                      // ^A
       else if (ch === "\x05")                       { this._moveTo(this._buffer.length); }    // ^E
       else if (ch === "\x0b")                       { this._killToEnd(); }                    // ^K

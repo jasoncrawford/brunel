@@ -181,13 +181,11 @@ export class BrunelAgent {
     registry.register("exit", {
       description: "Exit",
       handler: async () => {
-        if (!workerController.isActive) { await doExit(); return "exit"; }
-        const taskInfo = workerController.getTaskQuitInfo();
-        if (taskInfo) {
-          const choice = await workerController.confirmTaskQuit(taskInfo);
-          if (choice === "cancel") return undefined;
-          if (choice === "complete-and-quit") await workerController.completeCurrentTask();
+        if (workerController.isActive) {
+          await workerController.stop();
+          if (workerController.isActive) return undefined; // user cancelled
         }
+        await doExit();
         return "exit";
       },
     });
@@ -309,22 +307,20 @@ export class BrunelAgent {
       // event.type === "line" — real user input
       const userInput = event.value;
 
-      // ^D on empty buffer — treat as exit.
+      // ^D on empty buffer at a visible prompt — stop worker mode then exit.
       if (userInput === "__eof__") {
-        if (!workerController.isActive) { await doExit(); break; }
-        const taskInfo = workerController.getTaskQuitInfo();
-        if (taskInfo) {
-          const choice = await workerController.confirmTaskQuit(taskInfo);
-          if (choice === "cancel") continue;
-          if (choice === "complete-and-quit") await workerController.completeCurrentTask();
+        if (workerController.isActive) {
+          await workerController.stop();
+          if (workerController.isActive) continue; // user cancelled — stay in loop
         }
+        await doExit();
         break;
       }
 
-      // ^C on empty buffer — stop worker mode if idle; otherwise ignore
-      // (the running query was already interrupted by the SIGINT handler).
+      // ^C on empty buffer — stop worker mode if active (with confirmation if task active).
+      // State 3 with a running query never reaches here — SIGINT handler handles that path.
       if (userInput === "__ctrl_c__") {
-        if (workerController.isActive && !workerController.hasTask()) {
+        if (workerController.isActive) {
           await workerController.stop();
         }
         continue;
