@@ -1415,7 +1415,7 @@ describe("stop() with active task", () => {
 import { Workspace } from "../src/agent/models/workspace.js";
 import { WorkspaceController } from "../src/agent/controllers/workspace-controller.js";
 import { CommandRegistry } from "../src/agent/controllers/command-controller.js";
-import type { TaskQuitInfo } from "../src/agent/controllers/worker-controller.js";
+import type { TaskConfirmInfo } from "../src/agent/controllers/worker-controller.js";
 // ── foreman_error ─────────────────────────────────────────────────────────────
 
 describe("foreman_error", () => {
@@ -1933,17 +1933,17 @@ describe("heartbeat", () => {
   });
 });
 
-// ── getTaskQuitInfo ───────────────────────────────────────────────────────────
+// ── getTaskConfirmInfo ────────────────────────────────────────────────────────
 
-describe("getTaskQuitInfo", () => {
+describe("getTaskConfirmInfo", () => {
   it("returns undefined when no task is assigned", () => {
-    expect(session.getTaskQuitInfo()).toBeUndefined();
+    expect(session.getTaskConfirmInfo()).toBeUndefined();
   });
 
   it("returns task info with issueClosed=false when task is assigned", () => {
     const issue = makeIssue(7);
     sendMsg(fakeWs, { type: "task_assigned", taskId: "t7", issue });
-    const info = session.getTaskQuitInfo();
+    const info = session.getTaskConfirmInfo();
     expect(info).toEqual({ taskNumber: 7, workerId: AGENT_ID, issueClosed: false });
   });
 
@@ -1952,7 +1952,7 @@ describe("getTaskQuitInfo", () => {
     sendMsg(fakeWs, { type: "task_assigned", taskId: "t1", issue });
     session.takeNextPrompt();
     await session.completeCurrentTask();
-    expect(session.getTaskQuitInfo()).toBeUndefined();
+    expect(session.getTaskConfirmInfo()).toBeUndefined();
   });
 
   it("returns issueClosed=true after issues/closed event is received", () => {
@@ -1963,7 +1963,7 @@ describe("getTaskQuitInfo", () => {
     const closedEvt: Wire.WebhookEvent = { id: "e1", name: "issues", payload: { action: "closed" } };
     sendMsg(fakeWs, { type: "event_notification", taskId: "t5", event: closedEvt });
 
-    expect(session.getTaskQuitInfo()?.issueClosed).toBe(true);
+    expect(session.getTaskConfirmInfo()?.issueClosed).toBe(true);
   });
 
   it("returns issueClosed=false after issues/reopened follows issues/closed", () => {
@@ -1972,10 +1972,10 @@ describe("getTaskQuitInfo", () => {
     session.takeNextPrompt();
 
     sendMsg(fakeWs, { type: "event_notification", taskId: "t5", event: { id: "e1", name: "issues", payload: { action: "closed" } } });
-    expect(session.getTaskQuitInfo()?.issueClosed).toBe(true);
+    expect(session.getTaskConfirmInfo()?.issueClosed).toBe(true);
 
     sendMsg(fakeWs, { type: "event_notification", taskId: "t5", event: { id: "e2", name: "issues", payload: { action: "reopened" } } });
-    expect(session.getTaskQuitInfo()?.issueClosed).toBe(false);
+    expect(session.getTaskConfirmInfo()?.issueClosed).toBe(false);
   });
 
   it("resets issueClosed to false on new task_assigned", () => {
@@ -1984,11 +1984,11 @@ describe("getTaskQuitInfo", () => {
     session.takeNextPrompt();
 
     sendMsg(fakeWs, { type: "event_notification", taskId: "t1", event: { id: "e1", name: "issues", payload: { action: "closed" } } });
-    expect(session.getTaskQuitInfo()?.issueClosed).toBe(true);
+    expect(session.getTaskConfirmInfo()?.issueClosed).toBe(true);
 
     const issue2 = makeIssue(2);
     sendMsg(fakeWs, { type: "task_assigned", taskId: "t2", issue: issue2 });
-    expect(session.getTaskQuitInfo()?.issueClosed).toBe(false);
+    expect(session.getTaskConfirmInfo()?.issueClosed).toBe(false);
   });
 
   it("does not set issueClosed when issues/closed is for a different task", () => {
@@ -1998,15 +1998,15 @@ describe("getTaskQuitInfo", () => {
 
     // Event for a different task — should be ignored entirely
     sendMsg(fakeWs, { type: "event_notification", taskId: "t99", event: { id: "e1", name: "issues", payload: { action: "closed" } } });
-    expect(session.getTaskQuitInfo()?.issueClosed).toBe(false);
+    expect(session.getTaskConfirmInfo()?.issueClosed).toBe(false);
   });
 });
 
 // ── confirmTaskQuit ───────────────────────────────────────────────────────────
 
 describe("confirmTaskQuit", () => {
-  const openTask: TaskQuitInfo = { taskNumber: 42, workerId: "test-worker", issueClosed: false };
-  const closedTask: TaskQuitInfo = { taskNumber: 42, workerId: "test-worker", issueClosed: true };
+  const openTask: TaskConfirmInfo = { taskNumber: 42, workerId: "test-worker", issueClosed: false };
+  const closedTask: TaskConfirmInfo = { taskNumber: 42, workerId: "test-worker", issueClosed: true };
   const noopAgentStatus = new AgentStatus({ agentId: "test" });
   const noopDisplay = { print: vi.fn(), printForemanMessage: vi.fn() };
 
