@@ -7,6 +7,17 @@
  */
 import { test, expect } from "@playwright/test";
 
+function makeTaskEvents(startId: number, count: number) {
+  return Array.from({ length: count }, (_, i) => ({
+    kind: "webhook",
+    id: startId + i,
+    timestamp: new Date(Date.now() - (startId + i) * 1000).toISOString(),
+    taskId: "pg-task",
+    workerId: null,
+    summary: `task-event-${startId + i}`,
+  }));
+}
+
 const BASE = "http://localhost:14567";
 
 async function postWebhook(name: string, payload: object): Promise<void> {
@@ -92,4 +103,53 @@ test("task detail page: live events appear as webhooks arrive for that task", as
   // fmtEvent for issue_comment/created with body "LGTM":
   // "issue_comment/created — "LGTM""
   await expect(page.getByText(/issue_comment\/created/).first()).toBeVisible();
+});
+
+test("task detail: appends next page and removes load-more after last page", async ({ page }) => {
+  const PAGE_SIZE = 50;
+
+  await page.route("**/api/tasks/pg-task/events**", async (route) => {
+    const url = new URL(route.request().url());
+    await route.fulfill({
+      json: url.searchParams.has("before")
+        ? makeTaskEvents(PAGE_SIZE, 5)
+        : makeTaskEvents(0, PAGE_SIZE),
+    });
+  });
+  await page.route("**/api/tasks/pg-task", async (route) => {
+    await route.fulfill({ json: { taskId: "pg-task", title: "Pagination test task", status: "pending" } });
+  });
+
+  await page.goto("/tasks/pg-task");
+  await expect(page.getByText("task-event-0")).toBeVisible();
+
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+
+  await expect(page.getByText(`task-event-${PAGE_SIZE}`)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Load more" })).not.toBeVisible();
+});
+
+test("task detail: passes before cursor from last entry of current page", async ({ page }) => {
+  const PAGE_SIZE = 50;
+  const firstPage = makeTaskEvents(0, PAGE_SIZE);
+  const expectedCursor = firstPage[firstPage.length - 1].timestamp;
+
+  let capturedBefore: string | null = null;
+  await page.route("**/api/tasks/pg-task/events**", async (route) => {
+    const url = new URL(route.request().url());
+    const before = url.searchParams.get("before");
+    if (before) capturedBefore = before;
+    await route.fulfill({ json: before ? makeTaskEvents(PAGE_SIZE, 3) : firstPage });
+  });
+  await page.route("**/api/tasks/pg-task", async (route) => {
+    await route.fulfill({ json: { taskId: "pg-task", title: "Pagination test task", status: "pending" } });
+  });
+
+  await page.goto("/tasks/pg-task");
+  await expect(page.getByText("task-event-0")).toBeVisible();
+
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+
+  await expect(page.getByText(`task-event-${PAGE_SIZE}`)).toBeVisible();
+  expect(capturedBefore).toBe(expectedCursor);
 });

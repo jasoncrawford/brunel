@@ -7,6 +7,17 @@
  */
 import { test, expect } from "@playwright/test";
 
+function makeWorkerMessages(startId: number, count: number) {
+  return Array.from({ length: count }, (_, i) => ({
+    kind: "message",
+    id: startId + i,
+    timestamp: new Date(Date.now() - (startId + i) * 1000).toISOString(),
+    taskId: null,
+    workerId: "pg-worker",
+    summary: `worker-msg-${startId + i}`,
+  }));
+}
+
 const BASE = "http://localhost:14567";
 
 async function connectWorker(): Promise<string> {
@@ -68,4 +79,53 @@ test("worker detail page: live messages appear when the worker disconnects", asy
 
   // The disconnect entry should appear live without a page reload
   await expect(page.getByRole("cell", { name: /disconnected/ })).toBeVisible();
+});
+
+test("worker detail: appends next page and removes load-more after last page", async ({ page }) => {
+  const PAGE_SIZE = 50;
+
+  await page.route("**/api/workers/pg-worker/messages**", async (route) => {
+    const url = new URL(route.request().url());
+    await route.fulfill({
+      json: url.searchParams.has("before")
+        ? makeWorkerMessages(PAGE_SIZE, 5)
+        : makeWorkerMessages(0, PAGE_SIZE),
+    });
+  });
+  await page.route("**/api/workers/pg-worker", async (route) => {
+    await route.fulfill({ json: { workerId: "pg-worker", status: "idle" } });
+  });
+
+  await page.goto("/workers/pg-worker");
+  await expect(page.getByText("worker-msg-0")).toBeVisible();
+
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+
+  await expect(page.getByText(`worker-msg-${PAGE_SIZE}`)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Load more" })).not.toBeVisible();
+});
+
+test("worker detail: passes before cursor from last entry of current page", async ({ page }) => {
+  const PAGE_SIZE = 50;
+  const firstPage = makeWorkerMessages(0, PAGE_SIZE);
+  const expectedCursor = firstPage[firstPage.length - 1].timestamp;
+
+  let capturedBefore: string | null = null;
+  await page.route("**/api/workers/pg-worker/messages**", async (route) => {
+    const url = new URL(route.request().url());
+    const before = url.searchParams.get("before");
+    if (before) capturedBefore = before;
+    await route.fulfill({ json: before ? makeWorkerMessages(PAGE_SIZE, 3) : firstPage });
+  });
+  await page.route("**/api/workers/pg-worker", async (route) => {
+    await route.fulfill({ json: { workerId: "pg-worker", status: "idle" } });
+  });
+
+  await page.goto("/workers/pg-worker");
+  await expect(page.getByText("worker-msg-0")).toBeVisible();
+
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+
+  await expect(page.getByText(`worker-msg-${PAGE_SIZE}`)).toBeVisible();
+  expect(capturedBefore).toBe(expectedCursor);
 });

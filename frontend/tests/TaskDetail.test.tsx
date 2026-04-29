@@ -1,4 +1,4 @@
-import { render, screen, waitFor, act } from "@testing-library/react";
+import { render, screen, waitFor, act, fireEvent } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import TaskDetail from "../src/pages/TaskDetail.tsx";
@@ -126,5 +126,92 @@ describe("TaskDetail", () => {
     });
 
     expect(screen.getAllByRole("row")).toHaveLength(2); // header + 1 only
+  });
+
+  it("shows load-more button when first page is full (PAGE_SIZE entries)", async () => {
+    const PAGE_SIZE = 50;
+    const fullPage: LogEntry[] = Array.from({ length: PAGE_SIZE }, (_, i) => ({
+      kind: "webhook",
+      id: i + 1,
+      timestamp: new Date(Date.now() - i * 1000).toISOString(),
+      taskId: "99",
+      workerId: null,
+      summary: `event-${i}`,
+    }));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ json: () => Promise.resolve(fullPage) }));
+    renderTaskDetail("99");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Load more" })).toBeInTheDocument());
+  });
+
+  it("does not show load-more button when first page is partial", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ json: () => Promise.resolve([event1, event2]) }));
+    renderTaskDetail("99");
+    await waitFor(() => expect(screen.getByText("issue labeled")).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument();
+  });
+
+  it("clicking load-more fetches next page with before cursor", async () => {
+    const PAGE_SIZE = 50;
+    const firstPage: LogEntry[] = Array.from({ length: PAGE_SIZE }, (_, i) => ({
+      kind: "webhook",
+      id: i + 1,
+      timestamp: new Date(Date.now() - i * 1000).toISOString(),
+      taskId: "99",
+      workerId: null,
+      summary: `event-${i}`,
+    }));
+    const secondPage: LogEntry[] = [
+      { kind: "webhook", id: PAGE_SIZE + 1, timestamp: new Date(Date.now() - PAGE_SIZE * 1000).toISOString(), taskId: "99", workerId: null, summary: "older-event" },
+    ];
+    const expectedCursor = firstPage[firstPage.length - 1].timestamp;
+
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+      if (String(url).includes("before")) {
+        return Promise.resolve({ json: () => Promise.resolve(secondPage) });
+      }
+      return Promise.resolve({ json: () => Promise.resolve(firstPage) });
+    }));
+
+    renderTaskDetail("99");
+    const btn = await screen.findByRole("button", { name: "Load more" });
+
+    act(() => { fireEvent.click(btn); });
+
+    await waitFor(() => expect(screen.getByText("older-event")).toBeInTheDocument());
+    expect(fetch).toHaveBeenCalledWith(
+      `/api/tasks/99/events?before=${encodeURIComponent(expectedCursor)}`
+    );
+  });
+
+  it("appends second page entries after first page", async () => {
+    const PAGE_SIZE = 50;
+    const firstPage: LogEntry[] = Array.from({ length: PAGE_SIZE }, (_, i) => ({
+      kind: "webhook",
+      id: i + 1,
+      timestamp: new Date(Date.now() - i * 1000).toISOString(),
+      taskId: "99",
+      workerId: null,
+      summary: `event-${i}`,
+    }));
+    const secondPage: LogEntry[] = [
+      { kind: "webhook", id: PAGE_SIZE + 1, timestamp: new Date(Date.now() - PAGE_SIZE * 1000).toISOString(), taskId: "99", workerId: null, summary: "page-two-event" },
+    ];
+
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+      if (String(url).includes("before")) {
+        return Promise.resolve({ json: () => Promise.resolve(secondPage) });
+      }
+      return Promise.resolve({ json: () => Promise.resolve(firstPage) });
+    }));
+
+    renderTaskDetail("99");
+    const btn = await screen.findByRole("button", { name: "Load more" });
+    act(() => { fireEvent.click(btn); });
+
+    await waitFor(() => expect(screen.getByText("page-two-event")).toBeInTheDocument());
+    // All first-page entries still present
+    expect(screen.getByText("event-0")).toBeInTheDocument();
+    // Load-more gone after partial second page
+    expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument();
   });
 });

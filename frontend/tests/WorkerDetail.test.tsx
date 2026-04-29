@@ -1,4 +1,4 @@
-import { render, screen, waitFor, act } from "@testing-library/react";
+import { render, screen, waitFor, act, fireEvent } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import WorkerDetail from "../src/pages/WorkerDetail.tsx";
@@ -131,5 +131,90 @@ describe("WorkerDetail", () => {
     });
 
     expect(screen.getAllByRole("row")).toHaveLength(2); // header + 1 only
+  });
+
+  it("shows load-more button when first page is full (PAGE_SIZE messages)", async () => {
+    const PAGE_SIZE = 50;
+    const fullPage: LogEntry[] = Array.from({ length: PAGE_SIZE }, (_, i) => ({
+      kind: "message",
+      id: i + 1,
+      timestamp: new Date(Date.now() - i * 1000).toISOString(),
+      taskId: null,
+      workerId: "worker-abc-def-123",
+      summary: `msg-${i}`,
+    }));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ json: () => Promise.resolve(fullPage) }));
+    renderWorkerDetail("worker-abc-def-123");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Load more" })).toBeInTheDocument());
+  });
+
+  it("does not show load-more button when first page is partial", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ json: () => Promise.resolve([msg1, msg2]) }));
+    renderWorkerDetail("worker-abc-def-123");
+    await waitFor(() => expect(screen.getByText("→ assign task 42")).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument();
+  });
+
+  it("clicking load-more fetches next page with before cursor", async () => {
+    const PAGE_SIZE = 50;
+    const firstPage: LogEntry[] = Array.from({ length: PAGE_SIZE }, (_, i) => ({
+      kind: "message",
+      id: i + 1,
+      timestamp: new Date(Date.now() - i * 1000).toISOString(),
+      taskId: null,
+      workerId: "worker-abc-def-123",
+      summary: `msg-${i}`,
+    }));
+    const secondPage: LogEntry[] = [
+      { kind: "message", id: PAGE_SIZE + 1, timestamp: new Date(Date.now() - PAGE_SIZE * 1000).toISOString(), taskId: null, workerId: "worker-abc-def-123", summary: "older-msg" },
+    ];
+    const expectedCursor = firstPage[firstPage.length - 1].timestamp;
+
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+      if (String(url).includes("before")) {
+        return Promise.resolve({ json: () => Promise.resolve(secondPage) });
+      }
+      return Promise.resolve({ json: () => Promise.resolve(firstPage) });
+    }));
+
+    renderWorkerDetail("worker-abc-def-123");
+    const btn = await screen.findByRole("button", { name: "Load more" });
+
+    act(() => { fireEvent.click(btn); });
+
+    await waitFor(() => expect(screen.getByText("older-msg")).toBeInTheDocument());
+    expect(fetch).toHaveBeenCalledWith(
+      `/api/workers/worker-abc-def-123/messages?before=${encodeURIComponent(expectedCursor)}`
+    );
+  });
+
+  it("appends second page entries after first page", async () => {
+    const PAGE_SIZE = 50;
+    const firstPage: LogEntry[] = Array.from({ length: PAGE_SIZE }, (_, i) => ({
+      kind: "message",
+      id: i + 1,
+      timestamp: new Date(Date.now() - i * 1000).toISOString(),
+      taskId: null,
+      workerId: "worker-abc-def-123",
+      summary: `msg-${i}`,
+    }));
+    const secondPage: LogEntry[] = [
+      { kind: "message", id: PAGE_SIZE + 1, timestamp: new Date(Date.now() - PAGE_SIZE * 1000).toISOString(), taskId: null, workerId: "worker-abc-def-123", summary: "page-two-msg" },
+    ];
+
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+      if (String(url).includes("before")) {
+        return Promise.resolve({ json: () => Promise.resolve(secondPage) });
+      }
+      return Promise.resolve({ json: () => Promise.resolve(firstPage) });
+    }));
+
+    renderWorkerDetail("worker-abc-def-123");
+    const btn = await screen.findByRole("button", { name: "Load more" });
+    act(() => { fireEvent.click(btn); });
+
+    await waitFor(() => expect(screen.getByText("page-two-msg")).toBeInTheDocument());
+    expect(screen.getByText("msg-0")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument();
   });
 });

@@ -105,27 +105,30 @@ export class WebhookEvent extends ActiveRecord {
 
   // ── Queries ──────────────────────────────────────────────────────────────────
 
-  static async queryForTask(taskId: string): Promise<WebhookEvent[]> {
-    const { data } = await WebhookEvent.select()
+  static async queryForTask(taskId: string, opts: { limit?: number; before?: string } = {}): Promise<WebhookEvent[]> {
+    let query = WebhookEvent.select()
       .eq("task_id", taskId)
-      .order("received_at", { ascending: false })
-      .limit(500);
+      .order("received_at", { ascending: false });
+    if (opts.before) query = query.lt("received_at", opts.before);
+    const { data } = await query.limit(opts.limit ?? 500);
     return (data ?? []).map((r: Row) => new WebhookEvent(r));
   }
 
-  static async queryForWorker(workerId: string): Promise<WebhookEvent[]> {
-    const { data } = await WebhookEvent.select()
+  static async queryForWorker(workerId: string, opts: { limit?: number; before?: string } = {}): Promise<WebhookEvent[]> {
+    let query = WebhookEvent.select()
       .eq("worker_id", workerId)
-      .order("received_at", { ascending: false })
-      .limit(500);
+      .order("received_at", { ascending: false });
+    if (opts.before) query = query.lt("received_at", opts.before);
+    const { data } = await query.limit(opts.limit ?? 500);
     return (data ?? []).map((r: Row) => new WebhookEvent(r));
   }
 
-  static async queryForRepo(repoId: number): Promise<WebhookEvent[]> {
-    const { data } = await WebhookEvent.select()
+  static async queryForRepo(repoId: number, opts: { limit?: number; before?: string } = {}): Promise<WebhookEvent[]> {
+    let query = WebhookEvent.select()
       .eq("repo_id", repoId)
-      .order("received_at", { ascending: false })
-      .limit(500);
+      .order("received_at", { ascending: false });
+    if (opts.before) query = query.lt("received_at", opts.before);
+    const { data } = await query.limit(opts.limit ?? 500);
     return (data ?? []).map((r: Row) => new WebhookEvent(r));
   }
 
