@@ -63,6 +63,7 @@ export class Workspace extends EventEmitter {
       await this._npmInstall();
     }
     fs.writeFileSync(path.join(this.dir, ".brunel.lock"), String(process.pid));
+    this._ensureLocallyIgnored(".brunel.lock");
     this.isCreated = true;
   }
 
@@ -89,6 +90,7 @@ export class Workspace extends EventEmitter {
       this.emit("clone-start", { repoUrl: this.repoUrl, dir: this.dir });
       await this.exec(["clone", this.repoUrl, this.dir], undefined);
       fs.writeFileSync(path.join(this.dir, ".brunel.lock"), String(process.pid));
+      this._ensureLocallyIgnored(".brunel.lock");
       await this._doReset(); // throws if still broken — propagates to caller
     }
   }
@@ -99,6 +101,17 @@ export class Workspace extends EventEmitter {
     await this.exec(["reset", "--hard", "origin/main"], this.dir);
     await this.exec(["clean", "-fdx", "-e", "node_modules", "-e", ".env", "-e", ".brunel.lock"], this.dir);
     await this._npmInstall();
+  }
+
+  private _ensureLocallyIgnored(pattern: string): void {
+    const infoDir = path.join(this.dir, ".git", "info");
+    fs.mkdirSync(infoDir, { recursive: true });
+    const excludesPath = path.join(infoDir, "exclude");
+    const existing = fs.existsSync(excludesPath) ? fs.readFileSync(excludesPath, "utf8") : "";
+    const lines = existing.split("\n").map(l => l.trim());
+    if (lines.includes(pattern)) return;
+    const sep = existing.length > 0 && !existing.endsWith("\n") ? "\n" : "";
+    fs.appendFileSync(excludesPath, sep + pattern + "\n");
   }
 
   /** Run npm install if a package.json is present. */
