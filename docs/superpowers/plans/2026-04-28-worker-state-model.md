@@ -55,7 +55,7 @@ Supersedes PR #906 and closes issue #901. Also fixes the re-clone path gap ident
 - Test: `tests/workspace.test.ts`
 - Test: `tests/repl.workspace.test.ts`
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Add to `tests/workspace.test.ts`, after the existing `// ── create ──` describe block:
 
@@ -128,7 +128,7 @@ describe("WorkspaceController constructor listeners", () => {
 });
 ```
 
-- [ ] **Step 2: Run tests — expect them to fail**
+- [x] **Step 2: Run tests — expect them to fail**
 
 ```bash
 npm test -- workspace
@@ -136,7 +136,7 @@ npm test -- workspace
 
 Expected: FAIL — `_ensureLocallyIgnored` does not exist yet; double-listener test fails because two "Destroying workspace..." messages are printed.
 
-- [ ] **Step 3: Add `_ensureLocallyIgnored` to `workspace.ts`**
+- [x] **Step 3: Add `_ensureLocallyIgnored` to `workspace.ts`**
 
 In `src/agent/models/workspace.ts`, add this method after `_npmInstall()`:
 
@@ -174,7 +174,7 @@ this._ensureLocallyIgnored(".brunel.lock");
 await this._doReset();
 ```
 
-- [ ] **Step 4: Move event listeners to constructor in `workspace-controller.ts`**
+- [x] **Step 4: Move event listeners to constructor in `workspace-controller.ts`**
 
 Replace the entire constructor and `onCreate()` in `src/agent/controllers/workspace-controller.ts`:
 
@@ -229,7 +229,7 @@ async onCreate(): Promise<void> {
 
 Delete the old block of `workspace.on(…)` calls that were inside the old `onCreate()`.
 
-- [ ] **Step 5: Run tests — expect them to pass**
+- [x] **Step 5: Run tests — expect them to pass**
 
 ```bash
 npm test -- workspace
@@ -238,7 +238,7 @@ npx tsc --noEmit
 
 Expected: all workspace tests pass, no type errors.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/agent/models/workspace.ts src/agent/controllers/workspace-controller.ts tests/workspace.test.ts tests/repl.workspace.test.ts

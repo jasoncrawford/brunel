@@ -104,6 +104,51 @@ describe("Workspace.create", () => {
   });
 });
 
+// ── create: git excludes ──────────────────────────────────────────────────────
+
+describe("Workspace.create — git excludes", () => {
+  it("adds .brunel.lock to .git/info/exclude after create", async () => {
+    const ws = await makeWorkspace();
+    const excludePath = path.join(ws.dir, ".git", "info", "exclude");
+    expect(fs.existsSync(excludePath)).toBe(true);
+    const lines = fs.readFileSync(excludePath, "utf8").split("\n").map(l => l.trim());
+    expect(lines).toContain(".brunel.lock");
+  });
+
+  it("does not duplicate .brunel.lock in .git/info/exclude on repeated create", async () => {
+    const ws = await makeWorkspace();
+    await ws.create(); // second call — workspace dir already has .git
+    const excludePath = path.join(ws.dir, ".git", "info", "exclude");
+    const lines = fs.readFileSync(excludePath, "utf8").split("\n").map(l => l.trim()).filter(Boolean);
+    expect(lines.filter(l => l === ".brunel.lock")).toHaveLength(1);
+  });
+});
+
+// ── reset: re-clone path git excludes ────────────────────────────────────────
+
+describe("Workspace.reset — re-clone path", () => {
+  it("adds .brunel.lock to .git/info/exclude after a forced re-clone", async () => {
+    let fetchCalls = 0;
+    const exec = vi.fn().mockImplementation(async (args: string[]) => {
+      if (args[0] === "fetch") {
+        if (fetchCalls++ < 2) throw new Error("simulated network failure");
+      }
+      if (args[0] === "clone") {
+        // Simulate git clone creating a minimal repo structure
+        fs.mkdirSync(path.join(args[2], ".git", "info"), { recursive: true });
+        fs.writeFileSync(path.join(args[2], "package.json"), "{}");
+      }
+      return "";
+    });
+    const ws = await makeWorkspace(exec);
+    await ws.reset(); // fails twice, then re-clones
+    const excludePath = path.join(ws.dir, ".git", "info", "exclude");
+    expect(fs.existsSync(excludePath)).toBe(true);
+    const lines = fs.readFileSync(excludePath, "utf8").split("\n").map(l => l.trim());
+    expect(lines).toContain(".brunel.lock");
+  });
+});
+
 // ── destroy ────────────────────────────────────────────────────────────────
 
 describe("Workspace.destroy", () => {

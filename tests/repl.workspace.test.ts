@@ -238,6 +238,24 @@ describe("WorkspaceController.onCreate", () => {
   });
 });
 
+// ── constructor: event listener deduplication ─────────────────────────────────
+
+describe("WorkspaceController constructor listeners", () => {
+  it("prints 'Destroying workspace...' exactly once even when onCreate is called twice", async () => {
+    const ws = makeWorkspace();
+    ws.isCreated = true;
+    const controller = new WorkspaceController(ws, testDisplay, testConfig);
+    await controller.onCreate();
+    await controller.onCreate(); // simulate stop → /worker:start again
+    testDisplay.print.mockClear();
+    ws.emit("destroy", { dir: WORKSPACE_DIR });
+    const destroyMsgs = testDisplay.print.mock.calls
+      .map(([l]: [string]) => stripAnsi(l))
+      .filter((m: string) => m.includes("Destroying workspace"));
+    expect(destroyMsgs).toHaveLength(1);
+  });
+});
+
 // ── workspace:prune ───────────────────────────────────────────────────────────
 
 describe("workspace:prune", () => {
