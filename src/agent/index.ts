@@ -230,24 +230,36 @@ export class BrunelAgent {
      * before/after so it can track the AbortController for interrupt() and drain
      * pending events when the query finishes. Returns true if the query completed
      * normally, false if interrupted or errored (caller should stop draining).
+     *
+     * If runQuery detects a first-message stall (stallRetry: true), retries the
+     * same prompt up to MAX_STALL_RETRIES times before giving up.
      */
+    const MAX_STALL_RETRIES = 2;
     const runPrompt = async (prompt: string): Promise<boolean> => {
-      const ac = new AbortController();
-      workerController.notifyQueryStart(ac);
-      try {
-        const { sessionId: newId, stats } = await this.agentController.runQuery(prompt, sessionId, ac);
-        sessionId = newId ?? sessionId;
-        if (workerController.isActive) {
-          this.agentStatus.addQueryStats(stats.inputTokens, stats.outputTokens, stats.costUsd);
+      for (let attempt = 0; attempt <= MAX_STALL_RETRIES; attempt++) {
+        const ac = new AbortController();
+        workerController.notifyQueryStart(ac);
+        try {
+          const { sessionId: newId, stats, stallRetry } = await this.agentController.runQuery(prompt, sessionId, ac);
+          if (stallRetry && attempt < MAX_STALL_RETRIES) {
+            // Stall before first response: retry with the same prompt. Don't
+            // update sessionId — the stalled session may be in a broken state.
+            continue;
+          }
+          sessionId = newId ?? sessionId;
+          if (workerController.isActive) {
+            this.agentStatus.addQueryStats(stats.inputTokens, stats.outputTokens, stats.costUsd);
+          }
+          return stallRetry ? false : !ac.signal.aborted;
+        } catch (err) {
+          console.error(c.boldRed(`\nERROR: ${fmtError(err)}`));
+          logFull("ERROR", err instanceof Error ? { message: err.message, stack: err.stack } : err);
+          return false;
+        } finally {
+          workerController.notifyQueryEnd(ac.signal.aborted);
         }
-        return !ac.signal.aborted;
-      } catch (err) {
-        console.error(c.boldRed(`\nERROR: ${fmtError(err)}`));
-        logFull("ERROR", err instanceof Error ? { message: err.message, stack: err.stack } : err);
-        return false;
-      } finally {
-        workerController.notifyQueryEnd(ac.signal.aborted);
       }
+      return false;
     };
 
     /**

@@ -840,3 +840,97 @@ describe("runQuery - stall detection", () => {
     cap.restore();
   });
 });
+
+describe("runQuery - first-message stall auto-retry", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("returns stallRetry: true when stall fires before any substantive content", async () => {
+    vi.useFakeTimers();
+
+    (query as any).mockImplementation((opts: any) => {
+      return (async function* () {
+        // Only a system message arrives — not substantive
+        yield { type: "system", subtype: "status", status: "requesting" };
+        // Then silence until abort
+        await new Promise<void>((resolve) => {
+          opts.options.abortController.signal.addEventListener("abort", resolve, { once: true });
+        });
+      })();
+    });
+
+    const cap = captureConsole();
+    const queryPromise = testController.runQuery("test", undefined);
+
+    await vi.advanceTimersByTimeAsync(130_000);
+
+    const result = await queryPromise;
+    cap.restore();
+
+    expect(result.stallRetry).toBe(true);
+  });
+
+  it("prints the stall-retry warning message before aborting", async () => {
+    vi.useFakeTimers();
+
+    (query as any).mockImplementation((opts: any) => {
+      return (async function* () {
+        yield { type: "system", subtype: "status", status: "requesting" };
+        await new Promise<void>((resolve) => {
+          opts.options.abortController.signal.addEventListener("abort", resolve, { once: true });
+        });
+      })();
+    });
+
+    const cap = captureConsole();
+    const queryPromise = testController.runQuery("test", undefined);
+    await vi.advanceTimersByTimeAsync(130_000);
+    await queryPromise;
+    cap.restore();
+
+    const output = cap.lines.map(stripAnsi).join("\n");
+    expect(output).toContain("Connection stalled before receiving a response");
+  });
+
+  it("does NOT set stallRetry when stall fires after a non-system message was received", async () => {
+    vi.useFakeTimers();
+
+    (query as any).mockImplementation((opts: any) => {
+      return (async function* () {
+        yield { type: "system", subtype: "init", session_id: "s1" };
+        // Substantive content: a result message
+        yield { type: "result", duration_ms: 100, num_turns: 1, usage: { input_tokens: 5, output_tokens: 5 } };
+        // Then silence — loop will exit after result because generator is done
+      })();
+    });
+
+    const cap = captureConsole();
+    const result = await testController.runQuery("test", undefined);
+    cap.restore();
+
+    expect(result.stallRetry).toBeFalsy();
+  });
+
+  it("does not print the 'Interrupted' message when stallRetry fires", async () => {
+    vi.useFakeTimers();
+
+    (query as any).mockImplementation((opts: any) => {
+      return (async function* () {
+        yield { type: "system", subtype: "status", status: "requesting" };
+        await new Promise<void>((resolve) => {
+          opts.options.abortController.signal.addEventListener("abort", resolve, { once: true });
+        });
+      })();
+    });
+
+    const cap = captureConsole();
+    const queryPromise = testController.runQuery("test", undefined);
+    await vi.advanceTimersByTimeAsync(130_000);
+    await queryPromise;
+    cap.restore();
+
+    const output = cap.lines.map(stripAnsi).join("\n");
+    expect(output).not.toContain("Interrupted");
+  });
+});
