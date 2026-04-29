@@ -250,7 +250,11 @@ export class BrunelAgent {
           if (workerController.isActive) {
             this.agentStatus.addQueryStats(stats.inputTokens, stats.outputTokens, stats.costUsd);
           }
-          return stallRetry ? false : !ac.signal.aborted;
+          if (stallRetry) {
+            this.display.print(c.amber(`\n⚠ Connection stalled — giving up after ${MAX_STALL_RETRIES} retries. Please try again.`));
+            return false;
+          }
+          return !ac.signal.aborted;
         } catch (err) {
           console.error(c.boldRed(`\nERROR: ${fmtError(err)}`));
           logFull("ERROR", err instanceof Error ? { message: err.message, stack: err.stack } : err);
