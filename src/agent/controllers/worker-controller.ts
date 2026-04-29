@@ -531,6 +531,11 @@ export class WorkerController extends EventEmitter {
     }
   }
 
+  private transitionToIdle(): void {
+    this.transitionToRegistered();
+    this.display.print(c.sageGreen("Waiting for tasks..."));
+  }
+
   /**
    * Send all buffered messages if registered and the socket is open.
    * No-ops if the handshake is still pending or the socket is not ready.
@@ -659,7 +664,7 @@ export class WorkerController extends EventEmitter {
     }
 
     if (msg.type === "repo_activated") {
-      this.transitionToRegistered();
+      this.transitionToIdle();
       // Re-start the main routing loop's stdin listening. The activation picker
       // cancelled the active ask(); without this, the loop stays blocked at
       // nextRoutingEvent() with no stdin listener until a task arrives.
@@ -691,13 +696,18 @@ export class WorkerController extends EventEmitter {
         if (workspace?.isCreated) {
           // Track the reset promise so that task_assigned prompts are deferred until
           // the workspace is clean — preventing a new task from running in a dirty state.
+          // "Waiting for tasks..." is deferred to .finally() so it only prints after reset.
           this._resetPromise = workspace.reset().then(() => {
             this.display.print(c.amber("Workspace reset."));
           }).catch((err: unknown) => {
             this.display.print(c.boldRed(`Workspace reset failed: ${err instanceof Error ? err.message : String(err)}`));
           }).finally(() => {
             this._resetPromise = null;
+            this.display.print(c.sageGreen("Waiting for tasks..."));
           });
+          this.transitionToRegistered(); // "Waiting for tasks..." is in .finally() above
+        } else {
+          this.transitionToIdle(); // immediate — no reset needed
         }
       } else if (msg.repoStatus === "new") {
         // Show "Connected" in the status bar before waiting for user input — the
@@ -720,7 +730,11 @@ export class WorkerController extends EventEmitter {
         this.emit("prompts_ready");
       } else {
         // "idle" or "busy" with repoStatus 'active' (or no repoStatus for back-compat).
-        this.transitionToRegistered();
+        if (msg.status === "idle") {
+          this.transitionToIdle();
+        } else {
+          this.transitionToRegistered();
+        }
       }
       return;
     }
