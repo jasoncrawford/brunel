@@ -1604,6 +1604,93 @@ describe("afterTask callback on /worker:complete", () => {
   });
 });
 
+// ── completeCurrentTask: post-completion prompt ───────────────────────────────
+
+describe("completeCurrentTask: post-completion prompt", () => {
+  async function makeSession(pickFn: (opts: string[]) => Promise<number>) {
+    const ws = new FakeWs();
+    const sess = new WorkerController(sb, display, undefined, undefined, "owner/repo", {
+      wsFactory: vi.fn().mockReturnValue(ws),
+      pickFn,
+    });
+    await sess.start();
+    sendMsg(ws, { type: "task_assigned", taskId: "t-pick", issue: makeIssue(77) });
+    sess.takeNextPrompt();
+    return { sess, ws };
+  }
+
+  it("with no picker and no pickFn: defaults to waiting for next task, stays active, returns 'task-complete'", async () => {
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "t-nopick", issue: makeIssue(5) });
+    session.takeNextPrompt();
+    const result = await session.completeCurrentTask();
+    expect(result).toBe("task-complete");
+    expect(session.isActive).toBe(true);
+    const printed = display.print.mock.calls.map(([l]: [string]) => stripAnsi(l));
+    expect(printed.some(l => l.includes("Waiting for next task"))).toBe(true);
+  });
+
+  it("option 0 (wait for next task): stays active and returns 'task-complete'", async () => {
+    const { sess } = await makeSession(async () => 0);
+    const result = await sess.completeCurrentTask();
+    expect(result).toBe("task-complete");
+    expect(sess.isActive).toBe(true);
+  });
+
+  it("option 0 (wait for next task): prints 'Waiting for next task'", async () => {
+    const { sess } = await makeSession(async () => 0);
+    await sess.completeCurrentTask();
+    const printed = display.print.mock.calls.map(([l]: [string]) => stripAnsi(l));
+    expect(printed.some(l => l.includes("Waiting for next task"))).toBe(true);
+  });
+
+  it("option 1 (choose specific task): stops worker mode and returns 'task-complete'", async () => {
+    const { sess } = await makeSession(async () => 1);
+    const result = await sess.completeCurrentTask();
+    expect(result).toBe("task-complete");
+    expect(sess.isActive).toBe(false);
+  });
+
+  it("option 1 (choose specific task): prints message about /worker:claim", async () => {
+    const { sess } = await makeSession(async () => 1);
+    await sess.completeCurrentTask();
+    const printed = display.print.mock.calls.map(([l]: [string]) => stripAnsi(l));
+    expect(printed.some(l => l.includes("/worker:claim"))).toBe(true);
+  });
+
+  it("option 2 (stop working): stops worker mode and returns 'task-complete'", async () => {
+    const { sess } = await makeSession(async () => 2);
+    const result = await sess.completeCurrentTask();
+    expect(result).toBe("task-complete");
+    expect(sess.isActive).toBe(false);
+  });
+
+  it("option 2 (stop working): does not print /worker:claim message", async () => {
+    const { sess } = await makeSession(async () => 2);
+    await sess.completeCurrentTask();
+    const printed = display.print.mock.calls.map(([l]: [string]) => stripAnsi(l));
+    expect(printed.some(l => l.includes("/worker:claim"))).toBe(false);
+  });
+
+  it("option 3 (quit and exit): stops worker mode and returns 'exit'", async () => {
+    const { sess } = await makeSession(async () => 3);
+    const result = await sess.completeCurrentTask();
+    expect(result).toBe("exit");
+    expect(sess.isActive).toBe(false);
+  });
+
+  it("picker is called with the four expected option labels", async () => {
+    const mockPick = vi.fn().mockResolvedValue(0);
+    const { sess } = await makeSession(mockPick);
+    await sess.completeCurrentTask();
+    expect(mockPick).toHaveBeenCalledWith([
+      expect.stringContaining("Wait"),
+      expect.stringContaining("specific task"),
+      expect.stringContaining("Stop working"),
+      expect.stringContaining("Quit"),
+    ]);
+  });
+});
+
 // ── sendGoodbye ───────────────────────────────────────────────────────────────
 
 describe("sendGoodbye", () => {
