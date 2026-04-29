@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useAdminWs } from "../hooks/useAdminWs.ts";
+import { usePageTitle } from "../hooks/usePageTitle.ts";
 import type { Task, Worker, Repo, LogEntry, AdminMessage } from "../types.ts";
 import { shortWorkerId } from "../../../shared/utils.ts";
 
@@ -9,6 +10,7 @@ export default function RepoDetail() {
   const repoId = Number(id);
 
   const [repo, setRepo] = useState<Repo | null>(null);
+  usePageTitle(repo ? `${repo.fullName} \u2013 Brunel` : "Brunel");
   const [tasks, setTasks] = useState<Task[]>([]);
   const [workers, setWorkers] = useState<Worker[]>([]);
   const [recentLog, setRecentLog] = useState<LogEntry[]>([]);

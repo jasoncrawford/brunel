@@ -58,6 +58,12 @@ describe("TaskDetail", () => {
     vi.restoreAllMocks();
   });
 
+  it("sets document.title to 'Task #99 – Brunel'", () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ json: () => Promise.resolve([]) }));
+    renderTaskDetail("99");
+    expect(document.title).toBe("Task #99 \u2013 Brunel");
+  });
+
   it("fetches from /api/tasks/:id/events on mount", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ json: () => Promise.resolve([]) }));
     renderTaskDetail("99");

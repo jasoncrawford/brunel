@@ -1,12 +1,14 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Link } from "react-router-dom";
 import { useAdminWs } from "../hooks/useAdminWs.ts";
+import { usePageTitle } from "../hooks/usePageTitle.ts";
 import type { LogEntry, AdminMessage } from "../types.ts";
 import { shortWorkerId } from "../../../shared/utils.ts";
 
 const PAGE_SIZE = 50;
 
 export default function EventLog() {
+  usePageTitle("Events \u2013 Brunel");
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [hasMore, setHasMore] = useState(true);

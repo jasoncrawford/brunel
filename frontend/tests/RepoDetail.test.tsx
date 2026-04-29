@@ -69,6 +69,17 @@ describe("RepoDetail", () => {
     vi.restoreAllMocks();
   });
 
+  it("sets document.title to repo fullName when data loads", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn()
+        .mockResolvedValueOnce({ json: () => Promise.resolve(mockRepo) })
+        .mockResolvedValueOnce({ json: () => Promise.resolve([]) })
+    );
+    renderRepoDetail("5");
+    await waitFor(() => expect(document.title).toBe("user/my-repo \u2013 Brunel"));
+  });
+
   it("fetches repo and log on mount", async () => {
     vi.stubGlobal(
       "fetch",

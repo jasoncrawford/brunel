@@ -58,6 +58,12 @@ describe("WorkerDetail", () => {
     vi.restoreAllMocks();
   });
 
+  it("sets document.title to worker id", () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ json: () => Promise.resolve([]) }));
+    renderWorkerDetail("worker-abc-def-123");
+    expect(document.title).toBe("worker-abc-def-123 \u2013 Brunel");
+  });
+
   it("fetches from /api/workers/:id/messages on mount", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ json: () => Promise.resolve([]) }));
     renderWorkerDetail("worker-abc-def-123");
