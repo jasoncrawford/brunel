@@ -502,3 +502,56 @@ describe("workerMain input cancel discipline", () => {
     if (agentError) throw agentError;
   });
 });
+
+describe("workerMain stall retry exhaustion", () => {
+  let chdirSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    makeMockInput();
+    chdirSpy = vi.spyOn(process, "chdir").mockImplementation(() => {});
+    vi.mocked(confirmIfUnsafe).mockResolvedValue(true);
+    fakeWorkspace.isCreated = false;
+    vi.mocked(fakeWorkspace.destroy).mockResolvedValue(undefined);
+    vi.mocked(fakeWorkspace.checkSafety).mockResolvedValue({ uncommittedFiles: [], unpushedCommits: [], noUpstream: false });
+    vi.mocked(fakeWorkspace.create).mockImplementation(async () => { fakeWorkspace.isCreated = true; });
+  });
+
+  afterEach(() => {
+    chdirSpy.mockRestore();
+    vi.clearAllMocks();
+  });
+
+  it("prints a 'giving up' message when all stall retries are exhausted", async () => {
+    // ask: first call returns a prompt, second call exits
+    let askCallCount = 0;
+    mockInput.ask.mockImplementation(() => {
+      askCallCount++;
+      if (askCallCount === 1) return Promise.resolve("do some work");
+      return Promise.resolve("__eof__");
+    });
+
+    const stallResult = { stallRetry: true, sessionId: undefined, stats: { inputTokens: 0, outputTokens: 0, costUsd: undefined } };
+    const runQueryFn = vi.fn().mockResolvedValue(stallResult);
+    installMocks(runQueryFn);
+
+    const agent = new BrunelAgent(getConfig());
+    const printSpy = vi.spyOn(agent.display, "print");
+
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => {
+      throw new Error("__process_exit__");
+    }) as unknown as ReturnType<typeof vi.spyOn>;
+
+    try {
+      await agent.start(true);
+    } catch (err) {
+      if (!(err instanceof Error && err.message === "__process_exit__")) throw err;
+    } finally {
+      exitSpy.mockRestore();
+    }
+
+    const printed = printSpy.mock.calls.map(([s]: [unknown]) => stripAnsi(String(s))).join("\n");
+    expect(printed).toContain("Connection stalled");
+    expect(printed).toContain("giving up");
+    expect(printed).toContain("retries");
+  });
+});
