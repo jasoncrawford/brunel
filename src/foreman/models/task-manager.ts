@@ -377,39 +377,40 @@ export class TaskManager extends EventEmitter {
 
   // ── PR event handlers ──────────────────────────────────────────────────────
 
-  private static extractLinkedIssueNumber(body: string): number | null {
-    const match = /(?:closes|fixes|resolves)\s+#(\d+)/i.exec(body);
-    return match ? parseInt(match[1], 10) : null;
-  }
-
   /** Handle pull_request/opened: find the linked issue, register the branch and PR.
    *  Returns the linked task, or null if no linked issue is found. */
   async handlePrOpenedEvent(prNumber: number, body: string, branch: string | null): Promise<Task | null> {
-    const linkedIssue = TaskManager.extractLinkedIssueNumber(body);
-    if (linkedIssue === null) return null;
-    const task = await this.repo.getTaskByIssue(linkedIssue);
+    const task = await this.findTaskByClosingKeyword(body);
     if (!task) return null;
     if (branch) this.registerBranch(branch, task);
     await task.registerPr(prNumber, branch).catch((err: unknown) =>
       log(`ERROR Failed to register PR #${prNumber} for task #${task.taskId}: ${fmtError(err)}`)
     );
-    log(`[task #${linkedIssue}] PR #${prNumber} registered`);
+    log(`[task #${task.issueNumber}] PR #${prNumber} registered`);
     return task;
   }
 
   /** Handle pull_request/edited when the body changes: (re)register the PR-issue link.
    *  Returns the task if a closing keyword is found in the new body, or null otherwise. */
   async handlePrEditedEvent(prNumber: number, body: string, branch: string | null): Promise<Task | null> {
-    const linkedIssue = TaskManager.extractLinkedIssueNumber(body);
-    if (linkedIssue === null) return null;
-    const task = await this.repo.getTaskByIssue(linkedIssue);
+    const task = await this.findTaskByClosingKeyword(body);
     if (!task) return null;
     if (branch) this.registerBranch(branch, task);
     await task.registerPr(prNumber, branch).catch((err: unknown) =>
       log(`ERROR Failed to register PR #${prNumber} for task #${task.taskId}: ${fmtError(err)}`)
     );
-    log(`[task #${linkedIssue}] PR #${prNumber} registered (body edited)`);
+    log(`[task #${task.issueNumber}] PR #${prNumber} registered (body edited)`);
     return task;
+  }
+
+  private async findTaskByClosingKeyword(body: string): Promise<Task | null> {
+    const re = /(?:closes|fixes|resolves)\s+#(\d+)/gi;
+    let match: RegExpExecArray | null;
+    while ((match = re.exec(body)) !== null) {
+      const task = await this.repo.getTaskByIssue(parseInt(match[1], 10));
+      if (task?.status === "assigned") return task;
+    }
+    return null;
   }
 
   /** Handle pull_request/closed: unregister or record the merge on the linked task.
