@@ -58,10 +58,10 @@ describe("WorkerDetail", () => {
     vi.restoreAllMocks();
   });
 
-  it("sets document.title to worker id", () => {
+  it("sets document.title to short worker id", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ json: () => Promise.resolve([]) }));
-    renderWorkerDetail("worker-abc-def-123");
-    expect(document.title).toBe("worker-abc-def-123 \u2013 Brunel");
+    renderWorkerDetail("justice-a9bdda00-1234-5678-abcd-ef0123456789");
+    expect(document.title).toBe("justice-a9bdda00 \u2013 Brunel");
   });
 
   it("fetches from /api/workers/:id/messages on mount", async () => {

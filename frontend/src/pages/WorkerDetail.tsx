@@ -7,7 +7,7 @@ import { shortWorkerId } from "../../../shared/utils.ts";
 
 export default function WorkerDetail() {
   const { id } = useParams<{ id: string }>();
-  usePageTitle(`${id} \u2013 Brunel`);
+  usePageTitle(id ? `${shortWorkerId(id)} \u2013 Brunel` : "Brunel");
   const [messages, setMessages] = useState<LogEntry[]>([]);
   const [worker, setWorker] = useState<Worker | null>(null);
 
