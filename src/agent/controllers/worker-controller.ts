@@ -811,7 +811,7 @@ export class WorkerController extends EventEmitter {
       this.currentIssue = msg.issue;
       this.prIsClosed = false;
       this.issueClosed = msg.issue.status === "closed";
-      this.agentStatus.update({ taskNumber: msg.issue.number, prNumber: undefined });
+      this.agentStatus.update({ taskNumber: msg.issue.number, prNumber: msg.issue.prNumber ?? undefined });
       this.agentStatus.resetTaskStats();
       void this.agentStatus.refreshBranch();
       const initialPrompt = buildInitialPrompt(msg.issue, !!this.workspaceController?.workspace);

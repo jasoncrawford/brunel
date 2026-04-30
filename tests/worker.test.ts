@@ -694,6 +694,18 @@ describe("status bar content", () => {
     expect(fmtStatus(sb)).not.toContain("PR #");
   });
 
+  it("shows PR number in status bar when task_assigned carries a prNumber", () => {
+    const issue = { ...makeIssue(3), prNumber: 123 };
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "t3", issue });
+    expect(fmtStatus(sb)).toContain("PR #123");
+  });
+
+  it("shows no PR number when task_assigned has no prNumber", () => {
+    const issue = makeIssue(4);
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "t4", issue });
+    expect(fmtStatus(sb)).not.toContain("PR #");
+  });
+
   it("clears PR number from status bar when pull_request/closed without merging is received", () => {
     const issue = makeIssue(1);
     sendMsg(fakeWs, { type: "task_assigned", taskId: "t1", issue });
