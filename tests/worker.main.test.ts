@@ -192,6 +192,56 @@ describe("workerMain startup banner", () => {
   });
 });
 
+describe("workerMain query error display", () => {
+  let chdirSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    makeMockInput();
+    chdirSpy = vi.spyOn(process, "chdir").mockImplementation(() => {});
+    vi.mocked(confirmIfUnsafe).mockResolvedValue(true);
+    fakeWorkspace.isCreated = false;
+    vi.mocked(fakeWorkspace.destroy).mockResolvedValue(undefined);
+    vi.mocked(fakeWorkspace.checkSafety).mockResolvedValue({ uncommittedFiles: [], unpushedCommits: [], noUpstream: false });
+    vi.mocked(fakeWorkspace.create).mockImplementation(async () => { fakeWorkspace.isCreated = true; });
+  });
+
+  afterEach(() => {
+    chdirSpy.mockRestore();
+    vi.clearAllMocks();
+  });
+
+  it("query errors are routed through display.print, not console.error", async () => {
+    // runQuery throws → runPrompt catch should call display.print, not console.error.
+    // This prevents status bar text from being appended to the error line (issue #962).
+    const runQueryFn = vi.fn().mockRejectedValue(new Error("API Error: Connection refused"));
+    installMocks(runQueryFn);
+    mockInput.ask
+      .mockResolvedValueOnce("do some work")
+      .mockResolvedValue("__eof__");
+
+    const agent = new BrunelAgent(getConfig());
+    const printSpy = vi.spyOn(agent.display, "print").mockImplementation(() => {});
+    const errSpy = vi.spyOn(console, "error");
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => {
+      throw new Error("__process_exit__");
+    }) as unknown as ReturnType<typeof vi.spyOn>;
+
+    try {
+      await agent.start(true);
+    } catch (err) {
+      if (!(err instanceof Error && err.message === "__process_exit__")) throw err;
+    } finally {
+      exitSpy.mockRestore();
+    }
+
+    const errorPrints = printSpy.mock.calls
+      .map(([s]: [unknown]) => stripAnsi(String(s ?? "")))
+      .filter((s) => s.includes("ERROR"));
+    expect(errorPrints.length).toBeGreaterThan(0);
+    expect(errSpy).not.toHaveBeenCalled();
+  });
+});
+
 describe("workerMain exit behavior", () => {
   let chdirSpy: ReturnType<typeof vi.spyOn>;
 
