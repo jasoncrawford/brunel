@@ -79,6 +79,36 @@ describe("AgentStatus getStatusText", () => {
   });
 });
 
+describe("events-paused badge", () => {
+  it("shows 'Events paused (3 pending)' on right side when paused with events", () => {
+    const status = new AgentStatus({ agentId: "7c254628-abcd-1234-efgh-000000000000" });
+    status.update({ connectionStatus: "connected", eventsPaused: true, pendingEventsCount: 3 });
+    status.setWorkerModeActive(true);
+    const display = new Display(getConfig(), status);
+    const result = stripAnsi(display.renderer.fmtStatusBar(status, 160));
+    expect(result).toContain("Events paused (3 pending)");
+  });
+
+  it("shows 'Events paused' (no count) when paused with no events", () => {
+    const status = new AgentStatus({ agentId: "7c254628-abcd-1234-efgh-000000000000" });
+    status.update({ connectionStatus: "connected", eventsPaused: true, pendingEventsCount: 0 });
+    status.setWorkerModeActive(true);
+    const display = new Display(getConfig(), status);
+    const result = stripAnsi(display.renderer.fmtStatusBar(status, 160));
+    expect(result).toContain("Events paused");
+    expect(result).not.toContain("pending");
+  });
+
+  it("does not show events-paused text when not paused", () => {
+    const status = new AgentStatus({ agentId: "7c254628-abcd-1234-efgh-000000000000" });
+    status.update({ connectionStatus: "connected", eventsPaused: false });
+    status.setWorkerModeActive(true);
+    const display = new Display(getConfig(), status);
+    const result = stripAnsi(display.renderer.fmtStatusBar(status, 160));
+    expect(result).not.toContain("Events paused");
+  });
+});
+
 describe("AgentStatus callbacks", () => {
   it("fireOnToolResult calls the registered callback", () => {
     const status = new AgentStatus({ agentId: "test-agent-id" });

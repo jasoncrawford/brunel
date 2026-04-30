@@ -594,19 +594,25 @@ export class Renderer {
       return styledBar(leftText.padEnd(width));
     }
 
-    // Right side: connection status
+    // Right side: connection status + events-paused badge
     const retryInSeconds = status.reconnectAt != null
       ? Math.max(0, Math.ceil((status.reconnectAt - Date.now()) / 1000))
       : undefined;
     const codeStr = this.display.verbose && status.disconnectCode != null
       ? ` (${status.disconnectCode})`
       : "";
-    const rightText =
+    const connectionStr =
       status.connectionStatus === "connected"    ? "Connected" :
       status.connectionStatus === "handshaking"  ? "Handshaking..." :
       status.connectionStatus === "reconnecting" ? "Reconnecting..." :
       retryInSeconds != null                     ? `Disconnected${codeStr}. Retrying in ${retryInSeconds}s` :
                                                    `Disconnected${codeStr}`;
+    const eventsStr = status.eventsPaused
+      ? (status.pendingEventsCount > 0
+        ? ` · Events paused (${status.pendingEventsCount} pending)`
+        : " · Events paused")
+      : "";
+    const rightText = connectionStr + eventsStr;
 
     // Left side: worker {id8} ∙ {model} ∙ {task info}
     const parts = [...baseParts];

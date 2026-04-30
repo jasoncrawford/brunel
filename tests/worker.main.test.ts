@@ -104,13 +104,14 @@ import { stripAnsi } from "./helpers.js";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-let mockInput: { ask: ReturnType<typeof vi.fn>; cancel: ReturnType<typeof vi.fn> };
+let mockInput: { ask: ReturnType<typeof vi.fn>; cancel: ReturnType<typeof vi.fn>; on: ReturnType<typeof vi.fn> };
 let mockPicker: { pick: ReturnType<typeof vi.fn>; pickMultiple: ReturnType<typeof vi.fn>; pickQuestion: ReturnType<typeof vi.fn> };
 
 function makeMockInput() {
   mockInput = {
     ask: vi.fn().mockResolvedValue("__eof__"),
     cancel: vi.fn(),
+    on: vi.fn(),
   };
   mockPicker = {
     pick: vi.fn().mockResolvedValue(0),

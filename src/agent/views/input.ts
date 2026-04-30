@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import { c } from "./style.js";
 import type { Display } from "./display.js";
 import { type CommandSuggestion, filterCommands } from "../controllers/command-controller.js";
@@ -8,7 +9,7 @@ import { type CommandSuggestion, filterCommands } from "../controllers/command-c
  * View class for interactive terminal input. Receives a Display reference so
  * ask() can access the status bar without callers threading it through.
  */
-export class Input {
+export class Input extends EventEmitter {
   /** Buffer stashed by ^S, restored as the initial value of the next ask() call. */
   private _stash: string | null = null;
 
@@ -32,7 +33,7 @@ export class Input {
   /** Bound data listener, stored so it can be removed in _cleanup(). */
   private _dataListener: ((chunk: string) => void) | null = null;
 
-  constructor(private readonly display: Display) {}
+  constructor(private readonly display: Display) { super(); }
 
   /**
    * Cancel the currently-running ask() call. The promise resolves with null
@@ -355,11 +356,13 @@ export class Input {
   }
 
   private _insert(ch: string) {
+    const wasEmpty = this._buffer.length === 0;
     const prevRow = this._screenPosOf(this._cursor).row;
     this._buffer = this._buffer.slice(0, this._cursor) + ch + this._buffer.slice(this._cursor);
     this._cursor++;
     this._selectedSuggestion = -1;
     this._fullRedraw(prevRow, this._computeMatches());
+    if (wasEmpty) this.emit("firstKeystroke");
   }
 
   private _deleteBack() {
