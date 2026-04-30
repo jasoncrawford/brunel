@@ -174,6 +174,17 @@ export class WorkerController extends EventEmitter {
   get eventsPaused(): boolean { return this._eventsPaused; }
   /** Number of paused pending events (non-zero only when paused and events are queued). */
   get pendingEventsCount(): number { return this._eventsPaused ? this.pendingEvents.length : 0; }
+  /**
+   * Human-readable labels for each pending event while paused, e.g. ["issue_comment/created",
+   * "pull_request/closed"]. Returns [] when not paused or when queue is empty.
+   */
+  get pendingEventDetails(): string[] {
+    if (!this._eventsPaused) return [];
+    return this.pendingEvents.map(e => {
+      const action = e.payload["action"] as string | undefined;
+      return action ? `${e.name}/${action}` : e.name;
+    });
+  }
 
   // ── Protocol methods (previously required reaching through .session) ───────
 
@@ -207,7 +218,6 @@ export class WorkerController extends EventEmitter {
     if (aborted) {
       if (this.pendingEvents.length > 0 && !this._eventsPaused) {
         this._eventsPaused = true;
-        this.display.print(c.amber("⚠ Events received while running — /worker:events to process them"));
         this._syncPendingEventsStatus();
       }
     } else if (!this._eventsPaused) {
@@ -524,17 +534,23 @@ export class WorkerController extends EventEmitter {
         await this.stop();
       },
     });
-    registry.register("events", {
-      description: "Process queued events (unpauses auto-processing)",
+    registry.register("resume-events", {
+      description: "Resume processing of GitHub events, when paused, and process queued events",
       handler: async () => {
         if (!this._isActive) {
           this.display.print(c.boldRed("Not connected to a foreman."));
           return undefined;
         }
+        if (!this._eventsPaused) {
+          this.display.print(c.amber("Event processing is not paused."));
+          return undefined;
+        }
         const events = this.pendingEvents.splice(0);
         this._eventsPaused = false;
         this._syncPendingEventsStatus();
-        if (events.length > 0 && this.currentTaskId && this.currentIssue) {
+        if (events.length === 0) {
+          this.display.print(c.amber("Event processing resumed — no events queued."));
+        } else if (this.currentTaskId && this.currentIssue) {
           this.enqueuePrompt(this.buildAndLogEventPrompt(events), false);
         }
         return undefined;
@@ -809,6 +825,7 @@ export class WorkerController extends EventEmitter {
           prNumber: undefined,
           branch: "",
           pendingEventsCount: 0,
+          eventsPaused: false,
         });
         this.agentStatus.resetTaskStats();
         this.display.print(c.amber("Task cancelled (reassigned to another worker)."));
@@ -942,7 +959,10 @@ export class WorkerController extends EventEmitter {
   }
 
   private _syncPendingEventsStatus(): void {
-    this.agentStatus.update({ pendingEventsCount: this._eventsPaused ? this.pendingEvents.length : 0 });
+    this.agentStatus.update({
+      eventsPaused: this._eventsPaused,
+      pendingEventsCount: this._eventsPaused ? this.pendingEvents.length : 0,
+    });
   }
 
   private buildAndLogEventPrompt(events: Wire.WebhookEvent[]): string {

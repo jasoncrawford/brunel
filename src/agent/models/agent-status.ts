@@ -41,6 +41,7 @@ export type WorkerStatusPatch = {
   model?: string | undefined;
   effort?: EffortValue | undefined;
   pendingEventsCount?: number;
+  eventsPaused?: boolean;
 };
 
 // ── AgentStatus class ─────────────────────────────────────────────────────────
@@ -70,6 +71,7 @@ export class AgentStatus extends EventEmitter {
   private _taskCostUsd: number | undefined;
   private _workerModeActive = false;
   private _pendingEventsCount = 0;
+  private _eventsPaused = false;
 
   // Fired after a tool result is printed (tool has just finished running).
   // Used by the worker to refresh git branch in the status bar after Bash.
@@ -111,6 +113,7 @@ export class AgentStatus extends EventEmitter {
   get taskCostUsd(): number | undefined { return this._taskCostUsd; }
   get workerModeActive(): boolean { return this._workerModeActive; }
   get pendingEventsCount(): number { return this._pendingEventsCount; }
+  get eventsPaused(): boolean { return this._eventsPaused; }
 
   /** Apply a partial status update and emit "change". */
   update(patch: WorkerStatusPatch): void {
@@ -126,6 +129,7 @@ export class AgentStatus extends EventEmitter {
     if ("model" in patch) this._model = patch.model;
     if ("effort" in patch) this._effort = patch.effort;
     if ("pendingEventsCount" in patch) this._pendingEventsCount = patch.pendingEventsCount!;
+    if ("eventsPaused" in patch) this._eventsPaused = patch.eventsPaused!;
     this.emit("change");
   }
 

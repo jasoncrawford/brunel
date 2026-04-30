@@ -2388,37 +2388,6 @@ describe("event pause on ^C (notifyQueryEnd aborted=true)", () => {
     expect(session.hasPendingPrompts()).toBe(false);
   });
 
-  it("prints a message listing queued events when first entering paused state", () => {
-    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
-    session.takeNextPrompt();
-    const ac = new AbortController();
-    session.notifyQueryStart(ac);
-    sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
-    display.print.mockClear();
-    session.notifyQueryEnd(true);
-    const printed = display.print.mock.calls.map(args => stripAnsi(String(args[0]))).join("\n");
-    expect(printed).toContain("Events received while running");
-    expect(printed).toContain("/worker:events");
-  });
-
-  it("does not re-print message when already paused", () => {
-    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
-    session.takeNextPrompt();
-    // First abort with events — enters paused state
-    let ac = new AbortController();
-    session.notifyQueryStart(ac);
-    sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
-    session.notifyQueryEnd(true);
-
-    // Second abort — already paused
-    display.print.mockClear();
-    ac = new AbortController();
-    session.notifyQueryStart(ac);
-    session.notifyQueryEnd(true);
-    const printed = display.print.mock.calls.map(args => stripAnsi(String(args[0]))).join("\n");
-    expect(printed).not.toContain("Events received while running");
-  });
-
   it("drains events normally on notifyQueryEnd(false) when not paused", () => {
     sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
     session.takeNextPrompt();
@@ -2496,9 +2465,9 @@ describe("debounce suppression when paused", () => {
   });
 });
 
-// ── /worker:events command ────────────────────────────────────────────────────
+// ── /worker:resume-events command ────────────────────────────────────────────
 
-describe("/worker:events command", () => {
+describe("/worker:resume-events command", () => {
   function registerAndGetHandler(): (args: string) => Promise<unknown> {
     const handlers: Record<string, (args: string) => Promise<unknown>> = {};
     const registry = {
@@ -2507,11 +2476,11 @@ describe("/worker:events command", () => {
       },
     } as unknown as import("../src/agent/controllers/command-controller.js").CommandRegistry;
     session.registerCommands(registry);
-    return handlers["events"]!;
+    return handlers["resume-events"]!;
   }
 
   it("drains pending events and enqueues a prompt when events are queued", async () => {
-    const eventsHandler = registerAndGetHandler();
+    const handler = registerAndGetHandler();
     sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
     session.takeNextPrompt();
 
@@ -2521,22 +2490,32 @@ describe("/worker:events command", () => {
     session.notifyQueryEnd(true); // enter paused state
 
     expect(session.eventsPaused).toBe(true);
-    await eventsHandler("");
+    await handler("");
     expect(session.hasPendingPrompts()).toBe(true);
     expect(session.eventsPaused).toBe(false);
   });
 
-  it("clears eventsPaused flag even when no events are queued", async () => {
-    const eventsHandler = registerAndGetHandler();
-    // Manually set paused via pauseEvents() with no events
+  it("clears eventsPaused flag even when paused with no events queued", async () => {
+    const handler = registerAndGetHandler();
     session.pauseEvents();
     expect(session.eventsPaused).toBe(true);
-    await eventsHandler("");
+    display.print.mockClear();
+    await handler("");
     expect(session.eventsPaused).toBe(false);
+    const printed = display.print.mock.calls.map(args => stripAnsi(String(args[0]))).join("\n");
+    expect(printed).toContain("resumed");
+  });
+
+  it("prints amber message when event processing is not paused", async () => {
+    const handler = registerAndGetHandler();
+    display.print.mockClear();
+    await handler("");
+    const printed = display.print.mock.calls.map(args => stripAnsi(String(args[0]))).join("\n");
+    expect(printed).toContain("not paused");
   });
 
   it("clears the pending events badge in the status bar after draining", async () => {
-    const eventsHandler = registerAndGetHandler();
+    const handler = registerAndGetHandler();
     sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
     session.takeNextPrompt();
 
@@ -2545,8 +2524,9 @@ describe("/worker:events command", () => {
     sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
     session.notifyQueryEnd(true);
 
-    await eventsHandler("");
+    await handler("");
     expect(sb.pendingEventsCount).toBe(0);
+    expect(sb.eventsPaused).toBe(false);
   });
 });
 
@@ -2573,10 +2553,10 @@ describe("pauseEvents()", () => {
   });
 });
 
-// ── pendingEventsCount in AgentStatus badge ───────────────────────────────────
+// ── events-paused badge in status bar ────────────────────────────────────────
 
-describe("pending events badge in status bar", () => {
-  it("shows badge with count when paused and events are queued", () => {
+describe("events-paused badge in status bar", () => {
+  it("shows 'Events paused (1 pending)' on right side when paused with queued events", () => {
     sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
     session.takeNextPrompt();
     const ac = new AbortController();
@@ -2585,15 +2565,21 @@ describe("pending events badge in status bar", () => {
     session.notifyQueryEnd(true);
 
     const text = fmtStatus(sb);
-    expect(text).toContain("📬");
-    expect(text).toContain("1");
+    expect(text).toContain("Events paused (1 pending)");
   });
 
-  it("does not show badge when not paused", () => {
+  it("shows 'Events paused' (no count) when paused with no queued events", () => {
+    session.pauseEvents();
+    const text = fmtStatus(sb);
+    expect(text).toContain("Events paused");
+    expect(text).not.toContain("pending");
+  });
+
+  it("does not show 'Events paused' when not paused", () => {
     sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
     session.takeNextPrompt();
     const text = fmtStatus(sb);
-    expect(text).not.toContain("📬");
+    expect(text).not.toContain("Events paused");
   });
 
   it("pendingEventsCount on AgentStatus reflects queued events when paused", () => {
@@ -2605,9 +2591,10 @@ describe("pending events badge in status bar", () => {
     sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("pull_request_review") });
     session.notifyQueryEnd(true);
     expect(sb.pendingEventsCount).toBe(2);
+    expect(sb.eventsPaused).toBe(true);
   });
 
-  it("pendingEventsCount resets to 0 after /worker:events drains the queue", async () => {
+  it("badge clears after /worker:resume-events drains the queue", async () => {
     const handlers: Record<string, (args: string) => Promise<unknown>> = {};
     const registry = {
       register: (name: string, def: { handler: (args: string) => Promise<unknown> }) => {
@@ -2624,8 +2611,9 @@ describe("pending events badge in status bar", () => {
     session.notifyQueryEnd(true);
     expect(sb.pendingEventsCount).toBe(1);
 
-    await handlers["events"]!("");
+    await handlers["resume-events"]!("");
     expect(sb.pendingEventsCount).toBe(0);
+    expect(sb.eventsPaused).toBe(false);
   });
 });
 
