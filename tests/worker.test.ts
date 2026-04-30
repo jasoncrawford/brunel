@@ -2356,6 +2356,279 @@ describe("transitionToIdle — Waiting for tasks message", () => {
   });
 });
 
+// ── Event pause: notifyQueryEnd(aborted=true) ─────────────────────────────────
+
+describe("event pause on ^C (notifyQueryEnd aborted=true)", () => {
+  it("sets eventsPaused when aborted with pending events", () => {
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
+    session.takeNextPrompt();
+    const ac = new AbortController();
+    session.notifyQueryStart(ac);
+    sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
+    session.notifyQueryEnd(true);
+    expect(session.eventsPaused).toBe(true);
+  });
+
+  it("does not set eventsPaused when aborted with no pending events", () => {
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
+    session.takeNextPrompt();
+    const ac = new AbortController();
+    session.notifyQueryStart(ac);
+    session.notifyQueryEnd(true);
+    expect(session.eventsPaused).toBe(false);
+  });
+
+  it("does not drain events into prompt queue when aborted with pending events", () => {
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
+    session.takeNextPrompt();
+    const ac = new AbortController();
+    session.notifyQueryStart(ac);
+    sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
+    session.notifyQueryEnd(true);
+    expect(session.hasPendingPrompts()).toBe(false);
+  });
+
+  it("prints a message listing queued events when first entering paused state", () => {
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
+    session.takeNextPrompt();
+    const ac = new AbortController();
+    session.notifyQueryStart(ac);
+    sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
+    display.print.mockClear();
+    session.notifyQueryEnd(true);
+    const printed = display.print.mock.calls.map(args => stripAnsi(String(args[0]))).join("\n");
+    expect(printed).toContain("Events received while running");
+    expect(printed).toContain("/worker:events");
+  });
+
+  it("does not re-print message when already paused", () => {
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
+    session.takeNextPrompt();
+    // First abort with events — enters paused state
+    let ac = new AbortController();
+    session.notifyQueryStart(ac);
+    sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
+    session.notifyQueryEnd(true);
+
+    // Second abort — already paused
+    display.print.mockClear();
+    ac = new AbortController();
+    session.notifyQueryStart(ac);
+    session.notifyQueryEnd(true);
+    const printed = display.print.mock.calls.map(args => stripAnsi(String(args[0]))).join("\n");
+    expect(printed).not.toContain("Events received while running");
+  });
+
+  it("drains events normally on notifyQueryEnd(false) when not paused", () => {
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
+    session.takeNextPrompt();
+    const ac = new AbortController();
+    session.notifyQueryStart(ac);
+    sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
+    session.notifyQueryEnd(false);
+    expect(session.hasPendingPrompts()).toBe(true);
+  });
+
+  it("keeps events queued (not drained) on notifyQueryEnd(false) when already paused", () => {
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
+    session.takeNextPrompt();
+    // First: abort to enter paused state
+    let ac = new AbortController();
+    session.notifyQueryStart(ac);
+    sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
+    session.notifyQueryEnd(true);
+
+    // Second query runs normally but events are paused
+    ac = new AbortController();
+    session.notifyQueryStart(ac);
+    session.notifyQueryEnd(false);
+    expect(session.hasPendingPrompts()).toBe(false);
+  });
+});
+
+// ── Event pause: debounce suppression when paused ─────────────────────────────
+
+describe("debounce suppression when paused", () => {
+  it("does not fire debounce timer for new events while paused", async () => {
+    vi.useFakeTimers();
+    try {
+      sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
+      session.takeNextPrompt();
+
+      // Enter paused state via ^C
+      const ac = new AbortController();
+      session.notifyQueryStart(ac);
+      sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
+      session.notifyQueryEnd(true);
+
+      // A new event arrives while paused and no query is running
+      const onPromptsReady = vi.fn();
+      session.on("prompts_ready", onPromptsReady);
+      sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("pull_request_review") });
+      await vi.runAllTimersAsync();
+      expect(onPromptsReady).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("pauses event from pauseEvents() clears in-flight debounce timer", async () => {
+    vi.useFakeTimers();
+    try {
+      sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
+      session.takeNextPrompt();
+
+      const onPromptsReady = vi.fn();
+      session.on("prompts_ready", onPromptsReady);
+
+      // An event arrives and starts a debounce timer
+      sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
+
+      // User starts typing → pause
+      session.pauseEvents();
+
+      // Timer would have fired but should be cleared
+      await vi.runAllTimersAsync();
+      expect(onPromptsReady).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+// ── /worker:events command ────────────────────────────────────────────────────
+
+describe("/worker:events command", () => {
+  function registerAndGetHandler(): (args: string) => Promise<unknown> {
+    const handlers: Record<string, (args: string) => Promise<unknown>> = {};
+    const registry = {
+      register: (name: string, def: { handler: (args: string) => Promise<unknown> }) => {
+        handlers[name] = def.handler;
+      },
+    } as unknown as import("../src/agent/controllers/command-controller.js").CommandRegistry;
+    session.registerCommands(registry);
+    return handlers["events"]!;
+  }
+
+  it("drains pending events and enqueues a prompt when events are queued", async () => {
+    const eventsHandler = registerAndGetHandler();
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
+    session.takeNextPrompt();
+
+    const ac = new AbortController();
+    session.notifyQueryStart(ac);
+    sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
+    session.notifyQueryEnd(true); // enter paused state
+
+    expect(session.eventsPaused).toBe(true);
+    await eventsHandler("");
+    expect(session.hasPendingPrompts()).toBe(true);
+    expect(session.eventsPaused).toBe(false);
+  });
+
+  it("clears eventsPaused flag even when no events are queued", async () => {
+    const eventsHandler = registerAndGetHandler();
+    // Manually set paused via pauseEvents() with no events
+    session.pauseEvents();
+    expect(session.eventsPaused).toBe(true);
+    await eventsHandler("");
+    expect(session.eventsPaused).toBe(false);
+  });
+
+  it("clears the pending events badge in the status bar after draining", async () => {
+    const eventsHandler = registerAndGetHandler();
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
+    session.takeNextPrompt();
+
+    const ac = new AbortController();
+    session.notifyQueryStart(ac);
+    sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
+    session.notifyQueryEnd(true);
+
+    await eventsHandler("");
+    expect(sb.pendingEventsCount).toBe(0);
+  });
+});
+
+// ── pauseEvents() ─────────────────────────────────────────────────────────────
+
+describe("pauseEvents()", () => {
+  it("sets eventsPaused to true", () => {
+    session.pauseEvents();
+    expect(session.eventsPaused).toBe(true);
+  });
+
+  it("is idempotent — calling twice stays paused", () => {
+    session.pauseEvents();
+    session.pauseEvents();
+    expect(session.eventsPaused).toBe(true);
+  });
+
+  it("does not print a message (typing-triggered pause is silent)", () => {
+    display.print.mockClear();
+    session.pauseEvents();
+    // pauseEvents from typing should not print the "Events received while running" message
+    const printed = display.print.mock.calls.map(args => stripAnsi(String(args[0]))).join("\n");
+    expect(printed).not.toContain("Events received while running");
+  });
+});
+
+// ── pendingEventsCount in AgentStatus badge ───────────────────────────────────
+
+describe("pending events badge in status bar", () => {
+  it("shows badge with count when paused and events are queued", () => {
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
+    session.takeNextPrompt();
+    const ac = new AbortController();
+    session.notifyQueryStart(ac);
+    sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
+    session.notifyQueryEnd(true);
+
+    const text = fmtStatus(sb);
+    expect(text).toContain("📬");
+    expect(text).toContain("1");
+  });
+
+  it("does not show badge when not paused", () => {
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
+    session.takeNextPrompt();
+    const text = fmtStatus(sb);
+    expect(text).not.toContain("📬");
+  });
+
+  it("pendingEventsCount on AgentStatus reflects queued events when paused", () => {
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
+    session.takeNextPrompt();
+    const ac = new AbortController();
+    session.notifyQueryStart(ac);
+    sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
+    sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("pull_request_review") });
+    session.notifyQueryEnd(true);
+    expect(sb.pendingEventsCount).toBe(2);
+  });
+
+  it("pendingEventsCount resets to 0 after /worker:events drains the queue", async () => {
+    const handlers: Record<string, (args: string) => Promise<unknown>> = {};
+    const registry = {
+      register: (name: string, def: { handler: (args: string) => Promise<unknown> }) => {
+        handlers[name] = def.handler;
+      },
+    } as unknown as import("../src/agent/controllers/command-controller.js").CommandRegistry;
+    session.registerCommands(registry);
+
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
+    session.takeNextPrompt();
+    const ac = new AbortController();
+    session.notifyQueryStart(ac);
+    sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
+    session.notifyQueryEnd(true);
+    expect(sb.pendingEventsCount).toBe(1);
+
+    await handlers["events"]!("");
+    expect(sb.pendingEventsCount).toBe(0);
+  });
+});
+
 // ── onForceDestroy — skips confirmation ───────────────────────────────────────
 
 describe("WorkspaceController.onForceDestroy", () => {

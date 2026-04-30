@@ -79,6 +79,26 @@ describe("AgentStatus getStatusText", () => {
   });
 });
 
+describe("pending events badge", () => {
+  it("shows 📬 badge with count when pendingEventsCount > 0", () => {
+    const status = new AgentStatus({ agentId: "7c254628-abcd-1234-efgh-000000000000" });
+    status.update({ connectionStatus: "connected", pendingEventsCount: 3 });
+    status.setWorkerModeActive(true);
+    const display = new Display(getConfig(), status);
+    const result = stripAnsi(display.renderer.fmtStatusBar(status, 119));
+    expect(result).toContain("📬 3");
+  });
+
+  it("does not show 📬 badge when pendingEventsCount is 0", () => {
+    const status = new AgentStatus({ agentId: "7c254628-abcd-1234-efgh-000000000000" });
+    status.update({ connectionStatus: "connected", pendingEventsCount: 0 });
+    status.setWorkerModeActive(true);
+    const display = new Display(getConfig(), status);
+    const result = stripAnsi(display.renderer.fmtStatusBar(status, 119));
+    expect(result).not.toContain("📬");
+  });
+});
+
 describe("AgentStatus callbacks", () => {
   it("fireOnToolResult calls the registered callback", () => {
     const status = new AgentStatus({ agentId: "test-agent-id" });

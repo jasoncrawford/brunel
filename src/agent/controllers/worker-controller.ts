@@ -152,6 +152,7 @@ export class WorkerController extends EventEmitter {
   private currentAc: AbortController | null = null;
   private _queryRunning = false;
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private _eventsPaused = false;
 
   constructor(
     readonly agentStatus: AgentStatus,
@@ -169,6 +170,10 @@ export class WorkerController extends EventEmitter {
   get agentId(): string { return this.agentStatus.agentId; }
   /** True when worker mode is active (connected or connecting). */
   get isActive(): boolean { return this._isActive; }
+  /** True when event auto-processing is paused (after ^C or first keystroke). */
+  get eventsPaused(): boolean { return this._eventsPaused; }
+  /** Number of paused pending events (non-zero only when paused and events are queued). */
+  get pendingEventsCount(): number { return this._eventsPaused ? this.pendingEvents.length : 0; }
 
   // ── Protocol methods (previously required reaching through .session) ───────
 
@@ -190,15 +195,26 @@ export class WorkerController extends EventEmitter {
   /**
    * Called by main() after a prompt finishes (or is interrupted). Clears the
    * AbortController, drains any pending events into the prompt queue (unless
-   * the query was aborted, which signals the user interrupted), and refreshes
-   * the branch display.
+   * paused), and refreshes the branch display.
+   *
+   * If aborted (^C) and there are pending events, enters paused state and
+   * prints a one-time notice. If not paused, drains events normally (existing
+   * behavior). If already paused, events remain queued.
    */
   notifyQueryEnd(aborted = false): void {
     this.currentAc = null;
     this._queryRunning = false;
-    if (!aborted && this.pendingEvents.length > 0 && this.currentTaskId && this.currentIssue) {
-      const events = this.pendingEvents.splice(0);
-      this.enqueuePrompt(this.buildAndLogEventPrompt(events), false);
+    if (aborted) {
+      if (this.pendingEvents.length > 0 && !this._eventsPaused) {
+        this._eventsPaused = true;
+        this.display.print(c.amber("⚠ Events received while running — /worker:events to process them"));
+        this._syncPendingEventsStatus();
+      }
+    } else if (!this._eventsPaused) {
+      if (this.pendingEvents.length > 0 && this.currentTaskId && this.currentIssue) {
+        const events = this.pendingEvents.splice(0);
+        this.enqueuePrompt(this.buildAndLogEventPrompt(events), false);
+      }
     }
     void this.agentStatus.refreshBranch();
   }
@@ -232,6 +248,21 @@ export class WorkerController extends EventEmitter {
       return true;
     }
     return false;
+  }
+
+  /**
+   * Pause event auto-processing. Clears any pending debounce timer so events
+   * already queued will not auto-fire. Called when the user starts typing at
+   * the input prompt (first keystroke, buffer empty → non-empty).
+   */
+  pauseEvents(): void {
+    if (this._eventsPaused) return;
+    this._eventsPaused = true;
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
+    }
+    this._syncPendingEventsStatus();
   }
 
   /**
@@ -493,6 +524,22 @@ export class WorkerController extends EventEmitter {
         await this.stop();
       },
     });
+    registry.register("events", {
+      description: "Process queued events (unpauses auto-processing)",
+      handler: async () => {
+        if (!this._isActive) {
+          this.display.print(c.boldRed("Not connected to a foreman."));
+          return undefined;
+        }
+        const events = this.pendingEvents.splice(0);
+        this._eventsPaused = false;
+        this._syncPendingEventsStatus();
+        if (events.length > 0 && this.currentTaskId && this.currentIssue) {
+          this.enqueuePrompt(this.buildAndLogEventPrompt(events), false);
+        }
+        return undefined;
+      },
+    });
     registry.register("claim", {
       description: "Claim a specific task by ID",
       handler: async (args: string) => {
@@ -563,10 +610,12 @@ export class WorkerController extends EventEmitter {
     this.reconnectAttempts = 0;
     this.currentAc = null;
     this._queryRunning = false;
+    this._eventsPaused = false;
     if (this.debounceTimer) {
       clearTimeout(this.debounceTimer);
       this.debounceTimer = null;
     }
+    this._syncPendingEventsStatus();
   }
 
   /**
@@ -750,6 +799,7 @@ export class WorkerController extends EventEmitter {
         this.bufferedMessages = [];
         this.pendingPrompts = [];
         this.pendingEvents = [];
+        this._eventsPaused = false;
         this.currentTaskId = undefined;
         this.currentIssue = undefined;
         this.agentStatus.update({
@@ -758,6 +808,7 @@ export class WorkerController extends EventEmitter {
           taskNumber: undefined,
           prNumber: undefined,
           branch: "",
+          pendingEventsCount: 0,
         });
         this.agentStatus.resetTaskStats();
         this.display.print(c.amber("Task cancelled (reassigned to another worker)."));
@@ -868,14 +919,15 @@ export class WorkerController extends EventEmitter {
 
       // Actionable event: queue it for debounced dispatch.
       this.pendingEvents.push(event);
+      if (this._eventsPaused) this._syncPendingEventsStatus();
 
-      if (!this._queryRunning && this.currentTaskId && this.currentIssue) {
-        // No query running: set up/reset debounce timer to batch rapid events.
+      if (!this._eventsPaused && !this._queryRunning && this.currentTaskId && this.currentIssue) {
+        // No query running and not paused: set up/reset debounce timer to batch rapid events.
         // When the timer fires, events are enqueued and main()'s ask() is signalled.
         if (this.debounceTimer) clearTimeout(this.debounceTimer);
         this.debounceTimer = setTimeout(() => {
           this.debounceTimer = null;
-          if (!this._queryRunning && this.currentTaskId && this.currentIssue) {
+          if (!this._eventsPaused && !this._queryRunning && this.currentTaskId && this.currentIssue) {
             const events = this.pendingEvents.splice(0);
             if (events.length > 0) {
               this.enqueuePrompt(this.buildAndLogEventPrompt(events), false);
@@ -885,8 +937,12 @@ export class WorkerController extends EventEmitter {
           }
         }, debounceMs(this.pendingEvents));
       }
-      // If _queryRunning: events stay in pendingEvents, drained in notifyQueryEnd().
+      // If _queryRunning or _eventsPaused: events stay in pendingEvents.
     }
+  }
+
+  private _syncPendingEventsStatus(): void {
+    this.agentStatus.update({ pendingEventsCount: this._eventsPaused ? this.pendingEvents.length : 0 });
   }
 
   private buildAndLogEventPrompt(events: Wire.WebhookEvent[]): string {

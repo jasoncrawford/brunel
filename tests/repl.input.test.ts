@@ -1090,3 +1090,71 @@ describe("ask() - stash (^S)", () => {
     });
   });
 });
+
+describe("firstKeystroke event", () => {
+  it("emits 'firstKeystroke' on first character typed when buffer is empty", async () => {
+    await withFakeStdin(async (stdin) => {
+      const onFirstKeystroke = vi.fn();
+      testInput.on("firstKeystroke", onFirstKeystroke);
+      const p = testInput.ask("> ", () => []);
+      stdin.push("a");
+      stdin.push("\r");
+      await p;
+      expect(onFirstKeystroke).toHaveBeenCalledOnce();
+    });
+  });
+
+  it("does not emit 'firstKeystroke' when buffer starts non-empty (stash pre-populated)", async () => {
+    // Prime the stash so the buffer starts non-empty
+    await withFakeStdin(async (stdin) => {
+      const p = testInput.ask("> ", () => []);
+      stdin.push("stashed");
+      stdin.push("\x13"); // ^S stashes
+      stdin.push("\r"); // submit empty
+      await p;
+    });
+
+    await withFakeStdin(async (stdin) => {
+      const onFirstKeystroke = vi.fn();
+      testInput.on("firstKeystroke", onFirstKeystroke);
+      const p = testInput.ask("> ", () => []);
+      // Buffer is already "stashed" from stash — typing 'x' doesn't transition from empty
+      stdin.push("x");
+      stdin.push("\r");
+      await p;
+      expect(onFirstKeystroke).not.toHaveBeenCalled();
+    });
+  });
+
+  it("emits 'firstKeystroke' only once per ask() call (second char is not a first keystroke)", async () => {
+    await withFakeStdin(async (stdin) => {
+      const onFirstKeystroke = vi.fn();
+      testInput.on("firstKeystroke", onFirstKeystroke);
+      const p = testInput.ask("> ", () => []);
+      stdin.push("a");
+      stdin.push("b");
+      stdin.push("\r");
+      await p;
+      expect(onFirstKeystroke).toHaveBeenCalledOnce();
+    });
+  });
+
+  it("emits again on a new ask() call if buffer starts empty again", async () => {
+    await withFakeStdin(async (stdin) => {
+      const onFirstKeystroke = vi.fn();
+      testInput.on("firstKeystroke", onFirstKeystroke);
+
+      const p1 = testInput.ask("> ", () => []);
+      stdin.push("a");
+      stdin.push("\r");
+      await p1;
+
+      const p2 = testInput.ask("> ", () => []);
+      stdin.push("b");
+      stdin.push("\r");
+      await p2;
+
+      expect(onFirstKeystroke).toHaveBeenCalledTimes(2);
+    });
+  });
+});

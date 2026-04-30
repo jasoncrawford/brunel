@@ -608,8 +608,9 @@ export class Renderer {
       retryInSeconds != null                     ? `Disconnected${codeStr}. Retrying in ${retryInSeconds}s` :
                                                    `Disconnected${codeStr}`;
 
-    // Left side: worker {id8} ∙ {model} ∙ {task info}
+    // Left side: worker {id8} ∙ {model} ∙ [badge] ∙ {task info}
     const parts = [...baseParts];
+    if (status.pendingEventsCount > 0) parts.push(`📬 ${status.pendingEventsCount}`);
     if (status.taskNumber != null) parts.push(`task #${status.taskNumber}`);
     else parts.push("no current task");
     if (status.prNumber != null) parts.push(`PR #${status.prNumber}`);

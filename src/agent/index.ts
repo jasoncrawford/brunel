@@ -131,6 +131,11 @@ export class BrunelAgent {
       this.input.cancel();
       enqueueRoutingEvent({ type: "session", event: "fatal" });
     });
+    this.input.on("firstKeystroke", () => {
+      if (workerController.isActive) {
+        workerController.pauseEvents();
+      }
+    });
 
     // ── Signal handlers ───────────────────────────────────────────────────────
     //
@@ -289,6 +294,10 @@ export class BrunelAgent {
     // In worker mode with no active task, use an empty prompt so stdin remains
     // active (^D / ^C still work) but no "[agent] > " is displayed while waiting.
     const listenForInput = (): void => {
+      const n = workerController.pendingEventsCount;
+      if (n > 0) {
+        this.display.print(c.amber(`⚠ ${n} event${n === 1 ? "" : "s"} queued — /worker:events to process them`));
+      }
       const promptStr = workerController.isActive
         ? (workerController.hasTask() ? "\n[agent] > " : "")
         : "\n> ";
