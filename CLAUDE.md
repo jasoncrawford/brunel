@@ -24,6 +24,8 @@ MVC structure. Models own state; controllers handle external inputs.
 
 A unified REPL + worker loop. `index.ts` is the composition root; `AgentController` handles running queries via the Claude SDK.
 
+**Worker mode is human-supervised, not fully autonomous.** A human is always present at the terminal: they can type prompts, run slash commands, interrupt queries, and respond to confirmation dialogs. The foreman assigns tasks and sends prompts automatically, but the worker does not run unattended. Design accordingly — don't route around the human or assume no one is watching the console.
+
 Follows MVC with three subdirectories:
 
 - **Models** (`models/`) — `Workspace` (git/npm workspace management), `Settings` (runtime-settable preferences: model, effort, permissions), `QueryStats` (token usage/turn counts and API cost from SDK messages), `AgentStatus` (pure state model for worker status — emits `"change"` on updates, subscribed to by `Display` for reactive redraws; also owns static git/id utilities `getCurrentBranch`, `getRemoteRepo`, `generateAgentId`)
