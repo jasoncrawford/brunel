@@ -8,6 +8,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "events";
 import { WorkerController } from "../src/agent/controllers/worker-controller.js";
+import { UserCancelledError } from "../src/agent/controllers/workspace-controller.js";
 import { AgentStatus } from "../src/agent/models/agent-status.js";
 import { CommandRegistry } from "../src/agent/controllers/command-controller.js";
 import * as Wire from "../shared/wire.js";
@@ -197,6 +198,26 @@ describe("when has an active task", () => {
     const claim = sentClaimTask(fakeWs);
     expect(claim).toBeDefined();
     expect(claim?.taskId).toBe("new-task-id");
+  });
+
+  it("complete-and-claim: does NOT claim when afterTask throws UserCancelledError", async () => {
+    const pickFn = vi.fn().mockResolvedValue(0); // "Yes, complete first"
+    const afterTask = vi.fn().mockRejectedValue(new UserCancelledError());
+    sessionWithPick = new WorkerController(
+      new AgentStatus({ agentId: "test-worker-id" }),
+      display,
+      undefined,
+      undefined,
+      "owner/repo",
+      { wsFactory, pickFn, afterTask },
+    );
+    await sessionWithPick.start();
+    setupActiveTask(sessionWithPick);
+    fakeWs.send.mockClear();
+    const handler = await getClaimHandler(sessionWithPick);
+    await handler("new-task-id");
+    expect(sentTaskComplete(fakeWs)).toBeUndefined();
+    expect(sentClaimTask(fakeWs)).toBeUndefined();
   });
 
   it("quit sends goodbye, clears current task, and sets pending claim for reconnect", async () => {

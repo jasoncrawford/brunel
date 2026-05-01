@@ -10,7 +10,7 @@ import { fmtNum, fmtTaskStats } from "../../../shared/formatters.js";
 import { getConfig } from "../../config.js";
 import type { CommandRegistry } from "./command-controller.js";
 import { Picker } from "../views/picker.js";
-import { WorkspaceController } from "./workspace-controller.js";
+import { WorkspaceController, UserCancelledError } from "./workspace-controller.js";
 
 // ── WorkerDisplay interface ───────────────────────────────────────────────────
 
@@ -296,6 +296,7 @@ export class WorkerController extends EventEmitter {
   private async buildCompleteGoodbyeOpts(): Promise<{ task_complete: true; stats?: { inputTokens: number; outputTokens: number; costUsd?: number } }> {
     if (this._activeAfterTask) {
       try { await this._activeAfterTask(); } catch (err) {
+        if (err instanceof UserCancelledError) throw err;
         this.display.print(c.amber(`afterTask failed: ${fmtError(err)}`));
       }
     }
@@ -390,6 +391,7 @@ export class WorkerController extends EventEmitter {
     if (!this.currentTaskId) return undefined;
     if (this._activeAfterTask) {
       try { await this._activeAfterTask(); } catch (err) {
+        if (err instanceof UserCancelledError) throw err;
         // Log but don't abort — the task IS complete even if workspace cleanup fails.
         // Returning early here would leave the task stuck on the foreman forever.
         this.display.print(c.amber(`afterTask failed: ${fmtError(err)}`));
@@ -492,7 +494,12 @@ export class WorkerController extends EventEmitter {
     if (taskInfo) {
       const choice = await this.confirmTaskQuit(taskInfo);
       if (choice === "cancel") return;
-      if (choice === "complete-and-quit") goodbyeOpts = await this.buildCompleteGoodbyeOpts();
+      if (choice === "complete-and-quit") {
+        try { goodbyeOpts = await this.buildCompleteGoodbyeOpts(); } catch (err) {
+          if (err instanceof UserCancelledError) return;
+          throw err;
+        }
+      }
     }
     this._stopped = true;
     this.sendGoodbye(goodbyeOpts);
@@ -517,7 +524,10 @@ export class WorkerController extends EventEmitter {
           this.display.print(c.boldRed("Not connected to a foreman."));
           return undefined;
         }
-        return this.completeCurrentTask();
+        try { return await this.completeCurrentTask(); } catch (err) {
+          if (err instanceof UserCancelledError) return undefined;
+          throw err;
+        }
       },
     });
     registry.register("start", {
@@ -570,7 +580,10 @@ export class WorkerController extends EventEmitter {
             const choice = await this.confirmTaskClaim(taskInfo);
             if (choice === "cancel") return undefined;
             if (choice === "complete-and-claim") {
-              await this.completeCurrentTask();
+              try { await this.completeCurrentTask(); } catch (err) {
+                if (err instanceof UserCancelledError) return undefined;
+                throw err;
+              }
               // currentTaskId is now cleared; fall through to claim below
             } else {
               // "claim" — abandon current task: signal foreman and reconnect with new claim
