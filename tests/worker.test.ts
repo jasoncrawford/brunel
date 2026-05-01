@@ -1732,6 +1732,42 @@ describe("completeCurrentTask: post-completion prompt", () => {
       expect.stringContaining("Quit"),
     ]);
   });
+
+  it("skips picker and returns 'task-complete' when a task is already queued on entry", async () => {
+    const mockPick = vi.fn().mockResolvedValue(0);
+    const { sess, ws } = await makeSession(mockPick);
+    // Queue a new task before completing the current one; enqueuePrompt sets hasPendingPrompts()
+    sendMsg(ws, { type: "task_assigned", taskId: "t-pre", issue: makeIssue(99) });
+    const result = await sess.completeCurrentTask();
+    expect(result).toBe("task-complete");
+    expect(mockPick).not.toHaveBeenCalled();
+    const printed = display.print.mock.calls.map(([l]: [string]) => stripAnsi(l));
+    expect(printed.some(l => l.includes("Waiting for next task"))).toBe(true);
+  });
+
+  it("auto-dismisses picker and returns 'task-complete' when prompts_ready fires while picker is showing", async () => {
+    // pickFn signals when it has been called, then blocks indefinitely.
+    let signalPickShowing!: () => void;
+    const pickShowingP = new Promise<void>(r => { signalPickShowing = r; });
+    const { sess, ws } = await makeSession(async () => {
+      signalPickShowing();
+      return new Promise<number>(() => {}); // never resolves
+    });
+
+    const resultP = sess.completeCurrentTask();
+
+    // Wait until pickFn has been invoked — the once("prompts_ready") listener is
+    // already registered at this point (it is set up before pickFn is called).
+    await pickShowingP;
+
+    // Sending task_assigned emits prompts_ready, which dismisses the picker race.
+    sendMsg(ws, { type: "task_assigned", taskId: "t-mid", issue: makeIssue(88) });
+
+    const result = await resultP;
+    expect(result).toBe("task-complete");
+    const printed = display.print.mock.calls.map(([l]: [string]) => stripAnsi(l));
+    expect(printed.some(l => l.includes("Waiting for next task"))).toBe(true);
+  });
 });
 
 // ── sendGoodbye ───────────────────────────────────────────────────────────────

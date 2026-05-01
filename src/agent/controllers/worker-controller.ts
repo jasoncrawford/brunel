@@ -440,6 +440,9 @@ export class WorkerController extends EventEmitter {
    * After completing a task, prompt the user for what to do next.
    * Falls back to "wait for next task" silently when no picker is available
    * (e.g. non-interactive environments or tests that don't inject a pickFn).
+   *
+   * Auto-dismisses with "wait for next task" if a new task is assigned while
+   * the picker is showing, so the routing loop can proceed without user input.
    */
   private async promptAfterTaskComplete(): Promise<"task-complete" | "exit"> {
     const pickFn = this.options?.pickFn ?? (this.picker ? (opts: string[]) => this.picker!.pick(opts) : null);
@@ -449,13 +452,42 @@ export class WorkerController extends EventEmitter {
       return "task-complete";
     }
 
-    const idx = await pickFn([
+    // If a task was already enqueued before we reached the picker, skip it.
+    if (this.hasPendingPrompts()) {
+      this.display.print(c.sageGreen("Waiting for next task..."));
+      return "task-complete";
+    }
+
+    // Race the picker against a prompts_ready event. If a new task is assigned
+    // while the picker is showing, auto-dismiss and proceed to the task.
+    let dismissHandler: (() => void) | undefined;
+    const dismissedByTask = new Promise<void>((resolve) => {
+      dismissHandler = resolve;
+      this.once("prompts_ready", resolve);
+    });
+
+    const pickerP = pickFn([
       "Wait to be assigned the next task",
       "Choose a specific task to work on",
       "Stop working for now",
       "Quit and exit",
     ]);
 
+    const winner = await Promise.race([
+      pickerP.then(idx => ({ type: "pick" as const, idx })),
+      dismissedByTask.then(() => ({ type: "dismiss" as const })),
+    ]);
+
+    // Clean up the dismiss listener whether or not it fired.
+    this.off("prompts_ready", dismissHandler!);
+
+    if (winner.type === "dismiss") {
+      this.picker?.cancel(); // erase the picker UI from the terminal
+      this.display.print(c.sageGreen("Waiting for next task..."));
+      return "task-complete";
+    }
+
+    const { idx } = winner;
     switch (idx) {
       case 1:
         await this.stop();
