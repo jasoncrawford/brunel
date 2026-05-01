@@ -311,7 +311,7 @@ describe("pipeline: happy path and queued-then-assigned", () => {
     // 3. Worker connects; hello_ack + task_assigned arrive
     const ws = await connect();
     const q = makeQueue(ws);
-    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "ready" });
     const ack = await q.next();
     expect(ack.type).toBe("hello_ack");
 
@@ -352,7 +352,7 @@ describe("pipeline: happy path and queued-then-assigned", () => {
     // 3. Worker connects later
     const ws = await connect();
     const q = makeQueue(ws);
-    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w2", status: "idle" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w2", status: "ready" });
     const ack = await q.next();
     expect(ack.type).toBe("hello_ack");
 
@@ -404,7 +404,7 @@ describe("pipeline: worker disconnect/reclaim", () => {
     await foremanWss.routeEvent("evt-1", "issues", labeledPayload(70));
     const ws1 = await connect();
     const q1 = makeQueue(ws1);
-    send(ws1, { type: "worker_hello", repo: "owner/repo", workerId: "w-reclaim", status: "idle" });
+    send(ws1, { type: "worker_hello", repo: "owner/repo", workerId: "w-reclaim", status: "ready" });
     await q1.next(); // hello_ack
     await q1.next(); // task_assigned
 
@@ -497,7 +497,7 @@ describe("pipeline: dependency blocking", () => {
     // 1. Connect an idle worker
     const ws = await connect();
     const q = makeQueue(ws);
-    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w-blocked", status: "idle" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w-blocked", status: "ready" });
     const ack = await q.next();
     expect(ack.type).toBe("hello_ack");
     expect((ack as any).status).toBe("idle");
@@ -565,7 +565,7 @@ describe("pipeline: PR events forwarded and logged to DB", () => {
     await foremanWss.routeEvent("evt-1", "issues", labeledPayload(100));
     const ws = await connect();
     const q = makeQueue(ws);
-    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w-pr", status: "idle" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w-pr", status: "ready" });
     await q.next(); // hello_ack
     await q.next(); // task_assigned
     await q.next(); // event_notification: issues/labeled (queued at enqueue time, flushed on assign)

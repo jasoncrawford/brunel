@@ -140,7 +140,7 @@ afterEach(() => {
 describe("foreman log timestamps", () => {
   it("worker hello log lines start with ISO 8601 timestamp", async () => {
     const ws = await connect();
-    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "worker-abc123", status: "idle" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "worker-abc123", status: "ready" });
     await waitUntil(() => !!Worker.fromRegistry("worker-abc123"));
 
     expect(logLines.length).toBeGreaterThan(0);
@@ -154,7 +154,7 @@ describe("foreman log timestamps", () => {
 
     const ws = await connect();
     const reply = nextMsgWhere(ws, (m) => m.type === "task_assigned");
-    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "worker-abc123", status: "idle" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "worker-abc123", status: "ready" });
     await reply;
 
     for (const line of logLines) {
@@ -166,7 +166,7 @@ describe("foreman log timestamps", () => {
     await registerReady(taskManager, "1", 1, "owner/repo", "Fix the thing", "Body", []);
 
     const ws = await connect();
-    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "worker-abc123", status: "idle" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "worker-abc123", status: "ready" });
     await nextMsgWhere(ws, (m) => m.type === "task_assigned");
 
     logLines.length = 0;
@@ -181,7 +181,7 @@ describe("foreman log timestamps", () => {
 
   it("task enqueue log line starts with ISO 8601 timestamp", async () => {
     const ws = await connect();
-    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "worker-abc123", status: "idle" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "worker-abc123", status: "ready" });
     await waitUntil(() => !!Worker.fromRegistry("worker-abc123"));
 
     logLines.length = 0;

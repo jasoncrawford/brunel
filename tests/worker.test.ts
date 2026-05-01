@@ -479,7 +479,7 @@ describe("reconnect", () => {
     expect(wsFactory).toHaveBeenCalledTimes(2);
 
     // Simulate successful reconnect — hello_ack resets attempts to 0
-    sendMsg(ws2, { type: "hello_ack", status: "idle" });
+    sendMsg(ws2, { type: "hello_ack", status: "ready" });
 
     // Now disconnect again — should use attempt 0 delay (500ms), not attempt 1 (1000ms)
     ws2.emit("close", 1006, Buffer.from(""));
@@ -560,7 +560,7 @@ describe("connection status bar", () => {
 
   it("shows Connected in status text after hello_ack", () => {
     fakeWs.emit("open");
-    sendMsg(fakeWs, { type: "hello_ack", status: "idle" });
+    sendMsg(fakeWs, { type: "hello_ack", status: "ready" });
     expect(fmtStatus(sb)).toContain("Connected");
   });
 
@@ -785,7 +785,7 @@ describe("hello_ack handshake — buffering", () => {
       expect(newWs.send).not.toHaveBeenCalled();
 
       // Send hello_ack → buffer should be flushed
-      sendMsg(newWs, { type: "hello_ack", workerId: AGENT_ID, status: "busy" });
+      sendMsg(newWs, { type: "hello_ack", workerId: AGENT_ID, status: "assigned" });
       expect(newWs.send).toHaveBeenCalledOnce();
       const sent = JSON.parse(newWs.send.mock.calls[0][0]);
       expect(sent).toEqual({ type: "task_complete", workerId: AGENT_ID, taskId: "42" });
@@ -983,7 +983,7 @@ describe("hello_ack handshake — buffering", () => {
       expect(newWs.send).not.toHaveBeenCalled();
 
       // hello_ack idle — task was reverted on foreman side; but worker flushes anyway
-      sendMsg(newWs, { type: "hello_ack", workerId: AGENT_ID, status: "idle" });
+      sendMsg(newWs, { type: "hello_ack", workerId: AGENT_ID, status: "ready" });
       expect(newWs.send).toHaveBeenCalledOnce();
       const sent = JSON.parse(newWs.send.mock.calls[0][0]);
       expect(sent.type).toBe("task_complete");
@@ -994,9 +994,9 @@ describe("hello_ack handshake — buffering", () => {
   });
 
   it("hello_ack is passed to display.printForemanMessage", () => {
-    sendMsg(fakeWs, { type: "hello_ack", workerId: AGENT_ID, status: "idle" });
+    sendMsg(fakeWs, { type: "hello_ack", workerId: AGENT_ID, status: "ready" });
     expect(display.printForemanMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ type: "hello_ack", workerId: AGENT_ID, status: "idle" })
+      expect.objectContaining({ type: "hello_ack", workerId: AGENT_ID, status: "ready" })
     );
   });
 });
@@ -1398,7 +1398,7 @@ describe("stop() with active task", () => {
       pickFn: async () => 0, // first option = "No, keep working" = cancel
     });
     await s.start();
-    sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "idle" });
+    sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "ready" });
     sendMsg(ws, { type: "task_assigned", taskId: "99", issue: makeIssue() });
     s.takeNextPrompt();
 
@@ -1415,7 +1415,7 @@ describe("stop() with active task", () => {
       pickFn: async () => 1, // second option = "Yes, quit anyway" = quit
     });
     await s.start();
-    sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "idle" });
+    sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "ready" });
     sendMsg(ws, { type: "task_assigned", taskId: "99", issue: makeIssue() });
     s.takeNextPrompt();
 
@@ -1881,7 +1881,7 @@ describe("heartbeat", () => {
     vi.useFakeTimers();
     const { ws } = await makeHeartbeatSession();
     ws.emit("open");
-    sendMsg(ws, { type: "hello_ack", status: "idle" });
+    sendMsg(ws, { type: "hello_ack", status: "ready" });
 
     expect(ws.ping).not.toHaveBeenCalled();
     vi.advanceTimersByTime(25000);
@@ -1892,7 +1892,7 @@ describe("heartbeat", () => {
     vi.useFakeTimers();
     const { ws } = await makeHeartbeatSession();
     ws.emit("open");
-    sendMsg(ws, { type: "hello_ack", status: "idle" });
+    sendMsg(ws, { type: "hello_ack", status: "ready" });
 
     vi.advanceTimersByTime(25000); // first ping sent, isAlive set to false
     ws.emit("pong");               // pong received, isAlive reset to true
@@ -1905,7 +1905,7 @@ describe("heartbeat", () => {
     vi.useFakeTimers();
     const { ws } = await makeHeartbeatSession();
     ws.emit("open");
-    sendMsg(ws, { type: "hello_ack", status: "idle" });
+    sendMsg(ws, { type: "hello_ack", status: "ready" });
 
     vi.advanceTimersByTime(25000); // first ping sent, isAlive set to false
     ws.emit("ping");               // foreman's heartbeat ping resets isAlive to true
@@ -1918,7 +1918,7 @@ describe("heartbeat", () => {
     vi.useFakeTimers();
     const { ws } = await makeHeartbeatSession();
     ws.emit("open");
-    sendMsg(ws, { type: "hello_ack", status: "idle" });
+    sendMsg(ws, { type: "hello_ack", status: "ready" });
 
     vi.advanceTimersByTime(25000); // first ping sent, isAlive set to false
     // no pong emitted
@@ -1931,7 +1931,7 @@ describe("heartbeat", () => {
     vi.useFakeTimers();
     const { ws, s } = await makeHeartbeatSession();
     ws.emit("open");
-    sendMsg(ws, { type: "hello_ack", status: "idle" });
+    sendMsg(ws, { type: "hello_ack", status: "ready" });
     expect(fmtStatus(s.agentStatus)).toContain("Connected");
 
     vi.advanceTimersByTime(25000); // ping sent
@@ -1944,7 +1944,7 @@ describe("heartbeat", () => {
     vi.useFakeTimers();
     const { ws, factory } = await makeHeartbeatSession();
     ws.emit("open");
-    sendMsg(ws, { type: "hello_ack", status: "idle" });
+    sendMsg(ws, { type: "hello_ack", status: "ready" });
 
     vi.advanceTimersByTime(25000); // ping sent
     vi.advanceTimersByTime(25000); // no pong → terminate
@@ -1957,7 +1957,7 @@ describe("heartbeat", () => {
     vi.useFakeTimers();
     const { ws } = await makeHeartbeatSession();
     ws.emit("open");
-    sendMsg(ws, { type: "hello_ack", status: "idle" });
+    sendMsg(ws, { type: "hello_ack", status: "ready" });
 
     vi.advanceTimersByTime(25000); // first ping sent
     expect(ws.ping).toHaveBeenCalledOnce();
@@ -1978,7 +1978,7 @@ describe("heartbeat", () => {
     vi.useFakeTimers();
     const { ws } = await makeHeartbeatSession();
     ws.emit("open");
-    sendMsg(ws, { type: "hello_ack", status: "idle" });
+    sendMsg(ws, { type: "hello_ack", status: "ready" });
 
     vi.advanceTimersByTime(25000); // first ping sent
 
@@ -2190,7 +2190,7 @@ describe("repo activation flow", () => {
   it("when repoStatus is 'new', shows activation prompt before transitioning", async () => {
     const pickFn = vi.fn().mockResolvedValue(0); // "Yes, activate"
     const { sess, ws } = await makeSessionWithPick(pickFn);
-    sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "idle", repoStatus: "new" });
+    sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "ready", repoStatus: "new" });
     await new Promise((r) => setTimeout(r, 10));
     expect(pickFn).toHaveBeenCalledWith(expect.arrayContaining(["Yes, activate", "No, skip"]));
   });
@@ -2198,7 +2198,7 @@ describe("repo activation flow", () => {
   it("when user confirms activation, sends activate_repo to the foreman", async () => {
     const pickFn = vi.fn().mockResolvedValue(0); // "Yes, activate"
     const { sess, ws } = await makeSessionWithPick(pickFn);
-    sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "idle", repoStatus: "new" });
+    sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "ready", repoStatus: "new" });
     await new Promise((r) => setTimeout(r, 10));
     const sent = ws.send.mock.calls.map(([d]: [string]) => JSON.parse(d));
     const activateMsg = sent.find((m) => m.type === "activate_repo");
@@ -2209,7 +2209,7 @@ describe("repo activation flow", () => {
   it("when user confirms, does NOT yet transition to registered (waits for repo_activated)", async () => {
     const pickFn = vi.fn().mockResolvedValue(0); // "Yes, activate"
     const { sess, ws } = await makeSessionWithPick(pickFn);
-    sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "idle", repoStatus: "new" });
+    sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "ready", repoStatus: "new" });
     // No task has been assigned — still no pending prompts
     expect(sess.hasPendingPrompts()).toBe(false); // no task prompt yet
   });
@@ -2217,7 +2217,7 @@ describe("repo activation flow", () => {
   it("when repo_activated is received, transitions to registered and can accept tasks", async () => {
     const pickFn = vi.fn().mockResolvedValue(0); // "Yes, activate"
     const { sess, ws } = await makeSessionWithPick(pickFn);
-    sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "idle", repoStatus: "new" });
+    sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "ready", repoStatus: "new" });
     await new Promise((r) => setTimeout(r, 10));
     // Foreman responds with repo_activated
     sendMsg(ws, { type: "repo_activated", workerId: AGENT_ID });
@@ -2230,7 +2230,7 @@ describe("repo activation flow", () => {
   it("when user declines activation, does not send activate_repo to the foreman", async () => {
     const pickFn = vi.fn().mockResolvedValue(1); // "No, skip"
     const { sess, ws } = await makeSessionWithPick(pickFn);
-    sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "idle", repoStatus: "new" });
+    sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "ready", repoStatus: "new" });
     await new Promise((r) => setTimeout(r, 10));
     const sent = ws.send.mock.calls.map(([d]: [string]) => JSON.parse(d));
     const activateMsg = sent.find((m) => m.type === "activate_repo");
@@ -2240,7 +2240,7 @@ describe("repo activation flow", () => {
   it("when user declines activation, worker mode ends (isActive = false)", async () => {
     const pickFn = vi.fn().mockResolvedValue(1); // "No, skip"
     const { sess, ws } = await makeSessionWithPick(pickFn);
-    sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "idle", repoStatus: "new" });
+    sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "ready", repoStatus: "new" });
     await new Promise((r) => setTimeout(r, 10));
     expect(sess.isActive).toBe(false);
   });
@@ -2250,7 +2250,7 @@ describe("repo activation flow", () => {
     const { sess, ws } = await makeSessionWithPick(pickFn);
     const onPromptsReady = vi.fn();
     sess.on("prompts_ready", onPromptsReady);
-    sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "idle", repoStatus: "new" });
+    sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "ready", repoStatus: "new" });
     // stop() awaits refreshBranch() (a git command) before we emit, so wait longer
     await vi.waitFor(() => expect(onPromptsReady).toHaveBeenCalled(), { timeout: 2000 });
   });
@@ -2258,7 +2258,7 @@ describe("repo activation flow", () => {
   it("when repoStatus is 'active', transitions normally without showing activation prompt", async () => {
     const pickFn = vi.fn().mockResolvedValue(0);
     const { sess, ws } = await makeSessionWithPick(pickFn);
-    sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "idle", repoStatus: "active" });
+    sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "ready", repoStatus: "active" });
     await new Promise((r) => setTimeout(r, 10));
     expect(pickFn).not.toHaveBeenCalled();
   });
@@ -2266,7 +2266,7 @@ describe("repo activation flow", () => {
   it("activation prompt includes the repo name from options", async () => {
     const pickFn = vi.fn().mockResolvedValue(0);
     const { disp, ws } = await makeSessionWithPick(pickFn, "acme/my-project");
-    sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "idle", repoStatus: "new" });
+    sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "ready", repoStatus: "new" });
     await new Promise((r) => setTimeout(r, 10));
     const printedLines = disp.print.mock.calls.map(([l]: [string]) => l);
     expect(printedLines.some((l) => l.includes("acme/my-project"))).toBe(true);
@@ -2275,7 +2275,7 @@ describe("repo activation flow", () => {
   it("emits prompts_ready after repo_activated so the main loop can re-start stdin listening", async () => {
     const pickFn = vi.fn().mockResolvedValue(0); // "Yes, activate"
     const { sess, ws } = await makeSessionWithPick(pickFn);
-    sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "idle", repoStatus: "new" });
+    sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "ready", repoStatus: "new" });
     await new Promise((r) => setTimeout(r, 10));
 
     let emitted = false;
@@ -2304,7 +2304,7 @@ function makeSessionWithPickResult(pickResult: number): { s: WorkerController; w
 describe("transitionToIdle — Waiting for tasks message", () => {
   it("prints 'Waiting for tasks...' on hello_ack idle", () => {
     display.print.mockClear();
-    sendMsg(fakeWs, { type: "hello_ack", workerId: AGENT_ID, status: "idle" });
+    sendMsg(fakeWs, { type: "hello_ack", workerId: AGENT_ID, status: "ready" });
     const printed = display.print.mock.calls.map(([l]: [string]) => stripAnsi(l)).join("\n");
     expect(printed).toContain("Waiting for tasks");
   });
@@ -2314,7 +2314,7 @@ describe("transitionToIdle — Waiting for tasks message", () => {
     sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
     session.takeNextPrompt();
     display.print.mockClear();
-    sendMsg(fakeWs, { type: "hello_ack", workerId: AGENT_ID, status: "busy" });
+    sendMsg(fakeWs, { type: "hello_ack", workerId: AGENT_ID, status: "assigned" });
     const printed = display.print.mock.calls.map(([l]: [string]) => stripAnsi(l)).join("\n");
     expect(printed).not.toContain("Waiting for tasks");
   });
@@ -2333,7 +2333,7 @@ describe("transitionToIdle — Waiting for tasks message", () => {
     const { s, ws } = makeSessionWithPickResult(0); // 0 = "Yes, activate"
     await s.start();
     ws.emit("open");
-    sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "idle", repoStatus: "new" });
+    sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "ready", repoStatus: "new" });
     await new Promise(r => setTimeout(r, 0)); // let async pick resolve
     display.print.mockClear();
     sendMsg(ws, { type: "repo_activated", workerId: AGENT_ID });

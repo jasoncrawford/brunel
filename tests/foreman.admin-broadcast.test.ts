@@ -118,11 +118,11 @@ describe("foreman admin broadcast — hello_ack log event summary", () => {
     adminWss.broadcastLogEvent = (entry) => logEntries.push(entry);
 
     const ws = await connect();
-    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "worker-abc", status: "idle" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "worker-abc", status: "ready" });
     await waitUntil(() => logEntries.some((e) => e.summary.includes("hello_ack")));
 
     const entry = logEntries.find((e) => e.summary.includes("hello_ack"));
-    expect(entry?.summary).toContain("idle");
+    expect(entry?.summary).toContain("ready");
   });
 
   it("hello_ack busy includes status and taskId in summary", async () => {
@@ -137,11 +137,11 @@ describe("foreman admin broadcast — hello_ack log event summary", () => {
     adminWss.broadcastLogEvent = (entry) => logEntries.push(entry);
 
     const ws = await connect();
-    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "worker-abc", status: "busy", taskId: "42" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "worker-abc", status: "assigned", taskId: "42" });
     await waitUntil(() => logEntries.some((e) => e.summary.includes("hello_ack")));
 
     const entry = logEntries.find((e) => e.summary.includes("hello_ack"));
-    expect(entry?.summary).toContain("busy");
+    expect(entry?.summary).toContain("assigned");
     expect(entry?.summary).toContain("42");
   });
 
@@ -158,7 +158,7 @@ describe("foreman admin broadcast — hello_ack log event summary", () => {
     adminWss.broadcastLogEvent = (entry) => logEntries.push(entry);
 
     const ws = await connect();
-    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "worker-xyz", status: "busy", taskId: "42" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "worker-xyz", status: "assigned", taskId: "42" });
     await waitUntil(() => logEntries.some((e) => e.summary.includes("hello_ack")));
 
     const entry = logEntries.find((e) => e.summary.includes("hello_ack"));
