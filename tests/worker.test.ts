@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "events";
 import { WorkerController } from "../src/agent/controllers/worker-controller.js";
+import { UserCancelledError } from "../src/agent/controllers/workspace-controller.js";
 import { AgentStatus } from "../src/agent/models/agent-status.js";
 import { Display } from "../src/agent/views/display.js";
 import * as Wire from "../shared/wire.js";
@@ -1614,6 +1615,36 @@ describe("afterTask callback on /worker:complete", () => {
     const lastMsg = JSON.parse(fakeWs.send.mock.calls.at(-1)![0]);
     expect(lastMsg.type).toBe("task_complete");
   });
+
+  it("does NOT send task_complete when afterTask throws UserCancelledError", async () => {
+    const afterTask = vi.fn().mockRejectedValue(new UserCancelledError());
+    const sessionWithAfterTask = new WorkerController(sb, display, undefined, undefined, "", { wsFactory, afterTask });
+    await sessionWithAfterTask.start();
+
+    const issue = makeIssue();
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "t1", issue });
+    sessionWithAfterTask.takeNextPrompt();
+
+    const sendCountBefore = fakeWs.send.mock.calls.length;
+    try { await sessionWithAfterTask.completeCurrentTask(); } catch { /* UserCancelledError expected */ }
+    const taskCompleteSent = fakeWs.send.mock.calls
+      .slice(sendCountBefore)
+      .some(([data]: [string]) => JSON.parse(data).type === "task_complete");
+    expect(taskCompleteSent).toBe(false);
+  });
+
+  it("preserves task state when afterTask throws UserCancelledError", async () => {
+    const afterTask = vi.fn().mockRejectedValue(new UserCancelledError());
+    const sessionWithAfterTask = new WorkerController(sb, display, undefined, undefined, "", { wsFactory, afterTask });
+    await sessionWithAfterTask.start();
+
+    const issue = makeIssue();
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "t1", issue });
+    sessionWithAfterTask.takeNextPrompt();
+
+    try { await sessionWithAfterTask.completeCurrentTask(); } catch { /* UserCancelledError expected */ }
+    expect(sessionWithAfterTask.hasTask()).toBe(true);
+  });
 });
 
 // ── completeCurrentTask: post-completion prompt ───────────────────────────────
@@ -1813,6 +1844,22 @@ describe("stop — complete-and-quit", () => {
     const msgs = fakeWs.send.mock.calls.map(([d]: [string]) => JSON.parse(d));
     const goodbye = msgs.find((m: { type: string }) => m.type === "worker_goodbye");
     expect(goodbye.stats).toBeUndefined();
+  });
+
+  it("does NOT stop when afterTask throws UserCancelledError during complete-and-quit", async () => {
+    const afterTask = vi.fn().mockRejectedValue(new UserCancelledError());
+    const s = new WorkerController(sb, display, undefined, undefined, "owner/repo", { wsFactory, afterTask });
+    await s.start();
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
+    s.takeNextPrompt();
+    vi.spyOn(s, "confirmTaskQuit").mockResolvedValue("complete-and-quit");
+
+    fakeWs.send.mockClear();
+    await s.stop();
+
+    const msgs = fakeWs.send.mock.calls.map(([d]: [string]) => JSON.parse(d));
+    expect(msgs.find((m: { type: string }) => m.type === "worker_goodbye")).toBeUndefined();
+    expect(s.isActive).toBe(true);
   });
 });
 

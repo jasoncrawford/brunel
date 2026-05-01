@@ -4,6 +4,14 @@ import type { WorkerDisplay } from "./worker-controller.js";
 import { Workspace, confirmIfUnsafe } from "../models/workspace.js";
 import { fmtError } from "../../utils.js";
 
+/** Thrown when the user explicitly cancels an operation (e.g. workspace reset). */
+export class UserCancelledError extends Error {
+  constructor() {
+    super("cancelled");
+    this.name = "UserCancelledError";
+  }
+}
+
 /**
  * WorkspaceController owns workspace lifecycle (creation, reset between tasks,
  * and destruction on exit) and registers the /workspace:* slash commands.
@@ -144,7 +152,7 @@ export class WorkspaceController {
     const ok = await confirmIfUnsafe(workspace, workspace.confirm);
     if (!ok) {
       display.print(c.amber("Workspace reset cancelled. Task not marked complete."));
-      throw new Error("cancelled");
+      throw new UserCancelledError();
     }
     try {
       await workspace.reset();
