@@ -5,7 +5,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { Worker } from "../src/foreman/models/worker.js";
 import { db } from "../src/foreman/clients/db-client.js";
-import { fakeRepo, resetDb, createTestRepo } from "./helpers/task.js";
+import { fakeRepo, resetDb, createTestRepo, seedTask } from "./helpers/task.js";
 
 function fakeWs() {
   return { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
@@ -110,22 +110,71 @@ describe("Worker DB persistence", () => {
   });
 
   it("allForDashboard includes disconnected workers with assigned tasks from DB", async () => {
+    await seedTask({ task_id: "db-w1-active", issue_number: 1001, worker_id: "w1" });
     const repo = fakeRepo("owner/repo", 1, "new");
     const w = Worker.register("w1", fakeWs(), repo);
-    const task = { taskId: "42" } as any;
+    const task = { taskId: "db-w1-active" } as any;
     w.assign(task);
     w.markDisconnected();
     Worker._reset(); // clear in-memory (simulate reconnect context)
     await new Promise((r) => setTimeout(r, 20));
     const result = await Worker.allForDashboard();
     expect(result.map((w) => w.workerId)).toContain("w1");
-    expect(result.find((w) => w.workerId === "w1")?.currentTaskId).toBe("42");
+    expect(result.find((w) => w.workerId === "w1")?.currentTaskId).toBe("db-w1-active");
   });
 
   it("allForDashboard does not include disconnected workers without tasks", async () => {
     const repo = fakeRepo("owner/repo", 1, "new");
     const w = Worker.register("w1", fakeWs(), repo);
     w.remove(); // clean disconnect, no task
+    Worker._reset();
+    await new Promise((r) => setTimeout(r, 20));
+    const result = await Worker.allForDashboard();
+    expect(result.map((w) => w.workerId)).not.toContain("w1");
+  });
+
+  it("allForDashboard excludes disconnected workers whose task is complete", async () => {
+    await seedTask({ task_id: "db-w1-done", issue_number: 1002, worker_id: "w1", completed_at: new Date().toISOString() });
+    const repo = fakeRepo("owner/repo", 1, "new");
+    const w = Worker.register("w1", fakeWs(), repo);
+    w.assign({ taskId: "db-w1-done" } as any);
+    w.markDisconnected();
+    Worker._reset();
+    await new Promise((r) => setTimeout(r, 20));
+    const result = await Worker.allForDashboard();
+    expect(result.map((w) => w.workerId)).not.toContain("w1");
+  });
+
+  it("allForDashboard excludes disconnected workers whose task is closed", async () => {
+    await seedTask({ task_id: "db-w1-closed", issue_number: 1003, worker_id: "w1", issue_closed_at: new Date().toISOString() });
+    const repo = fakeRepo("owner/repo", 1, "new");
+    const w = Worker.register("w1", fakeWs(), repo);
+    w.assign({ taskId: "db-w1-closed" } as any);
+    w.markDisconnected();
+    Worker._reset();
+    await new Promise((r) => setTimeout(r, 20));
+    const result = await Worker.allForDashboard();
+    expect(result.map((w) => w.workerId)).not.toContain("w1");
+  });
+
+  it("allForDashboard excludes disconnected workers whose task is merged", async () => {
+    await seedTask({ task_id: "db-w1-merged", issue_number: 1004, worker_id: "w1", pr_merged_at: new Date().toISOString() });
+    const repo = fakeRepo("owner/repo", 1, "new");
+    const w = Worker.register("w1", fakeWs(), repo);
+    w.assign({ taskId: "db-w1-merged" } as any);
+    w.markDisconnected();
+    Worker._reset();
+    await new Promise((r) => setTimeout(r, 20));
+    const result = await Worker.allForDashboard();
+    expect(result.map((w) => w.workerId)).not.toContain("w1");
+  });
+
+  it("allForDashboard excludes disconnected workers no longer the current worker for their task", async () => {
+    await seedTask({ task_id: "db-w1-reassigned", issue_number: 1005, worker_id: "w2" });
+    const repo = fakeRepo("owner/repo", 1, "new");
+    const w = Worker.register("w1", fakeWs(), repo);
+    w.assign({ taskId: "db-w1-reassigned" } as any);
+    w.markDisconnected();
     Worker._reset();
     await new Promise((r) => setTimeout(r, 20));
     const result = await Worker.allForDashboard();

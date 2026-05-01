@@ -137,7 +137,7 @@ export class Worker extends ActiveRecord {
 
   /**
    * For the admin dashboard: connected workers from memory plus disconnected
-   * workers from DB that still have a currently assigned task.
+   * workers from DB that are still the current worker on a non-complete task.
    */
   static async allForDashboard(): Promise<Wire.Worker[]> {
     const connected = [...registry.values()].map((w) => w.toWire());
@@ -147,9 +147,29 @@ export class Worker extends ActiveRecord {
     try {
       const { data, error } = await Worker.select().not("current_task_id", "is", null);
       if (!error && data) {
-        fromDb = (data as WorkerDbRow[])
-          .filter((row) => !connectedIds.has(row.worker_id))
-          .map((row) => new Worker(row).toWire());
+        const rows = (data as WorkerDbRow[]).filter((row) => !connectedIds.has(row.worker_id));
+
+        if (rows.length > 0) {
+          const taskResults = await Promise.all(
+            rows.map((row) =>
+              (db.from as any)("tasks")
+                .select("task_id, worker_id, completed_at, issue_closed_at, pr_merged_at")
+                .eq("task_id", row.current_task_id)
+                .maybeSingle(),
+            ),
+          );
+
+          fromDb = rows
+            .map((row, i) => ({ row, task: taskResults[i].data as { worker_id: string | null; completed_at: string | null; issue_closed_at: string | null; pr_merged_at: string | null } | null }))
+            .filter(({ row, task }) =>
+              task !== null &&
+              !task.completed_at &&
+              !task.issue_closed_at &&
+              !task.pr_merged_at &&
+              task.worker_id === row.worker_id,
+            )
+            .map(({ row }) => new Worker(row).toWire());
+        }
       }
     } catch {
       // Non-critical: dashboard degrades to just connected workers on DB error
