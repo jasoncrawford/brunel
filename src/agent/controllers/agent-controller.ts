@@ -200,9 +200,8 @@ export class AgentController {
       clearInterval(stallWatcher);
       process.stdin.removeListener("data", onInterrupt);
       this.currentAbortController = null;
+      display.stopBar();
     }
-
-    display.stopBar();
 
     if (!resultReceived && !stallRetry) {
       display.print(c.darkGray("\nInterrupted. What should the agent do instead?"));

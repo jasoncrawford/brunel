@@ -271,6 +271,25 @@ describe("runQuery - error handling", () => {
     expect(thrown).toBeInstanceOf(Error);
     expect((thrown as Error).message).toBe("network failure");
   });
+
+  it("status bar is stopped when the query iterator throws a non-abort error", async () => {
+    (query as any).mockImplementation(() => {
+      const gen = (async function* () {
+        throw new Error("API Error: Connection refused");
+      })();
+      (gen as any).close = () => {};
+      return gen;
+    });
+    const cap = captureConsole();
+    try {
+      await testController.runQuery("test", undefined).catch(() => {});
+    } finally {
+      cap.restore();
+    }
+    // Bar must be inactive so that a subsequent display.print() doesn't
+    // concatenate output with status bar text (the root cause of issue #962).
+    expect(testDisplay.active).toBe(false);
+  });
 });
 
 describe("runQuery - canUseTool callback registration", () => {

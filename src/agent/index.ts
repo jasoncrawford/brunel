@@ -261,7 +261,7 @@ export class BrunelAgent {
           }
           return !ac.signal.aborted;
         } catch (err) {
-          console.error(c.boldRed(`\nERROR: ${fmtError(err)}`));
+          this.display.print(c.boldRed(`\nERROR: ${fmtError(err)}`));
           logFull("ERROR", err instanceof Error ? { message: err.message, stack: err.stack } : err);
           return false;
         } finally {
