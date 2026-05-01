@@ -39,6 +39,8 @@ export class Worker extends ActiveRecord {
 
   readonly workerId: string;
   status: "idle" | "busy" | "disconnected";
+  /** In-memory only — false when worker is in "reserved" state (registered but not eligible for auto-assignment). */
+  isAvailable = true;
   disconnectedAt?: Date;
 
   // Fields populated from DB row (undefined for synthetic registry instances)
@@ -101,6 +103,7 @@ export class Worker extends ActiveRecord {
     }
     worker.repo = repo;
     worker.status = "idle";
+    worker.isAvailable = true;
     worker.currentTask = undefined;
     worker.disconnectedAt = undefined;
     sockets.set(workerId, ws);
@@ -121,7 +124,7 @@ export class Worker extends ActiveRecord {
   }
 
   static getIdle(): Worker[] {
-    return [...registry.values()].filter((w) => w.status === "idle");
+    return [...registry.values()].filter((w) => w.status === "idle" && w.isAvailable);
   }
 
   static getByTask(taskId: string): Worker | undefined {
@@ -229,9 +232,31 @@ export class Worker extends ActiveRecord {
 
   release(): void {
     this.status = "idle";
+    this.isAvailable = true;
     this.currentTask = undefined;
     Worker.events.emit("changed");
     this._chain(() => this.update({ status: "idle", current_task_id: null }));
+  }
+
+  /** Release the task but stay reserved — not eligible for auto-assignment. */
+  releaseReserved(): void {
+    this.status = "idle";
+    this.isAvailable = false;
+    this.currentTask = undefined;
+    Worker.events.emit("changed");
+    this._chain(() => this.update({ status: "idle", current_task_id: null }));
+  }
+
+  /** Mark as unavailable for auto-assignment (reserved state). */
+  markReserved(): void {
+    this.isAvailable = false;
+    Worker.events.emit("changed");
+  }
+
+  /** Mark as available for auto-assignment (ready state). */
+  markAvailable(): void {
+    this.isAvailable = true;
+    Worker.events.emit("changed");
   }
 
   markDisconnected(): void {
