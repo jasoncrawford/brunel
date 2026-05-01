@@ -432,11 +432,11 @@ describe("pipeline: worker disconnect/reclaim", () => {
       repo: "owner/repo",
       workerId: "w-reclaim",
       taskId: "70",
-      status: "busy",
+      status: "assigned",
     });
     const ack2 = await q2.next();
     expect(ack2.type).toBe("hello_ack");
-    expect((ack2 as any).status).toBe("busy");
+    expect((ack2 as any).status).toBe("assigned");
 
     // 4. Task must still show as assigned in DB (not reverted to pending)
     const dbRow = await getDbTask("70");
@@ -500,7 +500,7 @@ describe("pipeline: dependency blocking", () => {
     send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w-blocked", status: "ready" });
     const ack = await q.next();
     expect(ack.type).toBe("hello_ack");
-    expect((ack as any).status).toBe("idle");
+    expect((ack as any).status).toBe("ready");
 
     // 2. Issue #92 depends on issue #91 (via body text). Issue #91 is open.
     await foremanWss.routeEvent("evt-1", "issues", labeledPayload(92, "Depends on #91"));
