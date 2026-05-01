@@ -114,6 +114,8 @@ export class ForemanWss {
             await this.handleActivateRepo(workerId, ws);
           } else if (msg.type === "claim_task") {
             await this.handleClaimTask(workerId, msg);
+          } else if (msg.type === "worker_ready") {
+            await this.handleWorkerReady(workerId);
           } else {
             log(`[worker ${workerId}] unknown message type: ${(msg as R).type}`);
             return;
@@ -313,7 +315,7 @@ export class ForemanWss {
       await task.assign(worker);
     }
     // For complete tasks, the task stays complete while worker finishes cleanup/finalization work
-    this.sendMsg(worker, { type: "hello_ack", workerId: worker.workerId, status: "busy", repoStatus: worker.repo.status }, { logTaskId: task.taskId });
+    this.sendMsg(worker, { type: "hello_ack", workerId: worker.workerId, status: "assigned", repoStatus: worker.repo.status }, { logTaskId: task.taskId });
     this.flushQueuedEvents(worker, task);
   }
 
@@ -338,17 +340,17 @@ export class ForemanWss {
       return;
     }
 
-    if (msg.status === "busy" && msg.taskId) {
-      await this.handleBusyHello(workerId, msg.taskId, ws, repo);
-    } else if (msg.claimTaskId) {
-      await this.handleClaimHello(workerId, msg.claimTaskId, ws, repo);
+    if (msg.status === "assigned" && msg.taskId) {
+      await this.handleAssignedHello(workerId, msg.taskId, ws, repo);
+    } else if (msg.status === "reserved") {
+      await this.handleReservedHello(workerId, ws, repo);
     } else {
-      await this.handleIdleHello(workerId, ws, repo);
+      await this.handleReadyHello(workerId, ws, repo);
     }
   }
 
   async handleTaskComplete(workerId: string, msg: Extract<Wire.WorkerMessage, { type: "task_complete" }>): Promise<void> {
-    this.workerLog(workerId, `task_complete #${msg.taskId}`);
+    this.workerLog(workerId, `task_complete #${msg.taskId} (nextState=${msg.nextState ?? "ready"})`);
     const task = await Task.get(msg.taskId);
     if (task && task.workerId !== workerId) {
       this.workerLog(workerId, `task_complete #${msg.taskId} ignored — owned by ${task.workerId ?? "nobody"}`);
@@ -362,7 +364,12 @@ export class ForemanWss {
         return; // don't release — keeps task assigned so the failure is visible
       }
     }
-    Worker.fromRegistry(workerId)?.release();
+    const worker = Worker.fromRegistry(workerId);
+    if (msg.nextState === "reserved") {
+      worker?.releaseReserved();
+    } else {
+      worker?.release();
+    }
   }
 
   async handleWorkerGoodbye(workerId: string, msg: Extract<Wire.WorkerMessage, { type: "worker_goodbye" }>): Promise<void> {
@@ -387,7 +394,7 @@ export class ForemanWss {
   }
 
   /**
-   * Handles the "busy" branch of a worker_hello — the worker is reconnecting
+   * Handles the "assigned" branch of a worker_hello — the worker is reconnecting
    * and claims to be mid-task. Decides among seven cases:
    *
    * 1. Unknown task (numeric taskId) → create placeholder, reclaim
@@ -398,7 +405,7 @@ export class ForemanWss {
    * 6. Live task, different worker → cancel
    * 7. Otherwise (live task, same or no worker) → reclaim
    */
-  async handleBusyHello(workerId: string, claimedTaskId: string, ws: WebSocket, repo: Repo): Promise<void> {
+  async handleAssignedHello(workerId: string, claimedTaskId: string, ws: WebSocket, repo: Repo): Promise<void> {
     try {
       const existing = await Task.get(claimedTaskId);
       const worker = Worker.register(workerId, ws, repo);
@@ -434,7 +441,7 @@ export class ForemanWss {
         await this.reclaimWorker(worker, existing);
       }
     } catch (err) {
-      log(`ERROR handleBusyHello ${workerId}: ${fmtError(err)}`);
+      log(`ERROR handleAssignedHello ${workerId}: ${fmtError(err)}`);
       // DB error during task lookup or reclaim — recoverable: DB may be temporarily down.
       // Worker retries on reconnect and the operation succeeds once the DB recovers.
       this.sendError(ws, `Internal error during reconnection: ${fmtError(err)}`, false, workerId, repo.id);
@@ -442,58 +449,74 @@ export class ForemanWss {
   }
 
   /**
-   * Handles the "idle" branch of a worker_hello — the worker is connecting
-   * fresh (or restarting without a task). Reverts any stale prior assignment,
-   * registers the worker, and sends an idle hello_ack.
+   * Shared registration logic for workers connecting fresh (no task).
+   * Reverts any stale prior assignment, registers the worker.
+   * Returns the registered Worker, or null if an error was sent to ws.
    */
-  async handleIdleHello(workerId: string, ws: WebSocket, repo: Repo): Promise<void> {
-    try {
-      // DB error here is transient — recoverable: worker retries on reconnect.
-      const priorTask = await Task.getByWorker(workerId);
-      if (priorTask) {
-        try {
-          await priorTask.revert();
-          this.workerLog(workerId, `hello idle (had task #${priorTask.taskId}) — reverting task to pending`);
-        } catch (err) {
-          log(`ERROR Failed to revert task #${priorTask.taskId} to pending: ${fmtError(err)}`);
-          // DB error reverting prior task — recoverable: task stays assigned so the
-          // failure is visible; a new idle assignment would create a double assignment.
-          // Worker retries on reconnect and the revert succeeds once the DB recovers.
-          this.sendError(ws, `Failed to revert prior task to pending: ${fmtError(err)}`, false, workerId, repo.id, priorTask.taskId);
-          return; // don't register as idle — task stays assigned, worker retries on reconnect
-        }
-      } else {
-        this.workerLog(workerId, "hello idle");
+  private async _registerFresh(workerId: string, ws: WebSocket, repo: Repo): Promise<Worker | null> {
+    // DB error here is transient — recoverable: worker retries on reconnect.
+    const priorTask = await Task.getByWorker(workerId);
+    if (priorTask) {
+      try {
+        await priorTask.revert();
+        this.workerLog(workerId, `reverted stale task #${priorTask.taskId} to pending`);
+      } catch (err) {
+        log(`ERROR Failed to revert task #${priorTask.taskId} to pending: ${fmtError(err)}`);
+        // DB error reverting prior task — recoverable: task stays assigned so the
+        // failure is visible; a new idle assignment would create a double assignment.
+        // Worker retries on reconnect and the revert succeeds once the DB recovers.
+        this.sendError(ws, `Failed to revert prior task to pending: ${fmtError(err)}`, false, workerId, repo.id, priorTask.taskId);
+        return null; // don't register — task stays assigned, worker retries on reconnect
       }
-      const w = Worker.register(workerId, ws, repo);
-      this.sendMsg(w, { type: "hello_ack", workerId: w.workerId, status: "idle", repoStatus: repo.status });
+    }
+    return Worker.register(workerId, ws, repo);
+  }
+
+  /**
+   * Handles the "ready" branch of a worker_hello — the worker is connecting
+   * fresh, available for auto-assignment. Reverts any stale prior assignment,
+   * registers the worker, and sends a ready hello_ack.
+   */
+  async handleReadyHello(workerId: string, ws: WebSocket, repo: Repo): Promise<void> {
+    try {
+      const worker = await this._registerFresh(workerId, ws, repo);
+      if (!worker) return; // error already sent
+      this.workerLog(workerId, "hello ready");
+      this.sendMsg(worker, { type: "hello_ack", workerId: worker.workerId, status: "ready", repoStatus: repo.status });
     } catch (err) {
-      log(`ERROR handleIdleHello ${workerId}: ${fmtError(err)}`);
+      log(`ERROR handleReadyHello ${workerId}: ${fmtError(err)}`);
       // DB error during worker lookup — recoverable: DB may be temporarily down.
-      // Worker retries on reconnect and the operation succeeds once the DB recovers.
-      this.sendError(ws, `Internal error during idle hello: ${fmtError(err)}`, false, workerId, repo.id);
+      this.sendError(ws, `Internal error during ready hello: ${fmtError(err)}`, false, workerId, repo.id);
     }
   }
 
   /**
-   * Handles a worker_hello that carries claimTaskId — the worker is connecting
-   * fresh and wants to be assigned a specific task. Registers as idle first
-   * (reverting any prior stale assignment and sending hello_ack), then
-   * immediately processes the claim exactly like handleClaimTask does.
+   * Handles the "reserved" branch of a worker_hello — the worker is connecting
+   * but NOT available for auto-assignment. Registers, marks as reserved, and
+   * sends hello_ack { status: "reserved" }. The worker will send claim_task
+   * separately after receiving the ack.
    */
-  async handleClaimHello(workerId: string, claimTaskId: string, ws: WebSocket, repo: Repo): Promise<void> {
-    await this.handleIdleHello(workerId, ws, repo);
+  async handleReservedHello(workerId: string, ws: WebSocket, repo: Repo): Promise<void> {
+    try {
+      const worker = await this._registerFresh(workerId, ws, repo);
+      if (!worker) return; // error already sent
+      this.workerLog(workerId, "hello reserved");
+      worker.markReserved();
+      this.sendMsg(worker, { type: "hello_ack", workerId: worker.workerId, status: "reserved", repoStatus: repo.status });
+    } catch (err) {
+      log(`ERROR handleReservedHello ${workerId}: ${fmtError(err)}`);
+      this.sendError(ws, `Internal error during reserved hello: ${fmtError(err)}`, false, workerId, repo.id);
+    }
+  }
+
+  async handleWorkerReady(workerId: string): Promise<void> {
     const worker = Worker.fromRegistry(workerId);
-    if (!worker) return; // handleIdleHello failed; error already sent to ws
-    this.workerLog(workerId, `hello claim task=#${claimTaskId}`);
-    const outcome = await worker.repo.taskManager.claimTask(worker, claimTaskId);
-    if (!outcome.ok) {
-      this.sendMsg(worker, { type: "foreman_error", message: outcome.error, fatal: false }, { logTaskId: claimTaskId });
+    if (!worker) {
+      log(`[worker ${shortWorkerId(workerId)}] worker_ready received but worker not in registry — ignoring`);
       return;
     }
-    const { task } = outcome;
-    this.sendMsg(worker, { type: "task_assigned", taskId: task.taskId, issue: task.toAssignmentPayload() });
-    this.workerLog(workerId, `→ claim task_assigned #${task.issueNumber} "${task.title}"`);
+    this.workerLog(workerId, "worker_ready");
+    worker.markAvailable();
   }
 
   async handleActivateRepo(workerId: string, ws: WebSocket): Promise<void> {
