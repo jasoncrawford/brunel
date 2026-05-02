@@ -72,7 +72,7 @@ describe("handleClaimTask", () => {
     await wss.handleClaimTask("w1", { type: "claim_task", workerId: "w1", taskId: "10" });
 
     expect(Worker.fromRegistry("w1")?.currentTaskId).toBe("10");
-    expect(Worker.fromRegistry("w1")?.status).toBe("busy");
+    expect(Worker.fromRegistry("w1")?.status).toBe("assigned");
   });
 
   it("sends foreman_error (non-fatal) when task does not exist", async () => {

@@ -17,7 +17,7 @@ beforeEach(() => { Worker._reset(); });
 describe("Worker", () => {
   it("registers a worker and retrieves it", () => {
     Worker.register("w1", fakeWs(), fakeRepo());
-    expect(Worker.fromRegistry("w1")).toMatchObject({ workerId: "w1", status: "idle" });
+    expect(Worker.fromRegistry("w1")).toMatchObject({ workerId: "w1", status: "ready" });
   });
 
   it("getIdle returns an idle worker", () => {
@@ -34,7 +34,7 @@ describe("Worker", () => {
   it("assign marks worker busy with taskId", () => {
     const w = Worker.register("w1", fakeWs(), fakeRepo());
     w.assign(fakeTask("42"));
-    expect(w.status).toBe("busy");
+    expect(w.status).toBe("assigned");
     expect(w.currentTaskId).toBe("42");
   });
 
@@ -42,7 +42,7 @@ describe("Worker", () => {
     const w = Worker.register("w1", fakeWs(), fakeRepo());
     w.assign(fakeTask("42"));
     w.release();
-    expect(w.status).toBe("idle");
+    expect(w.status).toBe("ready");
     expect(w.currentTaskId).toBeUndefined();
   });
 
@@ -83,7 +83,8 @@ describe("Worker", () => {
   it("toWire returns WorkerSnapshot", () => {
     const w = Worker.register("w1", fakeWs(), fakeRepo());
     w.assign(fakeTask("42"));
-    expect(w.toWire()).toEqual({ workerId: "w1", status: "busy", currentTaskId: "42", repo: "owner/repo" });
+    // toWire maps internal "assigned" → "busy" for Wire.Worker dashboard compat
+    expect(w.toWire()).toMatchObject({ workerId: "w1", status: "busy", currentTaskId: "42", repo: "owner/repo" });
   });
 
   describe("markDisconnected", () => {

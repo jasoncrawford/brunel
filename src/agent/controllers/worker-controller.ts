@@ -903,14 +903,11 @@ export class WorkerController extends EventEmitter {
         this.emit("prompts_ready");
       } else {
         // "ready", "reserved", or "assigned" with active repoStatus.
+        // "reserved" and "assigned" both call transitionToRegistered(), which
+        // flushes the buffer and sends any pending claim_task message.
         if (msg.status === "ready") {
           this.transitionToIdle();
-        } else if (msg.status === "reserved") {
-          // Registered but not auto-assignable. transitionToRegistered() flushes
-          // the buffer and sends any pending claim_task message.
-          this.transitionToRegistered();
         } else {
-          // "assigned" — reconnected with active task
           this.transitionToRegistered();
         }
       }

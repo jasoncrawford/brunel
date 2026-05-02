@@ -307,7 +307,7 @@ describe("webhook-triggered task routing", () => {
     expect((msg as any).issue.title).toBe("Issue 42");
     expect((msg as any).issue.repoUrl).toBe("https://github.com/owner/repo");
     expect((await Task.get("42"))?.status).toBe("assigned");
-    expect(Worker.fromRegistry("w1")?.status).toBe("busy");
+    expect(Worker.fromRegistry("w1")?.status).toBe("assigned");
   });
 
   it("issues/labeled with non-task label does not enqueue or assign", async () => {
@@ -388,7 +388,7 @@ describe("webhook-triggered task routing", () => {
     expect(msg.type).toBe("task_assigned");
     expect((msg as any).issue.number).toBe(99);
     expect((await Task.get("99"))?.status).toBe("assigned");
-    expect(Worker.fromRegistry("w1")?.status).toBe("busy");
+    expect(Worker.fromRegistry("w1")?.status).toBe("assigned");
   });
 
   it("issues/opened without task label does not enqueue", async () => {

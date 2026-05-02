@@ -435,11 +435,11 @@ describe("Multi-repo assignment isolation: two workers, two repos", () => {
     await q.next(); // hello_ack
 
     // Give assignWork time to run — the worker should NOT receive a task.
-    await waitUntil(() => Worker.fromRegistry("wA")?.status === "idle");
+    await waitUntil(() => Worker.fromRegistry("wA")?.status === "ready");
 
     // repo-b's task stays pending.
     expect((await Task.get("t62b"))?.status).toBe("pending");
-    expect(Worker.fromRegistry("wA")?.status).toBe("idle");
+    expect(Worker.fromRegistry("wA")?.status).toBe("ready");
   });
 });
 

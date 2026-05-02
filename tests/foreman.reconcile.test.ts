@@ -62,7 +62,7 @@ describe("reconcile()", () => {
 
     expect(fakeWs.send).toHaveBeenCalledWith(expect.stringContaining('"task_assigned"'), expect.any(Function));
     expect((await Task.get("42"))?.status).toBe("assigned");
-    expect(Worker.fromRegistry("w1")?.status).toBe("busy");
+    expect(Worker.fromRegistry("w1")?.status).toBe("assigned");
   });
 
   it("does NOT remove an assigned task (reconcile never deletes)", async () => {

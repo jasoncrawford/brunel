@@ -133,7 +133,7 @@ describe("foreman WebSocket protocol", () => {
       new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
     ]);
     expect(raceResult).toBe("timeout");
-    expect(Worker.fromRegistry("w1")?.status).toBe("idle");
+    expect(Worker.fromRegistry("w1")?.status).toBe("ready");
   });
 
   it("idle worker with pending task receives task_assigned", async () => {
@@ -147,7 +147,7 @@ describe("foreman WebSocket protocol", () => {
     expect(msg.issue.number).toBe(1);
     expect(msg.taskId).toBe("1");
     expect((await Task.get("1"))?.status).toBe("assigned");
-    expect(Worker.fromRegistry("w1")?.status).toBe("busy");
+    expect(Worker.fromRegistry("w1")?.status).toBe("assigned");
   });
 
   it("second idle worker gets no message when only task is already assigned", async () => {
@@ -183,7 +183,7 @@ describe("foreman WebSocket protocol", () => {
 
     const w1Status = Worker.fromRegistry("w1")?.status;
     const w2Status = Worker.fromRegistry("w2")?.status;
-    const busyCount = [w1Status, w2Status].filter((s) => s === "busy").length;
+    const busyCount = [w1Status, w2Status].filter((s) => s === "assigned").length;
     expect(busyCount).toBe(1);
 
     const task = await Task.get("42");
@@ -206,7 +206,7 @@ describe("foreman WebSocket protocol", () => {
 
     const w1Status = Worker.fromRegistry("w1")?.status;
     const w2Status = Worker.fromRegistry("w2")?.status;
-    const busyCount = [w1Status, w2Status].filter((s) => s === "busy").length;
+    const busyCount = [w1Status, w2Status].filter((s) => s === "assigned").length;
     expect(busyCount).toBe(1);
 
     const task = await Task.get("99");
@@ -257,7 +257,7 @@ describe("foreman WebSocket protocol", () => {
     await q.next(); // task_assigned
 
     send(ws, { type: "task_complete", workerId: "w1", taskId: "3001", stats: { inputTokens: 1000, outputTokens: 500, costUsd: 0.05 } });
-    await waitUntil(() => Worker.fromRegistry("w1")?.status === "idle");
+    await waitUntil(() => Worker.fromRegistry("w1")?.status === "ready");
 
     const task = await Task.get("3001");
     expect(task?.inputTokens).toBe(1000);
@@ -284,7 +284,7 @@ describe("foreman WebSocket protocol", () => {
     ]);
 
     expect(raceResult).toBe("timeout"); // no task_assigned (would reset in-progress session)
-    expect(Worker.fromRegistry("w1")?.status).toBe("busy");
+    expect(Worker.fromRegistry("w1")?.status).toBe("assigned");
     expect(Worker.fromRegistry("w1")?.currentTaskId).toBe("1");
     expect((await Task.get("1"))?.status).toBe("assigned");
   });
@@ -354,7 +354,7 @@ describe("foreman WebSocket protocol", () => {
       new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
     ]);
     expect(raceResult2).toBe("timeout");
-    expect(Worker.fromRegistry("worker-a")?.status).toBe("busy");
+    expect(Worker.fromRegistry("worker-a")?.status).toBe("assigned");
   });
 
   it("task_complete releases worker to idle", async () => {
@@ -363,7 +363,7 @@ describe("foreman WebSocket protocol", () => {
     send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "ready" });
     await nextMsg(ws); // task_assigned
     send(ws, { type: "task_complete", workerId: "w1", taskId: "1" });
-    await waitUntil(() => Worker.fromRegistry("w1")?.status === "idle");
+    await waitUntil(() => Worker.fromRegistry("w1")?.status === "ready");
     expect((await Task.get("1"))?.status).toBe("complete");
   });
 
@@ -379,7 +379,7 @@ describe("foreman WebSocket protocol", () => {
     const ws = await connect();
     send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", taskId: "1", status: "assigned" });
     await waitUntil(() => Worker.fromRegistry("w1") !== undefined);
-    expect(Worker.fromRegistry("w1")?.status).toBe("busy");
+    expect(Worker.fromRegistry("w1")?.status).toBe("assigned");
     expect(Worker.fromRegistry("w1")?.currentTaskId).toBe("1");
   });
 
@@ -466,7 +466,7 @@ describe("hello_ack handshake", () => {
     send(wsB, { type: "worker_hello", repo: "owner/repo", workerId: "worker-b", taskId: "1", status: "assigned" });
     const ack = await ackPromise;
     expect(ack).toMatchObject({ type: "hello_ack", workerId: "worker-b", status: "cancelled" });
-    expect(Worker.fromRegistry("worker-b")?.status).toBe("idle");
+    expect(Worker.fromRegistry("worker-b")?.status).toBe("ready");
   });
 
   it("worker reconnecting busy with nonexistent taskId receives cancelled status", async () => {
@@ -475,7 +475,7 @@ describe("hello_ack handshake", () => {
     send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", taskId: "nonexistent", status: "assigned" });
     const ack = await ackPromise;
     expect(ack).toMatchObject({ type: "hello_ack", workerId: "w1", status: "cancelled" });
-    expect(Worker.fromRegistry("w1")?.status).toBe("idle");
+    expect(Worker.fromRegistry("w1")?.status).toBe("ready");
   });
 
   it("allows worker to reclaim task even if complete (issue closed, same worker)", async () => {
@@ -490,7 +490,7 @@ describe("hello_ack handshake", () => {
     send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", taskId: "1", status: "assigned" });
     const ack = await ackPromise;
     expect(ack).toMatchObject({ type: "hello_ack", workerId: "w1", status: "assigned" });
-    expect(Worker.fromRegistry("w1")?.status).toBe("busy");
+    expect(Worker.fromRegistry("w1")?.status).toBe("assigned");
     expect(Worker.fromRegistry("w1")?.currentTaskId).toBe("1");
   });
 
@@ -506,7 +506,7 @@ describe("hello_ack handshake", () => {
     send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", taskId: "1", status: "assigned" });
     const ack = await ackPromise;
     expect(ack).toMatchObject({ type: "hello_ack", workerId: "w1", status: "cancelled" });
-    expect(Worker.fromRegistry("w1")?.status).toBe("idle");
+    expect(Worker.fromRegistry("w1")?.status).toBe("ready");
   });
 
   it("queued events are sent after hello_ack on reclaim", async () => {
@@ -667,8 +667,8 @@ describe("worker secret enforcement", () => {
   it("accepts any worker when workerSecret is not configured", async () => {
     const ws = await connect();
     send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "ready" });
-    await waitUntil(() => Worker.fromRegistry("w1")?.status === "idle");
-    expect(Worker.fromRegistry("w1")?.status).toBe("idle");
+    await waitUntil(() => Worker.fromRegistry("w1")?.status === "ready");
+    expect(Worker.fromRegistry("w1")?.status).toBe("ready");
   });
 });
 
@@ -868,7 +868,7 @@ describe("disconnected worker state", () => {
       expect(msg.event.name).toBe("issue_comment");
     }
 
-    expect(Worker.fromRegistry("w1")?.status).toBe("busy");
+    expect(Worker.fromRegistry("w1")?.status).toBe("assigned");
     expect((await Task.get("1"))?.status).toBe("assigned");
   });
 
@@ -889,7 +889,7 @@ describe("disconnected worker state", () => {
     expect(msg.type).toBe("task_assigned");
     if (msg.type === "task_assigned") expect(msg.taskId).toBe("1");
 
-    expect(Worker.fromRegistry("w1")?.status).toBe("busy");
+    expect(Worker.fromRegistry("w1")?.status).toBe("assigned");
     expect((await Task.get("1"))?.status).toBe("assigned");
     expect((await Task.get("1"))?.workerId).toBe("w1");
   });
@@ -985,7 +985,7 @@ describe("worker_goodbye — revert persistence", () => {
 
     const ws = await connect();
     send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "ready" });
-    await waitUntil(() => Worker.fromRegistry("w1")?.status === "busy");
+    await waitUntil(() => Worker.fromRegistry("w1")?.status === "assigned");
 
     send(ws, { type: "worker_goodbye", workerId: "w1", taskId: "1" });
     await waitUntil(() => Worker.fromRegistry("w1") === undefined);
@@ -1070,7 +1070,7 @@ describe("worker_goodbye with task_complete: true", () => {
 
     const ws = await connect();
     send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "ready" });
-    await waitUntil(() => Worker.fromRegistry("w1")?.status === "busy");
+    await waitUntil(() => Worker.fromRegistry("w1")?.status === "assigned");
 
     send(ws, { type: "worker_goodbye", workerId: "w1", taskId: "1", task_complete: true });
     await waitUntil(() => Worker.fromRegistry("w1") === undefined);
@@ -1111,7 +1111,7 @@ describe("worker_hello — reclaim complete task for finalization work", () => {
     send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", taskId: "1", status: "assigned" });
     const ack = await ackPromise;
     expect(ack).toMatchObject({ type: "hello_ack", workerId: "w1", status: "assigned" });
-    expect(Worker.fromRegistry("w1")?.status).toBe("busy");
+    expect(Worker.fromRegistry("w1")?.status).toBe("assigned");
     expect(Worker.fromRegistry("w1")?.currentTaskId).toBe("1");
   });
 });
@@ -1147,7 +1147,7 @@ describe("stale close from old connection", () => {
     send(wsA, { type: "worker_hello", repo: "owner/repo", workerId: "worker-a", status: "ready" });
     await qA.next(); // hello_ack
     await qA.next(); // task_assigned
-    await waitUntil(() => Worker.fromRegistry("worker-a")?.status === "busy");
+    await waitUntil(() => Worker.fromRegistry("worker-a")?.status === "assigned");
 
     const wsA2 = await connect();
     const qA2 = makeQueue(wsA2);
@@ -1159,7 +1159,7 @@ describe("stale close from old connection", () => {
     await new Promise<void>((r) => wsA.once("close", r));
     for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));
 
-    expect(Worker.fromRegistry("worker-a")?.status).toBe("busy");
+    expect(Worker.fromRegistry("worker-a")?.status).toBe("assigned");
     expect(Worker.fromRegistry("worker-a")?.currentTaskId).toBe("1");
 
     wsA2.close();

@@ -38,10 +38,11 @@ export class Worker extends ActiveRecord {
   }
 
   readonly workerId: string;
-  status: "idle" | "busy" | "disconnected";
-  /** In-memory only — false when worker is in "reserved" state (registered but not eligible for auto-assignment). */
-  isAvailable = true;
+  status: "ready" | "reserved" | "assigned" | "disconnected";
   disconnectedAt?: Date;
+
+  /** True when the worker is eligible for auto-assignment (i.e. status is "ready"). */
+  get isAvailable(): boolean { return this.status === "ready"; }
 
   // Fields populated from DB row (undefined for synthetic registry instances)
   readonly repoFullName?: string;
@@ -64,7 +65,11 @@ export class Worker extends ActiveRecord {
   private constructor(row: WorkerDbRow) {
     super();
     this.workerId = row.worker_id;
-    this.status = row.status as "idle" | "busy" | "disconnected";
+    // Map DB column values (idle/busy/disconnected) to in-memory vocabulary.
+    // "idle" → "ready" (reserved is not persisted; both write "idle" to DB).
+    // "busy" → "assigned". "disconnected" is unchanged.
+    const dbStatus = row.status as "idle" | "busy" | "disconnected";
+    this.status = dbStatus === "idle" ? "ready" : dbStatus === "busy" ? "assigned" : "disconnected";
     this.repoFullName = (row as any).repos?.full_name ?? undefined;
     this.numConnections = row.num_connections ?? undefined;
     this.firstConnectedAt = row.first_connected_at ?? undefined;
@@ -102,8 +107,7 @@ export class Worker extends ActiveRecord {
       } as unknown as WorkerDbRow);
     }
     worker.repo = repo;
-    worker.status = "idle";
-    worker.isAvailable = true;
+    worker.status = "ready";
     worker.currentTask = undefined;
     worker.disconnectedAt = undefined;
     sockets.set(workerId, ws);
@@ -124,7 +128,7 @@ export class Worker extends ActiveRecord {
   }
 
   static getIdle(): Worker[] {
-    return [...registry.values()].filter((w) => w.status === "idle" && w.isAvailable);
+    return [...registry.values()].filter((w) => w.status === "ready");
   }
 
   static getByTask(taskId: string): Worker | undefined {
@@ -224,15 +228,14 @@ export class Worker extends ActiveRecord {
   }
 
   assign(task: Task): void {
-    this.status = "busy";
+    this.status = "assigned";
     this.currentTask = task;
     Worker.events.emit("changed");
     this._chain(() => this.update({ status: "busy", current_task_id: task.taskId }));
   }
 
   release(): void {
-    this.status = "idle";
-    this.isAvailable = true;
+    this.status = "ready";
     this.currentTask = undefined;
     Worker.events.emit("changed");
     this._chain(() => this.update({ status: "idle", current_task_id: null }));
@@ -240,8 +243,7 @@ export class Worker extends ActiveRecord {
 
   /** Release the task but stay reserved — not eligible for auto-assignment. */
   releaseReserved(): void {
-    this.status = "idle";
-    this.isAvailable = false;
+    this.status = "reserved";
     this.currentTask = undefined;
     Worker.events.emit("changed");
     this._chain(() => this.update({ status: "idle", current_task_id: null }));
@@ -249,13 +251,13 @@ export class Worker extends ActiveRecord {
 
   /** Mark as unavailable for auto-assignment (reserved state). */
   markReserved(): void {
-    this.isAvailable = false;
+    this.status = "reserved";
     Worker.events.emit("changed");
   }
 
   /** Mark as available for auto-assignment (ready state). */
   markAvailable(): void {
-    this.isAvailable = true;
+    this.status = "ready";
     Worker.events.emit("changed");
   }
 
@@ -295,9 +297,12 @@ export class Worker extends ActiveRecord {
   }
 
   toWire(): Wire.Worker {
+    // Wire.Worker.status uses the legacy DB vocabulary — map back for the dashboard.
+    const wireStatus: Wire.Worker["status"] =
+      this.status === "assigned" ? "busy" : this.status === "disconnected" ? "disconnected" : "idle";
     return {
       workerId: this.workerId,
-      status: this.status,
+      status: wireStatus,
       currentTaskId: this.currentTaskId,
       repo: this.repo?.fullName ?? this.repoFullName,
       numConnections: this.numConnections,

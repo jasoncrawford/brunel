@@ -150,7 +150,7 @@ describe("handleAssignedHello", () => {
       await new Promise((r) => setTimeout(r, 20));
       const dbWorker = await Worker.get("w1");
       expect(dbWorker?.workerId).toBe("w1");
-      expect(dbWorker?.status).toBe("busy");
+      expect(dbWorker?.status).toBe("assigned");
     });
 
     it("unassigned — reclaims (busy ack, task.assign called)", async () => {
@@ -199,12 +199,12 @@ describe("handleReadyHello", () => {
 
     const ack = helloAck(sendMsg);
     expect(ack?.status).toBe("ready");
-    expect(Worker.fromRegistry("w1")?.status).toBe("idle");
+    expect(Worker.fromRegistry("w1")?.status).toBe("ready");
 
     await new Promise((r) => setTimeout(r, 20));
     const dbWorker = await Worker.get("w1");
     expect(dbWorker?.workerId).toBe("w1");
-    expect(dbWorker?.status).toBe("idle");
+    expect(dbWorker?.status).toBe("ready");
   });
 
   it("has prior task — reverts it and sends idle ack", async () => {
@@ -222,7 +222,7 @@ describe("handleReadyHello", () => {
     expect(revertSpy).toHaveBeenCalled();
     const ack = helloAck(sendMsg);
     expect(ack?.status).toBe("ready");
-    expect(Worker.fromRegistry("w1")?.status).toBe("idle");
+    expect(Worker.fromRegistry("w1")?.status).toBe("ready");
   });
 
   it("revert failure is logged and worker is NOT registered (task stays assigned, worker retries)", async () => {
