@@ -148,6 +148,9 @@ export class WorkerController extends EventEmitter {
   private reconnectAttempts = 0;
   private _stopped = false;
 
+  // ── Reserved state ────────────────────────────────────────────────────────
+  private _isReserved = false;
+
   // ── Query state ───────────────────────────────────────────────────────────
   private currentAc: AbortController | null = null;
   private _queryRunning = false;
@@ -170,6 +173,8 @@ export class WorkerController extends EventEmitter {
   get agentId(): string { return this.agentStatus.agentId; }
   /** True when worker mode is active (connected or connecting). */
   get isActive(): boolean { return this._isActive; }
+  /** True when the worker has been reserved (waiting but not auto-assignable). */
+  get isReserved(): boolean { return this._isReserved; }
   /** True when event auto-processing is paused (after ^C or first keystroke). */
   get eventsPaused(): boolean { return this._eventsPaused; }
   /** Number of paused pending events (non-zero only when paused and events are queued). */
@@ -302,6 +307,23 @@ export class WorkerController extends EventEmitter {
         workerId: this.agentStatus.agentId,
       } satisfies Wire.WorkerMessage));
     }
+  }
+
+  /**
+   * Reserve the worker: transition from the waiting state (ready, no task) to
+   * reserved. The foreman stops auto-assigning tasks, and the user can pick a
+   * specific task via /worker:claim. No-op if not active or if a task is assigned.
+   */
+  reserve(): void {
+    if (!this._isActive || this.currentTaskId !== undefined) return;
+    this._isReserved = true;
+    if (this.ws?.readyState === WebSocket.OPEN && this.connectionState === "registered") {
+      this.ws.send(JSON.stringify({
+        type: "worker_reserved",
+        workerId: this.agentStatus.agentId,
+      } satisfies Wire.WorkerMessage));
+    }
+    this.display.print(c.sageGreen("Reserved — use /worker:claim to pick a task."));
   }
 
   private async buildCompleteGoodbyeOpts(): Promise<{ task_complete: true; stats?: { inputTokens: number; outputTokens: number; costUsd?: number } }> {
@@ -686,6 +708,7 @@ export class WorkerController extends EventEmitter {
     this.issueClosed = false;
     this._resetPromise = null;
     this._pendingClaimTaskId = undefined;
+    this._isReserved = false;
     this.ws = undefined;
     this.connectionState = "registered";
     this.bufferedMessages = [];
@@ -944,6 +967,7 @@ export class WorkerController extends EventEmitter {
     }
 
     if (msg.type === "task_assigned") {
+      this._isReserved = false;
       this.currentTaskId = msg.taskId;
       this.currentIssue = msg.issue;
       this.prIsClosed = false;

@@ -299,7 +299,7 @@ export class BrunelAgent {
         this.display.print(c.amber(`⚠ ${n} event${n === 1 ? "" : "s"} received (${details.join(", ")}) — /worker:resume-events to process them`));
       }
       const promptStr = workerController.isActive
-        ? (workerController.hasTask() ? "\n[agent] > " : "")
+        ? (workerController.hasTask() || workerController.isReserved ? "\n[agent] > " : "")
         : "\n> ";
       void this.input.ask(promptStr, () => this.controller.listCommands()).then((line) => {
         if (line !== null) enqueueRoutingEvent({ type: "line", value: line });
@@ -342,11 +342,17 @@ export class BrunelAgent {
         break;
       }
 
-      // ^C on empty buffer — stop worker mode if active (with confirmation if task active).
+      // ^C on empty buffer — behaviour depends on worker state:
+      // - waiting (active, no task, not reserved): reserve instead of stopping
+      // - reserved or active with task: stop (with confirmation if task active)
       // State 3 with a running query never reaches here — SIGINT handler handles that path.
       if (userInput === "__ctrl_c__") {
         if (workerController.isActive) {
-          await workerController.stop();
+          if (!workerController.hasTask() && !workerController.isReserved) {
+            workerController.reserve();
+          } else {
+            await workerController.stop();
+          }
         }
         continue;
       }

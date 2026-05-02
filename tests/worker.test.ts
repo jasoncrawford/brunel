@@ -2698,6 +2698,73 @@ describe("events-paused badge in status bar", () => {
   });
 });
 
+// ── reserve() ─────────────────────────────────────────────────────────────────
+
+describe("reserve()", () => {
+  function completeHandshake() {
+    fakeWs.emit("open");
+    sendMsg(fakeWs, { type: "hello_ack", workerId: AGENT_ID, status: "ready", repoStatus: "active" });
+  }
+
+  it("sends worker_reserved message when in waiting state", () => {
+    completeHandshake();
+    fakeWs.send.mockClear();
+
+    session.reserve();
+
+    const sent = fakeWs.send.mock.calls.map((c: unknown[]) => JSON.parse(c[0] as string));
+    expect(sent.some((m: { type: string }) => m.type === "worker_reserved")).toBe(true);
+  });
+
+  it("sets isReserved to true", () => {
+    completeHandshake();
+    expect(session.isReserved).toBe(false);
+    session.reserve();
+    expect(session.isReserved).toBe(true);
+  });
+
+  it("prints a reserved message directing the user to /worker:claim", () => {
+    completeHandshake();
+    display.print.mockClear();
+    session.reserve();
+    const printed = display.print.mock.calls.map((c: unknown[]) => stripAnsi(String(c[0]))).join("\n");
+    expect(printed).toContain("Reserved");
+    expect(printed).toContain("/worker:claim");
+  });
+
+  it("does nothing when worker is not active", () => {
+    const inactiveSession = new WorkerController(sb, display, undefined, undefined, "owner/repo", { wsFactory });
+    expect(inactiveSession.isActive).toBe(false);
+    inactiveSession.reserve();
+    expect(inactiveSession.isReserved).toBe(false);
+    expect(fakeWs.send).not.toHaveBeenCalled();
+  });
+
+  it("does nothing when worker has a task", async () => {
+    completeHandshake();
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "99", issue: makeIssue(99) });
+    await vi.waitFor(() => expect(session.hasTask()).toBe(true));
+
+    fakeWs.send.mockClear();
+    session.reserve();
+
+    expect(session.isReserved).toBe(false);
+    const sent = fakeWs.send.mock.calls.map((c: unknown[]) => JSON.parse(c[0] as string));
+    expect(sent.some((m: { type: string }) => m.type === "worker_reserved")).toBe(false);
+  });
+
+  it("isReserved resets to false when a task is assigned", async () => {
+    completeHandshake();
+    session.reserve();
+    expect(session.isReserved).toBe(true);
+
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "99", issue: makeIssue(99) });
+    await vi.waitFor(() => expect(session.hasTask()).toBe(true));
+
+    expect(session.isReserved).toBe(false);
+  });
+});
+
 // ── onForceDestroy — skips confirmation ───────────────────────────────────────
 
 describe("WorkspaceController.onForceDestroy", () => {
