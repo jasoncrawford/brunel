@@ -177,7 +177,7 @@ describe("when has an active task", () => {
     expect(sentGoodbye(fakeWs)).toBeUndefined();
   });
 
-  it("sends goodbye and closes WS when user abandons", async () => {
+  it("sends worker_ready (not goodbye) and keeps connection when user abandons", async () => {
     const pickFn = vi.fn().mockResolvedValue(0); // "Yes, abandon"
     const s = makeSession(pickFn);
     await s.start();
@@ -185,8 +185,9 @@ describe("when has an active task", () => {
     fakeWs.send.mockClear();
     const handler = await getReadyHandler(s);
     await handler("");
-    expect(sentGoodbye(fakeWs)).toBeDefined();
-    expect(fakeWs.close).toHaveBeenCalled();
+    expect(sentWorkerReady(fakeWs)).toBeDefined();
+    expect(sentGoodbye(fakeWs)).toBeUndefined();
+    expect(fakeWs.close).not.toHaveBeenCalled();
   });
 
   it("clears currentTaskId when user abandons", async () => {

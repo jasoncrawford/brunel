@@ -655,12 +655,9 @@ export class WorkerController extends EventEmitter {
             this.display.print(c.amber(`\nCurrently assigned task #${taskInfo.taskNumber}. Abandon this task?`));
             const idx = await this.pickFnOrDefault()(["Yes, abandon and wait for new tasks", `No, stay with task #${taskInfo.taskNumber}`]);
             if (idx !== 0) return undefined;
-            this.sendGoodbye();
             this.currentTaskId = undefined;
             this.currentIssue = undefined;
-            this.ws?.close();
           }
-          return undefined;
         }
         this.sendWorkerReady();
         this.transitionToIdle();
