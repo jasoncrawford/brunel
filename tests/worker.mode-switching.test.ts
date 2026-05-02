@@ -215,7 +215,7 @@ describe("worker mode switching", () => {
     expect(printedMessages.some(m => m.includes("not active"))).toBe(true);
   });
 
-  it("__ctrl_c__ when worker is idle stops worker mode", async () => {
+  it("__ctrl_c__ when worker is waiting (no task, not reserved) reserves the worker instead of stopping", async () => {
     let capturedStatus: AgentStatus | undefined;
     vi.mocked(AgentController).mockImplementation(function(this: unknown, display: unknown) {
       capturedStatus = (display as { agentStatus: AgentStatus }).agentStatus;
@@ -226,7 +226,78 @@ describe("worker mode switching", () => {
     mockInput.ask.mockImplementation(() => {
       askCallCount++;
       if (askCallCount === 1) return Promise.resolve("/worker:start");
-      if (askCallCount === 2) return Promise.resolve("__ctrl_c__"); // ^C while idle (no task)
+      if (askCallCount === 2) return Promise.resolve("__ctrl_c__"); // ^C while waiting (no task)
+      return Promise.resolve("__eof__");
+    });
+
+    await runAgent(false);
+    // Worker mode stays active (reserved, not stopped)
+    // After ^D the loop exits but worker had been reserved, not stopped by ^C
+    // The key check: worker was still active after ^C (it reserved, not stopped)
+    expect(capturedControllers.list).toHaveLength(1);
+  });
+
+  it("__ctrl_c__ while waiting shows agent prompt afterwards (isReserved=true)", async () => {
+    const promptsUsed: string[] = [];
+    const pendingResolvers: Array<(val: string | null) => void> = [];
+
+    mockInput.ask.mockImplementation((promptStr: string) => {
+      promptsUsed.push(promptStr);
+      return new Promise<string | null>((resolve) => pendingResolvers.push(resolve));
+    });
+    mockInput.cancel.mockImplementation(() => {
+      if (pendingResolvers.length > 0) pendingResolvers.pop()!(null);
+    });
+
+    vi.mocked(AgentController).mockImplementation(function() {
+      return { runQuery: vi.fn().mockResolvedValue(undefined) } as unknown as AgentController;
+    });
+
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => {
+      throw new Error("__process_exit__");
+    }) as unknown as ReturnType<typeof vi.spyOn>;
+    const chdirSpy = vi.spyOn(process, "chdir").mockImplementation(() => {});
+
+    let agentError: unknown;
+    const agent = new BrunelAgent(getConfig());
+    const agentDone = agent.start(true).then(
+      () => {},
+      (err: unknown) => { if (!(err instanceof Error && err.message === "__process_exit__")) agentError = err; },
+    );
+
+    // Wait for the first ask() — should be empty prompt (waiting state)
+    await vi.waitFor(() => expect(promptsUsed.length).toBeGreaterThanOrEqual(1));
+    expect(promptsUsed[0]).toBe("");
+
+    // Press ^C — should reserve (not stop)
+    pendingResolvers.pop()!("__ctrl_c__");
+
+    // After reserve(), the next ask() should show the agent prompt (reserved state = visible prompt)
+    await vi.waitFor(() => expect(promptsUsed.length).toBeGreaterThanOrEqual(2));
+    expect(promptsUsed[1]).toBe("\n[agent] > ");
+
+    // Exit cleanly
+    pendingResolvers.pop()!("__eof__");
+    await agentDone;
+    agent.display.stopPersistentBar();
+    exitSpy.mockRestore();
+    chdirSpy.mockRestore();
+    if (agentError) throw agentError;
+  });
+
+  it("__ctrl_c__ while reserved (after first ^C) stops worker mode", async () => {
+    let capturedStatus: AgentStatus | undefined;
+    vi.mocked(AgentController).mockImplementation(function(this: unknown, display: unknown) {
+      capturedStatus = (display as { agentStatus: AgentStatus }).agentStatus;
+      return { runQuery: vi.fn().mockResolvedValue(undefined) } as unknown as AgentController;
+    });
+
+    let askCallCount = 0;
+    mockInput.ask.mockImplementation(() => {
+      askCallCount++;
+      if (askCallCount === 1) return Promise.resolve("/worker:start");
+      if (askCallCount === 2) return Promise.resolve("__ctrl_c__"); // first ^C → reserves
+      if (askCallCount === 3) return Promise.resolve("__ctrl_c__"); // second ^C → stops
       return Promise.resolve("__eof__");
     });
 

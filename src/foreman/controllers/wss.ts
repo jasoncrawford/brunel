@@ -116,6 +116,8 @@ export class ForemanWss {
             await this.handleClaimTask(workerId, msg);
           } else if (msg.type === "worker_ready") {
             await this.handleWorkerReady(workerId);
+          } else if (msg.type === "worker_reserve") {
+            await this.handleWorkerReserve(workerId);
           } else {
             log(`[worker ${workerId}] unknown message type: ${(msg as R).type}`);
             return;
@@ -517,6 +519,16 @@ export class ForemanWss {
     }
     this.workerLog(workerId, "worker_ready");
     await worker.becomeReady();
+  }
+
+  async handleWorkerReserve(workerId: string): Promise<void> {
+    const worker = Worker.fromRegistry(workerId);
+    if (!worker) {
+      log(`[worker ${shortWorkerId(workerId)}] worker_reserve received but worker not in registry — ignoring`);
+      return;
+    }
+    this.workerLog(workerId, "worker_reserve");
+    worker.markReserved();
   }
 
   async handleActivateRepo(workerId: string, ws: WebSocket): Promise<void> {
