@@ -255,6 +255,13 @@ export class Display {
 
   /** Start the animated query-progress bar, polling getText() every 500ms. */
   startBar(getText: () => string): void {
+    // Clear any existing interval before creating a new one. Without this, a
+    // second startBar() call (e.g. after a tool-permission prompt restarts the
+    // bar) leaves the old interval running with its stale getText closure. Two
+    // intervals firing at the same 500ms cadence then alternate between
+    // different getText outputs, producing the rapid back-and-forth blink
+    // reported in issue #986.
+    if (this._interval) { clearInterval(this._interval); this._interval = null; }
     this.clearBar();
     this.active = true;
     this._getText = getText;
@@ -262,7 +269,7 @@ export class Display {
     this.drawBar();
     this._interval = setInterval(() => {
       this.clearBar();
-      this._text = getText();
+      this._text = this._getText!();
       this.drawBar();
     }, 500);
   }
@@ -325,8 +332,15 @@ export class Display {
   /** Refresh the persistent status line text and redraw. Called on agentStatus "change". */
   private _updatePersistent(): void {
     if (!this.persistentActive) return;
-    this.clearBar();
     this._persistentText = this.renderer.fmtStatusBar(this.agentStatus, (this.getColumns() ?? W) - 1);
+    // When the animation interval is running and no interactive prompt is
+    // active, skip the full clearBar+drawBar — the interval will pick up the
+    // updated text on its next tick. This prevents extra clear/redraw cycles
+    // between interval ticks that cause the status line to flicker (issue #986).
+    // When inputStatus is set, ask() owns the screen and needs drawBar() to
+    // fire its inputStatus callback for proper multiline-prompt redraw.
+    if (this.active && !this.inputStatus) return;
+    this.clearBar();
     this.drawBar();
   }
 }
