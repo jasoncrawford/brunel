@@ -270,13 +270,21 @@ describe("workerMain exit behavior", () => {
   });
 
   it("exits cleanly (no process.exit) when user types /exit in worker mode", async () => {
-    // /exit calls stop() then doExit(), then returns "exit" to break the loop.
+    // /exit calls stop() then returns "exit"; the routing loop calls doExit() and breaks.
     mockInput.ask.mockResolvedValue("/exit");
     const { exitCalled } = await runWorkerMain();
     expect(exitCalled).toBe(false);
   });
 
   it("destroys workspace before exiting when workspace is safe", async () => {
+    await runWorkerMain();
+    expect(fakeWorkspace.destroy).toHaveBeenCalledOnce();
+  });
+
+  it("destroys workspace when user types /exit", async () => {
+    // Regression: /exit now returns "exit" without calling doExit() itself;
+    // the routing loop is responsible for calling doExit() on any "exit" result.
+    mockInput.ask.mockResolvedValue("/exit");
     await runWorkerMain();
     expect(fakeWorkspace.destroy).toHaveBeenCalledOnce();
   });

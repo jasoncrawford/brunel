@@ -190,7 +190,6 @@ export class BrunelAgent {
           await workerController.stop();
           if (workerController.isActive) return undefined; // user cancelled
         }
-        await doExit();
         return "exit";
       },
     });
@@ -363,7 +362,10 @@ export class BrunelAgent {
 
       if (action.type === "command") {
         const result = await registry.execute(action.name, action.args);
-        if (result === "exit") break;
+        if (result === "exit") {
+          await doExit();
+          break;
+        }
         continue;
       }
 
