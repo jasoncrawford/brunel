@@ -101,7 +101,7 @@ async function handleTestRoute(
       const ws = new WebSocket(`ws://localhost:${PORT}/worker`);
       await new Promise<void>((resolve, reject) => {
         ws.once("open", () => {
-          ws.send(JSON.stringify({ type: "worker_hello", repo: "owner/repo", workerId, status: "idle" }));
+          ws.send(JSON.stringify({ type: "worker_hello", repo: "owner/repo", workerId, status: "ready" }));
           ws.once("message", () => resolve()); // hello_ack
         });
         ws.once("error", reject);

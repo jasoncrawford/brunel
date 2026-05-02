@@ -93,7 +93,7 @@ test("worker detail: appends next page and removes load-more after last page", a
     });
   });
   await page.route("**/api/workers/pg-worker", async (route) => {
-    await route.fulfill({ json: { workerId: "pg-worker", status: "idle" } });
+    await route.fulfill({ json: { workerId: "pg-worker", status: "ready" } });
   });
 
   await page.goto("/workers/pg-worker");
@@ -118,7 +118,7 @@ test("worker detail: passes before cursor from last entry of current page", asyn
     await route.fulfill({ json: before ? makeWorkerMessages(PAGE_SIZE, 3) : firstPage });
   });
   await page.route("**/api/workers/pg-worker", async (route) => {
-    await route.fulfill({ json: { workerId: "pg-worker", status: "idle" } });
+    await route.fulfill({ json: { workerId: "pg-worker", status: "ready" } });
   });
 
   await page.goto("/workers/pg-worker");
