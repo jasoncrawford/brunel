@@ -231,12 +231,14 @@ const SORT_PRIORITY: Record<string, number> = {
   pull_request: 5,
 };
 
+function eventSortKey(event: Wire.WebhookEvent): number {
+  // pull_request/opened goes first so the worker sees PR creation before CI noise
+  if (event.name === "pull_request" && event.payload?.action === "opened") return 0;
+  return SORT_PRIORITY[event.name] ?? 4;
+}
+
 function sortEvents(events: Wire.WebhookEvent[]): Wire.WebhookEvent[] {
-  return [...events].sort((a, b) => {
-    const pa = SORT_PRIORITY[a.name] ?? 4;
-    const pb = SORT_PRIORITY[b.name] ?? 4;
-    return pa - pb;
-  });
+  return [...events].sort((a, b) => eventSortKey(a) - eventSortKey(b));
 }
 
 // ── Event formatter table ─────────────────────────────────────────────────────

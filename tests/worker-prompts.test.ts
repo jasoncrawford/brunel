@@ -481,6 +481,39 @@ describe("buildEventPrompt — pipeline behavior", () => {
     expect(commentIdx).toBeLessThan(checkIdx);
   });
 
+  it("pull_request/opened sorts before check_suite events", () => {
+    const events: Wire.WebhookEvent[] = [
+      { id: "e1", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success", name: "CI" } } },
+      { id: "e2", name: "pull_request", payload: { action: "opened", pull_request: { number: 42 } } },
+    ];
+    const p = buildEventPrompt(events);
+    const prIdx = p.indexOf("PR #42 has been created");
+    const checkIdx = p.indexOf("Checks succeeded");
+    expect(prIdx).toBeLessThan(checkIdx);
+  });
+
+  it("pull_request/auto_merge_enabled sorts after check_suite events", () => {
+    const events: Wire.WebhookEvent[] = [
+      { id: "e1", name: "pull_request", payload: { action: "auto_merge_enabled", pull_request: { number: 42 } } },
+      { id: "e2", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "success", name: "CI" } } },
+    ];
+    const p = buildEventPrompt(events);
+    const prIdx = p.indexOf("Auto-merge was enabled");
+    const checkIdx = p.indexOf("Checks succeeded");
+    expect(checkIdx).toBeLessThan(prIdx);
+  });
+
+  it("pull_request/opened sorts before issue_comment", () => {
+    const events: Wire.WebhookEvent[] = [
+      { id: "e1", name: "issue_comment", payload: { issue: { number: 1 }, comment: { body: "feedback here" } } },
+      { id: "e2", name: "pull_request", payload: { action: "opened", pull_request: { number: 42 } } },
+    ];
+    const p = buildEventPrompt(events);
+    const prIdx = p.indexOf("PR #42 has been created");
+    const commentIdx = p.indexOf("feedback here");
+    expect(prIdx).toBeLessThan(commentIdx);
+  });
+
   it("check_suite failure → mentions failed check names and instructs to fix", () => {
     const events: Wire.WebhookEvent[] = [
       { id: "e1", name: "check_suite", payload: { action: "completed", check_suite: { conclusion: "failure", name: "CI / tests" } } },
