@@ -319,7 +319,7 @@ export class WorkerController extends EventEmitter {
     this._isReserved = true;
     if (this.ws?.readyState === WebSocket.OPEN && this.connectionState === "registered") {
       this.ws.send(JSON.stringify({
-        type: "worker_reserve",
+        type: "worker_reserved",
         workerId: this.agentStatus.agentId,
       } satisfies Wire.WorkerMessage));
     }

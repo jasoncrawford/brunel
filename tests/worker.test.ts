@@ -2706,14 +2706,14 @@ describe("reserve()", () => {
     sendMsg(fakeWs, { type: "hello_ack", workerId: AGENT_ID, status: "ready", repoStatus: "active" });
   }
 
-  it("sends worker_reserve message when in waiting state", () => {
+  it("sends worker_reserved message when in waiting state", () => {
     completeHandshake();
     fakeWs.send.mockClear();
 
     session.reserve();
 
     const sent = fakeWs.send.mock.calls.map((c: unknown[]) => JSON.parse(c[0] as string));
-    expect(sent.some((m: { type: string }) => m.type === "worker_reserve")).toBe(true);
+    expect(sent.some((m: { type: string }) => m.type === "worker_reserved")).toBe(true);
   });
 
   it("sets isReserved to true", () => {
@@ -2750,7 +2750,7 @@ describe("reserve()", () => {
 
     expect(session.isReserved).toBe(false);
     const sent = fakeWs.send.mock.calls.map((c: unknown[]) => JSON.parse(c[0] as string));
-    expect(sent.some((m: { type: string }) => m.type === "worker_reserve")).toBe(false);
+    expect(sent.some((m: { type: string }) => m.type === "worker_reserved")).toBe(false);
   });
 
   it("isReserved resets to false when a task is assigned", async () => {

@@ -101,7 +101,7 @@ export type WorkerMessage =
   | { type: "activate_repo"; workerId: string }
   | { type: "claim_task"; workerId: string; taskId: string }
   | { type: "worker_ready"; workerId: string }
-  | { type: "worker_reserve"; workerId: string };
+  | { type: "worker_reserved"; workerId: string };
 
 // Foreman → Worker messages
 export type ForemanMessage =
