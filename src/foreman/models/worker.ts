@@ -251,12 +251,6 @@ export class Worker extends ActiveRecord {
     Worker.events.emit("changed");
   }
 
-  /** Mark as available for auto-assignment (ready state). */
-  markAvailable(): void {
-    this.status = "ready";
-    Worker.events.emit("changed");
-  }
-
   /**
    * Transition to ready: reverts any active task back to pending, then releases
    * the worker. Safe to call from reserved or assigned states.
