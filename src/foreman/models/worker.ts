@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import * as Wire from "../../../shared/wire.js";
 import { WebSocket } from "ws";
 import type { WebSocket as WsSocket } from "ws";
-import type { Task } from "./task.js";
+import { Task } from "./task.js";
 import type { Repo } from "./repo.js";
 import type { Database } from "../../database.types.js";
 import { log } from "../../utils.js";
@@ -255,6 +255,19 @@ export class Worker extends ActiveRecord {
   markAvailable(): void {
     this.status = "ready";
     Worker.events.emit("changed");
+  }
+
+  /**
+   * Transition to ready: reverts any active task back to pending, then releases
+   * the worker. Safe to call from reserved or assigned states.
+   */
+  async becomeReady(): Promise<void> {
+    const taskId = this.currentTaskId;
+    if (taskId) {
+      const task = await Task.get(taskId);
+      if (task) await task.revert();
+    }
+    this.release();
   }
 
   markDisconnected(): void {

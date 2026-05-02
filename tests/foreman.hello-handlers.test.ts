@@ -636,6 +636,20 @@ describe("handleWorkerReady", () => {
     expect(Worker.fromRegistry("w1")?.isReady).toBe(true);
   });
 
+  it("reverts the active task to pending when worker has one", async () => {
+    await seedTask({ task_id: "88", issue_number: 88, repo_id: taskManager.repo.id });
+    const { wss } = makeWss(taskManager);
+    await wss.handleAssignedHello("w1", "88", fakeWs(), taskManager.repo);
+    expect(Worker.fromRegistry("w1")?.currentTaskId).toBe("88");
+
+    const revertSpy = vi.spyOn(Task.prototype, "revert");
+    await wss.handleWorkerReady("w1");
+
+    expect(revertSpy).toHaveBeenCalled();
+    expect(Worker.fromRegistry("w1")?.isReady).toBe(true);
+    expect(Worker.fromRegistry("w1")?.currentTaskId).toBeUndefined();
+  });
+
   it("no-op when worker not in registry", async () => {
     const { wss } = makeWss(taskManager);
     await expect(wss.handleWorkerReady("unknown-worker")).resolves.toBeUndefined();
