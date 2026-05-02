@@ -295,7 +295,8 @@ export class WorkerController extends EventEmitter {
 
   /** Send worker_ready to opt back into auto-assignment from a reserved state. */
   sendWorkerReady(): void {
-    if (this.ws?.readyState === WebSocket.OPEN) {
+    // Guard with connectionState so this is never sent before hello_ack (e.g. during reconnect).
+    if (this.ws?.readyState === WebSocket.OPEN && this.connectionState === "registered") {
       this.ws.send(JSON.stringify({
         type: "worker_ready",
         workerId: this.agentStatus.agentId,
@@ -395,11 +396,12 @@ export class WorkerController extends EventEmitter {
    * Complete the current task: call afterTask hook, send task_complete, reset state,
    * then prompt the user for what to do next.
    *
-   * nextState defaults to "ready" (worker becomes eligible for auto-assignment).
-   * Pass "reserved" when the caller intends to immediately claim a specific task —
-   * this prevents the foreman from auto-assigning while the claim is in flight.
-   * When "reserved", the picker is skipped and "task-complete" is returned immediately
-   * so the caller can continue with its own follow-up action (e.g. sendClaimTask).
+   * Always sends nextState: "reserved" to the foreman so it doesn't auto-assign a new
+   * task while the picker is showing. promptAfterTaskComplete() calls sendWorkerReady()
+   * only after the user confirms they want to keep waiting.
+   *
+   * Pass "reserved" explicitly to skip the picker entirely (claim flow — the caller
+   * handles the next action, e.g. sendClaimTask).
    *
    * Returns 'task-complete' if the worker should remain (or become) idle,
    * 'exit' if the user chose to quit, or undefined if no task was assigned.
@@ -420,7 +422,7 @@ export class WorkerController extends EventEmitter {
       type: "task_complete",
       workerId: this.agentStatus.agentId,
       taskId: this.currentTaskId,
-      ...(nextState !== "ready" && { nextState }),
+      nextState: "reserved",
       ...(hasStats && { stats: { inputTokens: taskInputTokens, outputTokens: taskOutputTokens, costUsd: taskCostUsd } }),
     });
     const taskNumber = this.currentIssue!.number;
@@ -440,11 +442,15 @@ export class WorkerController extends EventEmitter {
    * After completing a task, prompt the user for what to do next.
    * Falls back to "wait for next task" silently when no picker is available
    * (e.g. non-interactive environments or tests that don't inject a pickFn).
+   *
+   * Calls sendWorkerReady() only when the user confirms they want to keep waiting —
+   * this is what transitions the foreman from "reserved" to auto-assignable.
    */
   private async promptAfterTaskComplete(): Promise<"task-complete" | "exit"> {
     const pickFn = this.options?.pickFn ?? (this.picker ? (opts: string[]) => this.picker!.pick(opts) : null);
 
     if (!pickFn) {
+      this.sendWorkerReady();
       this.display.print(c.sageGreen("Waiting for next task..."));
       return "task-complete";
     }
@@ -468,6 +474,7 @@ export class WorkerController extends EventEmitter {
         await this.stop();
         return "exit";
       default:
+        this.sendWorkerReady();
         this.display.print(c.sageGreen("Waiting for next task..."));
         return "task-complete";
     }
