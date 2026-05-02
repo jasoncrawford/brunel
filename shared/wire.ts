@@ -41,7 +41,7 @@ export interface Task {
 /** Wire representation of a worker — sent over the admin WebSocket and REST API. */
 export interface Worker {
   workerId: string;
-  status: "idle" | "busy" | "disconnected";
+  status: "ready" | "reserved" | "assigned" | "disconnected";
   currentTaskId?: string;
   repo?: string;
   // Diagnostic fields — present in REST responses, optional in WebSocket snapshots

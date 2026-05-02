@@ -591,7 +591,7 @@ describe("handleReservedHello", () => {
     // Worker is in registry...
     expect(Worker.fromRegistry("w1")).toBeDefined();
     // ...but NOT available for auto-assignment
-    expect(Worker.fromRegistry("w1")?.isAvailable).toBe(false);
+    expect(Worker.fromRegistry("w1")?.isReady).toBe(false);
     // No task_assigned was sent
     const assigned = sendMsg.mock.calls.find(([, msg]) => (msg as { type: string }).type === "task_assigned");
     expect(assigned).toBeUndefined();
@@ -612,7 +612,7 @@ describe("handleReservedHello", () => {
     expect(revertSpy).toHaveBeenCalled();
     const ack = helloAck(sendMsg);
     expect(ack?.status).toBe("reserved");
-    expect(Worker.fromRegistry("w1")?.isAvailable).toBe(false);
+    expect(Worker.fromRegistry("w1")?.isReady).toBe(false);
   });
 
   it("stores repo on the registered Worker", async () => {
@@ -629,11 +629,11 @@ describe("handleWorkerReady", () => {
   it("marks worker as available", async () => {
     const { wss } = makeWss(taskManager);
     await wss.handleReservedHello("w1", fakeWs(), taskManager.repo);
-    expect(Worker.fromRegistry("w1")?.isAvailable).toBe(false);
+    expect(Worker.fromRegistry("w1")?.isReady).toBe(false);
 
     await wss.handleWorkerReady("w1");
 
-    expect(Worker.fromRegistry("w1")?.isAvailable).toBe(true);
+    expect(Worker.fromRegistry("w1")?.isReady).toBe(true);
   });
 
   it("no-op when worker not in registry", async () => {

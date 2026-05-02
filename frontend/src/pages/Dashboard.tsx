@@ -93,7 +93,7 @@ export default function Dashboard() {
       </section>
 
       <section style={{ marginTop: "2rem" }}>
-        <h3>Workers ({workers.filter((w) => w.status === "idle").length} idle · {workers.filter((w) => w.status === "busy").length} busy)</h3>
+        <h3>Workers ({workers.filter((w) => w.status === "ready").length} ready · {workers.filter((w) => w.status === "assigned").length} assigned)</h3>
         {workers.length === 0 ? <p>No workers connected.</p> : (
           <ul>
             {workers.map((w) => (
