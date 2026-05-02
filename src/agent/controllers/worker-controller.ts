@@ -646,15 +646,24 @@ export class WorkerController extends EventEmitter {
       description: "Opt back into auto-assignment from a reserved state",
       handler: async () => {
         if (!this._isActive) {
-          this.display.print(c.boldRed("Not connected to a foreman."));
+          await this.start();
           return undefined;
         }
         if (this.hasTask()) {
-          this.display.print(c.boldRed("Cannot opt into auto-assignment while a task is active."));
+          const taskInfo = this.getTaskConfirmInfo();
+          if (taskInfo) {
+            this.display.print(c.amber(`\nCurrently assigned task #${taskInfo.taskNumber}. Abandon this task?`));
+            const idx = await this.pickFnOrDefault()(["Yes, abandon and wait for new tasks", `No, stay with task #${taskInfo.taskNumber}`]);
+            if (idx !== 0) return undefined;
+            this.sendGoodbye();
+            this.currentTaskId = undefined;
+            this.currentIssue = undefined;
+            this.ws?.close();
+          }
           return undefined;
         }
         this.sendWorkerReady();
-        this.display.print(c.sageGreen("Ready for auto-assignment."));
+        this.transitionToIdle();
         return undefined;
       },
     });
