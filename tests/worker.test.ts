@@ -110,6 +110,39 @@ describe("task_assigned", () => {
     const printCalls = display.print.mock.calls.map(args => stripAnsi(String(args[0])));
     expect(printCalls.some(s => s.includes(issue.title))).toBe(true);
   });
+
+  it("clears eventsPaused when task_assigned is received while paused", () => {
+    session.pauseEvents();
+    expect(session.eventsPaused).toBe(true);
+
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
+
+    expect(session.eventsPaused).toBe(false);
+  });
+
+  it("discards pending events from prior task when task_assigned is received while paused", () => {
+    // Assign and activate a first task so events can be queued.
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "41", issue: makeIssue(1) });
+    session.takeNextPrompt();
+    // Queue an event for the first task then pause.
+    sendMsg(fakeWs, { type: "event_notification", taskId: "41", event: makeEvent("issue_comment") });
+    session.pauseEvents();
+    expect(session.pendingEventsCount).toBe(1);
+
+    // New task arrives.
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue(2) });
+
+    expect(session.eventsPaused).toBe(false);
+    expect(session.pendingEventsCount).toBe(0);
+  });
+
+  it("agentStatus reflects unpaused state after task_assigned clears eventsPaused", () => {
+    session.pauseEvents();
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue: makeIssue() });
+
+    expect(sb.eventsPaused).toBe(false);
+    expect(sb.pendingEventsCount).toBe(0);
+  });
 });
 
 // ── Event handling during a running query ─────────────────────────────────────

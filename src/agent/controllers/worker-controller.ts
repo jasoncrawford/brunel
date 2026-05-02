@@ -972,8 +972,13 @@ export class WorkerController extends EventEmitter {
       this.currentIssue = msg.issue;
       this.prIsClosed = false;
       this.issueClosed = msg.issue.status === "closed";
+      // Reset event state so the new task starts with a clean slate.
+      this._eventsPaused = false;
+      this.pendingEvents = [];
+      if (this.debounceTimer) { clearTimeout(this.debounceTimer); this.debounceTimer = null; }
       this.agentStatus.update({ taskNumber: msg.issue.number, prNumber: msg.issue.prNumber ?? undefined });
       this.agentStatus.resetTaskStats();
+      this._syncPendingEventsStatus();
       void this.agentStatus.refreshBranch();
       const initialPrompt = buildInitialPrompt(msg.issue, !!this.workspaceController?.workspace);
       this.display.print(c.sageGreen(initialPrompt));
