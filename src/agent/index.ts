@@ -362,6 +362,8 @@ export class BrunelAgent {
 
       if (action.type === "command") {
         const result = await registry.execute(action.name, action.args);
+        // doExit() is always called here, never inside individual command handlers,
+        // so every "exit" return value gets the same terminal cleanup regardless of source.
         if (result === "exit") {
           await doExit();
           break;
