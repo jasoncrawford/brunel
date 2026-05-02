@@ -642,6 +642,22 @@ export class WorkerController extends EventEmitter {
         return undefined;
       },
     });
+    registry.register("ready", {
+      description: "Opt back into auto-assignment from a reserved state",
+      handler: async () => {
+        if (!this._isActive) {
+          this.display.print(c.boldRed("Not connected to a foreman."));
+          return undefined;
+        }
+        if (this.hasTask()) {
+          this.display.print(c.boldRed("Cannot opt into auto-assignment while a task is active."));
+          return undefined;
+        }
+        this.sendWorkerReady();
+        this.display.print(c.sageGreen("Ready for auto-assignment."));
+        return undefined;
+      },
+    });
   }
 
   // ── Private ───────────────────────────────────────────────────────────────
