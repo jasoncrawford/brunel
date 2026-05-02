@@ -18,13 +18,13 @@ beforeEach(async () => {
 });
 
 describe("Worker DB persistence", () => {
-  it("register writes worker to DB with status idle", async () => {
+  it("register writes worker to DB with status ready", async () => {
     const repo = fakeRepo("owner/repo", 1, "new");
     Worker.register("w1", fakeWs(), repo);
     await new Promise((r) => setTimeout(r, 20));
     const { data } = await (db.from as any)("workers")
       .select("*").eq("worker_id", "w1").maybeSingle();
-    expect(data).toMatchObject({ worker_id: "w1", status: "idle", num_connections: 1 });
+    expect(data).toMatchObject({ worker_id: "w1", status: "ready", num_connections: 1 });
   });
 
   it("reconnect increments num_connections", async () => {
@@ -40,7 +40,7 @@ describe("Worker DB persistence", () => {
     expect(data?.num_connections).toBe(2);
   });
 
-  it("assign updates status to busy and sets current_task_id", async () => {
+  it("assign updates status to assigned and sets current_task_id", async () => {
     const repo = fakeRepo("owner/repo", 1, "new");
     const w = Worker.register("w1", fakeWs(), repo);
     const task = { taskId: "42" } as any;
@@ -48,11 +48,11 @@ describe("Worker DB persistence", () => {
     await new Promise((r) => setTimeout(r, 20));
     const { data } = await (db.from as any)("workers")
       .select("*").eq("worker_id", "w1").maybeSingle();
-    expect(data?.status).toBe("busy");
+    expect(data?.status).toBe("assigned");
     expect(data?.current_task_id).toBe("42");
   });
 
-  it("release updates status to idle and clears current_task_id", async () => {
+  it("release updates status to ready and clears current_task_id", async () => {
     const repo = fakeRepo("owner/repo", 1, "new");
     const w = Worker.register("w1", fakeWs(), repo);
     const task = { taskId: "42" } as any;
@@ -61,7 +61,7 @@ describe("Worker DB persistence", () => {
     await new Promise((r) => setTimeout(r, 20));
     const { data } = await (db.from as any)("workers")
       .select("*").eq("worker_id", "w1").maybeSingle();
-    expect(data?.status).toBe("idle");
+    expect(data?.status).toBe("ready");
     expect(data?.current_task_id).toBeNull();
   });
 

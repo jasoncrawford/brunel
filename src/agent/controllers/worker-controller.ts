@@ -293,6 +293,16 @@ export class WorkerController extends EventEmitter {
     }
   }
 
+  /** Send worker_ready to opt back into auto-assignment from a reserved state. */
+  sendWorkerReady(): void {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({
+        type: "worker_ready",
+        workerId: this.agentStatus.agentId,
+      } satisfies Wire.WorkerMessage));
+    }
+  }
+
   private async buildCompleteGoodbyeOpts(): Promise<{ task_complete: true; stats?: { inputTokens: number; outputTokens: number; costUsd?: number } }> {
     if (this._activeAfterTask) {
       try { await this._activeAfterTask(); } catch (err) {
@@ -384,10 +394,17 @@ export class WorkerController extends EventEmitter {
   /**
    * Complete the current task: call afterTask hook, send task_complete, reset state,
    * then prompt the user for what to do next.
+   *
+   * nextState defaults to "ready" (worker becomes eligible for auto-assignment).
+   * Pass "reserved" when the caller intends to immediately claim a specific task —
+   * this prevents the foreman from auto-assigning while the claim is in flight.
+   * When "reserved", the picker is skipped and "task-complete" is returned immediately
+   * so the caller can continue with its own follow-up action (e.g. sendClaimTask).
+   *
    * Returns 'task-complete' if the worker should remain (or become) idle,
    * 'exit' if the user chose to quit, or undefined if no task was assigned.
    */
-  async completeCurrentTask(): Promise<"task-complete" | "exit" | undefined> {
+  async completeCurrentTask(nextState: "ready" | "reserved" = "ready"): Promise<"task-complete" | "exit" | undefined> {
     if (!this.currentTaskId) return undefined;
     if (this._activeAfterTask) {
       try { await this._activeAfterTask(); } catch (err) {
@@ -403,6 +420,7 @@ export class WorkerController extends EventEmitter {
       type: "task_complete",
       workerId: this.agentStatus.agentId,
       taskId: this.currentTaskId,
+      ...(nextState !== "ready" && { nextState }),
       ...(hasStats && { stats: { inputTokens: taskInputTokens, outputTokens: taskOutputTokens, costUsd: taskCostUsd } }),
     });
     const taskNumber = this.currentIssue!.number;
@@ -413,6 +431,8 @@ export class WorkerController extends EventEmitter {
     this.agentStatus.resetTaskStats();
     this.agentStatus.update({ taskNumber: undefined, prNumber: undefined });
     await this.agentStatus.refreshBranch();
+    // When called with "reserved", skip the picker — caller handles next action.
+    if (nextState === "reserved") return "task-complete";
     return this.promptAfterTaskComplete();
   }
 
@@ -580,7 +600,11 @@ export class WorkerController extends EventEmitter {
             const choice = await this.confirmTaskClaim(taskInfo);
             if (choice === "cancel") return undefined;
             if (choice === "complete-and-claim") {
-              try { await this.completeCurrentTask(); } catch (err) {
+              try {
+                // Complete with "reserved" so foreman doesn't auto-assign
+                // while we're about to claim a specific task.
+                await this.completeCurrentTask("reserved");
+              } catch (err) {
                 if (err instanceof UserCancelledError) return undefined;
                 throw err;
               }
@@ -721,16 +745,17 @@ export class WorkerController extends EventEmitter {
     };
 
     ws.on("open", () => {
-      // Read and consume any pending claim so it's included in this hello exactly once.
-      const claimTaskId = this._pendingClaimTaskId;
-      this._pendingClaimTaskId = undefined;
+      // If a claim is pending, connect as "reserved" so the foreman doesn't
+      // auto-assign while we're about to claim a specific task. After hello_ack,
+      // transitionToRegistered() will send the claim_task message automatically.
+      // Do NOT put _pendingClaimTaskId in the hello — it will be sent as claim_task.
+      const hasPendingClaim = !!this._pendingClaimTaskId;
       ws.send(JSON.stringify({
         type: "worker_hello",
         workerId: this.agentStatus.agentId,
         repo: this.repo,
         ...(this.currentTaskId !== undefined && { taskId: this.currentTaskId }),
-        ...(claimTaskId && { claimTaskId }),
-        status: this.currentTaskId ? "busy" : "idle",
+        status: this.currentTaskId ? "assigned" : (hasPendingClaim ? "reserved" : "ready"),
       } satisfies Wire.WorkerMessage));
 
       this.connectionState = "hello_sent";
@@ -877,8 +902,10 @@ export class WorkerController extends EventEmitter {
         await this.stop();
         this.emit("prompts_ready");
       } else {
-        // "idle" or "busy" with repoStatus 'active' (or no repoStatus for back-compat).
-        if (msg.status === "idle") {
+        // "ready", "reserved", or "assigned" with active repoStatus.
+        // "reserved" and "assigned" both call transitionToRegistered(), which
+        // flushes the buffer and sends any pending claim_task message.
+        if (msg.status === "ready") {
           this.transitionToIdle();
         } else {
           this.transitionToRegistered();

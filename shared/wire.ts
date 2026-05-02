@@ -41,7 +41,7 @@ export interface Task {
 /** Wire representation of a worker — sent over the admin WebSocket and REST API. */
 export interface Worker {
   workerId: string;
-  status: "idle" | "busy" | "disconnected";
+  status: "ready" | "reserved" | "assigned" | "disconnected";
   currentTaskId?: string;
   repo?: string;
   // Diagnostic fields — present in REST responses, optional in WebSocket snapshots
@@ -95,16 +95,17 @@ export interface TaskIssue {
 
 // Worker → Foreman messages
 export type WorkerMessage =
-  | { type: "worker_hello"; workerId: string; repo: string; taskId?: string; claimTaskId?: string; status: "idle" | "busy"; workerSecret?: string }
-  | { type: "task_complete"; workerId: string; taskId: string; stats?: { inputTokens: number; outputTokens: number; costUsd?: number } }
+  | { type: "worker_hello"; workerId: string; repo: string; taskId?: string; status: "ready" | "reserved" | "assigned"; workerSecret?: string }
+  | { type: "task_complete"; workerId: string; taskId: string; nextState?: "ready" | "reserved"; stats?: { inputTokens: number; outputTokens: number; costUsd?: number } }
   | { type: "worker_goodbye"; workerId: string; taskId?: string; task_complete?: boolean; stats?: { inputTokens: number; outputTokens: number; costUsd?: number } }
   | { type: "activate_repo"; workerId: string }
-  | { type: "claim_task"; workerId: string; taskId: string };
+  | { type: "claim_task"; workerId: string; taskId: string }
+  | { type: "worker_ready"; workerId: string };
 
 // Foreman → Worker messages
 export type ForemanMessage =
   | { type: "task_assigned"; taskId: string; issue: TaskIssue }
   | { type: "event_notification"; taskId: string; event: WebhookEvent }
-  | { type: "hello_ack"; workerId: string; status: "idle" | "busy" | "cancelled"; repoStatus: "new" | "active" }
+  | { type: "hello_ack"; workerId: string; status: "ready" | "reserved" | "assigned" | "cancelled"; repoStatus: "new" | "active" }
   | { type: "repo_activated"; workerId: string }
   | { type: "foreman_error"; message: string; fatal: boolean };

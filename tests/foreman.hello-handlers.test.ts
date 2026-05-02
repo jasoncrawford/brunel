@@ -1,5 +1,5 @@
 /**
- * Unit tests for ForemanWss.handleBusyHello and ForemanWss.handleIdleHello.
+ * Unit tests for ForemanWss.handleAssignedHello and ForemanWss.handleReadyHello.
  *
  * Each reconnection case is verified by calling the public methods directly on
  * a ForemanWss instance with sendMsg spied out.
@@ -50,22 +50,22 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// ── handleBusyHello ────────────────────────────────────────────────────────────
+// ── handleAssignedHello ────────────────────────────────────────────────────────────
 
-describe("handleBusyHello", () => {
+describe("handleAssignedHello", () => {
   describe("unknown task", () => {
     it("numeric taskId — creates placeholder and sends busy ack", async () => {
       const { wss, sendMsg } = makeWss(taskManager);
-      await wss.handleBusyHello("w1", "42", fakeWs(), fakeRepo());
+      await wss.handleAssignedHello("w1", "42", fakeWs(), fakeRepo());
 
       const ack = helloAck(sendMsg);
-      expect(ack?.status).toBe("busy");
+      expect(ack?.status).toBe("assigned");
       expect(Worker.fromRegistry("w1")?.currentTaskId).toBe("42");
     });
 
     it("non-numeric taskId — sends cancelled ack", async () => {
       const { wss, sendMsg } = makeWss(taskManager);
-      await wss.handleBusyHello("w1", "not-a-number", fakeWs(), fakeRepo());
+      await wss.handleAssignedHello("w1", "not-a-number", fakeWs(), fakeRepo());
 
       const ack = helloAck(sendMsg);
       expect(ack?.status).toBe("cancelled");
@@ -85,10 +85,10 @@ describe("handleBusyHello", () => {
       const assignSpy = vi.spyOn(Task.prototype, "assign");
 
       const { wss, sendMsg } = makeWss(taskManager);
-      await wss.handleBusyHello("w1", "10", fakeWs(), fakeRepo());
+      await wss.handleAssignedHello("w1", "10", fakeWs(), fakeRepo());
 
       const ack = helloAck(sendMsg);
-      expect(ack?.status).toBe("busy");
+      expect(ack?.status).toBe("assigned");
       // task.assign must NOT be called because task is already complete
       expect(assignSpy).not.toHaveBeenCalled();
       expect(Worker.fromRegistry("w1")?.currentTaskId).toBe("10");
@@ -105,7 +105,7 @@ describe("handleBusyHello", () => {
       });
 
       const { wss, sendMsg } = makeWss(taskManager);
-      await wss.handleBusyHello("w1", "10", fakeWs(), fakeRepo());
+      await wss.handleAssignedHello("w1", "10", fakeWs(), fakeRepo());
 
       const ack = helloAck(sendMsg);
       expect(ack?.status).toBe("cancelled");
@@ -123,7 +123,7 @@ describe("handleBusyHello", () => {
       });
 
       const { wss, sendMsg } = makeWss(taskManager);
-      await wss.handleBusyHello("w1", "10", fakeWs(), fakeRepo());
+      await wss.handleAssignedHello("w1", "10", fakeWs(), fakeRepo());
 
       const ack = helloAck(sendMsg);
       expect(ack?.status).toBe("cancelled");
@@ -140,17 +140,17 @@ describe("handleBusyHello", () => {
       const assignSpy = vi.spyOn(Task.prototype, "assign");
 
       const { wss, sendMsg } = makeWss(taskManager);
-      await wss.handleBusyHello("w1", "10", fakeWs(), fakeRepo());
+      await wss.handleAssignedHello("w1", "10", fakeWs(), fakeRepo());
 
       const ack = helloAck(sendMsg);
-      expect(ack?.status).toBe("busy");
+      expect(ack?.status).toBe("assigned");
       expect(assignSpy).toHaveBeenCalledWith(expect.objectContaining({ workerId: "w1" }));
       expect(Worker.fromRegistry("w1")?.currentTaskId).toBe("10");
 
       await new Promise((r) => setTimeout(r, 20));
       const dbWorker = await Worker.get("w1");
       expect(dbWorker?.workerId).toBe("w1");
-      expect(dbWorker?.status).toBe("busy");
+      expect(dbWorker?.status).toBe("assigned");
     });
 
     it("unassigned — reclaims (busy ack, task.assign called)", async () => {
@@ -158,10 +158,10 @@ describe("handleBusyHello", () => {
       const assignSpy = vi.spyOn(Task.prototype, "assign");
 
       const { wss, sendMsg } = makeWss(taskManager);
-      await wss.handleBusyHello("w1", "10", fakeWs(), fakeRepo());
+      await wss.handleAssignedHello("w1", "10", fakeWs(), fakeRepo());
 
       const ack = helloAck(sendMsg);
-      expect(ack?.status).toBe("busy");
+      expect(ack?.status).toBe("assigned");
       expect(assignSpy).toHaveBeenCalledWith(expect.objectContaining({ workerId: "w1" }));
     });
   });
@@ -180,7 +180,7 @@ describe("handleBusyHello", () => {
       taskManager.queueEvent(task, { toWorkerPayload: () => ({ name: "issue_comment", payload: {} }), eventName: "issue_comment" } as any);
 
       const { wss, sendMsg } = makeWss(taskManager);
-      await wss.handleBusyHello("w1", "10", fakeWs(), fakeRepo());
+      await wss.handleAssignedHello("w1", "10", fakeWs(), fakeRepo());
 
       const eventNotifs = sendMsg.mock.calls.filter(
         ([, msg]) => (msg as { type: string }).type === "event_notification"
@@ -190,21 +190,21 @@ describe("handleBusyHello", () => {
   });
 });
 
-// ── handleIdleHello ────────────────────────────────────────────────────────────
+// ── handleReadyHello ────────────────────────────────────────────────────────────
 
-describe("handleIdleHello", () => {
+describe("handleReadyHello", () => {
   it("no prior task — registers worker and sends idle ack", async () => {
     const { wss, sendMsg } = makeWss(taskManager);
-    await wss.handleIdleHello("w1", fakeWs(), fakeRepo());
+    await wss.handleReadyHello("w1", fakeWs(), fakeRepo());
 
     const ack = helloAck(sendMsg);
-    expect(ack?.status).toBe("idle");
-    expect(Worker.fromRegistry("w1")?.status).toBe("idle");
+    expect(ack?.status).toBe("ready");
+    expect(Worker.fromRegistry("w1")?.status).toBe("ready");
 
     await new Promise((r) => setTimeout(r, 20));
     const dbWorker = await Worker.get("w1");
     expect(dbWorker?.workerId).toBe("w1");
-    expect(dbWorker?.status).toBe("idle");
+    expect(dbWorker?.status).toBe("ready");
   });
 
   it("has prior task — reverts it and sends idle ack", async () => {
@@ -217,12 +217,12 @@ describe("handleIdleHello", () => {
     const revertSpy = vi.spyOn(Task.prototype, "revert");
 
     const { wss, sendMsg } = makeWss(taskManager);
-    await wss.handleIdleHello("w1", fakeWs(), fakeRepo());
+    await wss.handleReadyHello("w1", fakeWs(), fakeRepo());
 
     expect(revertSpy).toHaveBeenCalled();
     const ack = helloAck(sendMsg);
-    expect(ack?.status).toBe("idle");
-    expect(Worker.fromRegistry("w1")?.status).toBe("idle");
+    expect(ack?.status).toBe("ready");
+    expect(Worker.fromRegistry("w1")?.status).toBe("ready");
   });
 
   it("revert failure is logged and worker is NOT registered (task stays assigned, worker retries)", async () => {
@@ -236,7 +236,7 @@ describe("handleIdleHello", () => {
 
     const { wss, sendMsg } = makeWss(taskManager);
     const logSpy = vi.spyOn(utils, "log").mockImplementation(() => {});
-    await expect(wss.handleIdleHello("w1", fakeWs(), fakeRepo())).resolves.toBeUndefined();
+    await expect(wss.handleReadyHello("w1", fakeWs(), fakeRepo())).resolves.toBeUndefined();
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("ERROR"));
     // Worker must NOT be registered — allowing a new assignment would leave two tasks
     // pointing at this worker in the DB.
@@ -258,7 +258,7 @@ describe("handleIdleHello", () => {
     const { wss } = makeWss(taskManager);
     vi.spyOn(utils, "log").mockImplementation(() => {});
     const ws = fakeWs();
-    await wss.handleIdleHello("w1", ws, fakeRepo());
+    await wss.handleReadyHello("w1", ws, fakeRepo());
 
     const errorCall = ws.send.mock.calls.find(([data]: [string]) => {
       const msg = JSON.parse(data);
@@ -274,46 +274,46 @@ describe("handleIdleHello", () => {
 // ── repo stored on Worker ──────────────────────────────────────────────────────
 
 describe("repo stored on Worker", () => {
-  it("handleIdleHello stores repo on registered Worker", async () => {
+  it("handleReadyHello stores repo on registered Worker", async () => {
     const { wss } = makeWss(taskManager);
     const repo = fakeRepo("acme/widget");
-    await wss.handleIdleHello("w1", fakeWs(), repo);
+    await wss.handleReadyHello("w1", fakeWs(), repo);
     expect(Worker.fromRegistry("w1")?.repo).toBe(repo);
   });
 
-  it("handleBusyHello stores repo on registered Worker", async () => {
+  it("handleAssignedHello stores repo on registered Worker", async () => {
     await seedTask({ task_id: "10", issue_number: 10, repo_id: taskManager.repo.id, worker_id: "w1", assigned_at: new Date().toISOString() });
     const { wss } = makeWss(taskManager);
     const repo = fakeRepo("acme/widget");
-    await wss.handleBusyHello("w1", "10", fakeWs(), repo);
+    await wss.handleAssignedHello("w1", "10", fakeWs(), repo);
     expect(Worker.fromRegistry("w1")?.repo).toBe(repo);
   });
 
   it("Repo.findOrCreate is called with msg.repo from worker_hello", async () => {
     const findOrCreateSpy = vi.spyOn(Repo, "findOrCreate").mockResolvedValue(fakeRepo("owner/repo") as unknown as Repo);
     // Trigger via the full WS message path by calling handleWorkerHello-equivalent logic
-    // through handleIdleHello directly with a pre-resolved repo (spy verifies the call).
+    // through handleReadyHello directly with a pre-resolved repo (spy verifies the call).
     const resolvedRepo = await Repo.findOrCreate("owner/repo");
     expect(findOrCreateSpy).toHaveBeenCalledWith("owner/repo");
     expect(resolvedRepo.fullName).toBe("owner/repo");
   });
 });
 
-// ── handleBusyHello error handling ─────────────────────────────────────────────
+// ── handleAssignedHello error handling ─────────────────────────────────────────────
 //
-// All errors in handleBusyHello are transient DB errors (Task.get failing,
+// All errors in handleAssignedHello are transient DB errors (Task.get failing,
 // Task.upsert failing, or task.assign failing during reclaim). These are
 // recoverable — the DB may be temporarily down — so fatal: false is correct.
 // The worker retries on reconnect and the operation succeeds once the DB recovers.
 
-describe("handleBusyHello — error handling", () => {
+describe("handleAssignedHello — error handling", () => {
   it("sends foreman_error (non-fatal) when Task.get throws (DB read failure)", async () => {
     vi.spyOn(Task, "get").mockRejectedValueOnce(new Error("DB connection lost"));
 
     const { wss } = makeWss(taskManager);
     vi.spyOn(utils, "log").mockImplementation(() => {});
     const ws = fakeWs();
-    await wss.handleBusyHello("w1", "10", ws, fakeRepo());
+    await wss.handleAssignedHello("w1", "10", ws, fakeRepo());
 
     const errorCall = ws.send.mock.calls.find(([data]: [string]) => {
       const msg = JSON.parse(data);
@@ -332,7 +332,7 @@ describe("handleBusyHello — error handling", () => {
     const { wss } = makeWss(taskManager);
     vi.spyOn(utils, "log").mockImplementation(() => {});
     const ws = fakeWs();
-    await wss.handleBusyHello("w1", "42", ws, fakeRepo());
+    await wss.handleAssignedHello("w1", "42", ws, fakeRepo());
 
     const errorCall = ws.send.mock.calls.find(([data]: [string]) => {
       const msg = JSON.parse(data);
@@ -357,7 +357,7 @@ describe("handleBusyHello — error handling", () => {
     const { wss } = makeWss(taskManager);
     vi.spyOn(utils, "log").mockImplementation(() => {});
     const ws = fakeWs();
-    await wss.handleBusyHello("w1", "10", ws, fakeRepo());
+    await wss.handleAssignedHello("w1", "10", ws, fakeRepo());
 
     const errorCall = ws.send.mock.calls.find(([data]: [string]) => {
       const msg = JSON.parse(data);
@@ -370,21 +370,21 @@ describe("handleBusyHello — error handling", () => {
   });
 });
 
-// ── handleIdleHello error handling ─────────────────────────────────────────────
+// ── handleReadyHello error handling ─────────────────────────────────────────────
 //
-// All errors in handleIdleHello are transient DB errors (Task.getByWorker
+// All errors in handleReadyHello are transient DB errors (Task.getByWorker
 // failing, or priorTask.revert failing). These are recoverable — the DB may be
 // temporarily down — so fatal: false is correct in both cases. The worker
 // retries on reconnect and the operation succeeds once the DB recovers.
 
-describe("handleIdleHello — error handling", () => {
+describe("handleReadyHello — error handling", () => {
   it("sends foreman_error (non-fatal) when Task.getByWorker throws (DB read failure)", async () => {
     vi.spyOn(Task, "getByWorker").mockRejectedValueOnce(new Error("DB connection lost"));
 
     const { wss } = makeWss(taskManager);
     vi.spyOn(utils, "log").mockImplementation(() => {});
     const ws = fakeWs();
-    await wss.handleIdleHello("w1", ws, fakeRepo());
+    await wss.handleReadyHello("w1", ws, fakeRepo());
 
     const errorCall = ws.send.mock.calls.find(([data]: [string]) => {
       const msg = JSON.parse(data);
@@ -401,7 +401,7 @@ describe("handleIdleHello — error handling", () => {
 
     const { wss, sendMsg } = makeWss(taskManager);
     vi.spyOn(utils, "log").mockImplementation(() => {});
-    await wss.handleIdleHello("w1", fakeWs(), fakeRepo());
+    await wss.handleReadyHello("w1", fakeWs(), fakeRepo());
 
     expect(Worker.fromRegistry("w1")).toBeUndefined();
     const ackCall = sendMsg.mock.calls.find(([, msg]) => (msg as { type: string }).type === "hello_ack");
@@ -413,7 +413,7 @@ describe("handleIdleHello — error handling", () => {
 // ── sendError persistence ──────────────────────────────────────────────────────
 
 describe("sendError — ForemanMessage.log() is called", () => {
-  it("persists foreman_error to activity log when handleIdleHello revert fails", async () => {
+  it("persists foreman_error to activity log when handleReadyHello revert fails", async () => {
     await seedTask({
       task_id: "10",
       issue_number: 10,
@@ -426,7 +426,7 @@ describe("sendError — ForemanMessage.log() is called", () => {
     vi.spyOn(utils, "log").mockImplementation(() => {});
 
     const { wss } = makeWss(taskManager);
-    await wss.handleIdleHello("w1", fakeWs(), fakeRepo());
+    await wss.handleReadyHello("w1", fakeWs(), fakeRepo());
 
     const errorLogCall = logSpy.mock.calls.find(([data]) => data.msgType === "foreman_error");
     expect(errorLogCall).toBeDefined();
@@ -436,7 +436,7 @@ describe("sendError — ForemanMessage.log() is called", () => {
     expect((errorLogCall![0].payload as { message?: string }).message).toContain("DB down");
   });
 
-  it("persists foreman_error to activity log when handleBusyHello throws", async () => {
+  it("persists foreman_error to activity log when handleAssignedHello throws", async () => {
     await seedTask({
       task_id: "10",
       issue_number: 10,
@@ -450,7 +450,7 @@ describe("sendError — ForemanMessage.log() is called", () => {
     vi.spyOn(utils, "log").mockImplementation(() => {});
 
     const { wss } = makeWss(taskManager);
-    await wss.handleBusyHello("w1", "10", fakeWs(), fakeRepo());
+    await wss.handleAssignedHello("w1", "10", fakeWs(), fakeRepo());
 
     const errorLogCall = logSpy.mock.calls.find(([data]) => data.msgType === "foreman_error");
     expect(errorLogCall).toBeDefined();
@@ -463,24 +463,24 @@ describe("sendError — ForemanMessage.log() is called", () => {
 // ── repoStatus in hello_ack ────────────────────────────────────────────────────
 
 describe("repoStatus in hello_ack", () => {
-  it("handleIdleHello sends repoStatus: 'new' for a new repo", async () => {
+  it("handleReadyHello sends repoStatus: 'new' for a new repo", async () => {
     const { wss, sendMsg } = makeWss(taskManager);
     const repo = fakeRepo("new/repo");
-    await wss.handleIdleHello("w1", fakeWs(), repo);
+    await wss.handleReadyHello("w1", fakeWs(), repo);
 
     const ack = helloAck(sendMsg) as { status: string; repoStatus: string } | undefined;
-    expect(ack?.status).toBe("idle");
+    expect(ack?.status).toBe("ready");
     expect(ack?.repoStatus).toBe("new");
   });
 
-  it("handleIdleHello sends repoStatus: 'active' for an active repo", async () => {
+  it("handleReadyHello sends repoStatus: 'active' for an active repo", async () => {
     const repo = await createTestRepo("active/repo");
     await repo.activate();
     const { wss, sendMsg } = makeWss(taskManager);
-    await wss.handleIdleHello("w1", fakeWs(), repo);
+    await wss.handleReadyHello("w1", fakeWs(), repo);
 
     const ack = helloAck(sendMsg) as { status: string; repoStatus: string } | undefined;
-    expect(ack?.status).toBe("idle");
+    expect(ack?.status).toBe("ready");
     expect(ack?.repoStatus).toBe("active");
   });
 
@@ -488,7 +488,7 @@ describe("repoStatus in hello_ack", () => {
     await seedTask({ task_id: "10", issue_number: 10, repo_id: taskManager.repo.id, worker_id: "w2", assigned_at: new Date().toISOString() });
     const { wss, sendMsg } = makeWss(taskManager);
     const repo = fakeRepo("some/repo", 1, "active");
-    await wss.handleBusyHello("w1", "10", fakeWs(), repo);
+    await wss.handleAssignedHello("w1", "10", fakeWs(), repo);
 
     const ack = helloAck(sendMsg) as { status: string; repoStatus: string } | undefined;
     expect(ack?.status).toBe("cancelled");
@@ -499,10 +499,10 @@ describe("repoStatus in hello_ack", () => {
     await seedTask({ task_id: "10", issue_number: 10, repo_id: taskManager.repo.id, worker_id: "w1", assigned_at: new Date().toISOString() });
     const { wss, sendMsg } = makeWss(taskManager);
     const repo = fakeRepo("some/repo", 1, "active");
-    await wss.handleBusyHello("w1", "10", fakeWs(), repo);
+    await wss.handleAssignedHello("w1", "10", fakeWs(), repo);
 
     const ack = helloAck(sendMsg) as { status: string; repoStatus: string } | undefined;
-    expect(ack?.status).toBe("busy");
+    expect(ack?.status).toBe("assigned");
     expect(ack?.repoStatus).toBe("active");
   });
 });
@@ -527,7 +527,7 @@ describe("activate_repo", () => {
     vi.spyOn(TaskManager.prototype, "loadIssuesFromGithub").mockResolvedValue(undefined);
 
     const ws = fakeWs();
-    await wss.handleIdleHello("w1", ws, repo);
+    await wss.handleReadyHello("w1", ws, repo);
     await wss.handleActivateRepo("w1", ws);
 
     const activatedCall = sendMsg.mock.calls.find(([, msg]) => (msg as { type: string }).type === "repo_activated");
@@ -542,7 +542,7 @@ describe("activate_repo", () => {
 
     const { wss } = makeWssForActivate();
     const ws = fakeWs();
-    await wss.handleIdleHello("w1", ws, repo);
+    await wss.handleReadyHello("w1", ws, repo);
     await wss.handleActivateRepo("w1", ws);
 
     expect(activateSpy).toHaveBeenCalled();
@@ -556,7 +556,7 @@ describe("activate_repo", () => {
 
     const { wss } = makeWssForActivate();
     const ws = fakeWs();
-    await wss.handleIdleHello("w1", ws, repo);
+    await wss.handleReadyHello("w1", ws, repo);
     await wss.handleActivateRepo("w1", ws);
 
     const errorCall = ws.send.mock.calls.find(([data]: [string]) => {
@@ -576,105 +576,120 @@ describe("activate_repo", () => {
   });
 });
 
-// ── handleClaimHello ───────────────────────────────────────────────────────────
+// ── handleReservedHello ────────────────────────────────────────────────────────
 
-describe("handleClaimHello", () => {
-  beforeEach(async () => {
+describe("handleReservedHello", () => {
+  it("registers worker, sends hello_ack with status='reserved', worker is NOT immediately assigned a task", async () => {
     await taskManager.repo.activate();
-  });
-
-  it("sends idle hello_ack then task_assigned for a valid unassigned task", async () => {
     await seedTask({ task_id: "77", issue_number: 77, repo_id: taskManager.repo.id });
-    const { wss, sendMsg } = makeWss(taskManager);
 
-    await wss.handleClaimHello("w1", "77", fakeWs(), taskManager.repo);
+    const { wss, sendMsg } = makeWss(taskManager);
+    await wss.handleReservedHello("w1", fakeWs(), taskManager.repo);
 
     const ack = helloAck(sendMsg);
-    expect(ack?.status).toBe("idle");
-
-    const assignedCall = sendMsg.mock.calls.find(([, msg]) => (msg as { type: string }).type === "task_assigned");
-    expect(assignedCall).toBeDefined();
-    expect((assignedCall![1] as { taskId: string }).taskId).toBe("77");
+    expect(ack?.status).toBe("reserved");
+    // Worker is in registry...
+    expect(Worker.fromRegistry("w1")).toBeDefined();
+    // ...but NOT available for auto-assignment
+    expect(Worker.fromRegistry("w1")?.isReady).toBe(false);
+    // No task_assigned was sent
+    const assigned = sendMsg.mock.calls.find(([, msg]) => (msg as { type: string }).type === "task_assigned");
+    expect(assigned).toBeUndefined();
   });
 
-  it("registers worker as busy with the claimed task", async () => {
-    await seedTask({ task_id: "77", issue_number: 77, repo_id: taskManager.repo.id });
-    const { wss } = makeWss(taskManager);
+  it("reverts a stale prior assignment and sends reserved ack", async () => {
+    await seedTask({
+      task_id: "77",
+      issue_number: 77,
+      worker_id: "w1",
+      assigned_at: new Date().toISOString(),
+    });
+    const revertSpy = vi.spyOn(Task.prototype, "revert");
 
-    await wss.handleClaimHello("w1", "77", fakeWs(), taskManager.repo);
-
-    expect(Worker.fromRegistry("w1")?.status).toBe("busy");
-    expect(Worker.fromRegistry("w1")?.currentTaskId).toBe("77");
-  });
-
-  it("sends foreman_error (non-fatal) when task does not exist", async () => {
     const { wss, sendMsg } = makeWss(taskManager);
+    await wss.handleReservedHello("w1", fakeWs(), taskManager.repo);
 
-    await wss.handleClaimHello("w1", "999", fakeWs(), taskManager.repo);
-
+    expect(revertSpy).toHaveBeenCalled();
     const ack = helloAck(sendMsg);
-    expect(ack?.status).toBe("idle");
-
-    const errorCall = sendMsg.mock.calls.find(([, msg]) => (msg as { type: string }).type === "foreman_error");
-    expect(errorCall).toBeDefined();
-    expect((errorCall![1] as { fatal: boolean }).fatal).toBe(false);
-    expect((errorCall![1] as { message: string }).message).toContain("999");
+    expect(ack?.status).toBe("reserved");
+    expect(Worker.fromRegistry("w1")?.isReady).toBe(false);
   });
 
-  it("worker is idle when claim fails", async () => {
+  it("stores repo on the registered Worker", async () => {
     const { wss } = makeWss(taskManager);
-    await wss.handleClaimHello("w1", "nonexistent", fakeWs(), taskManager.repo);
-    expect(Worker.fromRegistry("w1")?.status).toBe("idle");
-  });
-
-  it("sends foreman_error when task is held by an active worker", async () => {
-    const repo = taskManager.repo;
-    // Seed task with worker_id set so claimTask sees it as assigned in the DB
-    const task = await seedTask({ task_id: "77", issue_number: 77, repo_id: repo.id, worker_id: "w2", assigned_at: new Date().toISOString() });
-    const w2 = Worker.register("w2", fakeWs(), repo);
-    w2.assign(task);
-
-    const { wss, sendMsg } = makeWss(taskManager);
-    await wss.handleClaimHello("w1", "77", fakeWs(), repo);
-
-    const errorCall = sendMsg.mock.calls.find(([, msg]) => (msg as { type: string }).type === "foreman_error");
-    expect(errorCall).toBeDefined();
-    expect((errorCall![1] as { fatal: boolean }).fatal).toBe(false);
+    const repo = fakeRepo("acme/widget");
+    await wss.handleReservedHello("w1", fakeWs(), repo);
+    expect(Worker.fromRegistry("w1")?.repo).toBe(repo);
   });
 });
 
-// ── handleWorkerHello routing for claimTaskId ──────────────────────────────────
+// ── handleWorkerReady ─────────────────────────────────────────────────────────
 
-describe("handleWorkerHello with claimTaskId", () => {
-  it("routes to handleClaimHello when hello has claimTaskId and status is idle", async () => {
+describe("handleWorkerReady", () => {
+  it("marks worker as available", async () => {
     const { wss } = makeWss(taskManager);
-    vi.spyOn(Repo, "findOrCreate").mockResolvedValue(taskManager.repo as unknown as Repo);
-    const claimHelloSpy = vi.spyOn(wss, "handleClaimHello").mockResolvedValue();
+    await wss.handleReservedHello("w1", fakeWs(), taskManager.repo);
+    expect(Worker.fromRegistry("w1")?.isReady).toBe(false);
 
-    await wss.handleWorkerHello("w1", fakeWs(), {
-      type: "worker_hello",
-      workerId: "w1",
-      repo: "owner/repo",
-      status: "idle",
-      claimTaskId: "77",
-    });
+    await wss.handleWorkerReady("w1");
 
-    expect(claimHelloSpy).toHaveBeenCalledWith("w1", "77", expect.anything(), taskManager.repo);
+    expect(Worker.fromRegistry("w1")?.isReady).toBe(true);
   });
 
-  it("routes to handleIdleHello when hello has no claimTaskId", async () => {
+  it("no-op when worker not in registry", async () => {
+    const { wss } = makeWss(taskManager);
+    await expect(wss.handleWorkerReady("unknown-worker")).resolves.toBeUndefined();
+  });
+});
+
+// ── handleWorkerHello routing ──────────────────────────────────────────────────
+
+describe("handleWorkerHello routing", () => {
+  it("status='assigned' with taskId → routes to handleAssignedHello", async () => {
     const { wss } = makeWss(taskManager);
     vi.spyOn(Repo, "findOrCreate").mockResolvedValue(taskManager.repo as unknown as Repo);
-    const idleHelloSpy = vi.spyOn(wss, "handleIdleHello").mockResolvedValue();
+    const spy = vi.spyOn(wss, "handleAssignedHello" as any).mockResolvedValue(undefined);
+    await seedTask({ task_id: "77", issue_number: 77, repo_id: taskManager.repo.id });
 
     await wss.handleWorkerHello("w1", fakeWs(), {
       type: "worker_hello",
       workerId: "w1",
       repo: "owner/repo",
-      status: "idle",
+      taskId: "77",
+      status: "assigned",
     });
 
-    expect(idleHelloSpy).toHaveBeenCalled();
+    expect(spy).toHaveBeenCalledWith("w1", "77", expect.anything(), expect.anything());
+  });
+
+  it("status='reserved' → routes to handleReservedHello", async () => {
+    const { wss } = makeWss(taskManager);
+    vi.spyOn(Repo, "findOrCreate").mockResolvedValue(taskManager.repo as unknown as Repo);
+    const spy = vi.spyOn(wss, "handleReservedHello" as any).mockResolvedValue(undefined);
+
+    await wss.handleWorkerHello("w1", fakeWs(), {
+      type: "worker_hello",
+      workerId: "w1",
+      repo: "owner/repo",
+      status: "reserved",
+    });
+
+    expect(spy).toHaveBeenCalled();
+  });
+
+  it("status='ready' → routes to handleReadyHello", async () => {
+    const { wss } = makeWss(taskManager);
+    vi.spyOn(Repo, "findOrCreate").mockResolvedValue(taskManager.repo as unknown as Repo);
+    const spy = vi.spyOn(wss, "handleReadyHello" as any).mockResolvedValue(undefined);
+
+    await wss.handleWorkerHello("w1", fakeWs(), {
+      type: "worker_hello",
+      workerId: "w1",
+      repo: "owner/repo",
+      status: "ready",
+    });
+
+    expect(spy).toHaveBeenCalled();
   });
 });
 

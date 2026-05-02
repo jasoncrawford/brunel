@@ -118,12 +118,12 @@ test("live task assignment: dashboard updates without page reload", async ({
     const taskRow = tasksSection.getByRole("row").filter({ hasText: "#2001" });
     await expect(taskRow.getByText("assigned")).toBeVisible();
 
-    // Workers section header shows "1 busy" (or at least the worker item
-    // contains "busy" next to the worker prefix)
+    // Workers section header shows "1 assigned" (or at least the worker item
+    // contains "assigned" next to the worker prefix)
     const workerItem = page
       .getByRole("listitem")
       .filter({ has: page.locator(`a[href="/workers/${workerId}"]`) });
-    await expect(workerItem.getByText("busy")).toBeVisible();
+    await expect(workerItem.getByText("assigned")).toBeVisible();
   } finally {
     await disconnectWorker(workerId);
   }

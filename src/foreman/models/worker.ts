@@ -38,8 +38,11 @@ export class Worker extends ActiveRecord {
   }
 
   readonly workerId: string;
-  status: "idle" | "busy" | "disconnected";
+  status: "ready" | "reserved" | "assigned" | "disconnected";
   disconnectedAt?: Date;
+
+  /** True when the worker is eligible for auto-assignment (i.e. status is "ready"). */
+  get isReady(): boolean { return this.status === "ready"; }
 
   // Fields populated from DB row (undefined for synthetic registry instances)
   readonly repoFullName?: string;
@@ -62,7 +65,7 @@ export class Worker extends ActiveRecord {
   private constructor(row: WorkerDbRow) {
     super();
     this.workerId = row.worker_id;
-    this.status = row.status as "idle" | "busy" | "disconnected";
+    this.status = row.status as "ready" | "reserved" | "assigned" | "disconnected";
     this.repoFullName = (row as any).repos?.full_name ?? undefined;
     this.numConnections = row.num_connections ?? undefined;
     this.firstConnectedAt = row.first_connected_at ?? undefined;
@@ -100,7 +103,7 @@ export class Worker extends ActiveRecord {
       } as unknown as WorkerDbRow);
     }
     worker.repo = repo;
-    worker.status = "idle";
+    worker.status = "ready";
     worker.currentTask = undefined;
     worker.disconnectedAt = undefined;
     sockets.set(workerId, ws);
@@ -121,7 +124,7 @@ export class Worker extends ActiveRecord {
   }
 
   static getIdle(): Worker[] {
-    return [...registry.values()].filter((w) => w.status === "idle");
+    return [...registry.values()].filter((w) => w.status === "ready");
   }
 
   static getByTask(taskId: string): Worker | undefined {
@@ -192,7 +195,7 @@ export class Worker extends ActiveRecord {
     if (existing) {
       await existing.update({
         repo_id: repo.id,
-        status: "idle",
+        status: "ready",
         current_task_id: null,
         last_connected_at: now,
         num_connections: (existing.numConnections ?? 0) + 1,
@@ -203,7 +206,7 @@ export class Worker extends ActiveRecord {
       await Worker.insert({
         worker_id: workerId,
         repo_id: repo.id,
-        status: "idle",
+        status: "ready",
         current_task_id: null,
         first_connected_at: now,
         last_connected_at: now,
@@ -221,17 +224,37 @@ export class Worker extends ActiveRecord {
   }
 
   assign(task: Task): void {
-    this.status = "busy";
+    this.status = "assigned";
     this.currentTask = task;
     Worker.events.emit("changed");
-    this._chain(() => this.update({ status: "busy", current_task_id: task.taskId }));
+    this._chain(() => this.update({ status: "assigned", current_task_id: task.taskId }));
   }
 
   release(): void {
-    this.status = "idle";
+    this.status = "ready";
     this.currentTask = undefined;
     Worker.events.emit("changed");
-    this._chain(() => this.update({ status: "idle", current_task_id: null }));
+    this._chain(() => this.update({ status: "ready", current_task_id: null }));
+  }
+
+  /** Release the task but stay reserved — not eligible for auto-assignment. */
+  releaseReserved(): void {
+    this.status = "reserved";
+    this.currentTask = undefined;
+    Worker.events.emit("changed");
+    this._chain(() => this.update({ status: "reserved", current_task_id: null }));
+  }
+
+  /** Mark as unavailable for auto-assignment (reserved state). */
+  markReserved(): void {
+    this.status = "reserved";
+    Worker.events.emit("changed");
+  }
+
+  /** Mark as available for auto-assignment (ready state). */
+  markAvailable(): void {
+    this.status = "ready";
+    Worker.events.emit("changed");
   }
 
   markDisconnected(): void {

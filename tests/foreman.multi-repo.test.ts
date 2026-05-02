@@ -354,7 +354,7 @@ describe("Full activation → assignment flow", () => {
     port = await startServer();
 
     // Worker connects for repo-a (new repo).
-    const ws = await connect({ type: "worker_hello", repo: "owner/repo-a", workerId: "w1", status: "idle" });
+    const ws = await connect({ type: "worker_hello", repo: "owner/repo-a", workerId: "w1", status: "ready" });
     const q = makeQueue(ws);
 
     const ack = await q.next() as { type: string; repoStatus: string };
@@ -392,10 +392,10 @@ describe("Multi-repo assignment isolation: two workers, two repos", () => {
     port = await startServer();
 
     // Connect both workers; set up queues immediately to avoid losing early messages.
-    const wsA = await connect({ type: "worker_hello", repo: "owner/repo-a", workerId: "wA", status: "idle" });
+    const wsA = await connect({ type: "worker_hello", repo: "owner/repo-a", workerId: "wA", status: "ready" });
     const qA = makeQueue(wsA);
 
-    const wsB = await connect({ type: "worker_hello", repo: "owner/repo-b", workerId: "wB", status: "idle" });
+    const wsB = await connect({ type: "worker_hello", repo: "owner/repo-b", workerId: "wB", status: "ready" });
     const qB = makeQueue(wsB);
 
     // Consume hello_acks then task_assigned for each worker.
@@ -430,16 +430,16 @@ describe("Multi-repo assignment isolation: two workers, two repos", () => {
     ({ wss } = new ForemanWss({ server: httpServer, config: defaultCfg }));
     port = await startServer();
 
-    const ws = await connect({ type: "worker_hello", repo: "owner/repo-a", workerId: "wA", status: "idle" });
+    const ws = await connect({ type: "worker_hello", repo: "owner/repo-a", workerId: "wA", status: "ready" });
     const q = makeQueue(ws);
     await q.next(); // hello_ack
 
     // Give assignWork time to run — the worker should NOT receive a task.
-    await waitUntil(() => Worker.fromRegistry("wA")?.status === "idle");
+    await waitUntil(() => Worker.fromRegistry("wA")?.status === "ready");
 
     // repo-b's task stays pending.
     expect((await Task.get("t62b"))?.status).toBe("pending");
-    expect(Worker.fromRegistry("wA")?.status).toBe("idle");
+    expect(Worker.fromRegistry("wA")?.status).toBe("ready");
   });
 });
 
@@ -461,7 +461,7 @@ describe("Negative: worker from repo-a cannot claim task from repo-b", () => {
 
     // Worker from repo-a claims task "t63b" which belongs to repo-b.
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    await foremanWss.handleBusyHello("wA", "t63b", fakeWs, m1.repo);
+    await foremanWss.handleAssignedHello("wA", "t63b", fakeWs, m1.repo);
 
     const ackCall = sendMsg.mock.calls.find(([, msg]) => (msg as { type: string }).type === "hello_ack");
     expect(ackCall).toBeDefined();

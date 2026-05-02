@@ -277,7 +277,7 @@ describe("when in hello_sent state (waiting for hello_ack)", () => {
     const handler = await getClaimHandler(session);
     await handler("42");
 
-    sendForemanMsg(fakeWs, { type: "hello_ack", workerId: AGENT_ID, status: "idle", repoStatus: "active" });
+    sendForemanMsg(fakeWs, { type: "hello_ack", workerId: AGENT_ID, status: "ready", repoStatus: "active" });
     await new Promise<void>((r) => setImmediate(r));
 
     const msg = sentClaimTask(fakeWs);
@@ -289,13 +289,13 @@ describe("when in hello_sent state (waiting for hello_ack)", () => {
     const handler = await getClaimHandler(session);
     await handler("42");
 
-    sendForemanMsg(fakeWs, { type: "hello_ack", workerId: AGENT_ID, status: "idle", repoStatus: "active" });
+    sendForemanMsg(fakeWs, { type: "hello_ack", workerId: AGENT_ID, status: "ready", repoStatus: "active" });
     await new Promise<void>((r) => setImmediate(r));
     fakeWs.send.mockClear();
 
     // Simulate a second hello_ack (reconnect scenario)
     (session as any).connectionState = "hello_sent";
-    sendForemanMsg(fakeWs, { type: "hello_ack", workerId: AGENT_ID, status: "idle", repoStatus: "active" });
+    sendForemanMsg(fakeWs, { type: "hello_ack", workerId: AGENT_ID, status: "ready", repoStatus: "active" });
     await new Promise<void>((r) => setImmediate(r));
 
     expect(sentClaimTask(fakeWs)).toBeUndefined();
@@ -312,7 +312,7 @@ describe("when worker mode is not active", () => {
     expect(session.isActive).toBe(true);
   });
 
-  it("includes claimTaskId in the worker_hello when connecting", async () => {
+  it("sends worker_hello with status='reserved' (not 'ready') when connecting with a pending claim", async () => {
     const handler = await getClaimHandler(session);
     await handler("42");
     // Fire the open event — this triggers the hello send in connect()'s open handler
@@ -321,31 +321,42 @@ describe("when worker mode is not active", () => {
 
     const hello = sentHello(fakeWs);
     expect(hello).toBeDefined();
-    expect(hello?.claimTaskId).toBe("42");
-    expect(hello?.status).toBe("idle");
+    expect(hello?.status).toBe("reserved");
+    // claimTaskId is no longer sent in the hello — claim_task is sent separately
+    expect(hello?.claimTaskId).toBeUndefined();
   });
 
-  it("does not send a separate claim_task message when fresh-connecting", async () => {
+  it("sends claim_task after receiving hello_ack, not on open", async () => {
     const handler = await getClaimHandler(session);
     await handler("42");
     fakeWs.emit("open");
     await new Promise<void>((r) => setImmediate(r));
 
+    // claim_task not sent yet — waiting for hello_ack
     expect(sentClaimTask(fakeWs)).toBeUndefined();
+
+    // Now receive hello_ack
+    sendForemanMsg(fakeWs, { type: "hello_ack", workerId: AGENT_ID, status: "reserved", repoStatus: "active" });
+    await new Promise<void>((r) => setImmediate(r));
+
+    const claim = sentClaimTask(fakeWs);
+    expect(claim).toBeDefined();
+    expect(claim?.taskId).toBe("42");
   });
 
-  it("clears the pending claim after the hello so reconnect does not re-send claimTaskId", async () => {
+  it("reconnect also connects as 'reserved' (pending claim is not cleared until hello_ack)", async () => {
     const handler = await getClaimHandler(session);
     await handler("42");
     fakeWs.emit("open");
     await new Promise<void>((r) => setImmediate(r));
 
-    // Simulate reconnect: reset the send mock and fire open again
+    // Simulate reconnect without receiving ack: pending claim is still set
     fakeWs.send.mockClear();
     fakeWs.emit("open");
     await new Promise<void>((r) => setImmediate(r));
 
     const hello2 = sentHello(fakeWs);
+    expect(hello2?.status).toBe("reserved");
     expect(hello2?.claimTaskId).toBeUndefined();
   });
 });

@@ -43,18 +43,23 @@ Status is **derived from timestamps**, not stored: `completedAt` → complete, `
 
 `Task.upsert()` intentionally does not overwrite status fields on conflict, so re-syncing at startup never clobbers existing assignments.
 
-Task assignment is **repo-scoped**: `TaskManager.tryAssignWork()` only assigns a task to a worker if (a) the worker's repo status is `"active"` and (b) the task's `repoId` matches the worker's repo. Workers from inactive or mismatched repos are silently skipped. Cross-repo enforcement also applies on reconnect: if a worker reconnects claiming a task that belongs to a different repo, `handleBusyHello` sends `cancelled` and the worker resets to idle.
+Task assignment is **repo-scoped**: `TaskManager.tryAssignWork()` only assigns a task to a worker if (a) the worker's repo status is `"active"` and (b) the task's `repoId` matches the worker's repo. Workers from inactive or mismatched repos are silently skipped. Cross-repo enforcement also applies on reconnect: if a worker reconnects claiming a task that belongs to a different repo, `handleAssignedHello` sends `cancelled` and the worker resets to idle.
 
 ## Worker/Foreman handshake
 
 Every `worker_hello` includes a `repo` field (owner/name parsed from `git remote get-url origin`). The foreman resolves this to a `Repo` via `Repo.findOrCreate()` and stores it on the `Worker` — every registered Worker always has a `Repo`. Missing or unresolvable repo is a fatal error.
 
-Every `worker_hello` gets a `hello_ack` with one of three statuses before any task is sent:
-- `idle` — worker is free, foreman may now assign
-- `busy` — reconnection accepted, worker may resume
+Every `worker_hello` gets a `hello_ack` with one of four statuses before any task is sent:
+- `ready` — worker is free and available for auto-assignment
+- `reserved` — worker is registered but NOT available for auto-assignment (will send `claim_task` next)
+- `assigned` — reconnection accepted, worker may resume the in-progress task
 - `cancelled` — task was taken or completed; worker should reset and become idle
 
-An idle `worker_hello` may include `claimTaskId` to atomically register and claim a specific task (used by the `/worker:claim` command on first connect). The foreman sends `hello_ack { status: "idle" }` first, then immediately sends `task_assigned` or a non-fatal `foreman_error`.
+Worker state transitions happen via dedicated messages while the worker stays connected:
+- `task_complete { nextState?: "ready" | "reserved" }` — complete a task and declare next state; defaults to `"ready"`
+- `worker_ready` — transition from `reserved` → `ready` (e.g., after claiming a specific task or deciding to accept work)
+
+The `/worker:claim` command connects with `status: "reserved"` (no `claimTaskId` in the hello), receives `hello_ack { status: "reserved" }`, then sends `claim_task { taskId }` separately. The foreman replies with `task_assigned` or a non-fatal `foreman_error`.
 
 `hello_ack` also carries `repoStatus: "new" | "active"`. If `"new"`, the worker prompts the user to activate the repo. On confirmation the worker sends `activate_repo`; the foreman activates the repo, seeds tasks from open labeled issues, and replies with `repo_activated`. The worker then transitions to idle and normal task assignment proceeds. If the user declines activation, the worker exits worker mode and returns to the interactive REPL.
 

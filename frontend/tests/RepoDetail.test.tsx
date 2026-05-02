@@ -35,7 +35,7 @@ const mockTask: Task = {
 
 const mockWorker: Worker = {
   workerId: "worker-abc-123",
-  status: "busy",
+  status: "assigned",
   repo: "user/my-repo",
   currentTaskId: "99",
 };
@@ -114,7 +114,7 @@ describe("RepoDetail", () => {
 
     await waitFor(() => {
       expect(screen.getByText("Fix auth bug")).toBeInTheDocument();
-      expect(screen.getByText(/1 idle.*0 busy|0 idle.*1 busy/)).toBeInTheDocument();
+      expect(screen.getByText(/0 ready.*1 assigned|1 assigned/)).toBeInTheDocument();
     });
   });
 

@@ -79,15 +79,19 @@ The foreman↔worker WebSocket protocol is defined as union types in `wire.ts`:
 
 ```ts
 export type ForemanMessage =
-  | { type: "task_assigned"; taskId: string; task: Task }
+  | { type: "task_assigned"; taskId: string; issue: TaskIssue }
   | { type: "event_notification"; taskId: string; event: WebhookEvent }
-  | { type: "hello_ack"; workerId: string; status: "idle" | "busy" | "cancelled" }
+  | { type: "hello_ack"; workerId: string; status: "ready" | "reserved" | "assigned" | "cancelled"; repoStatus: "new" | "active" }
+  | { type: "repo_activated"; workerId: string }
   | { type: "foreman_error"; message: string; fatal: boolean };
 
 export type WorkerMessage =
-  | { type: "worker_hello"; workerId: string; claimedTaskId?: string }
-  | { type: "task_complete"; taskId: string }
-  | { type: "worker_goodbye"; taskId: string };
+  | { type: "worker_hello"; workerId: string; repo: string; taskId?: string; status: "ready" | "reserved" | "assigned" }
+  | { type: "task_complete"; workerId: string; taskId: string; nextState?: "ready" | "reserved" }
+  | { type: "worker_goodbye"; workerId: string; taskId?: string }
+  | { type: "activate_repo"; workerId: string }
+  | { type: "claim_task"; workerId: string; taskId: string }
+  | { type: "worker_ready"; workerId: string };
 ```
 
 Payload types within the union reference the shared Wire interfaces directly rather than duplicating field definitions.

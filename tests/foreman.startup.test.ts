@@ -125,7 +125,7 @@ describe("tryAssignWork — assign persistence", () => {
     ({ wss } = new ForemanWss({ server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } }));
 
     port = await startServer();
-    const ws = await connect({ type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
+    const ws = await connect({ type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "ready" });
     const q = makeQueue(ws);
     await q.next(); // hello_ack
     const msg = await q.next(); // task_assigned
@@ -145,8 +145,8 @@ describe("tryAssignWork — assign persistence", () => {
     ({ wss } = new ForemanWss({ server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } }));
 
     port = await startServer();
-    const ws = await connect({ type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
-    await waitUntil(() => Worker.fromRegistry("w1")?.status === "idle");
+    const ws = await connect({ type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "ready" });
+    await waitUntil(() => Worker.fromRegistry("w1")?.status === "ready");
 
     expect((await Task.get("42"))?.status).toBe("pending");
   });
@@ -156,7 +156,7 @@ describe("tryAssignWork — assign persistence", () => {
     ({ wss } = new ForemanWss({ server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } }));
 
     port = await startServer();
-    const ws = await connect({ type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
+    const ws = await connect({ type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "ready" });
     const q = makeQueue(ws);
     await q.next(); // hello_ack
     const msg = await q.next(); // task_assigned
@@ -178,7 +178,7 @@ describe("startup reconnect behaviour", () => {
     ({ wss } = new ForemanWss({ server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } }));
 
     port = await startServer();
-    const ws = await connect({ type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
+    const ws = await connect({ type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "ready" });
     const q = makeQueue(ws);
     await q.next(); // hello_ack
     const msg = await q.next(); // task_assigned
@@ -196,8 +196,8 @@ describe("startup reconnect behaviour", () => {
     ({ wss } = new ForemanWss({ server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } }));
 
     port = await startServer();
-    const ws = await connect({ type: "worker_hello", repo: "owner/repo", workerId: "new-worker", status: "idle" });
-    await waitUntil(() => Worker.fromRegistry("new-worker")?.status === "idle");
+    const ws = await connect({ type: "worker_hello", repo: "owner/repo", workerId: "new-worker", status: "ready" });
+    await waitUntil(() => Worker.fromRegistry("new-worker")?.status === "ready");
 
     // new-worker should NOT get task 42 — it belongs to original-worker
     expect((await Task.get("42"))?.status).toBe("assigned");
@@ -213,9 +213,9 @@ describe("startup reconnect behaviour", () => {
     ({ wss } = new ForemanWss({ server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } }));
 
     port = await startServer();
-    await connect({ type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "busy", taskId: "42" });
+    await connect({ type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "assigned", taskId: "42" });
 
-    await waitUntil(() => Worker.fromRegistry("w1")?.status === "busy");
+    await waitUntil(() => Worker.fromRegistry("w1")?.status === "assigned");
     expect((await Task.get("42"))?.status).toBe("assigned");
     expect((await Task.get("42"))?.workerId).toBe("w1");
   });
@@ -392,7 +392,7 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
     await localForemanWss.reconcile();
 
     // Step 4: worker connects and receives task_assigned with real body/labels
-    const ws = await connect({ type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "idle" });
+    const ws = await connect({ type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "ready" });
     const q = makeQueue(ws);
     await q.next(); // hello_ack
     const msg = await q.next() as { type: string; issue: { body: string; labels: string[] } };
@@ -433,8 +433,8 @@ describe("startup — restore tasks from tasks table (DB is source of truth)", (
     expect((await Task.get("42"))?.status).toBe("assigned");
 
     // Step 4: an idle worker connects — must NOT receive the already-assigned task
-    const ws = await connect({ type: "worker_hello", repo: "owner/repo", workerId: "new-worker", status: "idle" });
-    await waitUntil(() => Worker.fromRegistry("new-worker")?.status === "idle");
+    const ws = await connect({ type: "worker_hello", repo: "owner/repo", workerId: "new-worker", status: "ready" });
+    await waitUntil(() => Worker.fromRegistry("new-worker")?.status === "ready");
 
     expect((await Task.get("42"))?.workerId).toBe("original-worker");
   });
@@ -492,11 +492,11 @@ describe("startup reconnect — worker reconnects to complete task", () => {
     ({ wss } = new ForemanWss({ server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } }));
 
     port = await startServer();
-    await connect({ type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "busy", taskId: "42" });
+    await connect({ type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "assigned", taskId: "42" });
 
     await waitUntil(() => Worker.fromRegistry("w1") !== undefined);
     // Worker should be reclaimed as busy to allow finalization work
-    expect(Worker.fromRegistry("w1")?.status).toBe("busy");
+    expect(Worker.fromRegistry("w1")?.status).toBe("assigned");
     // Task should stay complete
     expect((await Task.get("42"))?.status).toBe("complete");
   });
@@ -511,7 +511,7 @@ describe("startup reconnect — worker reconnects to complete task", () => {
     ({ wss } = new ForemanWss({ server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } }));
 
     port = await startServer();
-    const ws = await connect({ type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "busy", taskId: "42" });
+    const ws = await connect({ type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "assigned", taskId: "42" });
 
     await waitUntil(() => Worker.fromRegistry("w1") !== undefined);
     // Spy on complete after the task is already obtained
@@ -519,10 +519,10 @@ describe("startup reconnect — worker reconnects to complete task", () => {
     const spyComplete = vi.spyOn(t2!, "complete");
 
     ws.send(JSON.stringify({ type: "task_complete", workerId: "w1", taskId: "42" }));
-    await waitUntil(() => Worker.fromRegistry("w1")?.status === "idle");
+    await waitUntil(() => Worker.fromRegistry("w1")?.status === "ready");
 
     // The task was already complete; task_complete is still a no-op (idempotent)
-    expect(Worker.fromRegistry("w1")?.status).toBe("idle");
+    expect(Worker.fromRegistry("w1")?.status).toBe("ready");
   });
 });
 
@@ -538,15 +538,15 @@ describe("task_complete marks task complete", () => {
     ({ wss } = new ForemanWss({ server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } }));
 
     port = await startServer();
-    const ws = await connect({ type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "busy", taskId: "42" });
+    const ws = await connect({ type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "assigned", taskId: "42" });
 
-    await waitUntil(() => Worker.fromRegistry("w1")?.status === "busy");
+    await waitUntil(() => Worker.fromRegistry("w1")?.status === "assigned");
 
     // Spy on the prototype so we capture the call regardless of which instance is used
     const spyComplete = vi.spyOn(Task.prototype, "complete");
 
     ws.send(JSON.stringify({ type: "task_complete", workerId: "w1", taskId: "42" }));
-    await waitUntil(() => Worker.fromRegistry("w1")?.status === "idle");
+    await waitUntil(() => Worker.fromRegistry("w1")?.status === "ready");
 
     expect(spyComplete).toHaveBeenCalled();
   });

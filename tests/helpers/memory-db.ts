@@ -60,7 +60,7 @@ export function createMemoryTaskDb(): SupabaseClient<Database> {
       insert(rowData: WorkerRow) {
         const now = new Date().toISOString();
         const row: WorkerRow = {
-          status: "idle",
+          status: "ready",
           current_task_id: null,
           first_connected_at: now,
           last_connected_at: now,
