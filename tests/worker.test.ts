@@ -1714,7 +1714,7 @@ describe("completeCurrentTask: post-completion prompt", () => {
     expect(printed.some(l => l.includes("/worker:claim"))).toBe(false);
   });
 
-  it("option 3 (quit and exit): stops worker mode and returns 'exit'", async () => {
+  it("option 3 (exit): stops worker mode and returns 'exit'", async () => {
     const { sess } = await makeSession(async () => 3);
     const result = await sess.completeCurrentTask();
     expect(result).toBe("exit");
@@ -1729,7 +1729,7 @@ describe("completeCurrentTask: post-completion prompt", () => {
       expect.stringContaining("Wait"),
       expect.stringContaining("specific task"),
       expect.stringContaining("Stop working"),
-      expect.stringContaining("Quit"),
+      expect.stringContaining("Exit"),
     ]);
   });
 

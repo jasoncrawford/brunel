@@ -459,7 +459,7 @@ export class WorkerController extends EventEmitter {
       "Wait to be assigned the next task",
       "Choose a specific task to work on",
       "Stop working for now",
-      "Quit and exit",
+      "Exit",
     ]);
 
     switch (idx) {
