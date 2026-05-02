@@ -295,7 +295,8 @@ export class WorkerController extends EventEmitter {
 
   /** Send worker_ready to opt back into auto-assignment from a reserved state. */
   sendWorkerReady(): void {
-    if (this.ws?.readyState === WebSocket.OPEN) {
+    // Guard with connectionState so this is never sent before hello_ack (e.g. during reconnect).
+    if (this.ws?.readyState === WebSocket.OPEN && this.connectionState === "registered") {
       this.ws.send(JSON.stringify({
         type: "worker_ready",
         workerId: this.agentStatus.agentId,
@@ -395,11 +396,12 @@ export class WorkerController extends EventEmitter {
    * Complete the current task: call afterTask hook, send task_complete, reset state,
    * then prompt the user for what to do next.
    *
-   * nextState defaults to "ready" (worker becomes eligible for auto-assignment).
-   * Pass "reserved" when the caller intends to immediately claim a specific task —
-   * this prevents the foreman from auto-assigning while the claim is in flight.
-   * When "reserved", the picker is skipped and "task-complete" is returned immediately
-   * so the caller can continue with its own follow-up action (e.g. sendClaimTask).
+   * Always sends nextState: "reserved" to the foreman so it doesn't auto-assign a new
+   * task while the picker is showing. promptAfterTaskComplete() calls sendWorkerReady()
+   * only after the user confirms they want to keep waiting.
+   *
+   * Pass "reserved" explicitly to skip the picker entirely (claim flow — the caller
+   * handles the next action, e.g. sendClaimTask).
    *
    * Returns 'task-complete' if the worker should remain (or become) idle,
    * 'exit' if the user chose to quit, or undefined if no task was assigned.
@@ -420,7 +422,7 @@ export class WorkerController extends EventEmitter {
       type: "task_complete",
       workerId: this.agentStatus.agentId,
       taskId: this.currentTaskId,
-      ...(nextState !== "ready" && { nextState }),
+      nextState: "reserved",
       ...(hasStats && { stats: { inputTokens: taskInputTokens, outputTokens: taskOutputTokens, costUsd: taskCostUsd } }),
     });
     const taskNumber = this.currentIssue!.number;
@@ -441,53 +443,25 @@ export class WorkerController extends EventEmitter {
    * Falls back to "wait for next task" silently when no picker is available
    * (e.g. non-interactive environments or tests that don't inject a pickFn).
    *
-   * Auto-dismisses with "wait for next task" if a new task is assigned while
-   * the picker is showing, so the routing loop can proceed without user input.
+   * Calls sendWorkerReady() only when the user confirms they want to keep waiting —
+   * this is what transitions the foreman from "reserved" to auto-assignable.
    */
   private async promptAfterTaskComplete(): Promise<"task-complete" | "exit"> {
     const pickFn = this.options?.pickFn ?? (this.picker ? (opts: string[]) => this.picker!.pick(opts) : null);
 
     if (!pickFn) {
+      this.sendWorkerReady();
       this.display.print(c.sageGreen("Waiting for next task..."));
       return "task-complete";
     }
 
-    // If a task was already enqueued before we reached the picker, skip it.
-    if (this.hasPendingPrompts()) {
-      this.display.print(c.sageGreen("Waiting for next task..."));
-      return "task-complete";
-    }
-
-    // Race the picker against a prompts_ready event. If a new task is assigned
-    // while the picker is showing, auto-dismiss and proceed to the task.
-    let dismissHandler: (() => void) | undefined;
-    const dismissedByTask = new Promise<void>((resolve) => {
-      dismissHandler = resolve;
-      this.once("prompts_ready", resolve);
-    });
-
-    const pickerP = pickFn([
+    const idx = await pickFn([
       "Wait to be assigned the next task",
       "Choose a specific task to work on",
       "Stop working for now",
       "Quit and exit",
     ]);
 
-    const winner = await Promise.race([
-      pickerP.then(idx => ({ type: "pick" as const, idx })),
-      dismissedByTask.then(() => ({ type: "dismiss" as const })),
-    ]);
-
-    // Clean up the dismiss listener whether or not it fired.
-    this.off("prompts_ready", dismissHandler!);
-
-    if (winner.type === "dismiss") {
-      this.picker?.cancel(); // erase the picker UI from the terminal
-      this.display.print(c.sageGreen("Waiting for next task..."));
-      return "task-complete";
-    }
-
-    const { idx } = winner;
     switch (idx) {
       case 1:
         await this.stop();
@@ -500,6 +474,7 @@ export class WorkerController extends EventEmitter {
         await this.stop();
         return "exit";
       default:
+        this.sendWorkerReady();
         this.display.print(c.sageGreen("Waiting for next task..."));
         return "task-complete";
     }

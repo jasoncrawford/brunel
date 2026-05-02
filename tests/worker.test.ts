@@ -224,7 +224,7 @@ describe("completeCurrentTask", () => {
     await session.completeCurrentTask();
 
     const sent = JSON.parse(fakeWs.send.mock.calls[0][0]);
-    expect(sent).toEqual({ type: "task_complete", workerId: AGENT_ID, taskId: "42" });
+    expect(sent).toEqual({ type: "task_complete", workerId: AGENT_ID, taskId: "42", nextState: "reserved" });
   });
 
   it("returns 'task-complete' so the main loop can hide the prompt", async () => {
@@ -788,7 +788,7 @@ describe("hello_ack handshake — buffering", () => {
       sendMsg(newWs, { type: "hello_ack", workerId: AGENT_ID, status: "assigned" });
       expect(newWs.send).toHaveBeenCalledOnce();
       const sent = JSON.parse(newWs.send.mock.calls[0][0]);
-      expect(sent).toEqual({ type: "task_complete", workerId: AGENT_ID, taskId: "42" });
+      expect(sent).toEqual({ type: "task_complete", workerId: AGENT_ID, taskId: "42", nextState: "reserved" });
     } finally {
       vi.restoreAllMocks();
       vi.useRealTimers();
@@ -1586,7 +1586,7 @@ describe("afterTask callback on /worker:complete", () => {
 
     await sessionWithAfterTask.completeCurrentTask();
     expect(afterTask).toHaveBeenCalledOnce();
-    const sentMsg = JSON.parse(fakeWs.send.mock.calls.at(-1)![0]);
+    const sentMsg = JSON.parse(fakeWs.send.mock.calls[0][0]);
     expect(sentMsg.type).toBe("task_complete");
   });
 
@@ -1612,8 +1612,8 @@ describe("afterTask callback on /worker:complete", () => {
     sendMsg(fakeWs, { type: "task_assigned", taskId: "t1", issue });
     session.takeNextPrompt();
     await session.completeCurrentTask();
-    const lastMsg = JSON.parse(fakeWs.send.mock.calls.at(-1)![0]);
-    expect(lastMsg.type).toBe("task_complete");
+    const firstMsg = JSON.parse(fakeWs.send.mock.calls[0][0]);
+    expect(firstMsg.type).toBe("task_complete");
   });
 
   it("does NOT send task_complete when afterTask throws UserCancelledError", async () => {
@@ -1733,40 +1733,38 @@ describe("completeCurrentTask: post-completion prompt", () => {
     ]);
   });
 
-  it("skips picker and returns 'task-complete' when a task is already queued on entry", async () => {
-    const mockPick = vi.fn().mockResolvedValue(0);
-    const { sess, ws } = await makeSession(mockPick);
-    // Queue a new task before completing the current one; enqueuePrompt sets hasPendingPrompts()
-    sendMsg(ws, { type: "task_assigned", taskId: "t-pre", issue: makeIssue(99) });
-    const result = await sess.completeCurrentTask();
-    expect(result).toBe("task-complete");
-    expect(mockPick).not.toHaveBeenCalled();
-    const printed = display.print.mock.calls.map(([l]: [string]) => stripAnsi(l));
-    expect(printed.some(l => l.includes("Waiting for next task"))).toBe(true);
+  it("sends task_complete with nextState: reserved so foreman does not auto-assign during picker", async () => {
+    const { sess, ws } = await makeSession(async () => 0);
+    ws.send.mockClear();
+    await sess.completeCurrentTask();
+    const msgs = ws.send.mock.calls.map(([s]: [string]) => JSON.parse(s));
+    const complete = msgs.find((m: { type: string }) => m.type === "task_complete");
+    expect(complete?.nextState).toBe("reserved");
   });
 
-  it("auto-dismisses picker and returns 'task-complete' when prompts_ready fires while picker is showing", async () => {
-    // pickFn signals when it has been called, then blocks indefinitely.
-    let signalPickShowing!: () => void;
-    const pickShowingP = new Promise<void>(r => { signalPickShowing = r; });
-    const { sess, ws } = await makeSession(async () => {
-      signalPickShowing();
-      return new Promise<number>(() => {}); // never resolves
-    });
+  it("option 0 (wait for next task): sends worker_ready to opt back into auto-assignment", async () => {
+    const { sess, ws } = await makeSession(async () => 0);
+    ws.send.mockClear();
+    await sess.completeCurrentTask();
+    const msgs = ws.send.mock.calls.map(([s]: [string]) => JSON.parse(s));
+    expect(msgs.some((m: { type: string }) => m.type === "worker_ready")).toBe(true);
+  });
 
-    const resultP = sess.completeCurrentTask();
+  it("with no picker and no pickFn: sends worker_ready", async () => {
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "t-nopick2", issue: makeIssue(6) });
+    session.takeNextPrompt();
+    fakeWs.send.mockClear();
+    await session.completeCurrentTask();
+    const msgs = fakeWs.send.mock.calls.map(([s]: [string]) => JSON.parse(s));
+    expect(msgs.some((m: { type: string }) => m.type === "worker_ready")).toBe(true);
+  });
 
-    // Wait until pickFn has been invoked — the once("prompts_ready") listener is
-    // already registered at this point (it is set up before pickFn is called).
-    await pickShowingP;
-
-    // Sending task_assigned emits prompts_ready, which dismisses the picker race.
-    sendMsg(ws, { type: "task_assigned", taskId: "t-mid", issue: makeIssue(88) });
-
-    const result = await resultP;
-    expect(result).toBe("task-complete");
-    const printed = display.print.mock.calls.map(([l]: [string]) => stripAnsi(l));
-    expect(printed.some(l => l.includes("Waiting for next task"))).toBe(true);
+  it("option 2 (stop working): does not send worker_ready", async () => {
+    const { sess, ws } = await makeSession(async () => 2);
+    ws.send.mockClear();
+    await sess.completeCurrentTask();
+    const msgs = ws.send.mock.calls.map(([s]: [string]) => JSON.parse(s));
+    expect(msgs.some((m: { type: string }) => m.type === "worker_ready")).toBe(false);
   });
 });
 

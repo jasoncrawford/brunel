@@ -53,17 +53,6 @@ export type PickerDisplay = { clearBar(): void; drawBar(): void };
 export class Picker {
   constructor(private display?: PickerDisplay, private onStart?: () => void) {}
 
-  /** Stored by pick() so cancel() can dismiss the active menu from outside. */
-  private _cancelFn: (() => void) | null = null;
-
-  /**
-   * Cancel the currently-active pick(), if any. Erases the menu and resolves
-   * with the first option (index 0). No-op if no pick is in progress.
-   */
-  cancel(): void {
-    this._cancelFn?.();
-  }
-
   /** Formats a single picker row: adds marker and dims non-selected rows. */
   private static pickerLine(text: string, isSelected: boolean, marker?: string): string {
     const prefix = isSelected ? "▶ " : (marker ?? "  ");
@@ -85,7 +74,6 @@ export class Picker {
     const lastIsTextEntry = config?.lastIsTextEntry ?? false;
     const hasConfig = config != null;
     const { display } = this;
-    const self = this;
 
     this.onStart?.();
     display?.clearBar();
@@ -141,20 +129,10 @@ export class Picker {
 
       function finish(result: number | PickResult) {
         done = true;
-        self._cancelFn = null;
         process.stdin.removeListener("data", onData);
         display?.drawBar();
         resolve(result);
       }
-
-      // Allow external callers (e.g. routing loop) to dismiss this picker when
-      // a new task arrives, rather than waiting for user input.
-      self._cancelFn = () => {
-        if (!done) {
-          eraseMenu();
-          finish(hasConfig ? { type: "selected", index: 0 } as PickResult : 0);
-        }
-      };
 
       function onData(raw: string) {
         if (done) return;
