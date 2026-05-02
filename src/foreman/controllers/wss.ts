@@ -516,7 +516,7 @@ export class ForemanWss {
       return;
     }
     this.workerLog(workerId, "worker_ready");
-    worker.markAvailable();
+    await worker.becomeReady();
   }
 
   async handleActivateRepo(workerId: string, ws: WebSocket): Promise<void> {
