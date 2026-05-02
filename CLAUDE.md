@@ -56,8 +56,8 @@ Every `worker_hello` gets a `hello_ack` with one of four statuses before any tas
 - `cancelled` — task was taken or completed; worker should reset and become idle
 
 Worker state transitions happen via dedicated messages while the worker stays connected:
-- `task_complete { nextState?: "ready" | "reserved" }` — complete a task and declare next state; defaults to `"ready"`
-- `worker_ready` — transition from `reserved` → `ready` (e.g., after claiming a specific task or deciding to accept work)
+- `task_complete { nextState: "reserved" }` — complete a task; always sends `reserved` so the foreman holds the worker out of the auto-assignment pool while the post-task picker is showing. Pass `nextState: "reserved"` explicitly in the claim flow to skip the picker entirely.
+- `worker_ready` — transition from `reserved` → `ready`; sent after the user confirms "wait for next task" in the picker (or immediately in non-interactive mode)
 
 The `/worker:claim` command connects with `status: "reserved"` (no `claimTaskId` in the hello), receives `hello_ack { status: "reserved" }`, then sends `claim_task { taskId }` separately. The foreman replies with `task_assigned` or a non-fatal `foreman_error`.
 
