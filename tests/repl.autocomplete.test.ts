@@ -61,7 +61,7 @@ describe("listCommandNames", () => {
 
   it("returns only builtins when directory is missing", () => {
     const result = registry.listCommandNames(() => null);
-    expect(result).toEqual(["clear", "effort", "exit", "model", "permissions", "quit", "worker:claim", "worker:complete", "worker:done", "worker:start", "worker:stop", "workspace:create", "workspace:prune", "workspace:remove", "workspace:reset"]);
+    expect(result).toEqual(["clear", "effort", "exit", "model", "permissions", "worker:claim", "worker:complete", "worker:start", "worker:stop", "workspace:create", "workspace:prune", "workspace:remove", "workspace:reset"]);
   });
 
   it("includes a file at root level", () => {
@@ -147,6 +147,12 @@ describe("listCommandNames", () => {
   it("includes worker:complete", () => {
     const result = registry.listCommandNames(() => null);
     expect(result).toContain("worker:complete");
+  });
+
+  it("excludes alias entries (worker:done, quit)", () => {
+    const result = registry.listCommandNames(() => null);
+    expect(result).not.toContain("worker:done");
+    expect(result).not.toContain("quit");
   });
 
   it("deduplicates when skill name matches a command name", () => {
@@ -255,6 +261,21 @@ describe("listCommands", () => {
     const result = registry.listCommands(() => null);
     const names = result.map(c => c.name);
     expect(names).toEqual([...names].sort());
+  });
+
+  it("excludes alias entries from results", () => {
+    const result = registry.listCommands(() => null);
+    const names = result.map(c => c.name);
+    expect(names).not.toContain("quit");
+    expect(names).not.toContain("worker:done");
+  });
+
+  it("canonical commands include aliases array for filtering", () => {
+    const result = registry.listCommands(() => null);
+    const exitCmd = result.find(c => c.name === "exit");
+    expect(exitCmd?.aliases).toContain("quit");
+    const completeCmd = result.find(c => c.name === "worker:complete");
+    expect(completeCmd?.aliases).toContain("worker:done");
   });
 });
 

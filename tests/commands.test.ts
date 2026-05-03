@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { CommandRegistry, CommandController, filterCommands } from "../src/agent/controllers/command-controller.js";
+import { CommandRegistry, CommandController, filterCommands, type CommandSuggestion } from "../src/agent/controllers/command-controller.js";
 import { registerTestCommands } from "./helpers.js";
 
 let registry: CommandController;
@@ -241,6 +241,59 @@ describe("registered aliases", () => {
 
   it("quit description says it is alias for exit", () => {
     expect(registry.registry.lookup("quit")!.description).toContain("alias for exit");
+  });
+});
+
+// ── filterCommands alias priority ────────────────────────────────────────────
+
+describe("filterCommands alias priority", () => {
+  const cmds: CommandSuggestion[] = [
+    { name: "exit",           description: "Exit (alias: quit)",              aliases: ["quit"] },
+    { name: "something:quit", description: "A command with quit in the name"                    },
+    { name: "other",          description: "A command with quit in description"                 },
+  ];
+
+  it("alias depth-0 match ranks above name depth-1 segment match", () => {
+    // "exit" has alias "quit" → depth 0; "something:quit" has "quit" as segment → depth 1
+    const result = filterCommands("quit", cmds);
+    const names = result.map(c => c.name);
+    expect(names.indexOf("exit")).toBeLessThan(names.indexOf("something:quit"));
+  });
+
+  it("exact alias match surfaces the canonical command first", () => {
+    const result = filterCommands("quit", cmds);
+    expect(result[0].name).toBe("exit");
+  });
+
+  it("partial alias prefix match ranks above name segment match at greater depth", () => {
+    const partial: CommandSuggestion[] = [
+      { name: "exit",           description: "Exit", aliases: ["quit"] },
+      { name: "something:quit", description: ""                        },
+    ];
+    // "qui" matches alias "quit" at depth 0; matches "something:quit" segment at depth 1
+    const result = filterCommands("qui", partial);
+    expect(result[0].name).toBe("exit");
+  });
+
+  it("namespaced alias uses depth of matching segment", () => {
+    // alias "worker:done" → at depth 1 "done".startsWith("done") → depth 1
+    const cmdsNs: CommandSuggestion[] = [
+      { name: "worker:complete", description: "", aliases: ["worker:done"] },
+      { name: "done-other",      description: ""                           },
+    ];
+    // "worker:complete" via alias at depth 1; "done-other" via name at depth 0
+    const result = filterCommands("done", cmdsNs);
+    const names = result.map(c => c.name);
+    expect(names).toContain("worker:complete");
+    expect(names).toContain("done-other");
+    // "done-other" is depth 0 (name prefix), worker:complete alias "worker:done" depth 1
+    expect(names.indexOf("done-other")).toBeLessThan(names.indexOf("worker:complete"));
+  });
+
+  it("description match still works when no alias or name matches", () => {
+    // "in description" appears only in other's description, not in any name or alias
+    const result = filterCommands("in description", cmds);
+    expect(result.map(c => c.name)).toContain("other");
   });
 });
 
