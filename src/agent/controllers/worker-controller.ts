@@ -361,17 +361,16 @@ export class WorkerController extends EventEmitter {
    */
   async confirmTaskQuit(
     info: TaskConfirmInfo,
-    pickFn: (options: string[]) => Promise<number> = (opts) => this.picker!.pick(opts),
   ): Promise<"quit" | "complete-and-quit" | "cancel"> {
     if (info.issueClosed) {
       this.display.print(c.amber(`\nTask #${info.taskNumber} is closed but not complete. Complete it before exiting?`));
-      const idx = await pickFn(["Yes, complete before exiting", "No, just exit", "Don't exit"]);
+      const idx = await this.picker!.pick(["Yes, complete before exiting", "No, just exit", "Don't exit"]);
       if (idx === 0) return "complete-and-quit";
       if (idx === 1) return "quit";
       return "cancel";
     } else {
       this.display.print(c.amber(`\nTask #${info.taskNumber} is still open. Quitting now will unassign ${info.workerId}. Quit anyway?`));
-      const idx = await pickFn(["No, keep working", "Yes, quit anyway"]);
+      const idx = await this.picker!.pick(["No, keep working", "Yes, quit anyway"]);
       if (idx === 1) return "quit";
       return "cancel";
     }
@@ -388,17 +387,16 @@ export class WorkerController extends EventEmitter {
    */
   async confirmTaskClaim(
     info: TaskConfirmInfo,
-    pickFn: (options: string[]) => Promise<number> = (opts) => this.picker!.pick(opts),
   ): Promise<"claim" | "complete-and-claim" | "cancel"> {
     if (info.issueClosed) {
       this.display.print(c.amber(`\nTask #${info.taskNumber} is closed but not complete. Complete it before claiming a new task?`));
-      const idx = await pickFn(["Yes, complete first", "No, just claim", "Don't claim"]);
+      const idx = await this.picker!.pick(["Yes, complete first", "No, just claim", "Don't claim"]);
       if (idx === 0) return "complete-and-claim";
       if (idx === 1) return "claim";
       return "cancel";
     } else {
       this.display.print(c.amber(`\nTask #${info.taskNumber} is still open. Claiming a new task will unassign ${info.workerId}. Proceed?`));
-      const idx = await pickFn(["No, keep working", "Yes, claim anyway"]);
+      const idx = await this.picker!.pick(["No, keep working", "Yes, claim anyway"]);
       if (idx === 1) return "claim";
       return "cancel";
     }

@@ -2179,15 +2179,15 @@ describe("confirmTaskQuit", () => {
 
   it("open issue: returns 'cancel' when user picks 'No, keep working' (index 0)", async () => {
     const mockPick = vi.fn().mockResolvedValue(0);
-    const sess = new WorkerController(noopAgentStatus, noopDisplay, undefined, undefined, "");
-    const result = await sess.confirmTaskQuit(openTask, mockPick);
+    const sess = new WorkerController(noopAgentStatus, noopDisplay, makeMockPicker(mockPick), undefined, "");
+    const result = await sess.confirmTaskQuit(openTask);
     expect(result).toBe("cancel");
   });
 
   it("open issue: returns 'quit' when user picks 'Yes, quit anyway' (index 1)", async () => {
     const mockPick = vi.fn().mockResolvedValue(1);
-    const sess = new WorkerController(noopAgentStatus, noopDisplay, undefined, undefined, "");
-    const result = await sess.confirmTaskQuit(openTask, mockPick);
+    const sess = new WorkerController(noopAgentStatus, noopDisplay, makeMockPicker(mockPick), undefined, "");
+    const result = await sess.confirmTaskQuit(openTask);
     expect(result).toBe("quit");
   });
 
@@ -2195,8 +2195,8 @@ describe("confirmTaskQuit", () => {
     const printAgentStatus = new AgentStatus({ agentId: "test" });
     const printDisplay = { print: vi.fn(), printForemanMessage: vi.fn() };
     const mockPick = vi.fn().mockResolvedValue(0);
-    const sess = new WorkerController(printAgentStatus, printDisplay, undefined, undefined, "");
-    await sess.confirmTaskQuit(openTask, mockPick);
+    const sess = new WorkerController(printAgentStatus, printDisplay, makeMockPicker(mockPick), undefined, "");
+    await sess.confirmTaskQuit(openTask);
     const printed = printDisplay.print.mock.calls.map(([s]: [unknown]) => stripAnsi(String(s))).join("\n");
     expect(printed).toContain("#42");
     expect(printed).toContain("test-worker");
@@ -2204,22 +2204,22 @@ describe("confirmTaskQuit", () => {
 
   it("closed issue: returns 'complete-and-quit' when user picks index 0 (yes, complete)", async () => {
     const mockPick = vi.fn().mockResolvedValue(0);
-    const sess = new WorkerController(noopAgentStatus, noopDisplay, undefined, undefined, "");
-    const result = await sess.confirmTaskQuit(closedTask, mockPick);
+    const sess = new WorkerController(noopAgentStatus, noopDisplay, makeMockPicker(mockPick), undefined, "");
+    const result = await sess.confirmTaskQuit(closedTask);
     expect(result).toBe("complete-and-quit");
   });
 
   it("closed issue: returns 'quit' when user picks index 1 (no, just exit)", async () => {
     const mockPick = vi.fn().mockResolvedValue(1);
-    const sess = new WorkerController(noopAgentStatus, noopDisplay, undefined, undefined, "");
-    const result = await sess.confirmTaskQuit(closedTask, mockPick);
+    const sess = new WorkerController(noopAgentStatus, noopDisplay, makeMockPicker(mockPick), undefined, "");
+    const result = await sess.confirmTaskQuit(closedTask);
     expect(result).toBe("quit");
   });
 
   it("closed issue: returns 'cancel' when user picks index 2 (don't exit)", async () => {
     const mockPick = vi.fn().mockResolvedValue(2);
-    const sess = new WorkerController(noopAgentStatus, noopDisplay, undefined, undefined, "");
-    const result = await sess.confirmTaskQuit(closedTask, mockPick);
+    const sess = new WorkerController(noopAgentStatus, noopDisplay, makeMockPicker(mockPick), undefined, "");
+    const result = await sess.confirmTaskQuit(closedTask);
     expect(result).toBe("cancel");
   });
 
@@ -2227,16 +2227,16 @@ describe("confirmTaskQuit", () => {
     const printAgentStatus = new AgentStatus({ agentId: "test" });
     const printDisplay = { print: vi.fn(), printForemanMessage: vi.fn() };
     const mockPick = vi.fn().mockResolvedValue(0);
-    const sess = new WorkerController(printAgentStatus, printDisplay, undefined, undefined, "");
-    await sess.confirmTaskQuit(closedTask, mockPick);
+    const sess = new WorkerController(printAgentStatus, printDisplay, makeMockPicker(mockPick), undefined, "");
+    await sess.confirmTaskQuit(closedTask);
     const printed = printDisplay.print.mock.calls.map(([s]: [unknown]) => stripAnsi(String(s))).join("\n");
     expect(printed).toContain("#42");
   });
 
   it("open issue: pick is called with two options (No first, Yes second)", async () => {
     const mockPick = vi.fn().mockResolvedValue(0);
-    const sess = new WorkerController(noopAgentStatus, noopDisplay, undefined, undefined, "");
-    await sess.confirmTaskQuit(openTask, mockPick);
+    const sess = new WorkerController(noopAgentStatus, noopDisplay, makeMockPicker(mockPick), undefined, "");
+    await sess.confirmTaskQuit(openTask);
     expect(mockPick).toHaveBeenCalledOnce();
     const options = mockPick.mock.calls[0][0] as string[];
     expect(options).toHaveLength(2);
@@ -2246,8 +2246,8 @@ describe("confirmTaskQuit", () => {
 
   it("closed issue: pick is called with three options", async () => {
     const mockPick = vi.fn().mockResolvedValue(0);
-    const sess = new WorkerController(noopAgentStatus, noopDisplay, undefined, undefined, "");
-    await sess.confirmTaskQuit(closedTask, mockPick);
+    const sess = new WorkerController(noopAgentStatus, noopDisplay, makeMockPicker(mockPick), undefined, "");
+    await sess.confirmTaskQuit(closedTask);
     expect(mockPick).toHaveBeenCalledOnce();
     const options = mockPick.mock.calls[0][0] as string[];
     expect(options).toHaveLength(3);
