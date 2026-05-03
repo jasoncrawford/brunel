@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { CommandRegistry, CommandController } from "../src/agent/controllers/command-controller.js";
+import { CommandRegistry, CommandController, filterCommands } from "../src/agent/controllers/command-controller.js";
 import { registerTestCommands } from "./helpers.js";
 
 let registry: CommandController;
@@ -164,5 +164,112 @@ describe("each registered entry shape", () => {
     for (const entry of registry.registry.listAll()) {
       expect(entry.description, `${entry.name} should have description`).toBeTruthy();
     }
+  });
+});
+
+// ── filterCommands ────────────────────────────────────────────────────────────
+
+describe("filterCommands", () => {
+  it("empty query returns all commands", () => {
+    const cmds = [{ name: "foo", description: "" }, { name: "bar", description: "" }];
+    expect(filterCommands("", cmds)).toEqual(cmds);
+  });
+
+  it("prefix of full name matches", () => {
+    const result = filterCommands("ex", [{ name: "exit", description: "" }]);
+    expect(result.map(c => c.name)).toEqual(["exit"]);
+  });
+
+  it("non-prefix substring of name matches", () => {
+    const result = filterCommands("xit", [{ name: "exit", description: "" }]);
+    expect(result.map(c => c.name)).toEqual(["exit"]);
+  });
+
+  it("description-only match returns command", () => {
+    const result = filterCommands("suite", [
+      { name: "run-tests", description: "Run the test suite" },
+    ]);
+    expect(result.map(c => c.name)).toEqual(["run-tests"]);
+  });
+
+  it("prefix of last segment matches a namespaced command", () => {
+    const result = filterCommands("comp", [{ name: "worker:complete", description: "" }]);
+    expect(result.map(c => c.name)).toEqual(["worker:complete"]);
+  });
+
+  it("case-insensitive segment prefix match", () => {
+    const result = filterCommands("COMP", [{ name: "worker:complete", description: "" }]);
+    expect(result.map(c => c.name)).toEqual(["worker:complete"]);
+  });
+
+  it("depth-0 prefix match comes before depth-1 segment prefix match", () => {
+    const result = filterCommands("st", [
+      { name: "worker:start", description: "" },
+      { name: "status",       description: "" },
+    ]);
+    expect(result.map(c => c.name)).toEqual(["status", "worker:start"]);
+  });
+
+  it("depth-1 segment prefix match comes before non-prefix substring match", () => {
+    // "st" is a prefix of the "start" segment in "worker:start" (depth 1)
+    // "st" is NOT a prefix of any segment in "some-stuff" (substring only)
+    const result = filterCommands("st", [
+      { name: "some-stuff",   description: "" },
+      { name: "worker:start", description: "" },
+    ]);
+    expect(result.map(c => c.name)).toEqual(["worker:start", "some-stuff"]);
+  });
+
+  it("depth-1 segment prefix match comes before depth-2 segment prefix match", () => {
+    // "st" → "start" at depth 1 in "worker:start", "stuff" at depth 2 in "foo:bar:stuff"
+    const result = filterCommands("st", [
+      { name: "foo:bar:stuff", description: "" },
+      { name: "worker:start",  description: "" },
+    ]);
+    expect(result.map(c => c.name)).toEqual(["worker:start", "foo:bar:stuff"]);
+  });
+
+  it("full sort order: depth-0, depth-1, depth-2, substring, description", () => {
+    const result = filterCommands("st", [
+      { name: "foo:bar:stuff",  description: "" },
+      { name: "some-stuff",     description: "" },
+      { name: "worker:start",   description: "" },
+      { name: "status",         description: "" },
+      { name: "brainstorm",     description: "Start something" },
+    ]);
+    expect(result.map(c => c.name)).toEqual([
+      "status",
+      "worker:start",
+      "foo:bar:stuff",
+      "some-stuff",
+      "brainstorm",
+    ]);
+  });
+
+  it("sort order: prefix name match before description-only match", () => {
+    const result = filterCommands("run", [
+      { name: "brainstorm", description: "Run ideas by the AI" },
+      { name: "run-tests",  description: "Execute the suite" },
+    ]);
+    expect(result.map(c => c.name)).toEqual(["run-tests", "brainstorm"]);
+  });
+
+  it("/worker:st matches /worker:status at depth 0 before /foo:worker:status at depth 1", () => {
+    const result = filterCommands("worker:st", [
+      { name: "foo:worker:status", description: "" },
+      { name: "worker:status",     description: "" },
+    ]);
+    expect(result.map(c => c.name)).toEqual(["worker:status", "foo:worker:status"]);
+  });
+
+  it("non-prefix substring of full name stays as substring match (not promoted to prefix)", () => {
+    // "event" does not start any segment of "something-events" or "worker:resume-events"
+    const result = filterCommands("event", [
+      { name: "something-events",    description: "" },
+      { name: "worker:resume-events", description: "" },
+    ]);
+    expect(result).toHaveLength(2);
+    // Both are substring matches; order preserved from input
+    expect(result.map(c => c.name)).toEqual(["something-events", "worker:resume-events"]);
   });
 });

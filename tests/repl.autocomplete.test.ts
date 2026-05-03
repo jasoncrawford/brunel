@@ -682,6 +682,35 @@ describe("ask() - substring and description autocomplete", () => {
       expect(result).toBe("/run-tests"); // prefix match before description match
     });
   });
+
+  it("un-namespaced query matches namespaced command via segment prefix", async () => {
+    const namespacedCmds = (): CommandSuggestion[] => [
+      { name: "worker:complete", description: "Complete the task" },
+    ];
+    await withFakeStdin(async (stdin) => {
+      const p = testInput.ask("> ", namespacedCmds);
+      stdin.push("/comp");
+      stdin.push("\r"); // Enter picks the only match
+      const result = await p;
+      expect(result).toBe("/worker:complete");
+    });
+  });
+
+  it("sort order: segment prefix match ranked before non-prefix substring match", async () => {
+    // "/st" is a prefix of the "start" segment in "worker:start" (depth 1)
+    // "/st" is NOT a prefix of any segment in "restart" (substring match only)
+    const mixedCmds = (): CommandSuggestion[] => [
+      { name: "restart",     description: "" },
+      { name: "worker:start", description: "" },
+    ];
+    await withFakeStdin(async (stdin) => {
+      const p = testInput.ask("> ", mixedCmds);
+      stdin.push("/st");
+      stdin.push("\r"); // Enter picks first match
+      const result = await p;
+      expect(result).toBe("/worker:start"); // segment prefix beats substring
+    });
+  });
 });
 
 // ── Arrow navigation in autocomplete ─────────────────────────────────────────
