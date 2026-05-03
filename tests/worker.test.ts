@@ -1608,7 +1608,7 @@ describe("workspace slash commands in WorkerController", () => {
 // ── afterTask callback on /worker:complete ──────────────────────────────────────
 
 describe("afterTask callback on /worker:complete", () => {
-  it("calls afterTask before sending task_complete to foreman", async () => {
+  it("calls afterTask after task_complete is sent (picker defaults to wait)", async () => {
     const afterTask = vi.fn().mockResolvedValue(undefined);
     const sessionWithAfterTask = new WorkerController(sb, display, undefined, undefined, "", { wsFactory, afterTask });
     await sessionWithAfterTask.start();
@@ -1618,9 +1618,11 @@ describe("afterTask callback on /worker:complete", () => {
     sessionWithAfterTask.takeNextPrompt();
 
     await sessionWithAfterTask.completeCurrentTask();
+    // task_complete is sent first (before afterTask runs)
+    const firstMsg = JSON.parse(fakeWs.send.mock.calls[0][0]);
+    expect(firstMsg.type).toBe("task_complete");
+    // afterTask is called after the picker
     expect(afterTask).toHaveBeenCalledOnce();
-    const sentMsg = JSON.parse(fakeWs.send.mock.calls[0][0]);
-    expect(sentMsg.type).toBe("task_complete");
   });
 
   it("sends task_complete even if afterTask throws (task must not get stuck on foreman)", async () => {
@@ -1649,7 +1651,8 @@ describe("afterTask callback on /worker:complete", () => {
     expect(firstMsg.type).toBe("task_complete");
   });
 
-  it("does NOT send task_complete when afterTask throws UserCancelledError", async () => {
+  it("claim flow: does NOT send task_complete when afterTask throws UserCancelledError", async () => {
+    // In the claim (reserved) path, afterTask runs before task_complete so UCE can abort.
     const afterTask = vi.fn().mockRejectedValue(new UserCancelledError());
     const sessionWithAfterTask = new WorkerController(sb, display, undefined, undefined, "", { wsFactory, afterTask });
     await sessionWithAfterTask.start();
@@ -1659,14 +1662,16 @@ describe("afterTask callback on /worker:complete", () => {
     sessionWithAfterTask.takeNextPrompt();
 
     const sendCountBefore = fakeWs.send.mock.calls.length;
-    try { await sessionWithAfterTask.completeCurrentTask(); } catch { /* UserCancelledError expected */ }
+    try { await sessionWithAfterTask.completeCurrentTask("reserved"); } catch { /* UserCancelledError expected */ }
     const taskCompleteSent = fakeWs.send.mock.calls
       .slice(sendCountBefore)
       .some(([data]: [string]) => JSON.parse(data).type === "task_complete");
     expect(taskCompleteSent).toBe(false);
   });
 
-  it("preserves task state when afterTask throws UserCancelledError", async () => {
+  it("ready flow: sends task_complete even when afterTask throws UserCancelledError", async () => {
+    // In the default (ready) path, task_complete is sent before afterTask runs,
+    // so UCE from afterTask cannot prevent task_complete from being sent.
     const afterTask = vi.fn().mockRejectedValue(new UserCancelledError());
     const sessionWithAfterTask = new WorkerController(sb, display, undefined, undefined, "", { wsFactory, afterTask });
     await sessionWithAfterTask.start();
@@ -1675,7 +1680,25 @@ describe("afterTask callback on /worker:complete", () => {
     sendMsg(fakeWs, { type: "task_assigned", taskId: "t1", issue });
     sessionWithAfterTask.takeNextPrompt();
 
-    try { await sessionWithAfterTask.completeCurrentTask(); } catch { /* UserCancelledError expected */ }
+    const sendCountBefore = fakeWs.send.mock.calls.length;
+    await sessionWithAfterTask.completeCurrentTask(); // ready path: UCE handled gracefully
+    const taskCompleteSent = fakeWs.send.mock.calls
+      .slice(sendCountBefore)
+      .some(([data]: [string]) => JSON.parse(data).type === "task_complete");
+    expect(taskCompleteSent).toBe(true);
+  });
+
+  it("claim flow: preserves task state when afterTask throws UserCancelledError", async () => {
+    // In the claim (reserved) path, UCE from afterTask prevents task_complete and keeps the task.
+    const afterTask = vi.fn().mockRejectedValue(new UserCancelledError());
+    const sessionWithAfterTask = new WorkerController(sb, display, undefined, undefined, "", { wsFactory, afterTask });
+    await sessionWithAfterTask.start();
+
+    const issue = makeIssue();
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "t1", issue });
+    sessionWithAfterTask.takeNextPrompt();
+
+    try { await sessionWithAfterTask.completeCurrentTask("reserved"); } catch { /* UserCancelledError expected */ }
     expect(sessionWithAfterTask.hasTask()).toBe(true);
   });
 });
@@ -1728,6 +1751,13 @@ describe("completeCurrentTask: post-completion prompt", () => {
     const result = await sess.completeCurrentTask();
     expect(result).toBe("task-complete");
     expect(sess.isActive).toBe(false);
+  });
+
+  it("option 3 (exit): does NOT call afterTask (workspace will be destroyed)", async () => {
+    const afterTask = vi.fn().mockResolvedValue(undefined);
+    const { sess } = await makeSession(async () => 3, { afterTask });
+    await sess.completeCurrentTask();
+    expect(afterTask).not.toHaveBeenCalled();
   });
 
   it("option 3 (exit): stops worker mode and returns 'exit'", async () => {
@@ -1932,7 +1962,9 @@ describe("stop — complete-and-quit", () => {
     expect(goodbye.stats).toBeUndefined();
   });
 
-  it("does NOT stop when afterTask throws UserCancelledError during complete-and-quit", async () => {
+  it("complete-and-quit: skips afterTask (workspace is about to be destroyed anyway)", async () => {
+    // afterTask (workspace reset) is not called during complete-and-quit because
+    // the workspace will be destroyed when the process exits — resetting first is wasteful.
     const afterTask = vi.fn().mockRejectedValue(new UserCancelledError());
     const s = new WorkerController(sb, display, undefined, undefined, "owner/repo", { wsFactory, afterTask });
     await s.start();
@@ -1944,8 +1976,9 @@ describe("stop — complete-and-quit", () => {
     await s.stop();
 
     const msgs = fakeWs.send.mock.calls.map(([d]: [string]) => JSON.parse(d));
-    expect(msgs.find((m: { type: string }) => m.type === "worker_goodbye")).toBeUndefined();
-    expect(s.isActive).toBe(true);
+    expect(msgs.find((m: { type: string }) => m.type === "worker_goodbye")).toBeDefined();
+    expect(s.isActive).toBe(false);
+    expect(afterTask).not.toHaveBeenCalled();
   });
 });
 

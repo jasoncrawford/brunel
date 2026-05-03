@@ -328,12 +328,7 @@ export class WorkerController extends EventEmitter {
   }
 
   private async buildCompleteGoodbyeOpts(): Promise<{ task_complete: true; stats?: { inputTokens: number; outputTokens: number; costUsd?: number } }> {
-    if (this._activeAfterTask) {
-      try { await this._activeAfterTask(); } catch (err) {
-        if (err instanceof UserCancelledError) throw err;
-        this.display.print(c.amber(`afterTask failed: ${fmtError(err)}`));
-      }
-    }
+    // No afterTask reset here — the workspace will be destroyed when the process exits.
     const { taskInputTokens, taskOutputTokens, taskCostUsd } = this.agentStatus;
     const hasStats = taskInputTokens > 0 || taskOutputTokens > 0 || taskCostUsd != null;
     const statsStr = fmtTaskStats(taskInputTokens, taskOutputTokens, taskCostUsd);
@@ -416,12 +411,18 @@ export class WorkerController extends EventEmitter {
   }
 
   /**
-   * Complete the current task: call afterTask hook, send task_complete, reset state,
-   * then prompt the user for what to do next.
+   * Complete the current task: send task_complete, reset state, then prompt the user
+   * for what to do next.
    *
    * Always sends nextState: "reserved" to the foreman so it doesn't auto-assign a new
    * task while the picker is showing. promptAfterTaskComplete() calls sendWorkerReady()
    * only after the user confirms they want to keep waiting.
+   *
+   * For the claim flow (nextState: "reserved"), afterTask runs before task_complete so
+   * a UserCancelledError can abort the completion if the workspace has unsafe changes.
+   * For the default flow (nextState: "ready"), afterTask is deferred to after the picker
+   * so the picker appears immediately; the exit option skips afterTask entirely since
+   * the workspace is about to be destroyed.
    *
    * Pass "reserved" explicitly to skip the picker entirely (claim flow — the caller
    * handles the next action, e.g. sendClaimTask).
@@ -431,11 +432,11 @@ export class WorkerController extends EventEmitter {
    */
   async completeCurrentTask(nextState: "ready" | "reserved" = "ready"): Promise<"task-complete" | "exit" | undefined> {
     if (!this.currentTaskId) return undefined;
-    if (this._activeAfterTask) {
+    if (nextState === "reserved" && this._activeAfterTask) {
+      // Claim flow: run afterTask before marking complete so UserCancelledError can
+      // abort if the workspace has unsafe changes.
       try { await this._activeAfterTask(); } catch (err) {
         if (err instanceof UserCancelledError) throw err;
-        // Log but don't abort — the task IS complete even if workspace cleanup fails.
-        // Returning early here would leave the task stuck on the foreman forever.
         this.display.print(c.amber(`afterTask failed: ${fmtError(err)}`));
       }
     }
@@ -469,6 +470,9 @@ export class WorkerController extends EventEmitter {
    * this is what transitions the foreman from "reserved" to auto-assignable.
    *
    * Option 1 ("Claim a specific task:") uses inline text entry via textEntryIndex: 1.
+   *
+   * afterTask (workspace reset) runs after the picker for all options except Exit,
+   * where it is skipped entirely since the workspace will be destroyed on exit.
    */
   private async promptAfterTaskComplete(): Promise<"task-complete" | "exit"> {
     // task_complete was already sent to the foreman by completeCurrentTask().
@@ -483,18 +487,41 @@ export class WorkerController extends EventEmitter {
 
     if (result.type === "other") {
       const taskId = result.text.trim();
+      await this.runAfterTaskReset();
       if (taskId) this.claimAfterTask(taskId);
       return "task-complete";
     }
 
     const index = result.type === "selected" ? result.index : -1;
     switch (index) {
-      case 2: await this.stop(); return "task-complete";
-      case 3: await this.stop(); return "exit";
+      case 2:
+        await this.runAfterTaskReset();
+        await this.stop();
+        return "task-complete";
+      case 3:
+        // exit: skip reset — workspace will be destroyed
+        await this.stop();
+        return "exit";
       default:
+        await this.runAfterTaskReset();
         this.sendWorkerReady();
         this.display.print(c.sageGreen("Waiting for next task..."));
         return "task-complete";
+    }
+  }
+
+  /** Run afterTask (workspace reset) after the picker, swallowing errors non-fatally. */
+  private async runAfterTaskReset(): Promise<void> {
+    if (!this._activeAfterTask) return;
+    try {
+      await this._activeAfterTask();
+    } catch (err) {
+      if (err instanceof UserCancelledError) {
+        this.display.print(c.amber("Workspace reset cancelled."));
+        return;
+      }
+      // Log but don't abort — task_complete was already sent.
+      this.display.print(c.amber(`afterTask failed: ${fmtError(err)}`));
     }
   }
 
