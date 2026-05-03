@@ -4,9 +4,20 @@ import { WorkerController, WorkerControllerOptions } from "../src/agent/controll
 import { UserCancelledError } from "../src/agent/controllers/workspace-controller.js";
 import { AgentStatus } from "../src/agent/models/agent-status.js";
 import { Display } from "../src/agent/views/display.js";
+import { Picker, type PickConfig } from "../src/agent/views/picker.js";
 import * as Wire from "../shared/wire.js";
 import { stripAnsi } from "./helpers.js";
 import { getConfig } from "../src/config.js";
+
+function makeMockPicker(fn: (opts: string[]) => Promise<number | { type: "text"; text: string }>): Picker {
+  return {
+    pick: vi.fn().mockImplementation(async (opts: string[], config?: PickConfig) => {
+      const r = await fn(opts);
+      if (config == null) return r as number;
+      return typeof r === "number" ? { type: "selected", index: r } : { type: "other", text: (r as { text: string }).text };
+    }),
+  } as unknown as Picker;
+}
 
 // ── Fake WebSocket ─────────────────────────────────────────────────────────────
 
@@ -1426,10 +1437,9 @@ describe("prIsClosed guard", () => {
 describe("stop() with active task", () => {
   it("remains active if user cancels the quit confirmation", async () => {
     const ws = new FakeWs();
-    const s = new WorkerController(sb, display, undefined, undefined, "owner/repo", {
+    const s = new WorkerController(sb, display, makeMockPicker(async () => 0), undefined, "owner/repo", {
       wsFactory: vi.fn().mockReturnValue(ws),
-      pickFn: async () => 0, // first option = "No, keep working" = cancel
-    });
+    }); // first option = "No, keep working" = cancel
     await s.start();
     sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "ready" });
     sendMsg(ws, { type: "task_assigned", taskId: "99", issue: makeIssue() });
@@ -1443,10 +1453,9 @@ describe("stop() with active task", () => {
 
   it("stops and marks inactive if user confirms quit", async () => {
     const ws = new FakeWs();
-    const s = new WorkerController(sb, display, undefined, undefined, "owner/repo", {
+    const s = new WorkerController(sb, display, makeMockPicker(async () => 1), undefined, "owner/repo", {
       wsFactory: vi.fn().mockReturnValue(ws),
-      pickFn: async () => 1, // second option = "Yes, quit anyway" = quit
-    });
+    }); // second option = "Yes, quit anyway" = quit
     await s.start();
     sendMsg(ws, { type: "hello_ack", workerId: AGENT_ID, status: "ready" });
     sendMsg(ws, { type: "task_assigned", taskId: "99", issue: makeIssue() });
@@ -1711,9 +1720,8 @@ describe("completeCurrentTask: post-completion prompt", () => {
     extraOpts: Partial<WorkerControllerOptions> = {},
   ) {
     const ws = new FakeWs();
-    const sess = new WorkerController(sb, display, undefined, undefined, "owner/repo", {
+    const sess = new WorkerController(sb, display, makeMockPicker(pickFn), undefined, "owner/repo", {
       wsFactory: vi.fn().mockReturnValue(ws),
-      pickFn,
       ...extraOpts,
     });
     await sess.start();
@@ -1722,7 +1730,7 @@ describe("completeCurrentTask: post-completion prompt", () => {
     return { sess, ws };
   }
 
-  it("with no picker and no pickFn: defaults to waiting for next task, stays active, returns 'task-complete'", async () => {
+  it("with no picker: defaults to waiting for next task, stays active, returns 'task-complete'", async () => {
     sendMsg(fakeWs, { type: "task_assigned", taskId: "t-nopick", issue: makeIssue(5) });
     session.takeNextPrompt();
     const result = await session.completeCurrentTask();
@@ -1796,7 +1804,7 @@ describe("completeCurrentTask: post-completion prompt", () => {
     expect(msgs.some((m: { type: string }) => m.type === "worker_ready")).toBe(true);
   });
 
-  it("with no picker and no pickFn: sends worker_ready", async () => {
+  it("with no picker: sends worker_ready", async () => {
     sendMsg(fakeWs, { type: "task_assigned", taskId: "t-nopick2", issue: makeIssue(6) });
     session.takeNextPrompt();
     fakeWs.send.mockClear();
@@ -1814,9 +1822,7 @@ describe("completeCurrentTask: post-completion prompt", () => {
   });
 
   it("claim option (text entry): sends claim_task with the entered task ID", async () => {
-    const { sess, ws } = await makeSession(vi.fn(), {
-      pickFn: async () => ({ type: "text" as const, text: "task-123" }),
-    });
+    const { sess, ws } = await makeSession(async () => ({ type: "text" as const, text: "task-123" }));
     ws.send.mockClear();
     await sess.completeCurrentTask();
     const msgs = ws.send.mock.calls.map(([s]: [string]) => JSON.parse(s));
@@ -1824,25 +1830,19 @@ describe("completeCurrentTask: post-completion prompt", () => {
   });
 
   it("claim option (text entry): worker remains active", async () => {
-    const { sess } = await makeSession(vi.fn(), {
-      pickFn: async () => ({ type: "text" as const, text: "task-123" }),
-    });
+    const { sess } = await makeSession(async () => ({ type: "text" as const, text: "task-123" }));
     await sess.completeCurrentTask();
     expect(sess.isActive).toBe(true);
   });
 
   it("claim option (text entry): returns 'task-complete'", async () => {
-    const { sess } = await makeSession(vi.fn(), {
-      pickFn: async () => ({ type: "text" as const, text: "task-123" }),
-    });
+    const { sess } = await makeSession(async () => ({ type: "text" as const, text: "task-123" }));
     const result = await sess.completeCurrentTask();
     expect(result).toBe("task-complete");
   });
 
   it("claim option (text entry): does not send worker_ready", async () => {
-    const { sess, ws } = await makeSession(vi.fn(), {
-      pickFn: async () => ({ type: "text" as const, text: "task-123" }),
-    });
+    const { sess, ws } = await makeSession(async () => ({ type: "text" as const, text: "task-123" }));
     ws.send.mockClear();
     await sess.completeCurrentTask();
     const msgs = ws.send.mock.calls.map(([s]: [string]) => JSON.parse(s));
@@ -2301,7 +2301,7 @@ describe("repo activation flow", () => {
     const factory = vi.fn().mockReturnValue(ws);
     const sessAg = new AgentStatus({ agentId: AGENT_ID });
     const disp = { print: vi.fn(), printForemanMessage: vi.fn() };
-    const sess = new WorkerController(sessAg, disp, undefined, undefined, repo, { wsFactory: factory, pickFn });
+    const sess = new WorkerController(sessAg, disp, makeMockPicker(pickFn), undefined, repo, { wsFactory: factory });
     await sess.start();
     return { sess, ws, disp };
   }
@@ -2413,9 +2413,8 @@ describe("repo activation flow", () => {
 function makeSessionWithPickResult(pickResult: number): { s: WorkerController; ws: FakeWs } {
   const ws = new FakeWs();
   const localWsFactory = vi.fn().mockReturnValue(ws);
-  const s = new WorkerController(sb, display, undefined, undefined, "owner/repo", {
+  const s = new WorkerController(sb, display, makeMockPicker(async () => pickResult), undefined, "owner/repo", {
     wsFactory: localWsFactory,
-    pickFn: async () => pickResult,
   });
   return { s, ws };
 }
