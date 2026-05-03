@@ -458,7 +458,6 @@ export class WorkerController extends EventEmitter {
 
   /**
    * After completing a task, prompt the user for what to do next.
-   * When no picker is available (non-interactive mode) defaults to waiting.
    *
    * Calls sendWorkerReady() only when the user confirms they want to keep waiting —
    * this is what transitions the foreman from "reserved" to auto-assignable.
@@ -520,10 +519,7 @@ export class WorkerController extends EventEmitter {
   }
 
   private async postTaskPick(options: string[]): Promise<PickResult> {
-    if (this.picker) {
-      return this.picker.pick(options, { textEntryIndex: 1, textEntryPrefix: "Claim a specific task: " });
-    }
-    return { type: "selected", index: 0 }; // non-interactive: default to wait
+    return this.picker!.pick(options, { textEntryIndex: 1, textEntryPrefix: "Claim a specific task: " });
   }
 
   private claimAfterTask(taskId: string): void {

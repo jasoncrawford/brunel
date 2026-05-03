@@ -77,7 +77,7 @@ beforeEach(async () => {
   };
   vi.spyOn(sb, "setOnToolResult");
   vi.spyOn(sb, "update");
-  session = new WorkerController(sb, display, undefined, undefined, "owner/repo", { wsFactory });
+  session = new WorkerController(sb, display, makeMockPicker(async () => 0), undefined, "owner/repo", { wsFactory });
   await session.start();
 });
 
@@ -333,7 +333,7 @@ describe("state after task_complete", () => {
     const localSession = new WorkerController(
       localSb,
       display,
-      undefined,
+      makeMockPicker(async () => 0),
       undefined,
       "owner/repo",
       { wsFactory },
@@ -1617,9 +1617,9 @@ describe("workspace slash commands in WorkerController", () => {
 // ── afterTask callback on /worker:complete ──────────────────────────────────────
 
 describe("afterTask callback on /worker:complete", () => {
-  it("calls afterTask after task_complete is sent (picker defaults to wait)", async () => {
+  it("calls afterTask after task_complete is sent", async () => {
     const afterTask = vi.fn().mockResolvedValue(undefined);
-    const sessionWithAfterTask = new WorkerController(sb, display, undefined, undefined, "", { wsFactory, afterTask });
+    const sessionWithAfterTask = new WorkerController(sb, display, makeMockPicker(async () => 0), undefined, "", { wsFactory, afterTask });
     await sessionWithAfterTask.start();
 
     const issue = makeIssue();
@@ -1636,7 +1636,7 @@ describe("afterTask callback on /worker:complete", () => {
 
   it("sends task_complete even if afterTask throws (task must not get stuck on foreman)", async () => {
     const afterTask = vi.fn().mockRejectedValue(new Error("reset failed"));
-    const sessionWithAfterTask = new WorkerController(sb, display, undefined, undefined, "", { wsFactory, afterTask });
+    const sessionWithAfterTask = new WorkerController(sb, display, makeMockPicker(async () => 0), undefined, "", { wsFactory, afterTask });
     await sessionWithAfterTask.start();
 
     const issue = makeIssue();
@@ -1682,7 +1682,7 @@ describe("afterTask callback on /worker:complete", () => {
     // In the default (ready) path, task_complete is sent before afterTask runs,
     // so UCE from afterTask cannot prevent task_complete from being sent.
     const afterTask = vi.fn().mockRejectedValue(new UserCancelledError());
-    const sessionWithAfterTask = new WorkerController(sb, display, undefined, undefined, "", { wsFactory, afterTask });
+    const sessionWithAfterTask = new WorkerController(sb, display, makeMockPicker(async () => 0), undefined, "", { wsFactory, afterTask });
     await sessionWithAfterTask.start();
 
     const issue = makeIssue();
@@ -1729,16 +1729,6 @@ describe("completeCurrentTask: post-completion prompt", () => {
     sess.takeNextPrompt();
     return { sess, ws };
   }
-
-  it("with no picker: defaults to waiting for next task, stays active, returns 'task-complete'", async () => {
-    sendMsg(fakeWs, { type: "task_assigned", taskId: "t-nopick", issue: makeIssue(5) });
-    session.takeNextPrompt();
-    const result = await session.completeCurrentTask();
-    expect(result).toBe("task-complete");
-    expect(session.isActive).toBe(true);
-    const printed = display.print.mock.calls.map(([l]: [string]) => stripAnsi(l));
-    expect(printed.some(l => l.includes("Waiting for next task"))).toBe(true);
-  });
 
   it("option 0 (wait for next task): stays active and returns 'task-complete'", async () => {
     const { sess } = await makeSession(async () => 0);
@@ -1801,15 +1791,6 @@ describe("completeCurrentTask: post-completion prompt", () => {
     ws.send.mockClear();
     await sess.completeCurrentTask();
     const msgs = ws.send.mock.calls.map(([s]: [string]) => JSON.parse(s));
-    expect(msgs.some((m: { type: string }) => m.type === "worker_ready")).toBe(true);
-  });
-
-  it("with no picker: sends worker_ready", async () => {
-    sendMsg(fakeWs, { type: "task_assigned", taskId: "t-nopick2", issue: makeIssue(6) });
-    session.takeNextPrompt();
-    fakeWs.send.mockClear();
-    await session.completeCurrentTask();
-    const msgs = fakeWs.send.mock.calls.map(([s]: [string]) => JSON.parse(s));
     expect(msgs.some((m: { type: string }) => m.type === "worker_ready")).toBe(true);
   });
 
