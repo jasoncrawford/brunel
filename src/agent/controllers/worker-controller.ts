@@ -568,6 +568,7 @@ export class WorkerController extends EventEmitter {
   registerCommands(registry: CommandRegistry): void {
     registry.register("complete", {
       description: "Mark the current task as done",
+      aliases: ["done"],
       handler: async () => {
         if (!this._isActive) {
           this.display.print(c.boldRed("Not connected to a foreman."));

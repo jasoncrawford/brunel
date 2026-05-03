@@ -141,6 +141,109 @@ describe("scoped", () => {
   });
 });
 
+// ── aliases ───────────────────────────────────────────────────────────────────
+
+describe("aliases", () => {
+  it("registers alias entry alongside the canonical command", () => {
+    registry.registry.register("complete", { description: "Mark done", aliases: ["done"], handler: async () => "task-complete" });
+    expect(registry.registry.lookup("complete")).toBeDefined();
+    expect(registry.registry.lookup("done")).toBeDefined();
+  });
+
+  it("alias entry has aliasFor pointing to canonical name", () => {
+    registry.registry.register("complete", { description: "Mark done", aliases: ["done"], handler: async () => "task-complete" });
+    expect(registry.registry.lookup("done")!.aliasFor).toBe("complete");
+  });
+
+  it("canonical entry has aliases list", () => {
+    registry.registry.register("complete", { description: "Mark done", aliases: ["done", "finished"], handler: async () => "task-complete" });
+    expect(registry.registry.lookup("complete")!.aliases).toEqual(["done", "finished"]);
+  });
+
+  it("single alias: canonical description appends '(alias: name)'", () => {
+    registry.registry.register("complete", { description: "Mark done", aliases: ["done"], handler: async () => "task-complete" });
+    expect(registry.registry.lookup("complete")!.description).toBe("Mark done (alias: done)");
+  });
+
+  it("multiple aliases: canonical description appends '(aliases: name1, name2)'", () => {
+    registry.registry.register("complete", { description: "Mark done", aliases: ["done", "finished"], handler: async () => "task-complete" });
+    expect(registry.registry.lookup("complete")!.description).toBe("Mark done (aliases: done, finished)");
+  });
+
+  it("alias entry description shows it is an alias for canonical", () => {
+    registry.registry.register("complete", { description: "Mark done", aliases: ["done"], handler: async () => "task-complete" });
+    expect(registry.registry.lookup("done")!.description).toBe("Mark done (alias for complete)");
+  });
+
+  it("executing alias calls the same handler", async () => {
+    let called = 0;
+    registry.registry.register("complete", { description: "Mark done", aliases: ["done"], handler: async () => { called++; return "task-complete"; } });
+    const result = await registry.registry.execute("done", "");
+    expect(called).toBe(1);
+    expect(result).toBe("task-complete");
+  });
+
+  it("scoped registry applies prefix to both canonical and alias names", () => {
+    registry.registry.scoped("worker").register("complete", { description: "Mark done", aliases: ["done"], handler: async () => "task-complete" });
+    expect(registry.registry.lookup("worker:complete")).toBeDefined();
+    expect(registry.registry.lookup("worker:done")).toBeDefined();
+    expect(registry.registry.lookup("worker:done")!.aliasFor).toBe("worker:complete");
+  });
+
+  it("canonical description in scoped registry uses full prefixed alias names", () => {
+    registry.registry.scoped("worker").register("complete", { description: "Mark done", aliases: ["done"], handler: async () => "task-complete" });
+    expect(registry.registry.lookup("worker:complete")!.description).toBe("Mark done (alias: worker:done)");
+  });
+
+  it("listAll includes both canonical and alias entries", () => {
+    registry.registry.register("complete", { description: "Mark done", aliases: ["done"], handler: async () => "task-complete" });
+    const names = registry.registry.listAll().map(e => e.name);
+    expect(names).toContain("complete");
+    expect(names).toContain("done");
+  });
+
+  it("no aliases: description unchanged and aliases field absent", () => {
+    registry.registry.register("clear", { description: "Clear", handler: async () => {} });
+    const entry = registry.registry.lookup("clear")!;
+    expect(entry.description).toBe("Clear");
+    expect(entry.aliases).toBeUndefined();
+  });
+});
+
+// ── registered aliases ────────────────────────────────────────────────────────
+
+describe("registered aliases", () => {
+  beforeEach(async () => { registry = await registerTestCommands(); });
+
+  it("worker:done is an alias for worker:complete", () => {
+    const alias = registry.registry.lookup("worker:done")!;
+    expect(alias).toBeDefined();
+    expect(alias.aliasFor).toBe("worker:complete");
+  });
+
+  it("quit is an alias for exit", () => {
+    const alias = registry.registry.lookup("quit")!;
+    expect(alias).toBeDefined();
+    expect(alias.aliasFor).toBe("exit");
+  });
+
+  it("worker:complete description mentions worker:done", () => {
+    expect(registry.registry.lookup("worker:complete")!.description).toContain("worker:done");
+  });
+
+  it("exit description mentions quit", () => {
+    expect(registry.registry.lookup("exit")!.description).toContain("quit");
+  });
+
+  it("worker:done description says it is alias for worker:complete", () => {
+    expect(registry.registry.lookup("worker:done")!.description).toContain("alias for worker:complete");
+  });
+
+  it("quit description says it is alias for exit", () => {
+    expect(registry.registry.lookup("quit")!.description).toContain("alias for exit");
+  });
+});
+
 // ── Built-in command structure ─────────────────────────────────────────────────
 
 describe("each registered entry shape", () => {

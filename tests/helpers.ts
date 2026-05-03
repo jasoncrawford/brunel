@@ -26,7 +26,7 @@ export async function registerTestCommands(): Promise<CommandController> {
   const noopDisplay = { print: () => {}, printForemanMessage: () => {} } as WorkerDisplay;
   new WorkspaceController(undefined, noopDisplay).registerCommands(registry.scoped("workspace"));
   const noop = async () => {};
-  registry.register("exit",   { description: "Exit", handler: noop });
+  registry.register("exit",   { description: "Exit", aliases: ["quit"], handler: noop });
   registry.register("clear",  { description: "Clear the conversation", handler: noop });
   registry.register("model",  { description: "Select the Claude model to use", handler: noop });
   registry.register("effort", { description: "Set the effort level for Claude's thinking", handler: noop });
@@ -34,6 +34,7 @@ export async function registerTestCommands(): Promise<CommandController> {
   const workerRegistry = registry.scoped("worker");
   workerRegistry.register("complete", {
     description: "Mark the current task as done",
+    aliases: ["done"],
     handler: async () => "task-complete",
   });
   workerRegistry.register("start", { description: "Connect to the foreman and start accepting tasks", handler: noop });

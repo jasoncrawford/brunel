@@ -185,6 +185,7 @@ export class BrunelAgent {
     workerController.registerCommands(registry.scoped("worker"));
     registry.register("exit", {
       description: "Exit",
+      aliases: ["quit"],
       handler: async () => {
         if (workerController.isActive) {
           await workerController.stop();

@@ -91,6 +91,10 @@ export interface CommandEntry {
   name: string;
   description: string;
   handler: CommandHandler;
+  /** Canonical name this entry is an alias for, if this is an alias. */
+  aliasFor?: string;
+  /** Alias names registered for this canonical command. */
+  aliases?: string[];
 }
 
 /** A command name paired with a display description for autocomplete. */
@@ -315,13 +319,32 @@ export class CommandRegistry {
   }
 
   /** Register a command. In a scoped registry the name is automatically prefixed. */
-  register(name: string, opts: { description: string; handler: CommandHandler }): void {
+  register(name: string, opts: { description: string; handler: CommandHandler; aliases?: string[] }): void {
     const fullName = this._qualify(name);
+    const aliasFullNames = (opts.aliases ?? []).map(a => this._qualify(a));
+
+    let description = opts.description;
+    if (aliasFullNames.length === 1) {
+      description += ` (alias: ${aliasFullNames[0]})`;
+    } else if (aliasFullNames.length > 1) {
+      description += ` (aliases: ${aliasFullNames.join(", ")})`;
+    }
+
     this._root._entries.set(fullName, {
       name: fullName,
-      description: opts.description,
+      description,
       handler: opts.handler,
+      ...(aliasFullNames.length > 0 ? { aliases: aliasFullNames } : {}),
     });
+
+    for (const aliasName of aliasFullNames) {
+      this._root._entries.set(aliasName, {
+        name: aliasName,
+        description: `${opts.description} (alias for ${fullName})`,
+        handler: opts.handler,
+        aliasFor: fullName,
+      });
+    }
   }
 
   /** Look up a command entry by canonical name. */
