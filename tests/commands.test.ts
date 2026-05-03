@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { CommandRegistry, CommandController, filterCommands } from "../src/agent/controllers/command-controller.js";
+import { CommandRegistry, CommandController, filterCommands, type CommandSuggestion } from "../src/agent/controllers/command-controller.js";
 import { registerTestCommands } from "./helpers.js";
 
 let registry: CommandController;
@@ -138,6 +138,162 @@ describe("scoped", () => {
     ws.register("create", { description: "Create", handler: async () => { called = true; } });
     await registry.registry.execute("workspace:create", "");
     expect(called).toBe(true);
+  });
+});
+
+// ── aliases ───────────────────────────────────────────────────────────────────
+
+describe("aliases", () => {
+  it("registers alias entry alongside the canonical command", () => {
+    registry.registry.register("complete", { description: "Mark done", aliases: ["done"], handler: async () => "task-complete" });
+    expect(registry.registry.lookup("complete")).toBeDefined();
+    expect(registry.registry.lookup("done")).toBeDefined();
+  });
+
+  it("alias entry has aliasFor pointing to canonical name", () => {
+    registry.registry.register("complete", { description: "Mark done", aliases: ["done"], handler: async () => "task-complete" });
+    expect(registry.registry.lookup("done")!.aliasFor).toBe("complete");
+  });
+
+  it("canonical entry has aliases list", () => {
+    registry.registry.register("complete", { description: "Mark done", aliases: ["done", "finished"], handler: async () => "task-complete" });
+    expect(registry.registry.lookup("complete")!.aliases).toEqual(["done", "finished"]);
+  });
+
+  it("single alias: canonical description appends '(alias: name)'", () => {
+    registry.registry.register("complete", { description: "Mark done", aliases: ["done"], handler: async () => "task-complete" });
+    expect(registry.registry.lookup("complete")!.description).toBe("Mark done (alias: done)");
+  });
+
+  it("multiple aliases: canonical description appends '(aliases: name1, name2)'", () => {
+    registry.registry.register("complete", { description: "Mark done", aliases: ["done", "finished"], handler: async () => "task-complete" });
+    expect(registry.registry.lookup("complete")!.description).toBe("Mark done (aliases: done, finished)");
+  });
+
+  it("alias entry description shows it is an alias for canonical", () => {
+    registry.registry.register("complete", { description: "Mark done", aliases: ["done"], handler: async () => "task-complete" });
+    expect(registry.registry.lookup("done")!.description).toBe("Mark done (alias for complete)");
+  });
+
+  it("executing alias calls the same handler", async () => {
+    let called = 0;
+    registry.registry.register("complete", { description: "Mark done", aliases: ["done"], handler: async () => { called++; return "task-complete"; } });
+    const result = await registry.registry.execute("done", "");
+    expect(called).toBe(1);
+    expect(result).toBe("task-complete");
+  });
+
+  it("scoped registry applies prefix to both canonical and alias names", () => {
+    registry.registry.scoped("worker").register("complete", { description: "Mark done", aliases: ["done"], handler: async () => "task-complete" });
+    expect(registry.registry.lookup("worker:complete")).toBeDefined();
+    expect(registry.registry.lookup("worker:done")).toBeDefined();
+    expect(registry.registry.lookup("worker:done")!.aliasFor).toBe("worker:complete");
+  });
+
+  it("canonical description in scoped registry uses full prefixed alias names", () => {
+    registry.registry.scoped("worker").register("complete", { description: "Mark done", aliases: ["done"], handler: async () => "task-complete" });
+    expect(registry.registry.lookup("worker:complete")!.description).toBe("Mark done (alias: worker:done)");
+  });
+
+  it("listAll includes both canonical and alias entries", () => {
+    registry.registry.register("complete", { description: "Mark done", aliases: ["done"], handler: async () => "task-complete" });
+    const names = registry.registry.listAll().map(e => e.name);
+    expect(names).toContain("complete");
+    expect(names).toContain("done");
+  });
+
+  it("no aliases: description unchanged and aliases field absent", () => {
+    registry.registry.register("clear", { description: "Clear", handler: async () => {} });
+    const entry = registry.registry.lookup("clear")!;
+    expect(entry.description).toBe("Clear");
+    expect(entry.aliases).toBeUndefined();
+  });
+});
+
+// ── registered aliases ────────────────────────────────────────────────────────
+
+describe("registered aliases", () => {
+  beforeEach(async () => { registry = await registerTestCommands(); });
+
+  it("worker:done is an alias for worker:complete", () => {
+    const alias = registry.registry.lookup("worker:done")!;
+    expect(alias).toBeDefined();
+    expect(alias.aliasFor).toBe("worker:complete");
+  });
+
+  it("quit is an alias for exit", () => {
+    const alias = registry.registry.lookup("quit")!;
+    expect(alias).toBeDefined();
+    expect(alias.aliasFor).toBe("exit");
+  });
+
+  it("worker:complete description mentions worker:done", () => {
+    expect(registry.registry.lookup("worker:complete")!.description).toContain("worker:done");
+  });
+
+  it("exit description mentions quit", () => {
+    expect(registry.registry.lookup("exit")!.description).toContain("quit");
+  });
+
+  it("worker:done description says it is alias for worker:complete", () => {
+    expect(registry.registry.lookup("worker:done")!.description).toContain("alias for worker:complete");
+  });
+
+  it("quit description says it is alias for exit", () => {
+    expect(registry.registry.lookup("quit")!.description).toContain("alias for exit");
+  });
+});
+
+// ── filterCommands alias priority ────────────────────────────────────────────
+
+describe("filterCommands alias priority", () => {
+  const cmds: CommandSuggestion[] = [
+    { name: "exit",           description: "Exit (alias: quit)",              aliases: ["quit"] },
+    { name: "something:quit", description: "A command with quit in the name"                    },
+    { name: "other",          description: "A command with quit in description"                 },
+  ];
+
+  it("alias depth-0 match ranks above name depth-1 segment match", () => {
+    // "exit" has alias "quit" → depth 0; "something:quit" has "quit" as segment → depth 1
+    const result = filterCommands("quit", cmds);
+    const names = result.map(c => c.name);
+    expect(names.indexOf("exit")).toBeLessThan(names.indexOf("something:quit"));
+  });
+
+  it("exact alias match surfaces the canonical command first", () => {
+    const result = filterCommands("quit", cmds);
+    expect(result[0].name).toBe("exit");
+  });
+
+  it("partial alias prefix match ranks above name segment match at greater depth", () => {
+    const partial: CommandSuggestion[] = [
+      { name: "exit",           description: "Exit", aliases: ["quit"] },
+      { name: "something:quit", description: ""                        },
+    ];
+    // "qui" matches alias "quit" at depth 0; matches "something:quit" segment at depth 1
+    const result = filterCommands("qui", partial);
+    expect(result[0].name).toBe("exit");
+  });
+
+  it("namespaced alias uses depth of matching segment", () => {
+    // alias "worker:done" → at depth 1 "done".startsWith("done") → depth 1
+    const cmdsNs: CommandSuggestion[] = [
+      { name: "worker:complete", description: "", aliases: ["worker:done"] },
+      { name: "done-other",      description: ""                           },
+    ];
+    // "worker:complete" via alias at depth 1; "done-other" via name at depth 0
+    const result = filterCommands("done", cmdsNs);
+    const names = result.map(c => c.name);
+    expect(names).toContain("worker:complete");
+    expect(names).toContain("done-other");
+    // "done-other" is depth 0 (name prefix), worker:complete alias "worker:done" depth 1
+    expect(names.indexOf("done-other")).toBeLessThan(names.indexOf("worker:complete"));
+  });
+
+  it("description match still works when no alias or name matches", () => {
+    // "in description" appears only in other's description, not in any name or alias
+    const result = filterCommands("in description", cmds);
+    expect(result.map(c => c.name)).toContain("other");
   });
 });
 

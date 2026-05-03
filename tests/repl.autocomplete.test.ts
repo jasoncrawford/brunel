@@ -149,6 +149,12 @@ describe("listCommandNames", () => {
     expect(result).toContain("worker:complete");
   });
 
+  it("excludes alias entries (worker:done, quit)", () => {
+    const result = registry.listCommandNames(() => null);
+    expect(result).not.toContain("worker:done");
+    expect(result).not.toContain("quit");
+  });
+
   it("deduplicates when skill name matches a command name", () => {
     const listDir: ListDir = (dir) => {
       if (dir.endsWith("commands")) return [{ name: "shared.md", isDir: false }];
@@ -255,6 +261,21 @@ describe("listCommands", () => {
     const result = registry.listCommands(() => null);
     const names = result.map(c => c.name);
     expect(names).toEqual([...names].sort());
+  });
+
+  it("excludes alias entries from results", () => {
+    const result = registry.listCommands(() => null);
+    const names = result.map(c => c.name);
+    expect(names).not.toContain("quit");
+    expect(names).not.toContain("worker:done");
+  });
+
+  it("canonical commands include aliases array for filtering", () => {
+    const result = registry.listCommands(() => null);
+    const exitCmd = result.find(c => c.name === "exit");
+    expect(exitCmd?.aliases).toContain("quit");
+    const completeCmd = result.find(c => c.name === "worker:complete");
+    expect(completeCmd?.aliases).toContain("worker:done");
   });
 });
 

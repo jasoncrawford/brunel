@@ -38,14 +38,14 @@ export type DispatchResult =
 // ── Command filtering ─────────────────────────────────────────────────────────
 
 /**
- * Filter CommandSuggestion objects by substring of name or description.
+ * Filter CommandSuggestion objects by substring of name, alias, or description.
  * Case-insensitive. Empty query returns all commands.
  * Sort order:
- *   1. Prefix matches of any colon-separated suffix, ordered by depth (fewer
- *      leading segments removed = higher priority). `/st` matches `/status`
- *      (depth 0) before `/worker:start` (depth 1) before `/foo:bar:stuff`
- *      (depth 2). `/worker:st` matches `/worker:status` (depth 0) before
- *      `/foo:worker:status` (depth 1).
+ *   1. Prefix matches of any colon-separated suffix of the name or any alias,
+ *      ordered by depth (fewer leading segments removed = higher priority).
+ *      `/st` matches `/status` (depth 0) before `/worker:start` (depth 1).
+ *      `/quit` matches `/exit` via its alias `quit` (depth 0) before
+ *      `/something:quit` via its name segment (depth 1).
  *   2. Non-prefix name substring matches (e.g. `event` in `resume-events`).
  *   3. Description-only substring matches.
  */
@@ -71,6 +71,17 @@ export function filterCommands(query: string, commands: CommandSuggestion[]): Co
       }
     }
 
+    // Also check aliases — use the minimum depth across name and all aliases.
+    for (const alias of c.aliases ?? []) {
+      const aliasSegs = alias.toLowerCase().split(":");
+      for (let i = 0; i < aliasSegs.length; i++) {
+        if (aliasSegs.slice(i).join(":").startsWith(q)) {
+          if (minDepth < 0 || i < minDepth) minDepth = i;
+          break;
+        }
+      }
+    }
+
     if (minDepth >= 0) {
       prefixMatches.push({ cmd: c, depth: minDepth });
     } else if (name.includes(q)) {
@@ -91,10 +102,14 @@ export interface CommandEntry {
   name: string;
   description: string;
   handler: CommandHandler;
+  /** Canonical name this entry is an alias for, if this is an alias. */
+  aliasFor?: string;
+  /** Alias names registered for this canonical command. */
+  aliases?: string[];
 }
 
 /** A command name paired with a display description for autocomplete. */
-export type CommandSuggestion = { name: string; description: string };
+export type CommandSuggestion = { name: string; description: string; aliases?: string[] };
 
 export type ListDir = (dir: string) => Array<{ name: string; isDir: boolean }> | null;
 
@@ -315,13 +330,32 @@ export class CommandRegistry {
   }
 
   /** Register a command. In a scoped registry the name is automatically prefixed. */
-  register(name: string, opts: { description: string; handler: CommandHandler }): void {
+  register(name: string, opts: { description: string; handler: CommandHandler; aliases?: string[] }): void {
     const fullName = this._qualify(name);
+    const aliasFullNames = (opts.aliases ?? []).map(a => this._qualify(a));
+
+    let description = opts.description;
+    if (aliasFullNames.length === 1) {
+      description += ` (alias: ${aliasFullNames[0]})`;
+    } else if (aliasFullNames.length > 1) {
+      description += ` (aliases: ${aliasFullNames.join(", ")})`;
+    }
+
     this._root._entries.set(fullName, {
       name: fullName,
-      description: opts.description,
+      description,
       handler: opts.handler,
+      ...(aliasFullNames.length > 0 ? { aliases: aliasFullNames } : {}),
     });
+
+    for (const aliasName of aliasFullNames) {
+      this._root._entries.set(aliasName, {
+        name: aliasName,
+        description: `${opts.description} (alias for ${fullName})`,
+        handler: opts.handler,
+        aliasFor: fullName,
+      });
+    }
   }
 
   /** Look up a command entry by canonical name. */
@@ -380,7 +414,7 @@ export class CommandController {
     listDir: ListDir = defaultListDir,
     readFile: (path: string) => string | null = defaultReadFile,
   ): string[] {
-    const builtins = this._registry.listAll().map(e => e.name);
+    const builtins = this._registry.listAll().filter(e => !e.aliasFor).map(e => e.name);
     const home = process.env.HOME ?? process.env.USERPROFILE ?? ""; // "" → walks "/.claude/commands" which will silently return null
     const commandsDir = `${home}/.claude/commands`;
     const fileCommands = walkDir(commandsDir, "", listDir);
@@ -400,7 +434,7 @@ export class CommandController {
     const names = this.listCommandNames(listDir, readFile);
     return names.map(name => {
       const entry = this._registry.lookup(name);
-      if (entry) return { name, description: entry.description };
+      if (entry) return { name, description: entry.description, ...(entry.aliases ? { aliases: entry.aliases } : {}) };
       const content = resolveContent(name, readFile);
       return { name, description: content ? extractDescription(content) : "" };
     });
