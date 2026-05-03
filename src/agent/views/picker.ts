@@ -21,6 +21,8 @@ export type PickConfig = {
   lastIsTextEntry?: boolean;
   /** Treat the option at this index as an inline text-entry row. Takes precedence over lastIsTextEntry. */
   textEntryIndex?: number;
+  /** Prefix shown in the text-entry row while typing. Defaults to "Other: ". */
+  textEntryPrefix?: string;
 };
 
 export type PickResult =
@@ -85,12 +87,13 @@ export class Picker {
       let done = false;
       const count = options.length;
       const otherIdx = config?.textEntryIndex ?? (lastIsTextEntry ? count - 1 : -1);
+      const textEntryPrefix = config?.textEntryPrefix ?? "Other: ";
       let textMode = false;
       let textBuf = "";
 
       const renderLine = (i: number): string => {
         const marker = (i === currentIdx) ? "✓ " : undefined;
-        const text = (i === otherIdx && textMode) ? `Other: ${textBuf}` : options[i];
+        const text = (i === otherIdx && textMode) ? `${textEntryPrefix}${textBuf}` : options[i];
         return Picker.pickerLine(text, i === idx, marker);
       };
 
@@ -99,8 +102,8 @@ export class Picker {
       }
 
       function positionTextCursor() {
-        // Move up from below last line to Other row, position after "▶ Other: " + textBuf
-        process.stdout.write(`\x1b[${count - otherIdx}A\r\x1b[${10 + textBuf.length}C`);
+        // Move up from below last line to text-entry row; position after "▶ " (3 cols) + prefix + textBuf
+        process.stdout.write(`\x1b[${count - otherIdx}A\r\x1b[${3 + textEntryPrefix.length + textBuf.length}C`);
       }
 
       function redraw() {

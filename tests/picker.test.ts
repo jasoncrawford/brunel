@@ -238,6 +238,71 @@ describe("Picker: textEntryIndex allows text entry on any option", () => {
   });
 });
 
+// ── Issue #1007: textEntryPrefix preserves option label during text entry ──────
+//
+// Bug: the text-entry row replaced its label with "Other: <typed text>" as soon
+// as the user started typing. A meaningful label like "Claim a specific task:"
+// disappeared mid-interaction.
+//
+// Fix: PickConfig accepts an optional textEntryPrefix. When set, it is used as
+// the visible prefix in text mode instead of the hard-coded "Other: " string.
+// The cursor-positioning math in positionTextCursor() also uses the actual
+// prefix length rather than the hard-coded 10.
+
+describe("Picker: textEntryPrefix option (issue #1007)", () => {
+  afterEach(() => {
+    process.stdin.removeAllListeners("data");
+    vi.restoreAllMocks();
+  });
+
+  it("renders custom prefix in text mode instead of 'Other: '", async () => {
+    const written: string[] = [];
+    vi.spyOn(process.stdout, "write").mockImplementation((chunk: unknown) => {
+      written.push(String(chunk));
+      return true;
+    });
+    const picker = new Picker();
+
+    const prefix = "Claim a specific task: ";
+    const promise = picker.pick(
+      ["Option A", "Claim a specific task:", "Option C"],
+      { textEntryIndex: 1, textEntryPrefix: prefix },
+    );
+    process.stdin.emit("data", "\x11"); // navigate to index 1 → text mode
+    process.stdin.emit("data", "t");
+    process.stdin.emit("data", "\r");
+    await promise;
+
+    const all = written.join("");
+    expect(all).toContain("Claim a specific task: ");
+    expect(all).not.toContain("Other: t");
+  });
+
+  it("positions cursor after actual prefix length, not hard-coded 10", async () => {
+    const written: string[] = [];
+    vi.spyOn(process.stdout, "write").mockImplementation((chunk: unknown) => {
+      written.push(String(chunk));
+      return true;
+    });
+    const picker = new Picker();
+
+    const prefix = "Claim a specific task: "; // 23 chars → cursor col = 3 + 23 = 26
+    const promise = picker.pick(
+      ["Option A", "Claim a specific task:", "Option C"],
+      { textEntryIndex: 1, textEntryPrefix: prefix },
+    );
+    process.stdin.emit("data", "\x11"); // navigate → triggers positionTextCursor with empty buf
+    process.stdin.emit("data", "\x03"); // cancel
+    await promise;
+
+    const all = written.join("");
+    // Cursor should move right by 3 (▶ space) + 23 (prefix) = 26 columns
+    expect(all).toContain("\x1b[26C");
+    // Must NOT use the old hard-coded 10 value for this prefix
+    expect(all).not.toContain("\x1b[10C");
+  });
+});
+
 describe("Picker: ^C cancels cleanly without calling process.exit (issue #887)", () => {
   afterEach(() => {
     process.stdin.removeAllListeners("data");
