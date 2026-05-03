@@ -30,11 +30,13 @@ function numProp(obj: unknown, key: string): number | null {
   return typeof val === "number" ? val : null;
 }
 
-export interface RouteResult { taskId: string | null; workerId: string | null; }
-
-function routeResult(task: { taskId: string; workerId: string | null } | null | undefined): RouteResult {
-  return { taskId: task?.taskId ?? null, workerId: task?.workerId ?? null };
-}
+/**
+ * The task and human-readable ref returned by per-event-type routing functions.
+ * `forward` controls whether the event should be forwarded to the worker
+ * (defaults to true when task is non-null). Set to false to log the task_id
+ * without notifying the worker (e.g. pull_request/synchronize).
+ */
+export interface RouteResult { task: Task | null; ref: string; forward?: boolean; }
 
 // ── ForemanWss class ──────────────────────────────────────────────────────────
 
@@ -180,27 +182,32 @@ export class ForemanWss {
       repoId = (await Repo.findOrCreate(repoFullName)).id;
     }
 
-    let taskId: string | null = null;
-    let workerId: string | null = null;
-
+    // Step 1: determine task (side effects, DB lookups) — no forwarding yet.
+    let task: Task | null = null;
+    let ref = "";
+    let forward = true;
     if (name === "pull_request") {
-      ({ taskId, workerId } = await this.routePrEvent(p, evt));
+      ({ task, ref, forward = true } = await this.routePrEvent(p, evt));
     } else if (name === "pull_request_review" || name === "pull_request_review_comment") {
-      ({ taskId, workerId } = await this.routePrReviewEvent(p, evt));
+      ({ task, ref } = await this.routePrReviewEvent(p, evt));
     } else if (name === "check_run" || name === "check_suite") {
-      ({ taskId, workerId } = await this.routeCheckEvent(p, evt, name));
+      ({ task, ref } = await this.routeCheckEvent(p, evt, name));
     } else {
       const issue = p.issue as R | undefined;
       const issueNumber = numProp(issue, "number");
       if (issueNumber !== null) {
-        ({ taskId, workerId } = await this.routeIssueEvent(p, evt, issue!, issueNumber));
+        ({ task, ref } = await this.routeIssueEvent(p, evt, issue!, issueNumber));
       }
     }
 
+    const taskId = task?.taskId ?? null;
+    const workerId = task?.workerId ?? null;
     const action = typeof p.action === "string" ? p.action : null;
     const webhookIssueNumber = typeof (p.issue as R | undefined)?.number === "number" ? (p.issue as R).number as number : null;
     const webhookPrNumber = typeof (p.pull_request as R | undefined)?.number === "number" ? (p.pull_request as R).number as number : null;
-    void WebhookEvent.log({
+
+    // Step 2: log to DB and obtain the durable sequence id.
+    const seqId = await WebhookEvent.log({
       deliveryId: id,
       eventName: name,
       action,
@@ -213,6 +220,10 @@ export class ForemanWss {
       workerId,
       payload: p,
     });
+
+    // Step 3: forward to the worker with the sequence id (unless explicitly suppressed).
+    if (task && forward) this.forwardEvent(task, evt, ref, seqId ?? undefined);
+
     this.adminWss?.broadcastLogEvent({
       kind: "webhook",
       id: this.nextBroadcastId++,
@@ -289,9 +300,10 @@ export class ForemanWss {
 
   private flushQueuedEvents(worker: Worker, task: Task): void {
     for (const evt of task.drainEvents()) {
+      const seqId = evt.id ?? undefined;
       const sent = this.sendMsg(
         worker,
-        { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload() },
+        { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload(), ...(seqId !== undefined && { seqId }) },
         { onError: (err) => {
           task.queueEvent(evt);
           this.workerLog(worker.workerId, `✗ event_notification send error — requeued #${task.issueNumber} ${evt.eventName}: ${fmtError(err)}`);
@@ -310,7 +322,25 @@ export class ForemanWss {
     this.sendMsg(worker, { type: "hello_ack", workerId: worker.workerId, status: "cancelled", repoStatus: worker.repo.status }, { logTaskId: task?.taskId });
   }
 
-  private async reclaimWorker(worker: Worker, task: Task): Promise<void> {
+  private async replayMissedEvents(worker: Worker, task: Task, lastSeenEventSeqId: number): Promise<void> {
+    let missed: import("../models/webhook-event.js").WebhookEvent[];
+    try {
+      missed = await WebhookEvent.queryMissedFor(task.taskId, lastSeenEventSeqId);
+    } catch (err) {
+      this.workerLog(worker.workerId, `ERROR querying missed events for #${task.issueNumber}: ${fmtError(err)}`);
+      return;
+    }
+    for (const evt of missed) {
+      const seqId = evt.id ?? undefined;
+      this.sendMsg(
+        worker,
+        { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload(), ...(seqId !== undefined && { seqId }) },
+      );
+      this.workerLog(worker.workerId, `→ event_notification #${task.issueNumber} ${evt.eventName} (replay seqId=${seqId})`);
+    }
+  }
+
+  private async reclaimWorker(worker: Worker, task: Task, lastSeenEventSeqId?: number): Promise<void> {
     worker.assign(task);
     // Only call assign if task is not already complete (to preserve task status)
     if (task.status !== "complete") {
@@ -319,6 +349,11 @@ export class ForemanWss {
     // For complete tasks, the task stays complete while worker finishes cleanup/finalization work
     this.sendMsg(worker, { type: "hello_ack", workerId: worker.workerId, status: "assigned", repoStatus: worker.repo.status }, { logTaskId: task.taskId });
     this.flushQueuedEvents(worker, task);
+    // DB replay: send any events the worker missed while disconnected (covers zombie window
+    // and foreman restart scenarios). Runs after the in-memory flush; duplicates are acceptable.
+    if (lastSeenEventSeqId !== undefined) {
+      await this.replayMissedEvents(worker, task, lastSeenEventSeqId);
+    }
   }
 
   async handleWorkerHello(workerId: string, ws: WebSocket, msg: Extract<Wire.WorkerMessage, { type: "worker_hello" }>): Promise<void> {
@@ -343,7 +378,7 @@ export class ForemanWss {
     }
 
     if (msg.status === "assigned" && msg.taskId) {
-      await this.handleAssignedHello(workerId, msg.taskId, ws, repo);
+      await this.handleAssignedHello(workerId, msg.taskId, ws, repo, msg.lastSeenEventSeqId);
     } else if (msg.status === "reserved") {
       await this.handleReservedHello(workerId, ws, repo);
     } else {
@@ -407,7 +442,7 @@ export class ForemanWss {
    * 6. Live task, different worker → cancel
    * 7. Otherwise (live task, same or no worker) → reclaim
    */
-  async handleAssignedHello(workerId: string, claimedTaskId: string, ws: WebSocket, repo: Repo): Promise<void> {
+  async handleAssignedHello(workerId: string, claimedTaskId: string, ws: WebSocket, repo: Repo, lastSeenEventSeqId?: number): Promise<void> {
     try {
       const existing = await Task.get(claimedTaskId);
       const worker = Worker.register(workerId, ws, repo);
@@ -420,7 +455,7 @@ export class ForemanWss {
           placeholderTask = await Task.upsert(claimedTaskId, issueNumber, "", "", "", []);
         }
         if (placeholderTask) {
-          await this.reclaimWorker(worker, placeholderTask);
+          await this.reclaimWorker(worker, placeholderTask, lastSeenEventSeqId);
         } else {
           this.cancelWorker(worker, null);
         }
@@ -433,14 +468,14 @@ export class ForemanWss {
           this.cancelWorker(worker, existing);
         } else {
           this.workerLog(workerId, `hello busy task=#${claimedTaskId} — task already complete, reclaiming for finalization`);
-          await this.reclaimWorker(worker, existing);
+          await this.reclaimWorker(worker, existing, lastSeenEventSeqId);
         }
       } else if (existing.workerId && existing.workerId !== workerId) {
         this.workerLog(workerId, `hello busy task=#${claimedTaskId} — task taken by another worker`);
         this.cancelWorker(worker, existing);
       } else {
         this.workerLog(workerId, `hello busy task=#${claimedTaskId} — reclaimed`);
-        await this.reclaimWorker(worker, existing);
+        await this.reclaimWorker(worker, existing, lastSeenEventSeqId);
       }
     } catch (err) {
       log(`ERROR handleAssignedHello ${workerId}: ${fmtError(err)}`);
@@ -576,7 +611,7 @@ export class ForemanWss {
 
   // ── Routing ─────────────────────────────────────────────────────────────────
 
-  forwardEvent(task: Task, evt: WebhookEvent, ref: string): void {
+  forwardEvent(task: Task, evt: WebhookEvent, ref: string, seqId?: number): void {
     if (task.workerId) {
       const worker = Worker.fromRegistry(task.workerId);
       if (worker && worker.currentTask?.taskId !== task.taskId) {
@@ -589,7 +624,7 @@ export class ForemanWss {
       } else if (worker) {
         const sent = this.sendMsg(
           worker,
-          { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload() },
+          { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload(), ...(seqId !== undefined && { seqId }) },
           { onError: (err) => {
             task.queueEvent(evt);
             log(`[task ${ref}] ${evt.eventName} requeued (send error: ${fmtError(err)})`);
@@ -633,7 +668,8 @@ export class ForemanWss {
       });
       log(`[worker ${shortWorkerId(worker.workerId)}] → task_assigned #${task.issueNumber} "${task.title}"`);
       for (const evt of queued) {
-        this.sendMsg(worker, { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload() });
+        const seqId = evt.id ?? undefined;
+        this.sendMsg(worker, { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload(), ...(seqId !== undefined && { seqId }) });
         log(`[worker ${shortWorkerId(worker.workerId)}] → event_notification #${task.issueNumber} ${evt.eventName} (queued)`);
       }
     }
@@ -649,23 +685,20 @@ export class ForemanWss {
   async routePrEvent(p: R, evt: WebhookEvent): Promise<RouteResult> {
     const pr = p.pull_request as R | undefined;
     const prNumber = numProp(pr, "number");
-    if (prNumber === null) return routeResult(null);
+    if (prNumber === null) return { task: null, ref: "" };
 
     const repo = await this.resolveRepo(p);
     const manager = repo.taskManager;
+    const ref = `PR #${prNumber}`;
 
-    if (p.action === "synchronize") return routeResult(await repo.getTaskByPr(prNumber));
+    if (p.action === "synchronize") return { task: await repo.getTaskByPr(prNumber), ref, forward: false };
 
     if (p.action === "opened" && pr) {
-      const task = await manager.handlePrOpenedEvent(prNumber, String(pr.body ?? ""), strProp(pr.head, "ref"));
-      if (task) this.forwardEvent(task, evt, `PR #${prNumber}`);
-      return routeResult(task);
+      return { task: await manager.handlePrOpenedEvent(prNumber, String(pr.body ?? ""), strProp(pr.head, "ref")), ref };
     }
 
     if (p.action === "closed" && pr) {
-      const task = await manager.handlePrClosedEvent(prNumber, !!pr.merged);
-      if (task) this.forwardEvent(task, evt, `PR #${prNumber}`);
-      return routeResult(task);
+      return { task: await manager.handlePrClosedEvent(prNumber, !!pr.merged), ref };
     }
 
     if (p.action === "edited" && pr) {
@@ -675,23 +708,18 @@ export class ForemanWss {
         task = await manager.handlePrEditedEvent(prNumber, String(pr.body ?? ""), strProp(pr.head, "ref"));
       }
       if (!task) task = await repo.getTaskByPr(prNumber);
-      if (task) this.forwardEvent(task, evt, `PR #${prNumber}`);
-      return routeResult(task);
+      return { task, ref };
     }
 
-    const task = await repo.getTaskByPr(prNumber);
-    if (task) this.forwardEvent(task, evt, `PR #${prNumber}`);
-    return routeResult(task);
+    return { task: await repo.getTaskByPr(prNumber), ref };
   }
 
   async routePrReviewEvent(p: R, evt: WebhookEvent): Promise<RouteResult> {
     const pr = p.pull_request as R | undefined;
     const prNumber = numProp(pr, "number");
-    if (prNumber === null) return routeResult(null);
+    if (prNumber === null) return { task: null, ref: "" };
     const repo = await this.resolveRepo(p);
-    const task = await repo.getTaskByPr(prNumber);
-    if (task) this.forwardEvent(task, evt, `PR #${prNumber}`);
-    return routeResult(task);
+    return { task: await repo.getTaskByPr(prNumber), ref: `PR #${prNumber}` };
   }
 
   async routeCheckEvent(p: R, evt: WebhookEvent, name: string): Promise<RouteResult> {
@@ -706,8 +734,8 @@ export class ForemanWss {
       prs?.map((pr) => pr.number) ?? [],
       headBranch,
     );
-    if (found) { this.forwardEvent(found.task, evt, found.ref); return routeResult(found.task); }
-    return routeResult(null);
+    if (found) return { task: found.task, ref: found.ref };
+    return { task: null, ref: "" };
   }
 
   /**
@@ -816,9 +844,7 @@ export class ForemanWss {
   }
 
   async routeIssueEvent(p: R, evt: WebhookEvent, issue: R, issueNumber: number): Promise<RouteResult> {
-    const task = await this.applyIssueEffects(p, issue, issueNumber);
-    if (task) this.forwardEvent(task, evt, `#${issueNumber}`);
-    return routeResult(task);
+    return { task: await this.applyIssueEffects(p, issue, issueNumber), ref: `#${issueNumber}` };
   }
 
 }

@@ -11,6 +11,7 @@ import { Worker } from "../src/foreman/models/worker.js";
 import { Task } from "../src/foreman/models/task.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { ForemanMessage } from "../src/foreman/models/foreman-message.js";
+import { WebhookEvent } from "../src/foreman/models/webhook-event.js";
 import { Repo } from "../src/foreman/models/repo.js";
 import { fakeRepo, resetDb, seedTask, createTestTaskManager, createTestRepo } from "./helpers/task.js";
 import * as utils from "../src/utils.js";
@@ -186,6 +187,79 @@ describe("handleAssignedHello", () => {
         ([, msg]) => (msg as { type: string }).type === "event_notification"
       );
       expect(eventNotifs).toHaveLength(1);
+    });
+  });
+
+  describe("DB replay on reconnect (lastSeenEventSeqId)", () => {
+    it("replays missed events from DB when lastSeenEventSeqId is provided", async () => {
+      await seedTask({
+        task_id: "10",
+        issue_number: 10,
+        repo_id: taskManager.repo.id,
+        worker_id: "w1",
+        assigned_at: new Date().toISOString(),
+      });
+
+      // Simulate two events that arrived while the worker was disconnected
+      const evt1 = WebhookEvent.fromIncoming("d1", "issue_comment", {}) as any;
+      const evt2 = WebhookEvent.fromIncoming("d2", "pull_request", {}) as any;
+      // Give them synthetic DB ids (simulating rows fetched from webhook_events)
+      Object.assign(evt1, { id: 11 });
+      Object.assign(evt2, { id: 12 });
+
+      vi.spyOn(WebhookEvent, "queryMissedFor").mockResolvedValue([evt1, evt2]);
+
+      const { wss, sendMsg } = makeWss(taskManager);
+      // Worker reconnects claiming it last saw seqId=10
+      await wss.handleAssignedHello("w1", "10", fakeWs(), fakeRepo(), 10);
+
+      expect(WebhookEvent.queryMissedFor).toHaveBeenCalledWith("10", 10);
+
+      const replayNotifs = sendMsg.mock.calls.filter(
+        ([, msg]) => (msg as { type: string }).type === "event_notification"
+      );
+      expect(replayNotifs).toHaveLength(2);
+      expect((replayNotifs[0][1] as any).seqId).toBe(11);
+      expect((replayNotifs[1][1] as any).seqId).toBe(12);
+    });
+
+    it("does not call queryMissedFor when lastSeenEventSeqId is absent", async () => {
+      await seedTask({
+        task_id: "10",
+        issue_number: 10,
+        repo_id: taskManager.repo.id,
+        worker_id: "w1",
+        assigned_at: new Date().toISOString(),
+      });
+
+      const querySpy = vi.spyOn(WebhookEvent, "queryMissedFor").mockResolvedValue([]);
+
+      const { wss } = makeWss(taskManager);
+      await wss.handleAssignedHello("w1", "10", fakeWs(), fakeRepo());
+
+      expect(querySpy).not.toHaveBeenCalled();
+    });
+
+    it("logs an error and continues if queryMissedFor throws", async () => {
+      await seedTask({
+        task_id: "10",
+        issue_number: 10,
+        repo_id: taskManager.repo.id,
+        worker_id: "w1",
+        assigned_at: new Date().toISOString(),
+      });
+
+      vi.spyOn(WebhookEvent, "queryMissedFor").mockRejectedValue(new Error("DB down"));
+      const logSpy = vi.spyOn(utils, "log").mockImplementation(() => {});
+
+      const { wss, sendMsg } = makeWss(taskManager);
+      // Should not throw even if DB query fails
+      await expect(wss.handleAssignedHello("w1", "10", fakeWs(), fakeRepo(), 5)).resolves.toBeUndefined();
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("ERROR"));
+
+      // hello_ack should still have been sent
+      const ack = helloAck(sendMsg);
+      expect(ack?.status).toBe("assigned");
     });
   });
 });
@@ -693,7 +767,7 @@ describe("handleWorkerHello routing", () => {
       status: "assigned",
     });
 
-    expect(spy).toHaveBeenCalledWith("w1", "77", expect.anything(), expect.anything());
+    expect(spy).toHaveBeenCalledWith("w1", "77", expect.anything(), expect.anything(), undefined);
   });
 
   it("status='reserved' → routes to handleReservedHello", async () => {

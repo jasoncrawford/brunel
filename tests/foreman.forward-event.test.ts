@@ -226,3 +226,33 @@ describe("forwardEvent — send failure recovery", () => {
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("not in registry"));
   });
 });
+
+// ── seqId propagation ─────────────────────────────────────────────────────────
+
+describe("forwardEvent — seqId in event_notification", () => {
+  it("includes seqId in the event_notification message when provided", () => {
+    const task = Task.fromTest({ task_id: "42", issue_number: 42, worker_id: "worker-1" });
+    const w = Worker.register("worker-1", fakeWs(), fakeRepo());
+    w.assign(task);
+    const { wss, sendMsg } = makeWss();
+
+    wss.forwardEvent(task, makeEvent(), "#42", 99);
+
+    expect(sendMsg).toHaveBeenCalledOnce();
+    const [, msg] = sendMsg.mock.calls[0];
+    expect((msg as any).seqId).toBe(99);
+  });
+
+  it("omits seqId from the event_notification message when not provided", () => {
+    const task = Task.fromTest({ task_id: "42", issue_number: 42, worker_id: "worker-1" });
+    const w = Worker.register("worker-1", fakeWs(), fakeRepo());
+    w.assign(task);
+    const { wss, sendMsg } = makeWss();
+
+    wss.forwardEvent(task, makeEvent(), "#42");
+
+    expect(sendMsg).toHaveBeenCalledOnce();
+    const [, msg] = sendMsg.mock.calls[0];
+    expect((msg as any).seqId).toBeUndefined();
+  });
+});

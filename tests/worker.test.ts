@@ -2855,3 +2855,122 @@ describe("WorkspaceController.onForceDestroy", () => {
     expect(mockWs.checkSafety).not.toHaveBeenCalled();
   });
 });
+
+// ── lastSeenEventSeqId tracking ───────────────────────────────────────────────
+
+describe("lastSeenEventSeqId", () => {
+  function reconnectWithNewWs(): FakeWs {
+    const newWs = new FakeWs();
+    wsFactory.mockReturnValueOnce(newWs as any);
+    fakeWs.emit("close", 1000, Buffer.from(""));
+    vi.advanceTimersByTime(1); // delay=0 with Math.random mocked to 0
+    return newWs;
+  }
+
+  it("includes lastSeenEventSeqId in worker_hello when reconnecting with a task", () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    try {
+      const issue = makeIssue();
+      sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+
+      // Receive an event_notification with seqId
+      sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment"), seqId: 7 });
+
+      const newWs = reconnectWithNewWs();
+      newWs.emit("open");
+
+      const helloCalls = newWs.send.mock.calls.filter((args) => {
+        const parsed = JSON.parse(args[0] as string);
+        return parsed.type === "worker_hello";
+      });
+      expect(helloCalls).toHaveLength(1);
+      const hello = JSON.parse(helloCalls[0][0] as string);
+      expect(hello.status).toBe("assigned");
+      expect(hello.lastSeenEventSeqId).toBe(7);
+    } finally {
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    }
+  });
+
+  it("omits lastSeenEventSeqId when no event_notification with seqId was received", () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    try {
+      const issue = makeIssue();
+      sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+
+      // Receive an event_notification WITHOUT seqId
+      sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent("issue_comment") });
+
+      const newWs = reconnectWithNewWs();
+      newWs.emit("open");
+
+      const helloCalls = newWs.send.mock.calls.filter((args) => {
+        const parsed = JSON.parse(args[0] as string);
+        return parsed.type === "worker_hello";
+      });
+      expect(helloCalls).toHaveLength(1);
+      const hello = JSON.parse(helloCalls[0][0] as string);
+      expect(hello.lastSeenEventSeqId).toBeUndefined();
+    } finally {
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    }
+  });
+
+  it("tracks the highest seqId when multiple events arrive", () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    try {
+      const issue = makeIssue();
+      sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+
+      sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent(), seqId: 5 });
+      sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent(), seqId: 3 }); // lower than previous
+      sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent(), seqId: 9 });
+
+      const newWs = reconnectWithNewWs();
+      newWs.emit("open");
+
+      const helloCalls = newWs.send.mock.calls.filter((args) => {
+        const parsed = JSON.parse(args[0] as string);
+        return parsed.type === "worker_hello";
+      });
+      const hello = JSON.parse(helloCalls[0][0] as string);
+      expect(hello.lastSeenEventSeqId).toBe(9);
+    } finally {
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    }
+  });
+
+  it("resets lastSeenEventSeqId when a new task is assigned", () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    try {
+      const issue = makeIssue();
+      sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+      sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent(), seqId: 7 });
+
+      // Complete task, then receive a new task assignment
+      sendMsg(fakeWs, { type: "hello_ack", workerId: AGENT_ID, status: "ready", repoStatus: "active" });
+      sendMsg(fakeWs, { type: "task_assigned", taskId: "99", issue: makeIssue(2) });
+
+      const newWs = reconnectWithNewWs();
+      newWs.emit("open");
+
+      const helloCalls = newWs.send.mock.calls.filter((args) => {
+        const parsed = JSON.parse(args[0] as string);
+        return parsed.type === "worker_hello";
+      });
+      const hello = JSON.parse(helloCalls[0][0] as string);
+      // lastSeenEventSeqId should be absent because the new task has no events yet
+      expect(hello.lastSeenEventSeqId).toBeUndefined();
+    } finally {
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    }
+  });
+});

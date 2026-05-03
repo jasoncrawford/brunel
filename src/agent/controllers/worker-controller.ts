@@ -131,6 +131,7 @@ export class WorkerController extends EventEmitter {
   private prIsClosed = false;
   private issueClosed = false;
   private _resetPromise: Promise<void> | null = null;
+  private lastSeenEventSeqId: number | undefined;
 
   // ── Pending claim (cleared by stop() and after sending) ───────────────────
   private _pendingClaimTaskId: string | undefined;
@@ -745,6 +746,7 @@ export class WorkerController extends EventEmitter {
     this._resetPromise = null;
     this._pendingClaimTaskId = undefined;
     this._isReserved = false;
+    this.lastSeenEventSeqId = undefined;
     this.ws = undefined;
     this.connectionState = "registered";
     this.bufferedMessages = [];
@@ -839,12 +841,14 @@ export class WorkerController extends EventEmitter {
       // transitionToRegistered() will send the claim_task message automatically.
       // Do NOT put _pendingClaimTaskId in the hello — it will be sent as claim_task.
       const hasPendingClaim = !!this._pendingClaimTaskId;
+      const isAssigned = !!this.currentTaskId;
       ws.send(JSON.stringify({
         type: "worker_hello",
         workerId: this.agentStatus.agentId,
         repo: this.repo,
         ...(this.currentTaskId !== undefined && { taskId: this.currentTaskId }),
-        status: this.currentTaskId ? "assigned" : (hasPendingClaim ? "reserved" : "ready"),
+        status: isAssigned ? "assigned" : (hasPendingClaim ? "reserved" : "ready"),
+        ...(isAssigned && this.lastSeenEventSeqId !== undefined && { lastSeenEventSeqId: this.lastSeenEventSeqId }),
       } satisfies Wire.WorkerMessage));
 
       this.connectionState = "hello_sent";
@@ -1012,6 +1016,7 @@ export class WorkerController extends EventEmitter {
       // Reset event state so the new task starts with a clean slate.
       this._eventsPaused = false;
       this.pendingEvents = [];
+      this.lastSeenEventSeqId = undefined;
       if (this.debounceTimer) { clearTimeout(this.debounceTimer); this.debounceTimer = null; }
       this.agentStatus.update({ taskNumber: msg.issue.number, prNumber: msg.issue.prNumber ?? undefined, workerReady: false });
       this.agentStatus.resetTaskStats();
@@ -1032,6 +1037,13 @@ export class WorkerController extends EventEmitter {
         // Ignore stale events forwarded for tasks we're no longer working on.
         this.display.print(c.darkGray(`[worker] ignoring event_notification for task ${msg.taskId} (current: ${this.currentTaskId ?? "none"})`));
         return;
+      }
+
+      // Track the highest sequence id seen so far; included in worker_hello on reconnect.
+      if (msg.seqId !== undefined) {
+        if (this.lastSeenEventSeqId === undefined || msg.seqId > this.lastSeenEventSeqId) {
+          this.lastSeenEventSeqId = msg.seqId;
+        }
       }
 
       const { event } = msg;
