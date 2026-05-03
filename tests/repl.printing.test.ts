@@ -253,6 +253,67 @@ describe("printMessage", () => {
     expect(stripAnsi(output)).toContain("done: All good");
   });
 
+  it("system/task_started with Agent tool_use_id → shown", () => {
+    captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_use", id: "tu_agent_1", name: "Agent", input: {} }, "assistant");
+    });
+    const output = captureOutput(() => {
+      testDisplay.printMessage({ type: "system", subtype: "task_started", description: "Do research", tool_use_id: "tu_agent_1" });
+    });
+    expect(stripAnsi(output)).toContain("▶ agent started: Do research");
+  });
+
+  it("system/task_started with Bash tool_use_id → suppressed", () => {
+    captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_use", id: "tu_bash_1", name: "Bash", input: { command: "npx tsc" } }, "assistant");
+    });
+    const output = captureOutput(() => {
+      testDisplay.printMessage({ type: "system", subtype: "task_started", description: "Run TypeScript type check", tool_use_id: "tu_bash_1" });
+    });
+    expect(output).toBe("");
+  });
+
+  it("system/task_notification with Bash tool_use_id → suppressed", () => {
+    captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_use", id: "tu_bash_2", name: "Bash", input: { command: "npm test" } }, "assistant");
+    });
+    const output = captureOutput(() => {
+      testDisplay.printMessage({ type: "system", subtype: "task_notification", status: "completed", summary: "Run tests", tool_use_id: "tu_bash_2" });
+    });
+    expect(output).toBe("");
+  });
+
+  it("system/task_progress with Bash tool_use_id → suppressed", () => {
+    captureOutput(() => {
+      testDisplay.printBlock({ type: "tool_use", id: "tu_bash_3", name: "Bash", input: { command: "ls" } }, "assistant");
+    });
+    const output = captureOutput(() => {
+      testDisplay.printMessage({ type: "system", subtype: "task_progress", description: "Listing files", tool_use_id: "tu_bash_3" });
+    });
+    expect(output).toBe("");
+  });
+
+  it("system/task_started with skip_transcript → suppressed", () => {
+    const output = captureOutput(() => {
+      testDisplay.printMessage({ type: "system", subtype: "task_started", description: "Housekeeping", skip_transcript: true });
+    });
+    expect(output).toBe("");
+  });
+
+  it("system/task_notification with skip_transcript → suppressed", () => {
+    const output = captureOutput(() => {
+      testDisplay.printMessage({ type: "system", subtype: "task_notification", status: "completed", summary: "Housekeeping", skip_transcript: true });
+    });
+    expect(output).toBe("");
+  });
+
+  it("system/task_started with unknown tool_use_id → shown (safe fallback)", () => {
+    const output = captureOutput(() => {
+      testDisplay.printMessage({ type: "system", subtype: "task_started", description: "Unknown task", tool_use_id: "unknown_id" });
+    });
+    expect(stripAnsi(output)).toContain("▶ agent started: Unknown task");
+  });
+
   it("assistant with empty content → MESSAGE_FMT._empty", () => {
     const output = captureOutput(() => {
       testDisplay.printMessage({ type: "assistant", message: { content: [] } });

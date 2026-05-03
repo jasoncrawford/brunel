@@ -158,6 +158,14 @@ export class Display {
 
     if (m.type === "system") {
       const subtype = typeof m.subtype === "string" ? m.subtype : "_default";
+      if (subtype === "task_started" || subtype === "task_notification" || subtype === "task_progress") {
+        if (m.skip_transcript === true) return;
+        const toolUseId = typeof m.tool_use_id === "string" ? m.tool_use_id : null;
+        if (toolUseId != null) {
+          const toolName = this._toolUseNames.get(toolUseId);
+          if (toolName !== undefined && toolName !== "Agent") return;
+        }
+      }
       this.print(this.renderer.formatSystemEvent(subtype, m));
       return;
     }
