@@ -1684,7 +1684,7 @@ describe("afterTask callback on /worker:complete", () => {
 
 describe("completeCurrentTask: post-completion prompt", () => {
   async function makeSession(
-    pickFn: (opts: string[]) => Promise<number>,
+    pickFn: (opts: string[]) => Promise<number | { type: "text"; text: string }>,
     extraOpts: Partial<WorkerControllerOptions> = {},
   ) {
     const ws = new FakeWs();
@@ -1785,7 +1785,7 @@ describe("completeCurrentTask: post-completion prompt", () => {
 
   it("claim option (text entry): sends claim_task with the entered task ID", async () => {
     const { sess, ws } = await makeSession(vi.fn(), {
-      postTaskPickFn: async () => ({ type: "text" as const, text: "task-123" }),
+      pickFn: async () => ({ type: "text" as const, text: "task-123" }),
     });
     ws.send.mockClear();
     await sess.completeCurrentTask();
@@ -1795,7 +1795,7 @@ describe("completeCurrentTask: post-completion prompt", () => {
 
   it("claim option (text entry): worker remains active", async () => {
     const { sess } = await makeSession(vi.fn(), {
-      postTaskPickFn: async () => ({ type: "text" as const, text: "task-123" }),
+      pickFn: async () => ({ type: "text" as const, text: "task-123" }),
     });
     await sess.completeCurrentTask();
     expect(sess.isActive).toBe(true);
@@ -1803,7 +1803,7 @@ describe("completeCurrentTask: post-completion prompt", () => {
 
   it("claim option (text entry): returns 'task-complete'", async () => {
     const { sess } = await makeSession(vi.fn(), {
-      postTaskPickFn: async () => ({ type: "text" as const, text: "task-123" }),
+      pickFn: async () => ({ type: "text" as const, text: "task-123" }),
     });
     const result = await sess.completeCurrentTask();
     expect(result).toBe("task-complete");
@@ -1811,7 +1811,7 @@ describe("completeCurrentTask: post-completion prompt", () => {
 
   it("claim option (text entry): does not send worker_ready", async () => {
     const { sess, ws } = await makeSession(vi.fn(), {
-      postTaskPickFn: async () => ({ type: "text" as const, text: "task-123" }),
+      pickFn: async () => ({ type: "text" as const, text: "task-123" }),
     });
     ws.send.mockClear();
     await sess.completeCurrentTask();
