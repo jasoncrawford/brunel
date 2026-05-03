@@ -45,6 +45,8 @@ export type WorkerControllerOptions = {
   afterTask?: () => Promise<void>;
   /** Override pick function for repo activation and quit confirmation. */
   pickFn?: (options: string[]) => Promise<number>;
+  /** Override the post-task completion picker; supports returning a task ID for inline claim. */
+  postTaskPickFn?: (options: string[]) => Promise<number | { type: "text"; text: string }>;
 };
 
 // Messages that must wait for hello_ack before being sent.
@@ -468,38 +470,68 @@ export class WorkerController extends EventEmitter {
    *
    * Calls sendWorkerReady() only when the user confirms they want to keep waiting —
    * this is what transitions the foreman from "reserved" to auto-assignable.
+   *
+   * The last option ("Claim a specific task...") uses inline text entry so the user
+   * can type a task ID directly and kick off the claim flow without a separate command.
    */
   private async promptAfterTaskComplete(): Promise<"task-complete" | "exit"> {
-    const pickFn = this.options?.pickFn ?? (this.picker ? (opts: string[]) => this.picker!.pick(opts) : null);
+    const options = [
+      "Wait to be assigned the next task",
+      "Stop working for now",
+      "Exit",
+      "Claim a specific task...",
+    ];
 
-    if (!pickFn) {
-      this.sendWorkerReady();
-      this.display.print(c.sageGreen("Waiting for next task..."));
+    let selectedIndex = -1;
+    let claimTaskId: string | undefined;
+
+    if (this.picker) {
+      const result = await this.picker.pick(options, { lastIsTextEntry: true });
+      if (result.type === "selected") {
+        selectedIndex = result.index;
+      } else if (result.type === "other") {
+        claimTaskId = result.text.trim();
+      }
+      // result.type === "cancelled": selectedIndex stays -1 → default (wait)
+    } else {
+      const fn = this.options?.postTaskPickFn ?? this.options?.pickFn ?? null;
+      if (!fn) {
+        this.sendWorkerReady();
+        this.display.print(c.sageGreen("Waiting for next task..."));
+        return "task-complete";
+      }
+      const r = await fn(options);
+      if (typeof r === "number") {
+        selectedIndex = r;
+      } else if (r.type === "text") {
+        claimTaskId = r.text.trim();
+      }
+    }
+
+    if (claimTaskId !== undefined) {
+      if (claimTaskId) this.claimAfterTask(claimTaskId);
       return "task-complete";
     }
 
-    const idx = await pickFn([
-      "Wait to be assigned the next task",
-      "Choose a specific task to work on",
-      "Stop working for now",
-      "Exit",
-    ]);
-
-    switch (idx) {
+    switch (selectedIndex) {
       case 1:
         await this.stop();
-        this.display.print(c.sageGreen("To claim a specific task, use /worker:claim <taskId>."));
         return "task-complete";
       case 2:
-        await this.stop();
-        return "task-complete";
-      case 3:
         await this.stop();
         return "exit";
       default:
         this.sendWorkerReady();
         this.display.print(c.sageGreen("Waiting for next task..."));
         return "task-complete";
+    }
+  }
+
+  private claimAfterTask(taskId: string): void {
+    if (this.connectionState === "registered") {
+      this.sendClaimTask(taskId);
+    } else {
+      this._pendingClaimTaskId = taskId;
     }
   }
 
