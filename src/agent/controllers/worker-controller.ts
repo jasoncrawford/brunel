@@ -477,16 +477,16 @@ export class WorkerController extends EventEmitter {
   private async promptAfterTaskComplete(): Promise<"task-complete" | "exit"> {
     const options = [
       "Wait to be assigned the next task",
+      "Claim a specific task...",
       "Stop working for now",
       "Exit",
-      "Claim a specific task...",
     ];
 
     let selectedIndex = -1;
     let claimTaskId: string | undefined;
 
     if (this.picker) {
-      const result = await this.picker.pick(options, { lastIsTextEntry: true });
+      const result = await this.picker.pick(options, { textEntryIndex: 1 });
       if (result.type === "selected") {
         selectedIndex = result.index;
       } else if (result.type === "other") {
@@ -514,10 +514,10 @@ export class WorkerController extends EventEmitter {
     }
 
     switch (selectedIndex) {
-      case 1:
+      case 2:
         await this.stop();
         return "task-complete";
-      case 2:
+      case 3:
         await this.stop();
         return "exit";
       default:

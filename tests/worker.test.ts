@@ -1723,15 +1723,15 @@ describe("completeCurrentTask: post-completion prompt", () => {
     expect(printed.some(l => l.includes("Waiting for next task"))).toBe(true);
   });
 
-  it("option 1 (stop working): stops worker mode and returns 'task-complete'", async () => {
-    const { sess } = await makeSession(async () => 1);
+  it("option 2 (stop working): stops worker mode and returns 'task-complete'", async () => {
+    const { sess } = await makeSession(async () => 2);
     const result = await sess.completeCurrentTask();
     expect(result).toBe("task-complete");
     expect(sess.isActive).toBe(false);
   });
 
-  it("option 2 (exit): stops worker mode and returns 'exit'", async () => {
-    const { sess } = await makeSession(async () => 2);
+  it("option 3 (exit): stops worker mode and returns 'exit'", async () => {
+    const { sess } = await makeSession(async () => 3);
     const result = await sess.completeCurrentTask();
     expect(result).toBe("exit");
     expect(sess.isActive).toBe(false);
@@ -1743,9 +1743,9 @@ describe("completeCurrentTask: post-completion prompt", () => {
     await sess.completeCurrentTask();
     expect(mockPick).toHaveBeenCalledWith([
       expect.stringContaining("Wait"),
+      expect.stringContaining("Claim"),
       expect.stringContaining("Stop working"),
       expect.stringContaining("Exit"),
-      expect.stringContaining("Claim"),
     ]);
   });
 
@@ -1775,8 +1775,8 @@ describe("completeCurrentTask: post-completion prompt", () => {
     expect(msgs.some((m: { type: string }) => m.type === "worker_ready")).toBe(true);
   });
 
-  it("option 1 (stop working): does not send worker_ready", async () => {
-    const { sess, ws } = await makeSession(async () => 1);
+  it("option 2 (stop working): does not send worker_ready", async () => {
+    const { sess, ws } = await makeSession(async () => 2);
     ws.send.mockClear();
     await sess.completeCurrentTask();
     const msgs = ws.send.mock.calls.map(([s]: [string]) => JSON.parse(s));
