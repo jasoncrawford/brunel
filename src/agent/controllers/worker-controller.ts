@@ -317,6 +317,7 @@ export class WorkerController extends EventEmitter {
   reserve(): void {
     if (!this._isActive || this.currentTaskId !== undefined) return;
     this._isReserved = true;
+    this.agentStatus.update({ workerReady: false });
     if (this.ws?.readyState === WebSocket.OPEN && this.connectionState === "registered") {
       this.ws.send(JSON.stringify({
         type: "worker_reserved",
@@ -757,6 +758,7 @@ export class WorkerController extends EventEmitter {
 
   private transitionToIdle(): void {
     this.transitionToRegistered();
+    this.agentStatus.update({ workerReady: true });
     this.display.print(c.sageGreen("Waiting for tasks..."));
   }
 
@@ -977,7 +979,7 @@ export class WorkerController extends EventEmitter {
       this._eventsPaused = false;
       this.pendingEvents = [];
       if (this.debounceTimer) { clearTimeout(this.debounceTimer); this.debounceTimer = null; }
-      this.agentStatus.update({ taskNumber: msg.issue.number, prNumber: msg.issue.prNumber ?? undefined });
+      this.agentStatus.update({ taskNumber: msg.issue.number, prNumber: msg.issue.prNumber ?? undefined, workerReady: false });
       this.agentStatus.resetTaskStats();
       this._syncPendingEventsStatus();
       void this.agentStatus.refreshBranch();

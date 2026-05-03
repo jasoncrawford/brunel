@@ -617,6 +617,7 @@ export class Renderer {
     // Left side: worker {id8} ∙ {model} ∙ {task info}
     const parts = [...baseParts];
     if (status.taskNumber != null) parts.push(`task #${status.taskNumber}`);
+    else if (status.workerReady) parts.push("waiting for task");
     else parts.push("no current task");
     if (status.prNumber != null) parts.push(`PR #${status.prNumber}`);
     if (status.branch) parts.push(status.branch);

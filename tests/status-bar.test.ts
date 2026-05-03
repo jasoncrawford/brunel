@@ -35,7 +35,7 @@ describe("AgentStatus getStatusText", () => {
     vi.useRealTimers();
   });
 
-  it("shows worker id and no current task when idle", () => {
+  it("shows worker id and no current task when idle (reserved)", () => {
     const status = new AgentStatus({ agentId: "7c254628-abcd-1234-efgh-000000000000" });
     status.update({ connectionStatus: "connected" });
     status.setWorkerModeActive(true);
@@ -44,6 +44,26 @@ describe("AgentStatus getStatusText", () => {
     expect(result).toContain("worker 7c254628");
     expect(result).toContain("no current task");
     expect(result).toContain("Connected");
+  });
+
+  it("shows 'waiting for task' when workerReady is true and no task assigned", () => {
+    const status = new AgentStatus({ agentId: "7c254628-abcd-1234-efgh-000000000000" });
+    status.update({ connectionStatus: "connected", workerReady: true });
+    status.setWorkerModeActive(true);
+    const display = new Display(getConfig(), status);
+    const result = stripAnsi(display.renderer.fmtStatusBar(status, 119));
+    expect(result).toContain("waiting for task");
+    expect(result).not.toContain("no current task");
+  });
+
+  it("shows 'no current task' when workerReady is false and no task assigned", () => {
+    const status = new AgentStatus({ agentId: "7c254628-abcd-1234-efgh-000000000000" });
+    status.update({ connectionStatus: "connected", workerReady: false });
+    status.setWorkerModeActive(true);
+    const display = new Display(getConfig(), status);
+    const result = stripAnsi(display.renderer.fmtStatusBar(status, 119));
+    expect(result).toContain("no current task");
+    expect(result).not.toContain("waiting for task");
   });
 
   it("shows disconnectCode in verbose mode (via Renderer.fmtStatusBar)", () => {
