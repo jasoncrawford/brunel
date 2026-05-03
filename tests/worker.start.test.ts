@@ -61,6 +61,16 @@ function sentGoodbye(ws: FakeWs): Record<string, unknown> | undefined {
   return undefined;
 }
 
+function sentTaskComplete(ws: FakeWs): Record<string, unknown> | undefined {
+  for (const call of ws.send.mock.calls) {
+    try {
+      const msg = JSON.parse(call[0] as string);
+      if (msg.type === "task_complete") return msg;
+    } catch { /* ignore */ }
+  }
+  return undefined;
+}
+
 function printedMessages(display: { print: ReturnType<typeof vi.fn> }): string[] {
   return display.print.mock.calls.map((a) => stripAnsi(String(a[0])));
 }
@@ -204,6 +214,106 @@ describe("when has an active task", () => {
     const handler = await getStartHandler(s);
     await handler("");
     expect((s as any).currentTaskId).toBeUndefined();
+  });
+});
+
+// ── Active closed task: complete prompt ───────────────────────────────────────
+
+describe("when has an active closed task (issue closed)", () => {
+  function setupClosedTask(s: WorkerController): void {
+    (s as any).currentTaskId = "closed-task-id";
+    (s as any).currentIssue = FAKE_ISSUE;
+    (s as any).issueClosed = true;
+  }
+
+  it("shows a complete prompt, not an abandon prompt", async () => {
+    const pickFn = vi.fn().mockResolvedValue(2); // "Cancel"
+    const s = makeSession(pickFn);
+    await s.start();
+    setupClosedTask(s);
+    const handler = await getStartHandler(s);
+    await handler("");
+    expect(pickFn).toHaveBeenCalled();
+    const [options] = pickFn.mock.calls[0] as [string[]];
+    expect(options.some((o) => /complete/i.test(o))).toBe(true);
+    expect(options.every((o) => !/abandon/i.test(o))).toBe(true);
+  });
+
+  it("displays the task number in the complete prompt", async () => {
+    const pickFn = vi.fn().mockResolvedValue(2); // "Cancel"
+    const s = makeSession(pickFn);
+    await s.start();
+    setupClosedTask(s);
+    const handler = await getStartHandler(s);
+    await handler("");
+    const msgs = printedMessages(display);
+    expect(msgs.some((m) => m.includes(String(FAKE_ISSUE.number)))).toBe(true);
+  });
+
+  it("sends task_complete then worker_ready when user chooses to complete", async () => {
+    const pickFn = vi.fn().mockResolvedValue(0); // "Yes, complete"
+    const s = makeSession(pickFn);
+    await s.start();
+    setupClosedTask(s);
+    fakeWs.send.mockClear();
+    const handler = await getStartHandler(s);
+    await handler("");
+    expect(sentTaskComplete(fakeWs)).toBeDefined();
+    expect(sentWorkerReady(fakeWs)).toBeDefined();
+  });
+
+  it("clears currentTaskId when user chooses to complete", async () => {
+    const pickFn = vi.fn().mockResolvedValue(0); // "Yes, complete"
+    const s = makeSession(pickFn);
+    await s.start();
+    setupClosedTask(s);
+    const handler = await getStartHandler(s);
+    await handler("");
+    expect((s as any).currentTaskId).toBeUndefined();
+  });
+
+  it("does not send task_complete, sends worker_ready when user skips complete", async () => {
+    const pickFn = vi.fn().mockResolvedValue(1); // "No, just wait"
+    const s = makeSession(pickFn);
+    await s.start();
+    setupClosedTask(s);
+    fakeWs.send.mockClear();
+    const handler = await getStartHandler(s);
+    await handler("");
+    expect(sentTaskComplete(fakeWs)).toBeUndefined();
+    expect(sentWorkerReady(fakeWs)).toBeDefined();
+  });
+
+  it("clears currentTaskId when user skips complete", async () => {
+    const pickFn = vi.fn().mockResolvedValue(1); // "No, just wait"
+    const s = makeSession(pickFn);
+    await s.start();
+    setupClosedTask(s);
+    const handler = await getStartHandler(s);
+    await handler("");
+    expect((s as any).currentTaskId).toBeUndefined();
+  });
+
+  it("does not send worker_ready or task_complete when user cancels", async () => {
+    const pickFn = vi.fn().mockResolvedValue(2); // "Cancel"
+    const s = makeSession(pickFn);
+    await s.start();
+    setupClosedTask(s);
+    fakeWs.send.mockClear();
+    const handler = await getStartHandler(s);
+    await handler("");
+    expect(sentTaskComplete(fakeWs)).toBeUndefined();
+    expect(sentWorkerReady(fakeWs)).toBeUndefined();
+  });
+
+  it("preserves currentTaskId when user cancels", async () => {
+    const pickFn = vi.fn().mockResolvedValue(2); // "Cancel"
+    const s = makeSession(pickFn);
+    await s.start();
+    setupClosedTask(s);
+    const handler = await getStartHandler(s);
+    await handler("");
+    expect((s as any).currentTaskId).toBe("closed-task-id");
   });
 });
 

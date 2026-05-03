@@ -636,11 +636,28 @@ export class WorkerController extends EventEmitter {
         if (this.hasTask()) {
           const taskInfo = this.getTaskConfirmInfo();
           if (taskInfo) {
-            this.display.print(c.amber(`\nCurrently assigned task #${taskInfo.taskNumber}. Abandon this task?`));
-            const idx = await this.pickFnOrDefault()(["Yes, abandon and wait for new tasks", `No, stay with task #${taskInfo.taskNumber}`]);
-            if (idx !== 0) return undefined;
-            this.currentTaskId = undefined;
-            this.currentIssue = undefined;
+            if (taskInfo.issueClosed) {
+              this.display.print(c.amber(`\nTask #${taskInfo.taskNumber} is closed but not complete. Complete it before waiting for new tasks?`));
+              const idx = await this.pickFnOrDefault()(["Yes, complete and wait for new tasks", "No, just wait for new tasks", "Cancel"]);
+              if (idx === 2) return undefined;
+              if (idx === 0) {
+                try {
+                  await this.completeCurrentTask("reserved");
+                } catch (err) {
+                  if (err instanceof UserCancelledError) return undefined;
+                  throw err;
+                }
+              } else {
+                this.currentTaskId = undefined;
+                this.currentIssue = undefined;
+              }
+            } else {
+              this.display.print(c.amber(`\nCurrently assigned task #${taskInfo.taskNumber}. Abandon this task?`));
+              const idx = await this.pickFnOrDefault()(["Yes, abandon and wait for new tasks", `No, stay with task #${taskInfo.taskNumber}`]);
+              if (idx !== 0) return undefined;
+              this.currentTaskId = undefined;
+              this.currentIssue = undefined;
+            }
           }
         }
         this.sendWorkerReady();
