@@ -501,7 +501,7 @@ export class WorkerController extends EventEmitter {
   /** Normalises the three picker sources (real Picker / test pickFn / none) into a PickResult. */
   private async postTaskPick(options: string[]): Promise<PickResult> {
     if (this.picker) {
-      return this.picker.pick(options, { textEntryIndex: 1 });
+      return this.picker.pick(options, { textEntryIndex: 1, textEntryPrefix: "Claim a specific task: " });
     }
     if (this.options?.pickFn) {
       const r = await this.options.pickFn(options);
