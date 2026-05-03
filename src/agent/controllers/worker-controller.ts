@@ -582,7 +582,7 @@ export class WorkerController extends EventEmitter {
       },
     });
     registry.register("start", {
-      description: "Connect to the foreman and start accepting tasks",
+      description: "Start accepting tasks from the foreman",
       aliases: ["ready"],
       handler: async () => {
         if (!this._isActive) {
