@@ -40,20 +40,50 @@ export type DispatchResult =
 /**
  * Filter CommandSuggestion objects by substring of name or description.
  * Case-insensitive. Empty query returns all commands.
- * Sort order: prefix matches of name, then non-prefix name substring matches,
- * then description-only matches.
+ * Sort order:
+ *   1. Prefix matches of any colon-separated suffix, ordered by depth (fewer
+ *      leading segments removed = higher priority). `/st` matches `/status`
+ *      (depth 0) before `/worker:start` (depth 1) before `/foo:bar:stuff`
+ *      (depth 2). `/worker:st` matches `/worker:status` (depth 0) before
+ *      `/foo:worker:status` (depth 1).
+ *   2. Non-prefix name substring matches (e.g. `event` in `resume-events`).
+ *   3. Description-only substring matches.
  */
 export function filterCommands(query: string, commands: CommandSuggestion[]): CommandSuggestion[] {
   if (query === "") return commands;
   const q = query.toLowerCase();
-  const prefixName = commands.filter(c => c.name.toLowerCase().startsWith(q));
-  const substringName = commands.filter(
-    c => !c.name.toLowerCase().startsWith(q) && c.name.toLowerCase().includes(q),
-  );
-  const descOnly = commands.filter(
-    c => !c.name.toLowerCase().includes(q) && c.description.toLowerCase().includes(q),
-  );
-  return [...prefixName, ...substringName, ...descOnly];
+
+  type Scored = { cmd: CommandSuggestion; depth: number };
+  const prefixMatches: Scored[] = [];
+  const substringName: CommandSuggestion[] = [];
+  const descOnly: CommandSuggestion[] = [];
+
+  for (const c of commands) {
+    const name = c.name.toLowerCase();
+    const segments = name.split(":");
+
+    // Find the shallowest depth at which q is a prefix of a colon-joined suffix.
+    let minDepth = -1;
+    for (let i = 0; i < segments.length; i++) {
+      if (segments.slice(i).join(":").startsWith(q)) {
+        minDepth = i;
+        break;
+      }
+    }
+
+    if (minDepth >= 0) {
+      prefixMatches.push({ cmd: c, depth: minDepth });
+    } else if (name.includes(q)) {
+      substringName.push(c);
+    } else if (c.description.toLowerCase().includes(q)) {
+      descOnly.push(c);
+    }
+  }
+
+  // Stable sort by depth so shallower (more absolute) matches rank first.
+  prefixMatches.sort((a, b) => a.depth - b.depth);
+
+  return [...prefixMatches.map(s => s.cmd), ...substringName, ...descOnly];
 }
 
 export interface CommandEntry {
