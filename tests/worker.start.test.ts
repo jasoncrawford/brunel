@@ -9,8 +9,19 @@ import { EventEmitter } from "events";
 import { WorkerController } from "../src/agent/controllers/worker-controller.js";
 import { AgentStatus } from "../src/agent/models/agent-status.js";
 import { CommandRegistry } from "../src/agent/controllers/command-controller.js";
+import { Picker, type PickConfig } from "../src/agent/views/picker.js";
 import * as Wire from "../shared/wire.js";
 import { stripAnsi } from "./helpers.js";
+
+function makeMockPicker(fn: (opts: string[]) => Promise<number>): Picker {
+  return {
+    pick: vi.fn().mockImplementation(async (opts: string[], config?: PickConfig) => {
+      const r = await fn(opts);
+      if (config == null) return r;
+      return { type: "selected", index: r };
+    }),
+  } as unknown as Picker;
+}
 
 const FAKE_ISSUE: Wire.TaskIssue = {
   number: 978,
@@ -87,10 +98,10 @@ function makeSession(pickFn?: (options: string[]) => Promise<number>): WorkerCon
   return new WorkerController(
     new AgentStatus({ agentId: AGENT_ID }),
     display,
-    undefined,
+    pickFn ? makeMockPicker(pickFn) : undefined,
     undefined,
     "owner/repo",
-    { wsFactory, ...(pickFn && { pickFn }) },
+    { wsFactory },
   );
 }
 

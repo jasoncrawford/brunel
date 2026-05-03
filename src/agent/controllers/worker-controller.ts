@@ -43,8 +43,6 @@ export type WorkerControllerOptions = {
   wsFactory?: WsFactory;
   /** Override the afterTask hook (default: derived from workspaceController.onReset). */
   afterTask?: () => Promise<void>;
-  /** Override pick function for repo activation and quit confirmation. */
-  pickFn?: (options: string[]) => Promise<number | { type: "text"; text: string }>;
 };
 
 // Messages that must wait for hello_ack before being sent.
@@ -360,22 +358,19 @@ export class WorkerController extends EventEmitter {
    *
    * Returns 'quit' to proceed without completing, 'complete-and-quit' to mark
    * the task complete then quit, or 'cancel' to stay in the worker.
-   *
-   * An injectable pickFn is accepted so callers can supply a mock in tests.
    */
   async confirmTaskQuit(
     info: TaskConfirmInfo,
-    pickFn: (options: string[]) => Promise<number> = this.pickFnOrDefault(),
   ): Promise<"quit" | "complete-and-quit" | "cancel"> {
     if (info.issueClosed) {
       this.display.print(c.amber(`\nTask #${info.taskNumber} is closed but not complete. Complete it before exiting?`));
-      const idx = await pickFn(["Yes, complete before exiting", "No, just exit", "Don't exit"]);
+      const idx = await this.picker!.pick(["Yes, complete before exiting", "No, just exit", "Don't exit"]);
       if (idx === 0) return "complete-and-quit";
       if (idx === 1) return "quit";
       return "cancel";
     } else {
       this.display.print(c.amber(`\nTask #${info.taskNumber} is still open. Quitting now will unassign ${info.workerId}. Quit anyway?`));
-      const idx = await pickFn(["No, keep working", "Yes, quit anyway"]);
+      const idx = await this.picker!.pick(["No, keep working", "Yes, quit anyway"]);
       if (idx === 1) return "quit";
       return "cancel";
     }
@@ -389,22 +384,19 @@ export class WorkerController extends EventEmitter {
    *
    * Returns 'complete-and-claim' to complete the current task then claim,
    * 'claim' to abandon the current task and claim, or 'cancel' to do nothing.
-   *
-   * An injectable pickFn is accepted so callers can supply a mock in tests.
    */
   async confirmTaskClaim(
     info: TaskConfirmInfo,
-    pickFn: (options: string[]) => Promise<number> = this.pickFnOrDefault(),
   ): Promise<"claim" | "complete-and-claim" | "cancel"> {
     if (info.issueClosed) {
       this.display.print(c.amber(`\nTask #${info.taskNumber} is closed but not complete. Complete it before claiming a new task?`));
-      const idx = await pickFn(["Yes, complete first", "No, just claim", "Don't claim"]);
+      const idx = await this.picker!.pick(["Yes, complete first", "No, just claim", "Don't claim"]);
       if (idx === 0) return "complete-and-claim";
       if (idx === 1) return "claim";
       return "cancel";
     } else {
       this.display.print(c.amber(`\nTask #${info.taskNumber} is still open. Claiming a new task will unassign ${info.workerId}. Proceed?`));
-      const idx = await pickFn(["No, keep working", "Yes, claim anyway"]);
+      const idx = await this.picker!.pick(["No, keep working", "Yes, claim anyway"]);
       if (idx === 1) return "claim";
       return "cancel";
     }
@@ -464,7 +456,6 @@ export class WorkerController extends EventEmitter {
 
   /**
    * After completing a task, prompt the user for what to do next.
-   * When no picker is available (non-interactive / no pickFn injected) defaults to waiting.
    *
    * Calls sendWorkerReady() only when the user confirms they want to keep waiting —
    * this is what transitions the foreman from "reserved" to auto-assignable.
@@ -525,18 +516,8 @@ export class WorkerController extends EventEmitter {
     }
   }
 
-  /** Normalises the three picker sources (real Picker / test pickFn / none) into a PickResult. */
   private async postTaskPick(options: string[]): Promise<PickResult> {
-    if (this.picker) {
-      return this.picker.pick(options, { textEntryIndex: 1, textEntryPrefix: "Claim a specific task: " });
-    }
-    if (this.options?.pickFn) {
-      const r = await this.options.pickFn(options);
-      return typeof r === "number"
-        ? { type: "selected", index: r }
-        : { type: "other", text: r.text };
-    }
-    return { type: "selected", index: 0 }; // non-interactive: default to wait
+    return this.picker!.pick(options, { textEntryIndex: 1, textEntryPrefix: "Claim a specific task: " });
   }
 
   private claimAfterTask(taskId: string): void {
@@ -638,7 +619,7 @@ export class WorkerController extends EventEmitter {
           if (taskInfo) {
             if (taskInfo.issueClosed) {
               this.display.print(c.amber(`\nTask #${taskInfo.taskNumber} is closed but not complete. Complete it before waiting for new tasks?`));
-              const idx = await this.pickFnOrDefault()(["Yes, complete and wait for new tasks", "No, just wait for new tasks", "Cancel"]);
+              const idx = await this.picker!.pick(["Yes, complete and wait for new tasks", "No, just wait for new tasks", "Cancel"]);
               if (idx === 2) return undefined;
               if (idx === 0) {
                 try {
@@ -653,7 +634,7 @@ export class WorkerController extends EventEmitter {
               }
             } else {
               this.display.print(c.amber(`\nCurrently assigned task #${taskInfo.taskNumber}. Abandon this task?`));
-              const idx = await this.pickFnOrDefault()(["Yes, abandon and wait for new tasks", `No, stay with task #${taskInfo.taskNumber}`]);
+              const idx = await this.picker!.pick(["Yes, abandon and wait for new tasks", `No, stay with task #${taskInfo.taskNumber}`]);
               if (idx !== 0) return undefined;
               this.currentTaskId = undefined;
               this.currentIssue = undefined;
@@ -749,14 +730,6 @@ export class WorkerController extends EventEmitter {
   }
 
   // ── Private ───────────────────────────────────────────────────────────────
-
-  private pickFnOrDefault(): (opts: string[]) => Promise<number> {
-    if (this.options?.pickFn) {
-      const fn = this.options.pickFn;
-      return async (opts) => { const r = await fn(opts); return typeof r === "number" ? r : -1; };
-    }
-    return (opts) => this.picker!.pick(opts);
-  }
 
   private buildWsFactory(): WsFactory {
     return () => new WebSocket(`${getConfig().foremanUrl}/worker`);
@@ -1005,7 +978,7 @@ export class WorkerController extends EventEmitter {
         this.agentStatus.update({ connectionStatus: "connected", disconnectCode: undefined });
         // Repo is new — ask the user whether to activate it before proceeding.
         this.display.print(c.amber(`Repo ${this.repo} is new — activate it?`));
-        const idx = await this.pickFnOrDefault()(["Yes, activate", "No, skip"]);
+        const idx = await this.picker!.pick(["Yes, activate", "No, skip"]);
         if (idx === 0) {
           // Send activate_repo — foreman will reply with a repo_activated message.
           this.ws?.send(JSON.stringify({ type: "activate_repo", workerId: this.agentId } satisfies Wire.WorkerMessage));
