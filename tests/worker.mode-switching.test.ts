@@ -176,7 +176,7 @@ describe("worker mode switching", () => {
     expect(capturedStatus?.workerModeActive).toBe(false);
   });
 
-  it("/worker:start when already active prints a message and does not create a second session", async () => {
+  it("/worker:start when already active transitions to ready without creating a second session", async () => {
     const agent = new BrunelAgent(getConfig());
     const printedMessages: string[] = [];
     vi.spyOn(agent.display, "print").mockImplementation((line) => {
@@ -187,14 +187,13 @@ describe("worker mode switching", () => {
     mockInput.ask.mockImplementation(() => {
       askCallCount++;
       if (askCallCount === 1) return Promise.resolve("/worker:start");
-      if (askCallCount === 2) return Promise.resolve("/worker:start"); // second start
+      if (askCallCount === 2) return Promise.resolve("/worker:start"); // second start while already connected
       return Promise.resolve("__eof__");
     });
 
     await runAgent(false, agent);
 
     expect(capturedControllers.list).toHaveLength(1); // only one controller activated
-    expect(printedMessages.some(m => m.includes("already active"))).toBe(true);
   });
 
   it("/worker:stop when not active prints a message", async () => {

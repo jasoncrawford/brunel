@@ -1,9 +1,8 @@
 /**
- * Unit tests for the /worker:ready command.
+ * Unit tests for the /worker:start command (with /worker:ready as alias).
  *
- * Tests the worker-side of opting back into auto-assignment: auto-starting
- * if not connected, prompting to abandon an active task, and the happy path
- * (sends worker_ready to foreman and prints "Waiting for tasks...").
+ * Tests: auto-starting if not connected, prompting to abandon an active task,
+ * and the happy path (sends worker_ready to foreman and prints "Waiting for tasks...").
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "events";
@@ -40,7 +39,7 @@ class FakeWs extends EventEmitter {
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-const AGENT_ID = "test-worker-ready-id";
+const AGENT_ID = "test-worker-start-id";
 
 function sentWorkerReady(ws: FakeWs): { type: string; workerId: string } | undefined {
   for (const call of ws.send.mock.calls) {
@@ -85,11 +84,11 @@ function makeSession(pickFn?: (options: string[]) => Promise<number>): WorkerCon
   );
 }
 
-async function getReadyHandler(s: WorkerController): Promise<(args: string) => Promise<void>> {
+async function getStartHandler(s: WorkerController): Promise<(args: string) => Promise<void>> {
   const reg = new CommandRegistry();
   s.registerCommands(reg.scoped("worker"));
-  const entry = reg.lookup("worker:ready");
-  if (!entry) throw new Error("worker:ready not registered");
+  const entry = reg.lookup("worker:start");
+  if (!entry) throw new Error("worker:start not registered");
   return entry.handler as (args: string) => Promise<void>;
 }
 
@@ -106,8 +105,15 @@ afterEach(() => { vi.useRealTimers(); });
 
 // ── Command registration ───────────────────────────────────────────────────────
 
-it("registers worker:ready command", () => {
-  expect(registry.lookup("worker:ready")).toBeDefined();
+it("registers worker:start as canonical command", () => {
+  expect(registry.lookup("worker:start")).toBeDefined();
+  expect(registry.lookup("worker:start")?.aliasFor).toBeUndefined();
+});
+
+it("registers worker:ready as alias for worker:start", () => {
+  const entry = registry.lookup("worker:ready");
+  expect(entry).toBeDefined();
+  expect(entry?.aliasFor).toBe("worker:start");
 });
 
 // ── Not active: auto-start ─────────────────────────────────────────────────────
@@ -115,13 +121,13 @@ it("registers worker:ready command", () => {
 describe("when worker mode is not active", () => {
   it("starts worker mode", async () => {
     expect(session.isActive).toBe(false);
-    const handler = await getReadyHandler(session);
+    const handler = await getStartHandler(session);
     await handler("");
     expect(session.isActive).toBe(true);
   });
 
   it("connects as ready (not reserved)", async () => {
-    const handler = await getReadyHandler(session);
+    const handler = await getStartHandler(session);
     await handler("");
     // Fire open to trigger hello send
     fakeWs.emit("open");
@@ -146,7 +152,7 @@ describe("when has an active task", () => {
     const s = makeSession(pickFn);
     await s.start();
     setupActiveTask(s);
-    const handler = await getReadyHandler(s);
+    const handler = await getStartHandler(s);
     await handler("");
     expect(pickFn).toHaveBeenCalled();
     const [options] = pickFn.mock.calls[0] as [string[]];
@@ -159,7 +165,7 @@ describe("when has an active task", () => {
     const s = makeSession(pickFn);
     await s.start();
     setupActiveTask(s);
-    const handler = await getReadyHandler(s);
+    const handler = await getStartHandler(s);
     await handler("");
     const msgs = printedMessages(display);
     expect(msgs.some(m => m.includes(String(FAKE_ISSUE.number)))).toBe(true);
@@ -171,7 +177,7 @@ describe("when has an active task", () => {
     await s.start();
     setupActiveTask(s);
     fakeWs.send.mockClear();
-    const handler = await getReadyHandler(s);
+    const handler = await getStartHandler(s);
     await handler("");
     expect(sentWorkerReady(fakeWs)).toBeUndefined();
     expect(sentGoodbye(fakeWs)).toBeUndefined();
@@ -183,7 +189,7 @@ describe("when has an active task", () => {
     await s.start();
     setupActiveTask(s);
     fakeWs.send.mockClear();
-    const handler = await getReadyHandler(s);
+    const handler = await getStartHandler(s);
     await handler("");
     expect(sentWorkerReady(fakeWs)).toBeDefined();
     expect(sentGoodbye(fakeWs)).toBeUndefined();
@@ -195,7 +201,7 @@ describe("when has an active task", () => {
     const s = makeSession(pickFn);
     await s.start();
     setupActiveTask(s);
-    const handler = await getReadyHandler(s);
+    const handler = await getStartHandler(s);
     await handler("");
     expect((s as any).currentTaskId).toBeUndefined();
   });
@@ -210,7 +216,7 @@ describe("when active and idle (no active task)", () => {
   });
 
   it("sends worker_ready with correct workerId", async () => {
-    const handler = await getReadyHandler(session);
+    const handler = await getStartHandler(session);
     await handler("");
     const msg = sentWorkerReady(fakeWs);
     expect(msg).toBeDefined();
@@ -219,7 +225,7 @@ describe("when active and idle (no active task)", () => {
   });
 
   it("prints 'Waiting for tasks...'", async () => {
-    const handler = await getReadyHandler(session);
+    const handler = await getStartHandler(session);
     await handler("");
     const msgs = printedMessages(display);
     expect(msgs.some(m => m.includes("Waiting for tasks"))).toBe(true);
@@ -236,7 +242,7 @@ describe("when socket is not open", () => {
   });
 
   it("does not send worker_ready when socket is closed", async () => {
-    const handler = await getReadyHandler(session);
+    const handler = await getStartHandler(session);
     await handler("");
     expect(sentWorkerReady(fakeWs)).toBeUndefined();
   });
