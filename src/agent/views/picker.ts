@@ -19,6 +19,8 @@ export type PickConfig = {
   escapable?: boolean;
   /** Treat the last option as an inline text-entry row ("Other:"). */
   lastIsTextEntry?: boolean;
+  /** Treat the option at this index as an inline text-entry row. Takes precedence over lastIsTextEntry. */
+  textEntryIndex?: number;
 };
 
 export type PickResult =
@@ -82,7 +84,7 @@ export class Picker {
       let idx = hasConfig && currentIdx >= 0 ? currentIdx : 0;
       let done = false;
       const count = options.length;
-      const otherIdx = lastIsTextEntry ? count - 1 : -1;
+      const otherIdx = config?.textEntryIndex ?? (lastIsTextEntry ? count - 1 : -1);
       let textMode = false;
       let textBuf = "";
 

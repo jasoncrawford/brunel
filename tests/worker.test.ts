@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "events";
-import { WorkerController } from "../src/agent/controllers/worker-controller.js";
+import { WorkerController, WorkerControllerOptions } from "../src/agent/controllers/worker-controller.js";
 import { UserCancelledError } from "../src/agent/controllers/workspace-controller.js";
 import { AgentStatus } from "../src/agent/models/agent-status.js";
 import { Display } from "../src/agent/views/display.js";
@@ -1683,11 +1683,15 @@ describe("afterTask callback on /worker:complete", () => {
 // ── completeCurrentTask: post-completion prompt ───────────────────────────────
 
 describe("completeCurrentTask: post-completion prompt", () => {
-  async function makeSession(pickFn: (opts: string[]) => Promise<number>) {
+  async function makeSession(
+    pickFn: (opts: string[]) => Promise<number | { type: "text"; text: string }>,
+    extraOpts: Partial<WorkerControllerOptions> = {},
+  ) {
     const ws = new FakeWs();
     const sess = new WorkerController(sb, display, undefined, undefined, "owner/repo", {
       wsFactory: vi.fn().mockReturnValue(ws),
       pickFn,
+      ...extraOpts,
     });
     await sess.start();
     sendMsg(ws, { type: "task_assigned", taskId: "t-pick", issue: makeIssue(77) });
@@ -1719,32 +1723,11 @@ describe("completeCurrentTask: post-completion prompt", () => {
     expect(printed.some(l => l.includes("Waiting for next task"))).toBe(true);
   });
 
-  it("option 1 (choose specific task): stops worker mode and returns 'task-complete'", async () => {
-    const { sess } = await makeSession(async () => 1);
-    const result = await sess.completeCurrentTask();
-    expect(result).toBe("task-complete");
-    expect(sess.isActive).toBe(false);
-  });
-
-  it("option 1 (choose specific task): prints message about /worker:claim", async () => {
-    const { sess } = await makeSession(async () => 1);
-    await sess.completeCurrentTask();
-    const printed = display.print.mock.calls.map(([l]: [string]) => stripAnsi(l));
-    expect(printed.some(l => l.includes("/worker:claim"))).toBe(true);
-  });
-
   it("option 2 (stop working): stops worker mode and returns 'task-complete'", async () => {
     const { sess } = await makeSession(async () => 2);
     const result = await sess.completeCurrentTask();
     expect(result).toBe("task-complete");
     expect(sess.isActive).toBe(false);
-  });
-
-  it("option 2 (stop working): does not print /worker:claim message", async () => {
-    const { sess } = await makeSession(async () => 2);
-    await sess.completeCurrentTask();
-    const printed = display.print.mock.calls.map(([l]: [string]) => stripAnsi(l));
-    expect(printed.some(l => l.includes("/worker:claim"))).toBe(false);
   });
 
   it("option 3 (exit): stops worker mode and returns 'exit'", async () => {
@@ -1760,7 +1743,7 @@ describe("completeCurrentTask: post-completion prompt", () => {
     await sess.completeCurrentTask();
     expect(mockPick).toHaveBeenCalledWith([
       expect.stringContaining("Wait"),
-      expect.stringContaining("specific task"),
+      expect.stringContaining("Claim"),
       expect.stringContaining("Stop working"),
       expect.stringContaining("Exit"),
     ]);
@@ -1794,6 +1777,42 @@ describe("completeCurrentTask: post-completion prompt", () => {
 
   it("option 2 (stop working): does not send worker_ready", async () => {
     const { sess, ws } = await makeSession(async () => 2);
+    ws.send.mockClear();
+    await sess.completeCurrentTask();
+    const msgs = ws.send.mock.calls.map(([s]: [string]) => JSON.parse(s));
+    expect(msgs.some((m: { type: string }) => m.type === "worker_ready")).toBe(false);
+  });
+
+  it("claim option (text entry): sends claim_task with the entered task ID", async () => {
+    const { sess, ws } = await makeSession(vi.fn(), {
+      pickFn: async () => ({ type: "text" as const, text: "task-123" }),
+    });
+    ws.send.mockClear();
+    await sess.completeCurrentTask();
+    const msgs = ws.send.mock.calls.map(([s]: [string]) => JSON.parse(s));
+    expect(msgs.some((m: { type: string; taskId?: string }) => m.type === "claim_task" && m.taskId === "task-123")).toBe(true);
+  });
+
+  it("claim option (text entry): worker remains active", async () => {
+    const { sess } = await makeSession(vi.fn(), {
+      pickFn: async () => ({ type: "text" as const, text: "task-123" }),
+    });
+    await sess.completeCurrentTask();
+    expect(sess.isActive).toBe(true);
+  });
+
+  it("claim option (text entry): returns 'task-complete'", async () => {
+    const { sess } = await makeSession(vi.fn(), {
+      pickFn: async () => ({ type: "text" as const, text: "task-123" }),
+    });
+    const result = await sess.completeCurrentTask();
+    expect(result).toBe("task-complete");
+  });
+
+  it("claim option (text entry): does not send worker_ready", async () => {
+    const { sess, ws } = await makeSession(vi.fn(), {
+      pickFn: async () => ({ type: "text" as const, text: "task-123" }),
+    });
     ws.send.mockClear();
     await sess.completeCurrentTask();
     const msgs = ws.send.mock.calls.map(([s]: [string]) => JSON.parse(s));

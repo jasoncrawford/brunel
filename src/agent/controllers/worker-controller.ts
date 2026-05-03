@@ -9,7 +9,7 @@ import { fmtError } from "../../utils.js";
 import { fmtNum, fmtTaskStats } from "../../../shared/formatters.js";
 import { getConfig } from "../../config.js";
 import type { CommandRegistry } from "./command-controller.js";
-import { Picker } from "../views/picker.js";
+import { Picker, type PickResult } from "../views/picker.js";
 import { WorkspaceController, UserCancelledError } from "./workspace-controller.js";
 
 // ── WorkerDisplay interface ───────────────────────────────────────────────────
@@ -44,7 +44,7 @@ export type WorkerControllerOptions = {
   /** Override the afterTask hook (default: derived from workspaceController.onReset). */
   afterTask?: () => Promise<void>;
   /** Override pick function for repo activation and quit confirmation. */
-  pickFn?: (options: string[]) => Promise<number>;
+  pickFn?: (options: string[]) => Promise<number | { type: "text"; text: string }>;
 };
 
 // Messages that must wait for hello_ack before being sent.
@@ -463,43 +463,60 @@ export class WorkerController extends EventEmitter {
 
   /**
    * After completing a task, prompt the user for what to do next.
-   * Falls back to "wait for next task" silently when no picker is available
-   * (e.g. non-interactive environments or tests that don't inject a pickFn).
+   * When no picker is available (non-interactive / no pickFn injected) defaults to waiting.
    *
    * Calls sendWorkerReady() only when the user confirms they want to keep waiting —
    * this is what transitions the foreman from "reserved" to auto-assignable.
+   *
+   * Option 1 ("Claim a specific task:") uses inline text entry via textEntryIndex: 1.
    */
   private async promptAfterTaskComplete(): Promise<"task-complete" | "exit"> {
-    const pickFn = this.options?.pickFn ?? (this.picker ? (opts: string[]) => this.picker!.pick(opts) : null);
+    // task_complete was already sent to the foreman by completeCurrentTask().
+    const options = [
+      "Wait to be assigned the next task",
+      "Claim a specific task:",
+      "Stop working for now",
+      "Exit",
+    ];
 
-    if (!pickFn) {
-      this.sendWorkerReady();
-      this.display.print(c.sageGreen("Waiting for next task..."));
+    const result = await this.postTaskPick(options);
+
+    if (result.type === "other") {
+      const taskId = result.text.trim();
+      if (taskId) this.claimAfterTask(taskId);
       return "task-complete";
     }
 
-    const idx = await pickFn([
-      "Wait to be assigned the next task",
-      "Choose a specific task to work on",
-      "Stop working for now",
-      "Exit",
-    ]);
-
-    switch (idx) {
-      case 1:
-        await this.stop();
-        this.display.print(c.sageGreen("To claim a specific task, use /worker:claim <taskId>."));
-        return "task-complete";
-      case 2:
-        await this.stop();
-        return "task-complete";
-      case 3:
-        await this.stop();
-        return "exit";
+    const index = result.type === "selected" ? result.index : -1;
+    switch (index) {
+      case 2: await this.stop(); return "task-complete";
+      case 3: await this.stop(); return "exit";
       default:
         this.sendWorkerReady();
         this.display.print(c.sageGreen("Waiting for next task..."));
         return "task-complete";
+    }
+  }
+
+  /** Normalises the three picker sources (real Picker / test pickFn / none) into a PickResult. */
+  private async postTaskPick(options: string[]): Promise<PickResult> {
+    if (this.picker) {
+      return this.picker.pick(options, { textEntryIndex: 1 });
+    }
+    if (this.options?.pickFn) {
+      const r = await this.options.pickFn(options);
+      return typeof r === "number"
+        ? { type: "selected", index: r }
+        : { type: "other", text: r.text };
+    }
+    return { type: "selected", index: 0 }; // non-interactive: default to wait
+  }
+
+  private claimAfterTask(taskId: string): void {
+    if (this.connectionState === "registered") {
+      this.sendClaimTask(taskId);
+    } else {
+      this._pendingClaimTaskId = taskId;
     }
   }
 
@@ -690,7 +707,10 @@ export class WorkerController extends EventEmitter {
   // ── Private ───────────────────────────────────────────────────────────────
 
   private pickFnOrDefault(): (opts: string[]) => Promise<number> {
-    if (this.options?.pickFn) return this.options.pickFn;
+    if (this.options?.pickFn) {
+      const fn = this.options.pickFn;
+      return async (opts) => { const r = await fn(opts); return typeof r === "number" ? r : -1; };
+    }
     return (opts) => this.picker!.pick(opts);
   }
 

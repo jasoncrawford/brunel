@@ -190,6 +190,54 @@ describe("Picker: status bar not corrupted when ask() is active (issue #832)", (
 // - pickMultiple() → rejects with PickerCancelledError
 // - pickQuestion() → rejects with PickerCancelledError
 
+describe("Picker: textEntryIndex allows text entry on any option", () => {
+  afterEach(() => {
+    process.stdin.removeAllListeners("data");
+    vi.restoreAllMocks();
+  });
+
+  it("non-last option with textEntryIndex: typing text and Enter returns { type: 'other', text }", async () => {
+    vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    const picker = new Picker();
+
+    const promise = picker.pick(["Option A", "Claim a task...", "Option C"], { textEntryIndex: 1 });
+    // Navigate down to index 1 (text entry)
+    process.stdin.emit("data", "\x11");
+    // Type a task ID
+    process.stdin.emit("data", "t");
+    process.stdin.emit("data", "a");
+    process.stdin.emit("data", "s");
+    process.stdin.emit("data", "k");
+    process.stdin.emit("data", "-");
+    process.stdin.emit("data", "4");
+    process.stdin.emit("data", "2");
+    process.stdin.emit("data", "\r");
+    await expect(promise).resolves.toEqual({ type: "other", text: "task-42" });
+  });
+
+  it("non-last option with textEntryIndex: non-text-entry options still return { type: 'selected', index }", async () => {
+    vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    const picker = new Picker();
+
+    const promise = picker.pick(["Option A", "Claim a task...", "Option C"], { textEntryIndex: 1 });
+    // Navigate down twice to index 2 (regular option after text-entry option)
+    process.stdin.emit("data", "\x11"); // index 1 (text mode)
+    process.stdin.emit("data", "\x11"); // index 2 (exit text mode, regular selection)
+    process.stdin.emit("data", "\r");
+    await expect(promise).resolves.toEqual({ type: "selected", index: 2 });
+  });
+
+  it("textEntryIndex: ^C in text mode resolves with { type: 'cancelled' }", async () => {
+    vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    const picker = new Picker();
+
+    const promise = picker.pick(["Option A", "Claim a task...", "Option C"], { textEntryIndex: 1 });
+    process.stdin.emit("data", "\x11"); // navigate to text-entry option
+    process.stdin.emit("data", "\x03"); // Ctrl+C
+    await expect(promise).resolves.toEqual({ type: "cancelled" });
+  });
+});
+
 describe("Picker: ^C cancels cleanly without calling process.exit (issue #887)", () => {
   afterEach(() => {
     process.stdin.removeAllListeners("data");
