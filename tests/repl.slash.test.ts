@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import type { CommandController } from "../src/agent/controllers/command-controller.js";
+import { CommandRegistry, CommandController } from "../src/agent/controllers/command-controller.js";
 import { registerTestCommands } from "./helpers.js";
 
 let registry: CommandController;
@@ -68,6 +68,61 @@ describe("parseSlashCommand", () => {
 
   it("recognizes /effort", () => {
     expect(registry.parseSlashCommand("/effort")).toEqual({ type: "command", name: "effort" });
+  });
+});
+
+// ── Unambiguous namespace-less resolution ─────────────────────────────────────
+
+describe("parseSlashCommand: unambiguous namespace-less resolution", () => {
+  it("resolves /claim to worker:claim when only one match exists", async () => {
+    const result = registry.parseSlashCommand("/claim");
+    expect(result).toEqual({ type: "command", name: "worker:claim" });
+  });
+
+  it("resolves /complete to worker:complete (canonical suffix match)", async () => {
+    const result = registry.parseSlashCommand("/complete");
+    expect(result).toEqual({ type: "command", name: "worker:complete" });
+  });
+
+  it("resolves /done to worker:complete (alias suffix match, returns canonical)", async () => {
+    // worker:done is an alias for worker:complete; stripping 'worker:' gives 'done'
+    const result = registry.parseSlashCommand("/done");
+    expect(result).toEqual({ type: "command", name: "worker:complete" });
+  });
+
+  it("resolves /claim with args by matching on command token only", async () => {
+    const result = registry.parseSlashCommand("/claim 123");
+    expect(result).toEqual({ type: "command", name: "worker:claim" });
+  });
+
+  it("returns ambiguous_command when multiple commands share the suffix", () => {
+    const reg = new CommandRegistry();
+    const ctrl = new CommandController(reg);
+    reg.scoped("worker").register("start", { description: "s1", handler: async () => {} });
+    reg.scoped("workspace").register("start", { description: "s2", handler: async () => {} });
+    expect(ctrl.parseSlashCommand("/start")).toEqual({
+      type: "ambiguous_command",
+      command: "start",
+      matches: ["worker:start", "workspace:start"],
+    });
+  });
+
+  it("returns ambiguous_command with matches sorted alphabetically", () => {
+    const reg = new CommandRegistry();
+    const ctrl = new CommandController(reg);
+    reg.scoped("zzz").register("go", { description: "z", handler: async () => {} });
+    reg.scoped("aaa").register("go", { description: "a", handler: async () => {} });
+    const result = ctrl.parseSlashCommand("/go");
+    expect(result).toEqual({
+      type: "ambiguous_command",
+      command: "go",
+      matches: ["aaa:go", "zzz:go"],
+    });
+  });
+
+  it("still returns unknown_command when no suffix match exists", () => {
+    const result = registry.parseSlashCommand("/completelymadeup");
+    expect(result).toEqual({ type: "unknown_command", command: "completelymadeup" });
   });
 });
 

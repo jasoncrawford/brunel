@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import { CommandRegistry, CommandController } from "../src/agent/controllers/command-controller.js";
 import { registerTestCommands } from "./helpers.js";
-import type { CommandController } from "../src/agent/controllers/command-controller.js";
 
 let registry: CommandController;
 
@@ -109,5 +109,138 @@ describe("dispatchInput", () => {
   it("/worker:complete returns canonical command", async () => {
     const result = await registry.dispatch("/worker:complete", () => null);
     expect(result).toEqual({ type: "command", name: "worker:complete", args: "" });
+  });
+});
+
+// ── Unambiguous namespace-less dispatch ───────────────────────────────────────
+
+describe("dispatchInput: unambiguous namespace-less resolution", () => {
+  it("/claim resolves to worker:claim with no args", async () => {
+    const result = await registry.dispatch("/claim", () => null);
+    expect(result).toEqual({ type: "command", name: "worker:claim", args: "" });
+  });
+
+  it("/claim 123 resolves to worker:claim passing args", async () => {
+    const result = await registry.dispatch("/claim 123", () => null);
+    expect(result).toEqual({ type: "command", name: "worker:claim", args: "123" });
+  });
+
+  it("/complete resolves to worker:complete", async () => {
+    const result = await registry.dispatch("/complete", () => null);
+    expect(result).toEqual({ type: "command", name: "worker:complete", args: "" });
+  });
+
+  it("returns ambiguous_command for ambiguous namespace-less command", async () => {
+    const reg = new CommandRegistry();
+    const ctrl = new CommandController(reg);
+    reg.scoped("worker").register("start", { description: "s1", handler: async () => {} });
+    reg.scoped("workspace").register("start", { description: "s2", handler: async () => {} });
+    const result = await ctrl.dispatch("/start", () => null);
+    expect(result).toEqual({
+      type: "ambiguous_command",
+      command: "start",
+      matches: ["worker:start", "workspace:start"],
+    });
+  });
+
+  it("ambiguous command does not fall through to file lookup", async () => {
+    const reg = new CommandRegistry();
+    const ctrl = new CommandController(reg);
+    reg.scoped("worker").register("run", { description: "r1", handler: async () => {} });
+    reg.scoped("workspace").register("run", { description: "r2", handler: async () => {} });
+    // Pass empty file system so only registry matches count.
+    const result = await ctrl.dispatch("/run", () => null, () => null);
+    expect(result).toEqual({
+      type: "ambiguous_command",
+      command: "run",
+      matches: ["worker:run", "workspace:run"],
+    });
+  });
+});
+
+// ── File-based namespace-less dispatch ────────────────────────────────────────
+
+describe("dispatchInput: file-based namespace-less resolution", () => {
+  it("resolves unambiguous file-based command with namespace stripped", async () => {
+    const reg = new CommandRegistry();
+    const ctrl = new CommandController(reg);
+    const home = process.env.HOME ?? "";
+    const readFile = (path: string) => {
+      if (path === `${home}/.claude/commands/worker/run.md`) return "Run the worker.";
+      return null;
+    };
+    const listDir = (dir: string) => {
+      if (dir === `${home}/.claude/commands`) return [{ name: "worker", isDir: true }];
+      if (dir === `${home}/.claude/commands/worker`) return [{ name: "run.md", isDir: false }];
+      return null;
+    };
+    const result = await ctrl.dispatch("/run", readFile, listDir);
+    expect(result).toEqual({ type: "query", prompt: "Run the worker." });
+  });
+
+  it("passes args through to file-based command resolved via namespace strip", async () => {
+    const reg = new CommandRegistry();
+    const ctrl = new CommandController(reg);
+    const home = process.env.HOME ?? "";
+    const readFile = (path: string) => {
+      if (path === `${home}/.claude/commands/worker/run.md`) return "Run with: $ARGUMENTS";
+      return null;
+    };
+    const listDir = (dir: string) => {
+      if (dir === `${home}/.claude/commands`) return [{ name: "worker", isDir: true }];
+      if (dir === `${home}/.claude/commands/worker`) return [{ name: "run.md", isDir: false }];
+      return null;
+    };
+    const result = await ctrl.dispatch("/run foo bar", readFile, listDir);
+    expect(result).toEqual({ type: "query", prompt: "Run with: foo bar" });
+  });
+
+  it("returns ambiguous_command when multiple file-based commands share the suffix", async () => {
+    const reg = new CommandRegistry();
+    const ctrl = new CommandController(reg);
+    const home = process.env.HOME ?? "";
+    const readFile = (path: string) => {
+      if (path === `${home}/.claude/commands/worker/run.md`) return "Worker run.";
+      if (path === `${home}/.claude/commands/workspace/run.md`) return "Workspace run.";
+      return null;
+    };
+    const listDir = (dir: string) => {
+      if (dir === `${home}/.claude/commands`) return [
+        { name: "worker", isDir: true },
+        { name: "workspace", isDir: true },
+      ];
+      if (dir === `${home}/.claude/commands/worker`) return [{ name: "run.md", isDir: false }];
+      if (dir === `${home}/.claude/commands/workspace`) return [{ name: "run.md", isDir: false }];
+      return null;
+    };
+    const result = await ctrl.dispatch("/run", readFile, listDir);
+    expect(result).toEqual({
+      type: "ambiguous_command",
+      command: "run",
+      matches: ["worker:run", "workspace:run"],
+    });
+  });
+
+  it("includes file-based matches alongside registry matches in ambiguous_command", async () => {
+    const reg = new CommandRegistry();
+    const ctrl = new CommandController(reg);
+    reg.scoped("worker").register("run", { description: "r1", handler: async () => {} });
+    const home = process.env.HOME ?? "";
+    const readFile = (path: string) => {
+      if (path === `${home}/.claude/commands/workspace/run.md`) return "Workspace run.";
+      return null;
+    };
+    const listDir = (dir: string) => {
+      if (dir === `${home}/.claude/commands`) return [{ name: "workspace", isDir: true }];
+      if (dir === `${home}/.claude/commands/workspace`) return [{ name: "run.md", isDir: false }];
+      return null;
+    };
+    // Registry suffix match finds worker:run; file suffix match finds workspace:run → ambiguous
+    const result = await ctrl.dispatch("/run", readFile, listDir);
+    expect(result).toEqual({
+      type: "ambiguous_command",
+      command: "run",
+      matches: ["worker:run", "workspace:run"],
+    });
   });
 });
