@@ -30,11 +30,11 @@ Follows MVC with three subdirectories:
 
 - **Models** (`models/`) — `Workspace` (git/npm workspace management), `Settings` (runtime-settable preferences: model, effort, permissions), `QueryStats` (token usage/turn counts and API cost from SDK messages), `AgentStatus` (pure state model for worker status — emits `"change"` on updates, subscribed to by `Display` for reactive redraws; also owns static git/id utilities `getCurrentBranch`, `getRemoteRepo`, `generateAgentId`)
 - **Views** (`views/`) — `Display` (TUI terminal I/O — the single doorway to stdout), `Renderer` (pure string producers, no I/O), `Input` (readline-based REPL), `Picker` (arrow-key menus), `style.ts` (terminal color/style constants)
-- **Controllers** (`controllers/`) — `AgentController` (runs queries), `WorkerController` (consolidated worker mode lifecycle: WebSocket protocol, task state, reconnect/heartbeat, `/worker:*` commands; maintains an explicit three-state model: stopped / waiting / active — `transitionToIdle()` is the canonical entry point for the waiting state), `WorkspaceController` (workspace lifecycle + `/workspace:*` slash commands; event listeners are registered once in the constructor, not in `onCreate()` or other per-operation methods), `CommandRegistry`/`CommandController` (slash command registration and dispatch), `SettingsController` (model/effort/permissions selection)
+- **Controllers** (`controllers/`) — `AgentController` (runs queries), `WorkerController` (consolidated worker mode lifecycle: WebSocket protocol, task state, reconnect/heartbeat, `/worker:*` commands; maintains an explicit three-state model: stopped / waiting / active — `transitionToIdle()` is the canonical entry point for the waiting state), `WorkspaceController` (workspace lifecycle + `/workspace:*` slash commands; event listeners are registered once in the constructor, not in `onCreate()` or other per-operation methods), `CommandRegistry`/`CommandController` (slash command registration and dispatch; commands registered with `canRunFromArgs: true` can be invoked directly from CLI args, e.g. `brunel worker:start`; `exitAfterRunFromArgs: true` causes the process to exit after the command completes rather than entering the REPL), `SettingsController` (model/effort/permissions selection)
 
 ### Shared
 
-- `src/` root — `config.ts` (unified config loader with `getConfig()` singleton), `wire.ts` (re-exports from `shared/wire.ts`)
+- `src/` root — `config.ts` (unified config loader with `getConfig()` singleton; also exports `parseCommandFromArgs()` which extracts the first positional CLI arg as a command name for direct CLI invocation), `wire.ts` (re-exports from `shared/wire.ts`)
 - `shared/` — utilities needed by both Node backend and Vite frontend: `wire.ts` (wire protocol types), `formatters.ts` (pure data-to-string helpers)
 
 ## Task lifecycle
@@ -81,7 +81,7 @@ npm start
 npm run worker
 ```
 
-Config via `.env` or `brunel.config.ts` (CLI flags also accepted). See `src/config.ts` for all options.
+Config via `.env` or `brunel.config.ts` (CLI flags also accepted). See `src/config.ts` for all options. Positional args that aren't flag values are treated as command invocations (e.g. `brunel worker:start`, `brunel workspace:prune`, `brunel worker:claim 512`).
 
 ## Useful scripts
 
