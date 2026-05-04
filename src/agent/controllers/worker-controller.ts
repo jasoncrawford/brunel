@@ -145,6 +145,7 @@ export class WorkerController extends EventEmitter {
   private connectionState: "hello_sent" | "registered" = "registered";
   private bufferedMessages: BufferableMessage[] = [];
   private reconnectAttempts = 0;
+  private _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private _stopped = false;
 
   // ── Reserved state ────────────────────────────────────────────────────────
@@ -728,6 +729,18 @@ export class WorkerController extends EventEmitter {
         return undefined;
       },
     });
+    registry.register("reconnect", {
+      description: "Immediately reconnect to the foreman, cancelling any backoff delay",
+      handler: async () => {
+        if (!this._isActive) {
+          this.display.print(c.amber("Worker mode is not active."));
+          return undefined;
+        }
+        this.display.print(c.sageGreen("Reconnecting..."));
+        this.forceReconnect();
+        return undefined;
+      },
+    });
   }
 
   // ── Private ───────────────────────────────────────────────────────────────
@@ -751,6 +764,10 @@ export class WorkerController extends EventEmitter {
     this.connectionState = "registered";
     this.bufferedMessages = [];
     this.reconnectAttempts = 0;
+    if (this._reconnectTimer) {
+      clearTimeout(this._reconnectTimer);
+      this._reconnectTimer = null;
+    }
     this.currentAc = null;
     this._queryRunning = false;
     this._eventsPaused = false;
@@ -903,7 +920,7 @@ export class WorkerController extends EventEmitter {
         disconnectCode: code,
         reconnectAt: Date.now() + delay,
       });
-      setTimeout(() => this.connect(), delay);
+      this._reconnectTimer = setTimeout(() => this.connect(), delay);
     });
 
     ws.on("error", (err: Error) => {
@@ -913,6 +930,24 @@ export class WorkerController extends EventEmitter {
       // (e.g. some TLS negotiation failures on older Node.js / ws versions).
       ws.terminate();
     });
+  }
+
+  /**
+   * Cancel any pending backoff timer, tear down the current socket, and
+   * immediately open a fresh connection. Called by /worker:reconnect.
+   */
+  private forceReconnect(): void {
+    if (this._reconnectTimer) {
+      clearTimeout(this._reconnectTimer);
+      this._reconnectTimer = null;
+    }
+    // Nullify this.ws before terminating so the close handler's stale-socket
+    // guard treats the old socket as stale and skips scheduling another reconnect.
+    const oldWs = this.ws;
+    this.ws = undefined;
+    this.reconnectAttempts = 0;
+    oldWs?.terminate();
+    this.connect();
   }
 
   private async handleMessage(msg: Wire.ForemanMessage): Promise<void> {
