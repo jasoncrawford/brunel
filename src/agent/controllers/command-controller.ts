@@ -487,29 +487,79 @@ export class CommandController {
   async dispatch(
     input: string,
     readFile: (path: string) => string | null = defaultReadFile,
+    listDir: ListDir = defaultListDir,
   ): Promise<DispatchResult> {
     if (!input) return { type: "skip" };
 
     const slash = this.parseSlashCommand(input);
     if (slash) {
+      const rawCommand = input.slice(1).split(/\s+/)[0];
+      const args = input.slice(1 + rawCommand.length).trim();
+
       if (slash.type === "command") {
-        const rawCommand = input.slice(1).split(/\s+/)[0];
-        const args = input.slice(1 + rawCommand.length).trim();
+        // If this was a suffix match (not a direct lookup), check for file-based matches too,
+        // so they can be surfaced as ambiguous rather than silently losing to the registry.
+        if (!this._registry.lookup(rawCommand)) {
+          const fileMatches = this._findFileSuffixMatches(rawCommand, listDir, readFile);
+          if (fileMatches.length > 0) {
+            return {
+              type: "ambiguous_command",
+              command: rawCommand,
+              matches: [slash.name, ...fileMatches].sort(),
+            };
+          }
+        }
         return { type: "command", name: slash.name, args };
       }
-      if (slash.type === "ambiguous_command") {
-        return { type: "ambiguous_command", command: slash.command, matches: slash.matches };
-      }
-      // unknown_command: look up command file or skill
+
       const { command } = slash;
+
+      // Check for file-based commands that suffix-match (registry handled by parseSlashCommand).
+      const fileMatches = this._findFileSuffixMatches(command, listDir, readFile);
+
+      if (slash.type === "ambiguous_command") {
+        const allMatches = [...new Set([...slash.matches, ...fileMatches])].sort();
+        return { type: "ambiguous_command", command, matches: allMatches };
+      }
+
+      // unknown_command: try file suffix matches first, then direct file/skill lookup.
+      if (fileMatches.length === 1) {
+        const content = resolveContent(fileMatches[0], readFile);
+        if (content !== null) {
+          const args = input.slice(1 + command.length).trim();
+          return { type: "query", prompt: applyArguments(content, args) };
+        }
+      } else if (fileMatches.length > 1) {
+        return { type: "ambiguous_command", command, matches: fileMatches.sort() };
+      }
+
       const content = resolveContent(command, readFile);
       if (content === null) return { type: "unknown_command", command };
-      const args = input.slice(1 + command.length).trim();
-      const prompt = applyArguments(content, args);
-      return { type: "query", prompt };
+      const cmdArgs = input.slice(1 + command.length).trim();
+      return { type: "query", prompt: applyArguments(content, cmdArgs) };
     }
 
     return { type: "query", prompt: input };
+  }
+
+  private _findFileSuffixMatches(
+    command: string,
+    listDir: ListDir,
+    readFile: (path: string) => string | null,
+  ): string[] {
+    const allNames = this.listCommandNames(listDir, readFile);
+    const matches: string[] = [];
+    for (const name of allNames) {
+      if (this._registry.lookup(name)) continue; // registry entries handled by parseSlashCommand
+      const segments = name.split(":");
+      for (let i = 1; i < segments.length; i++) {
+        if (segments.slice(i).join(":") === command) {
+          matches.push(name);
+          break;
+        }
+      }
+    }
+    return matches;
   }
 
   /**
