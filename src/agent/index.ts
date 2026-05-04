@@ -367,6 +367,12 @@ export class BrunelAgent {
         continue;
       }
 
+      if (action.type === "ambiguous_command") {
+        const options = action.matches.map(m => `/${m}`).join(", ");
+        this.display.print(c.boldRed(`Ambiguous command: /${action.command} — which did you mean? ${options}`));
+        continue;
+      }
+
       if (action.type === "command") {
         const result = await registry.execute(action.name, action.args);
         // doExit() is always called here, never inside individual command handlers,

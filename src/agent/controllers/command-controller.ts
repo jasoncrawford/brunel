@@ -27,11 +27,13 @@ function applyArguments(content: string, args: string): string {
 
 export type SlashCommandResult =
   | { type: "command"; name: string }
-  | { type: "unknown_command"; command: string };
+  | { type: "unknown_command"; command: string }
+  | { type: "ambiguous_command"; command: string; matches: string[] };
 
 export type DispatchResult =
   | { type: "command"; name: string; args: string }
   | { type: "unknown_command"; command: string }
+  | { type: "ambiguous_command"; command: string; matches: string[] }
   | { type: "skip" }
   | { type: "query"; prompt: string };
 
@@ -450,8 +452,31 @@ export class CommandController {
     if (!input.startsWith("/")) return null;
     const command = input.slice(1).split(/\s+/)[0];
     if (!command) return null;
+
+    // Direct exact lookup.
     const entry = this._registry.lookup(command);
     if (entry) return { type: "command", name: entry.name };
+
+    // Suffix match: find canonical commands where stripping one or more namespace
+    // prefix segments from the entry name (or alias name) yields exactly `command`.
+    const matchingCanonicals = new Set<string>();
+    for (const e of this._registry.listAll()) {
+      const segments = e.name.split(":");
+      for (let i = 1; i < segments.length; i++) {
+        if (segments.slice(i).join(":") === command) {
+          matchingCanonicals.add(e.aliasFor ?? e.name);
+          break;
+        }
+      }
+    }
+
+    if (matchingCanonicals.size === 1) {
+      return { type: "command", name: [...matchingCanonicals][0] };
+    }
+    if (matchingCanonicals.size > 1) {
+      return { type: "ambiguous_command", command, matches: [...matchingCanonicals].sort() };
+    }
+
     return { type: "unknown_command", command };
   }
 
@@ -471,6 +496,9 @@ export class CommandController {
         const rawCommand = input.slice(1).split(/\s+/)[0];
         const args = input.slice(1 + rawCommand.length).trim();
         return { type: "command", name: slash.name, args };
+      }
+      if (slash.type === "ambiguous_command") {
+        return { type: "ambiguous_command", command: slash.command, matches: slash.matches };
       }
       // unknown_command: look up command file or skill
       const { command } = slash;
