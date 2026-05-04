@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { Repo } from "../src/foreman/models/repo.js";
 import { initDb } from "../src/foreman/clients/db-client.js";
 import { createTestSupabase } from "./helpers/db.js";
@@ -33,6 +33,29 @@ describe("Repo.findOrCreate", () => {
     const a = await Repo.findOrCreate("dbr-owner/repo-a");
     const b = await Repo.findOrCreate("dbr-owner/repo-b");
     expect(a.id).not.toBe(b.id);
+  });
+
+  it("does not emit 'changed' when the repo already exists", async () => {
+    await Repo.findOrCreate("dbr-owner/repo-a");
+    const listener = vi.fn();
+    Repo.events.on("changed", listener);
+    try {
+      await Repo.findOrCreate("dbr-owner/repo-a");
+      expect(listener).not.toHaveBeenCalled();
+    } finally {
+      Repo.events.off("changed", listener);
+    }
+  });
+
+  it("emits 'changed' when a new repo is created", async () => {
+    const listener = vi.fn();
+    Repo.events.on("changed", listener);
+    try {
+      await Repo.findOrCreate("dbr-owner/repo-a");
+      expect(listener).toHaveBeenCalledOnce();
+    } finally {
+      Repo.events.off("changed", listener);
+    }
   });
 });
 
