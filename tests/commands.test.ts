@@ -108,6 +108,39 @@ describe("register", () => {
     const entry = registry.registry.lookup("test:overwrite")!;
     expect(entry.description).toBe("second");
   });
+
+  it("canRunFromArgs and exitAfterRunFromArgs are stored on canonical entry", () => {
+    registry.registry.register("test:runnable", {
+      description: "Runnable",
+      handler: async () => {},
+      canRunFromArgs: true,
+      exitAfterRunFromArgs: true,
+    });
+    const entry = registry.registry.lookup("test:runnable")!;
+    expect(entry.canRunFromArgs).toBe(true);
+    expect(entry.exitAfterRunFromArgs).toBe(true);
+  });
+
+  it("canRunFromArgs defaults to undefined when not set", () => {
+    registry.registry.register("test:plain", { description: "Plain", handler: async () => {} });
+    const entry = registry.registry.lookup("test:plain")!;
+    expect(entry.canRunFromArgs).toBeUndefined();
+    expect(entry.exitAfterRunFromArgs).toBeUndefined();
+  });
+
+  it("canRunFromArgs and exitAfterRunFromArgs are propagated to alias entries", () => {
+    registry.registry.register("test:cmd", {
+      description: "Cmd",
+      aliases: ["test:c"],
+      handler: async () => {},
+      canRunFromArgs: true,
+      exitAfterRunFromArgs: true,
+    });
+    const alias = registry.registry.lookup("test:c")!;
+    expect(alias.aliasFor).toBe("test:cmd");
+    expect(alias.canRunFromArgs).toBe(true);
+    expect(alias.exitAfterRunFromArgs).toBe(true);
+  });
 });
 
 // ── scoped ────────────────────────────────────────────────────────────────────

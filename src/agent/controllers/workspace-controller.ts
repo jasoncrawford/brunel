@@ -113,6 +113,8 @@ export class WorkspaceController {
 
     registry.register("prune", {
       description: "Remove orphaned worker workspace directories",
+      canRunFromArgs: true,
+      exitAfterRunFromArgs: true,
       handler: async () => {
         if (!workspace) {
           display.print(c.boldRed("Cannot prune: no workspace directory configured."));

@@ -28,6 +28,7 @@ const fakeWorkspace = vi.hoisted(() => {
     checkSafety: ReturnType<typeof vi.fn>;
     reset: ReturnType<typeof vi.fn>;
     create: ReturnType<typeof vi.fn>;
+    prune: ReturnType<typeof vi.fn>;
     on: ReturnType<typeof vi.fn>;
   } = {
     dir: "/fake/workers/test-worker",
@@ -44,6 +45,7 @@ const fakeWorkspace = vi.hoisted(() => {
     }),
     reset: vi.fn().mockResolvedValue(undefined),
     create: vi.fn().mockImplementation(async () => { ws.isCreated = true; }),
+    prune: vi.fn().mockResolvedValue([]),
     on: vi.fn(),
   };
   return ws;
@@ -139,7 +141,7 @@ async function runWorkerMain(runQueryFn = vi.fn().mockResolvedValue(undefined)):
   }) as unknown as ReturnType<typeof vi.spyOn>;
 
   try {
-    await new BrunelAgent(getConfig()).start(true);
+    await new BrunelAgent(getConfig()).start({ command: "worker:start", args: "" });
     return { exitCalled: false, exitCode: undefined };
   } catch (err) {
     if (err instanceof Error && err.message === "__process_exit__") {
@@ -179,7 +181,7 @@ describe("workerMain startup banner", () => {
     const agent = new BrunelAgent(getConfig());
     const printSpy = vi.spyOn(agent.display, "print").mockImplementation(() => {});
     try {
-      await agent.start(true);
+      await agent.start({ command: "worker:start", args: "" });
     } catch (err) {
       if (!(err instanceof Error && err.message === "__process_exit__")) throw err;
     } finally {
@@ -227,7 +229,7 @@ describe("workerMain query error display", () => {
     }) as unknown as ReturnType<typeof vi.spyOn>;
 
     try {
-      await agent.start(true);
+      await agent.start({ command: "worker:start", args: "" });
     } catch (err) {
       if (!(err instanceof Error && err.message === "__process_exit__")) throw err;
     } finally {
@@ -311,7 +313,7 @@ describe("workerMain exit behavior", () => {
     }) as unknown as ReturnType<typeof vi.spyOn>;
 
     let workerDone = false;
-    const workerPromise = new BrunelAgent(getConfig()).start(true).then(
+    const workerPromise = new BrunelAgent(getConfig()).start({ command: "worker:start", args: "" }).then(
       () => { workerDone = true; },
       () => { workerDone = true; },
     );
@@ -346,7 +348,7 @@ describe("workerMain exit behavior", () => {
 
     installMocks();
     try {
-      await new BrunelAgent(getConfig()).start(true);
+      await new BrunelAgent(getConfig()).start({ command: "worker:start", args: "" });
     } catch (err) {
       if (!(err instanceof Error && err.message === "__process_exit__")) throw err;
     } finally {
@@ -406,7 +408,7 @@ describe("workerMain prompt suppression while waiting for task", () => {
     }) as unknown as ReturnType<typeof vi.spyOn>;
 
     let agentError: unknown;
-    const agentDone = new BrunelAgent(getConfig()).start(true).then(
+    const agentDone = new BrunelAgent(getConfig()).start({ command: "worker:start", args: "" }).then(
       () => {},
       (err: unknown) => { if (!(err instanceof Error && err.message === "__process_exit__")) agentError = err; },
     );
@@ -521,7 +523,7 @@ describe("workerMain input cancel discipline", () => {
     }) as unknown as ReturnType<typeof vi.spyOn>;
 
     let agentError: unknown;
-    const agentDone = new BrunelAgent(getConfig()).start(true).then(
+    const agentDone = new BrunelAgent(getConfig()).start({ command: "worker:start", args: "" }).then(
       () => {},
       (err: unknown) => {
         if (!(err instanceof Error && err.message === "__process_exit__")) agentError = err;
@@ -601,7 +603,7 @@ describe("workerMain stall retry exhaustion", () => {
     }) as unknown as ReturnType<typeof vi.spyOn>;
 
     try {
-      await agent.start(true);
+      await agent.start({ command: "worker:start", args: "" });
     } catch (err) {
       if (!(err instanceof Error && err.message === "__process_exit__")) throw err;
     } finally {
@@ -612,5 +614,112 @@ describe("workerMain stall retry exhaustion", () => {
     expect(printed).toContain("Connection stalled");
     expect(printed).toContain("giving up");
     expect(printed).toContain("retries");
+  });
+});
+
+describe("CLI command dispatch", () => {
+  let chdirSpy: ReturnType<typeof vi.spyOn>;
+  let stderrSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    makeMockInput();
+    chdirSpy = vi.spyOn(process, "chdir").mockImplementation(() => {});
+    stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    fakeWorkspace.isCreated = false;
+    vi.mocked(fakeWorkspace.destroy).mockResolvedValue(undefined);
+    vi.mocked(fakeWorkspace.checkSafety).mockResolvedValue({ uncommittedFiles: [], unpushedCommits: [], noUpstream: false });
+    vi.mocked(fakeWorkspace.create).mockImplementation(async () => { fakeWorkspace.isCreated = true; });
+    vi.mocked(fakeWorkspace.prune).mockResolvedValue([]);
+  });
+
+  afterEach(() => {
+    chdirSpy.mockRestore();
+    stderrSpy.mockRestore();
+    vi.clearAllMocks();
+  });
+
+  it("workspace:prune exits after running (exitAfterRunFromArgs)", async () => {
+    installMocks();
+    let exitCode: number | undefined;
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation((code?: number | string) => {
+      exitCode = typeof code === "number" ? code : undefined;
+      throw new Error("__process_exit__");
+    }) as unknown as ReturnType<typeof vi.spyOn>;
+
+    let startCalled = false;
+    try {
+      await new BrunelAgent(getConfig()).start({ command: "workspace:prune", args: "" });
+      startCalled = true;
+    } catch (err) {
+      if (!(err instanceof Error && err.message === "__process_exit__")) throw err;
+    } finally {
+      exitSpy.mockRestore();
+    }
+
+    // start() should return normally (no process.exit) — doExit() + return exits cleanly
+    expect(startCalled).toBe(true);
+    // ask() should NOT have been called (routing loop skipped)
+    expect(mockInput.ask).not.toHaveBeenCalled();
+  });
+
+  it("unknown command writes to stderr and exits with code 1", async () => {
+    installMocks();
+    let exitCode: number | undefined;
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation((code?: number | string) => {
+      exitCode = typeof code === "number" ? code : undefined;
+      throw new Error("__process_exit__");
+    }) as unknown as ReturnType<typeof vi.spyOn>;
+
+    try {
+      await new BrunelAgent(getConfig()).start({ command: "nonexistent-command", args: "" });
+    } catch (err) {
+      if (!(err instanceof Error && err.message === "__process_exit__")) throw err;
+    } finally {
+      exitSpy.mockRestore();
+    }
+
+    expect(exitCode).toBe(1);
+    const stderrOutput = stderrSpy.mock.calls.map(([s]: [unknown]) => String(s)).join("");
+    expect(stderrOutput).toContain("Unknown command: nonexistent-command");
+  });
+
+  it("command without canRunFromArgs writes to stderr and exits with code 1", async () => {
+    installMocks();
+    let exitCode: number | undefined;
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation((code?: number | string) => {
+      exitCode = typeof code === "number" ? code : undefined;
+      throw new Error("__process_exit__");
+    }) as unknown as ReturnType<typeof vi.spyOn>;
+
+    // /clear is a real registered command but does not have canRunFromArgs
+    try {
+      await new BrunelAgent(getConfig()).start({ command: "clear", args: "" });
+    } catch (err) {
+      if (!(err instanceof Error && err.message === "__process_exit__")) throw err;
+    } finally {
+      exitSpy.mockRestore();
+    }
+
+    expect(exitCode).toBe(1);
+    const stderrOutput = stderrSpy.mock.calls.map(([s]: [unknown]) => String(s)).join("");
+    expect(stderrOutput).toContain("cannot be invoked from command line args");
+  });
+
+  it("worker:start does not exit after running (enters routing loop)", async () => {
+    installMocks();
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => {
+      throw new Error("__process_exit__");
+    }) as unknown as ReturnType<typeof vi.spyOn>;
+
+    try {
+      await new BrunelAgent(getConfig()).start({ command: "worker:start", args: "" });
+    } catch (err) {
+      if (!(err instanceof Error && err.message === "__process_exit__")) throw err;
+    } finally {
+      exitSpy.mockRestore();
+    }
+
+    // The routing loop ran — ask() was called (got __eof__ and exited)
+    expect(mockInput.ask).toHaveBeenCalled();
   });
 });

@@ -8,7 +8,7 @@ import { AgentStatus } from "./models/agent-status.js";
 import { Input } from "./views/input.js";
 import { Picker } from "./views/picker.js";
 import { WorkerController } from "./controllers/worker-controller.js";
-import { loadConfig, getConfig, type BrunelConfig } from "../config.js";
+import { loadConfig, getConfig, parseCommandFromArgs, type BrunelConfig } from "../config.js";
 import { Workspace } from "./models/workspace.js";
 import { fmtError } from "../utils.js";
 import { Settings } from "./models/settings.js";
@@ -62,11 +62,12 @@ export class BrunelAgent {
   /**
    * Complete setup and enter the routing loop.
    *
-   * If runWorkerMode is true, connects to the foreman immediately (equivalent
-   * to running /worker:start on startup). Worker mode can also be toggled at
-   * runtime via /worker:start and /worker:stop. The status bar is always shown.
+   * If cliCommand is provided, the named command is executed on startup (equivalent
+   * to the user typing that slash command). Commands with exitAfterRunFromArgs will
+   * exit after running instead of entering the REPL loop. Commands must have
+   * canRunFromArgs: true to be invocable this way.
    */
-  async start(runWorkerMode: boolean): Promise<void> {
+  async start(cliCommand: { command: string; args: string } | null): Promise<void> {
     // Always detect the repo so /worker:start can use it at runtime.
     const repo = await AgentStatus.getRemoteRepo();
     // Show current branch in the minimal status bar before worker mode activates.
@@ -157,12 +158,7 @@ export class BrunelAgent {
       process.exit(0);
     });
 
-    // Start worker mode immediately if requested via --worker-mode flag.
-    if (runWorkerMode) {
-      await workerController.start();
-    }
-
-    // Status bar is always shown regardless of worker mode.
+    // Status bar is always shown.
     this.display.startPersistentBar();
 
     // Print the startup banner.
@@ -229,6 +225,42 @@ export class BrunelAgent {
         );
       },
     });
+
+    // ── CLI command dispatch ──────────────────────────────────────────────────
+    //
+    // If a command was specified in CLI args (e.g. `brunel worker:start`), execute
+    // it now using the same resolution logic as the REPL (suffix matching, aliases).
+    // Commands must have canRunFromArgs: true; exitAfterRunFromArgs: true commands
+    // exit after running instead of entering the routing loop.
+
+    if (cliCommand) {
+      const slashResult = this.controller.parseSlashCommand(`/${cliCommand.command}`);
+      if (!slashResult || slashResult.type === "unknown_command") {
+        process.stderr.write(`Error: Unknown command: ${cliCommand.command}\n`);
+        await doExit();
+        process.exit(1);
+        return;
+      }
+      if (slashResult.type === "ambiguous_command") {
+        const options = slashResult.matches.map(m => `/${m}`).join(", ");
+        process.stderr.write(`Error: Ambiguous command: ${cliCommand.command} — did you mean one of: ${options}\n`);
+        await doExit();
+        process.exit(1);
+        return;
+      }
+      const entry = registry.lookup(slashResult.name);
+      if (!entry?.canRunFromArgs) {
+        process.stderr.write(`Error: Command cannot be invoked from command line args: /${slashResult.name}\n`);
+        await doExit();
+        process.exit(1);
+        return;
+      }
+      const result = await registry.execute(slashResult.name, cliCommand.args);
+      if (result === "exit" || entry.exitAfterRunFromArgs) {
+        await doExit();
+        return;
+      }
+    }
 
     /**
      * Run a single prompt through agentController.runQuery. Notifies the session
@@ -399,6 +431,6 @@ export class BrunelAgent {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const config = await loadConfig(process.argv);
-  const runWorkerMode = process.argv.includes("--worker-mode");
-  await new BrunelAgent(config).start(runWorkerMode);
+  const cliCommand = parseCommandFromArgs(process.argv);
+  await new BrunelAgent(config).start(cliCommand);
 }

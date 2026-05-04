@@ -197,6 +197,39 @@ function parseCliFlags(argv: string[]): Record<string, unknown> {
   return flags;
 }
 
+/** CLI flags that are boolean (take no value argument). */
+const BOOLEAN_CLI_FLAGS = new Set(["--verbose", "--dangerously-skip-permissions"]);
+
+/**
+ * Parse a command invocation from CLI argv.
+ * Returns the first positional arg (not a flag or its value) as the command name,
+ * and any subsequent positional args joined with spaces as the args string.
+ * Returns null if no positional args are present.
+ *
+ * Example: ["node", "brunel.js", "--effort", "high", "worker:claim", "512"]
+ *   → { command: "worker:claim", args: "512" }
+ */
+export function parseCommandFromArgs(argv: string[]): { command: string; args: string } | null {
+  const args = argv.slice(2);
+  const consumed = new Set<number>();
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (!arg.startsWith("--")) continue;
+    consumed.add(i);
+    if (BOOLEAN_CLI_FLAGS.has(arg)) continue;
+    // All other --flags consume the next arg as their value.
+    if (i + 1 < args.length && !args[i + 1].startsWith("--")) {
+      consumed.add(i + 1);
+      i++;
+    }
+  }
+
+  const positional = args.filter((_, i) => !consumed.has(i));
+  if (positional.length === 0) return null;
+  return { command: positional[0], args: positional.slice(1).join(" ") };
+}
+
 function readBrunelEnvVars(env: NodeJS.ProcessEnv): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const key of Object.keys(BrunelConfigSchema.shape)) {

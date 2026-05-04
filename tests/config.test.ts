@@ -1,7 +1,7 @@
 // tests/config.test.ts
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import { loadConfig, VALID_PERMISSION_MODES } from "../src/config.js";
+import { loadConfig, parseCommandFromArgs, VALID_PERMISSION_MODES } from "../src/config.js";
 
 // ── Test helpers ──────────────────────────────────────────────────────────────
 
@@ -572,5 +572,73 @@ describe("effort", () => {
       const cfg = await loadConfig(["node", "repl.js", "--effort", level]);
       expect(cfg.effort).toBe(level);
     }
+  });
+});
+
+// ── parseCommandFromArgs ─────────────────────────────────────────────────────
+
+describe("parseCommandFromArgs", () => {
+  it("returns null when no positional args", () => {
+    expect(parseCommandFromArgs(["node", "brunel.js"])).toBeNull();
+  });
+
+  it("returns null when only flags are present", () => {
+    expect(parseCommandFromArgs(["node", "brunel.js", "--verbose", "--effort", "high"])).toBeNull();
+  });
+
+  it("returns command with empty args when one positional arg", () => {
+    expect(parseCommandFromArgs(["node", "brunel.js", "worker:start"])).toEqual({
+      command: "worker:start",
+      args: "",
+    });
+  });
+
+  it("returns command and args when multiple positional args", () => {
+    expect(parseCommandFromArgs(["node", "brunel.js", "worker:claim", "512"])).toEqual({
+      command: "worker:claim",
+      args: "512",
+    });
+  });
+
+  it("multiple command args are joined with spaces", () => {
+    expect(parseCommandFromArgs(["node", "brunel.js", "cmd", "arg1", "arg2"])).toEqual({
+      command: "cmd",
+      args: "arg1 arg2",
+    });
+  });
+
+  it("config flags with values are not treated as commands", () => {
+    expect(parseCommandFromArgs(["node", "brunel.js", "--effort", "high", "worker:start"])).toEqual({
+      command: "worker:start",
+      args: "",
+    });
+  });
+
+  it("--verbose flag (no value) does not consume next arg", () => {
+    expect(parseCommandFromArgs(["node", "brunel.js", "--verbose", "worker:start"])).toEqual({
+      command: "worker:start",
+      args: "",
+    });
+  });
+
+  it("--dangerously-skip-permissions flag (no value) does not consume next arg", () => {
+    expect(parseCommandFromArgs(["node", "brunel.js", "--dangerously-skip-permissions", "prune"])).toEqual({
+      command: "prune",
+      args: "",
+    });
+  });
+
+  it("config flags can appear before and after command", () => {
+    expect(parseCommandFromArgs(["node", "brunel.js", "--model", "opus", "worker:claim", "42", "--verbose"])).toEqual({
+      command: "worker:claim",
+      args: "42",
+    });
+  });
+
+  it("works with alias short names", () => {
+    expect(parseCommandFromArgs(["node", "brunel.js", "prune"])).toEqual({
+      command: "prune",
+      args: "",
+    });
   });
 });

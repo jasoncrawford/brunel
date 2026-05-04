@@ -90,18 +90,20 @@ function makeMocks() {
 }
 
 /**
- * Run BrunelAgent.start(runWorkerMode) and return the agent.
+ * Run BrunelAgent.start() and return the agent.
+ * Pass workerMode=true to start in worker mode (equivalent to `brunel worker:start`).
  * Mocks process.exit so it throws instead of exiting.
  * Cleans up the persistent bar to avoid resize-listener accumulation.
  */
-async function runAgent(runWorkerMode: boolean, agentOverride?: BrunelAgent): Promise<BrunelAgent> {
+async function runAgent(workerMode: boolean, agentOverride?: BrunelAgent): Promise<BrunelAgent> {
   const exitSpy = vi.spyOn(process, "exit").mockImplementation((code?: number | string) => {
     throw new Error("__process_exit__");
   }) as unknown as ReturnType<typeof vi.spyOn>;
   const chdirSpy = vi.spyOn(process, "chdir").mockImplementation(() => {});
   const agent = agentOverride ?? new BrunelAgent(getConfig());
+  const cliCommand = workerMode ? { command: "worker:start", args: "" } : null;
   try {
-    await agent.start(runWorkerMode);
+    await agent.start(cliCommand);
   } catch (err) {
     if (!(err instanceof Error && err.message === "__process_exit__")) throw err;
   } finally {
@@ -135,7 +137,7 @@ describe("worker mode switching", () => {
     expect(capturedStatus?.workerModeActive).toBe(false);
   });
 
-  it("workerModeActive is true when --worker-mode flag is used", async () => {
+  it("workerModeActive is true when started via `brunel worker:start`", async () => {
     // Verify that worker mode was started (controller captured in list).
     // After ^D exits, stop() is called first, so workerModeActive is false at that point.
     await runAgent(true);
@@ -259,7 +261,7 @@ describe("worker mode switching", () => {
 
     let agentError: unknown;
     const agent = new BrunelAgent(getConfig());
-    const agentDone = agent.start(true).then(
+    const agentDone = agent.start({ command: "worker:start", args: "" }).then(
       () => {},
       (err: unknown) => { if (!(err instanceof Error && err.message === "__process_exit__")) agentError = err; },
     );
@@ -378,7 +380,7 @@ describe("worker mode switching", () => {
     const chdirSpy = vi.spyOn(process, "chdir").mockImplementation(() => {});
     const agent = new BrunelAgent(getConfig());
     try {
-      await agent.start(false);
+      await agent.start(null);
     } catch (err) {
       if (!(err instanceof Error && err.message === "__process_exit__")) throw err;
     } finally {

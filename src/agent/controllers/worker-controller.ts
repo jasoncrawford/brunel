@@ -611,6 +611,7 @@ export class WorkerController extends EventEmitter {
     registry.register("start", {
       description: "Start accepting tasks from the foreman",
       aliases: ["ready"],
+      canRunFromArgs: true,
       handler: async () => {
         if (!this._isActive) {
           await this.start();
@@ -682,6 +683,7 @@ export class WorkerController extends EventEmitter {
     });
     registry.register("claim", {
       description: "Claim a specific task by ID",
+      canRunFromArgs: true,
       handler: async (args: string) => {
         const taskId = args.trim();
         if (!taskId) {
