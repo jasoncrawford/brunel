@@ -95,7 +95,7 @@ export interface TaskIssue {
 
 // Worker → Foreman messages
 export type WorkerMessage =
-  | { type: "worker_hello"; workerId: string; repo: string; taskId?: string; status: "ready" | "reserved" | "assigned"; workerSecret?: string }
+  | { type: "worker_hello"; workerId: string; repo: string; taskId?: string; status: "ready" | "reserved" | "assigned"; workerSecret?: string; lastSeenEventSeqId?: number }
   | { type: "task_complete"; workerId: string; taskId: string; nextState?: "ready" | "reserved"; stats?: { inputTokens: number; outputTokens: number; costUsd?: number } }
   | { type: "worker_goodbye"; workerId: string; taskId?: string; task_complete?: boolean; stats?: { inputTokens: number; outputTokens: number; costUsd?: number } }
   | { type: "activate_repo"; workerId: string }
@@ -106,7 +106,7 @@ export type WorkerMessage =
 // Foreman → Worker messages
 export type ForemanMessage =
   | { type: "task_assigned"; taskId: string; issue: TaskIssue }
-  | { type: "event_notification"; taskId: string; event: WebhookEvent }
+  | { type: "event_notification"; taskId: string; event: WebhookEvent; seqId?: number }
   | { type: "hello_ack"; workerId: string; status: "ready" | "reserved" | "assigned" | "cancelled"; repoStatus: "new" | "active" }
   | { type: "repo_activated"; workerId: string }
   | { type: "foreman_error"; message: string; fatal: boolean };

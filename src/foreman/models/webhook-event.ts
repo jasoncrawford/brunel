@@ -74,8 +74,11 @@ export class WebhookEvent extends ActiveRecord {
 
   // ── Persistence ─────────────────────────────────────────────────────────────
 
-  /** Insert into webhook_events. Returns a promise (usually ignored with `void`). */
-  static log(data: {
+  /**
+   * Insert into webhook_events. Returns the DB-assigned id on success, or null
+   * on error. Callers that only need fire-and-forget behavior can `void` the result.
+   */
+  static async log(data: {
     deliveryId: string | null;
     eventName: string;
     action: string | null;
@@ -87,20 +90,36 @@ export class WebhookEvent extends ActiveRecord {
     taskId: string | null;
     workerId: string | null;
     payload: Record<string, unknown>;
-  }): Promise<void> {
-    return WebhookEvent.insert({
-      delivery_id: data.deliveryId,
-      event_name: data.eventName,
-      action: data.action,
-      repo_id: data.repoId,
-      sender: data.sender,
-      issue_number: data.issueNumber,
-      pr_number: data.prNumber,
-      branch: data.branch,
-      task_id: data.taskId,
-      worker_id: data.workerId,
-      payload: data.payload as Json,
-    }).then(() => undefined).catch((err: unknown) => log(`[db] webhook_events insert error: ${fmtError(err)}`));
+  }): Promise<number | null> {
+    try {
+      const row = await WebhookEvent.insert({
+        delivery_id: data.deliveryId,
+        event_name: data.eventName,
+        action: data.action,
+        repo_id: data.repoId,
+        sender: data.sender,
+        issue_number: data.issueNumber,
+        pr_number: data.prNumber,
+        branch: data.branch,
+        task_id: data.taskId,
+        worker_id: data.workerId,
+        payload: data.payload as Json,
+      });
+      return (row as WebhookEvent).id ?? null;
+    } catch (err: unknown) {
+      log(`[db] webhook_events insert error: ${fmtError(err)}`);
+      return null;
+    }
+  }
+
+  /** Query events for a task that arrived after the given sequence id, ordered ascending. */
+  static async queryMissedFor(taskId: string, afterSeqId: number): Promise<WebhookEvent[]> {
+    const { data } = await WebhookEvent.select()
+      .eq("task_id", taskId)
+      .gt("id", afterSeqId)
+      .order("id", { ascending: true })
+      .limit(500);
+    return (data ?? []).map((r: Row) => new WebhookEvent(r));
   }
 
   // ── Queries ──────────────────────────────────────────────────────────────────
