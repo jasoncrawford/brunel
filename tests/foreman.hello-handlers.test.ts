@@ -13,7 +13,7 @@ import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { ForemanMessage } from "../src/foreman/models/foreman-message.js";
 import { WebhookEvent } from "../src/foreman/models/webhook-event.js";
 import { Repo } from "../src/foreman/models/repo.js";
-import { fakeRepo, resetDb, seedTask, createTestTaskManager, createTestRepo } from "./helpers/task.js";
+import { fakeRepo, resetDb, seedTask, seedWebhookEvent, createTestTaskManager, createTestRepo } from "./helpers/task.js";
 import * as utils from "../src/utils.js";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -177,20 +177,15 @@ describe("handleAssignedHello", () => {
         assigned_at: new Date().toISOString(),
       });
 
-      // Simulate two events that arrived while the worker was disconnected
-      const evt1 = WebhookEvent.fromIncoming("d1", "issue_comment", {}) as any;
-      const evt2 = WebhookEvent.fromIncoming("d2", "pull_request", {}) as any;
-      // Give them synthetic DB ids (simulating rows fetched from webhook_events)
-      Object.assign(evt1, { id: 11 });
-      Object.assign(evt2, { id: 12 });
-
-      vi.spyOn(WebhookEvent, "queryMissedFor").mockResolvedValue([evt1, evt2]);
+      // Seed two webhook_events that arrived while the worker was disconnected.
+      // id=10 is before the reconnect seqId; ids 11 and 12 are the missed ones.
+      await seedWebhookEvent({ id: 10, task_id: "10", event_name: "issue_comment" });
+      await seedWebhookEvent({ id: 11, task_id: "10", event_name: "issue_comment" });
+      await seedWebhookEvent({ id: 12, task_id: "10", event_name: "pull_request" });
 
       const { wss, sendMsg } = makeWss(taskManager);
       // Worker reconnects claiming it last saw seqId=10
       await wss.handleAssignedHello("w1", "10", fakeWs(), fakeRepo(), 10);
-
-      expect(WebhookEvent.queryMissedFor).toHaveBeenCalledWith("10", 10);
 
       const replayNotifs = sendMsg.mock.calls.filter(
         ([, msg]) => (msg as { type: string }).type === "event_notification"
@@ -209,7 +204,7 @@ describe("handleAssignedHello", () => {
         assigned_at: new Date().toISOString(),
       });
 
-      const querySpy = vi.spyOn(WebhookEvent, "queryMissedFor").mockResolvedValue([]);
+      const querySpy = vi.spyOn(WebhookEvent, "queryMissedFor");
 
       const { wss } = makeWss(taskManager);
       await wss.handleAssignedHello("w1", "10", fakeWs(), fakeRepo());

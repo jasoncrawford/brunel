@@ -6,6 +6,7 @@ import { TaskManager } from "../../src/foreman/models/task-manager.js";
 import type { Database } from "../../src/database.types.js";
 
 type DbRow = Database["public"]["Tables"]["tasks"]["Row"];
+type WebhookRow = Database["public"]["Tables"]["webhook_events"]["Row"];
 
 /**
  * Resets the in-memory DB and TaskManager registry to a fresh, empty state.
@@ -48,6 +49,20 @@ export function fakeRepo(fullName = "owner/repo", id = 1, status: "new" | "activ
  * already-assigned or already-completed task). Call resetDb() in
  * beforeEach before using seedTask() to ensure per-test isolation.
  */
+/**
+ * Seeds a webhook_event directly into the DB shim.
+ * Accepts an optional `id` to set a specific sequence id (the real Supabase schema
+ * auto-generates this, but tests often need deterministic ids for seqId assertions).
+ */
+export async function seedWebhookEvent(
+  fields: Partial<WebhookRow> & { event_name: string },
+): Promise<void> {
+  await (db.from as any)("webhook_events").insert({
+    payload: {},
+    ...fields,
+  }).single();
+}
+
 export async function seedTask(
   fields: Partial<DbRow> & { task_id: string; issue_number: number },
 ): Promise<Task> {
