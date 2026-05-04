@@ -172,7 +172,7 @@ describe("forwardEvent — active tasks still receive events", () => {
     expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("dropped"));
   });
 
-  it("queues event for a pending task with no worker", () => {
+  it("drops events for a pending task with no worker — worker reads state fresh on assignment", () => {
     const task = Task.fromTest({ task_id: "42", issue_number: 42, repo_id: testRepoId });
     task.blockersLoaded = true; // no open blockers → status is "pending"
     const queueSpy = vi.spyOn(task.manager, "queueEvent");
@@ -180,7 +180,7 @@ describe("forwardEvent — active tasks still receive events", () => {
 
     wss.forwardEvent(task, makeEvent(), "#42");
 
-    expect(queueSpy).toHaveBeenCalledOnce();
+    expect(queueSpy).not.toHaveBeenCalled();
     expect(sendMsg).not.toHaveBeenCalled();
   });
 });

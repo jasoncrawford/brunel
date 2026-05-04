@@ -20,7 +20,7 @@ import type { Repo } from "./repo.js";
 // subscribers (e.g. admin dashboard, work assignment).
 
 export type AssignOutcome =
-  | { ok: true; task: Task; queued: WebhookEvent[]; worker: Worker }
+  | { ok: true; task: Task; worker: Worker }
   | { ok: false; worker: Worker; err: unknown };
 
 export type ClaimOutcome =
@@ -188,7 +188,8 @@ export class TaskManager extends EventEmitter {
     worker.assign(task);
     try {
       await task.assign(worker);
-      return { ok: true, task, queued: this.drainEvents(task), worker };
+      this.drainEvents(task); // discard any pre-assignment events; new worker reads state fresh
+      return { ok: true, task, worker };
     } catch (err) {
       worker.release();
       return { ok: false, worker, err };

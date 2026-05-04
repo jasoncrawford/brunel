@@ -641,9 +641,6 @@ export class ForemanWss {
         task.queueEvent(evt);
         log(`[task ${ref}] ${evt.eventName} queued — worker ${shortWorkerId(task.workerId)} not in registry`);
       }
-    } else if (task.status === "pending" || task.status === "blocked") {
-      task.queueEvent(evt);
-      log(`[task ${ref}] ${evt.eventName} queued (no worker assigned)`);
     }
   }
 
@@ -660,18 +657,13 @@ export class ForemanWss {
         log(`[worker ${shortWorkerId(outcome.worker.workerId)}] → idle (DB write failed)`);
         continue;
       }
-      const { task, queued, worker } = outcome;
+      const { task, worker } = outcome;
       this.sendMsg(worker, {
         type: "task_assigned",
         taskId: task.taskId,
         issue: task.toAssignmentPayload(),
       });
       log(`[worker ${shortWorkerId(worker.workerId)}] → task_assigned #${task.issueNumber} "${task.title}"`);
-      for (const evt of queued) {
-        const seqId = evt.id ?? undefined;
-        this.sendMsg(worker, { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload(), ...(seqId !== undefined && { seqId }) });
-        log(`[worker ${shortWorkerId(worker.workerId)}] → event_notification #${task.issueNumber} ${evt.eventName} (queued)`);
-      }
     }
   }
 
