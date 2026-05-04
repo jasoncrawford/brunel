@@ -277,23 +277,6 @@ export function createMemoryTaskDb(): SupabaseClient<Database> {
         };
         return sb;
       },
-      upsert(rowData: { full_name: string; status?: string }, _opts?: unknown) {
-        if (!reposStore.has(rowData.full_name)) {
-          reposStore.set(rowData.full_name, {
-            id: nextRepoId++,
-            full_name: rowData.full_name,
-            status: rowData.status ?? "new",
-            created_at: new Date().toISOString(),
-          });
-        }
-        const result = reposStore.get(rowData.full_name)!;
-        const sb = {
-          select() { return sb; },
-          single() { return ok(result); },
-          maybeSingle() { return ok(result); },
-        };
-        return sb;
-      },
       update(changes: Partial<RepoRow>) {
         let matchId: number | null = null;
         const thenable = {
