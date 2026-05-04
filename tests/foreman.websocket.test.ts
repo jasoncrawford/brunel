@@ -7,6 +7,7 @@ import { Worker } from "../src/foreman/models/worker.js";
 import { ForemanWss } from "../src/foreman/controllers/wss.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
+import { WebhookEvent } from "../src/foreman/models/webhook-event.js";
 import { fakeRepo, resetDb, createTestTaskManager } from "./helpers/task.js";
 import { loadDefaultConfig } from "../src/config.js";
 const defaultCfg = await loadDefaultConfig();
@@ -303,13 +304,12 @@ describe("foreman WebSocket protocol", () => {
     expect(msg.event.name).toBe("issue_comment");
   });
 
-  it("routeEvent queues event when no worker is assigned", async () => {
+  it("drops event silently when no worker is assigned — worker reads state fresh on assignment", async () => {
     await makeTask(taskManager, 1);
     await foremanWss.routeEvent("evt-1", "issue_comment", { issue: { number: 1 }, repository: { full_name: "owner/repo" } });
     const t = await Task.get("1");
-    const events = taskManager.drainEvents(t!);
-    expect(events).toHaveLength(1);
-    expect(events[0].eventName).toBe("issue_comment");
+    expect(t?.workerId).toBeNull();
+    expect(t?.status).toBe("pending");
   });
 
   it("invalid JSON from worker does not crash the server", async () => {
@@ -509,17 +509,19 @@ describe("hello_ack handshake", () => {
     expect(Worker.fromRegistry("w1")?.status).toBe("ready");
   });
 
-  it("queued events are sent after hello_ack on reclaim", async () => {
+  it("replays missed events from DB after hello_ack on reclaim (when lastSeenEventSeqId provided)", async () => {
     await makeTask(taskManager, 1);
     const t = await Task.get("1");
-    const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    { const w = Worker.register("w1", fakeWs, fakeRepo()); await t!.assign(w); w.assign(t!); w.markDisconnected(); }
-    await foremanWss.routeEvent("evt-1", "issue_comment", { issue: { number: 1 }, repository: { full_name: "owner/repo" } });
+    const fakeWs2 = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
+    { const w = Worker.register("w1", fakeWs2, fakeRepo()); await t!.assign(w); w.assign(t!); w.markDisconnected(); }
+    vi.spyOn(WebhookEvent, "queryMissedFor").mockResolvedValue([
+      WebhookEvent.fromIncoming("evt-1", "issue_comment", {}),
+    ]);
 
     const ws = await connect();
     const messages: Wire.ForemanMessage[] = [];
     ws.on("message", (data) => messages.push(JSON.parse(data.toString())));
-    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", taskId: "1", status: "assigned" });
+    send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", taskId: "1", status: "assigned", lastSeenEventSeqId: 5 });
     await waitUntil(() => messages.length >= 2);
     expect(messages[0]).toMatchObject({ type: "hello_ack", status: "assigned" });
     expect(messages[1]).toMatchObject({ type: "event_notification" });
@@ -829,7 +831,7 @@ describe("disconnected worker state", () => {
     expect(Worker.fromRegistry("w1")).toBeUndefined();
   });
 
-  it("events are queued (not dropped) when assigned worker is disconnected", async () => {
+  it("drops event (no queue) when assigned worker is disconnected — DB replay covers it on reconnect", async () => {
     await makeTask(taskManager, 1);
     const ws = await connect();
     send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "ready" });
@@ -841,35 +843,29 @@ describe("disconnected worker state", () => {
     await foremanWss.routeEvent("evt-1", "issue_comment", { issue: { number: 1 }, comment: { body: "hi" }, repository: { full_name: "owner/repo" } });
 
     const t = await Task.get("1");
-    const queued = taskManager.drainEvents(t!);
-    expect(queued).toHaveLength(1);
-    expect(queued[0].eventName).toBe("issue_comment");
+    expect(t?.status).toBe("assigned");
   });
 
-  it("reconnecting worker (busy) from disconnected state drains queued events", async () => {
+  it("reconnecting worker (busy) from disconnected state reclaims the task", async () => {
     await makeTask(taskManager, 1);
     const ws1 = await connect();
     send(ws1, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "ready" });
-    await nextMsg(ws1); // hello_ack (task is assigned server-side regardless)
+    await nextMsg(ws1); // task_assigned
 
     await closeClient(ws1);
     await waitUntil(() => Worker.fromRegistry("w1")?.status === "disconnected");
 
-    await foremanWss.routeEvent("evt-1", "issue_comment", { issue: { number: 1 }, comment: { body: "hi" }, repository: { full_name: "owner/repo" } });
-
     const ws2 = await connect();
     const q2 = makeQueue(ws2);
     send(ws2, { type: "worker_hello", repo: "owner/repo", workerId: "w1", taskId: "1", status: "assigned" });
-    await q2.next(); // hello_ack (status: busy)
-    const msg = await q2.next();
-    expect(msg.type).toBe("event_notification");
-    if (msg.type === "event_notification") {
-      expect(msg.taskId).toBe("1");
-      expect(msg.event.name).toBe("issue_comment");
-    }
+    const ack = await q2.next(); // hello_ack
+    expect(ack.type).toBe("hello_ack");
+    if (ack.type === "hello_ack") expect(ack.status).toBe("assigned");
 
     expect(Worker.fromRegistry("w1")?.status).toBe("assigned");
     expect((await Task.get("1"))?.status).toBe("assigned");
+    // missed events are replayed from DB via queryMissedFor on reconnect;
+    // that path is covered by DB integration tests
   });
 
   it("reconnecting worker (idle) from disconnected state reverts task to pending", async () => {

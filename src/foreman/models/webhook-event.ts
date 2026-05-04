@@ -112,6 +112,15 @@ export class WebhookEvent extends ActiveRecord {
     }
   }
 
+  /** Returns the highest id currently in webhook_events, or 0 if the table is empty.
+   *  Used as baseSeqId in task_assigned so the worker can replay from this point on reconnect. */
+  static async currentMaxId(): Promise<number> {
+    const { data } = await WebhookEvent.select()
+      .order("id", { ascending: false })
+      .limit(1);
+    return (data as Array<{ id?: number }> | null)?.[0]?.id ?? 0;
+  }
+
   /** Query events for a task that arrived after the given sequence id, ordered ascending. */
   static async queryMissedFor(taskId: string, afterSeqId: number): Promise<WebhookEvent[]> {
     const { data } = await WebhookEvent.select()

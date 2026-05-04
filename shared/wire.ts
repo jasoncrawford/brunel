@@ -105,7 +105,7 @@ export type WorkerMessage =
 
 // Foreman → Worker messages
 export type ForemanMessage =
-  | { type: "task_assigned"; taskId: string; issue: TaskIssue }
+  | { type: "task_assigned"; taskId: string; issue: TaskIssue; baseSeqId?: number }
   | { type: "event_notification"; taskId: string; event: WebhookEvent; seqId?: number }
   | { type: "hello_ack"; workerId: string; status: "ready" | "reserved" | "assigned" | "cancelled"; repoStatus: "new" | "active" }
   | { type: "repo_activated"; workerId: string }

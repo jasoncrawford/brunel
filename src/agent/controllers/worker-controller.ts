@@ -1016,7 +1016,7 @@ export class WorkerController extends EventEmitter {
       // Reset event state so the new task starts with a clean slate.
       this._eventsPaused = false;
       this.pendingEvents = [];
-      this.lastSeenEventSeqId = undefined;
+      this.lastSeenEventSeqId = msg.baseSeqId;
       if (this.debounceTimer) { clearTimeout(this.debounceTimer); this.debounceTimer = null; }
       this.agentStatus.update({ taskNumber: msg.issue.number, prNumber: msg.issue.prNumber ?? undefined, workerReady: false });
       this.agentStatus.resetTaskStats();

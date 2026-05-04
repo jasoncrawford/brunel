@@ -2946,17 +2946,17 @@ describe("lastSeenEventSeqId", () => {
     }
   });
 
-  it("resets lastSeenEventSeqId when a new task is assigned", () => {
+  it("resets lastSeenEventSeqId to new task's baseSeqId when a new task is assigned", () => {
     vi.useFakeTimers();
     vi.spyOn(Math, "random").mockReturnValue(0);
     try {
       const issue = makeIssue();
-      sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+      sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue, baseSeqId: 10 });
       sendMsg(fakeWs, { type: "event_notification", taskId: "42", event: makeEvent(), seqId: 7 });
 
-      // Complete task, then receive a new task assignment
+      // Complete task, then receive a new task assignment with its own baseSeqId
       sendMsg(fakeWs, { type: "hello_ack", workerId: AGENT_ID, status: "ready", repoStatus: "active" });
-      sendMsg(fakeWs, { type: "task_assigned", taskId: "99", issue: makeIssue(2) });
+      sendMsg(fakeWs, { type: "task_assigned", taskId: "99", issue: makeIssue(2), baseSeqId: 50 });
 
       const newWs = reconnectWithNewWs();
       newWs.emit("open");
@@ -2966,8 +2966,30 @@ describe("lastSeenEventSeqId", () => {
         return parsed.type === "worker_hello";
       });
       const hello = JSON.parse(helloCalls[0][0] as string);
-      // lastSeenEventSeqId should be absent because the new task has no events yet
-      expect(hello.lastSeenEventSeqId).toBeUndefined();
+      expect(hello.lastSeenEventSeqId).toBe(50);
+    } finally {
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    }
+  });
+
+  it("uses task_assigned.baseSeqId as initial lastSeenEventSeqId before any events arrive", () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    try {
+      const issue = makeIssue();
+      sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue, baseSeqId: 33 });
+      // No event_notification received — worker disconnects immediately
+
+      const newWs = reconnectWithNewWs();
+      newWs.emit("open");
+
+      const helloCalls = newWs.send.mock.calls.filter((args) => {
+        const parsed = JSON.parse(args[0] as string);
+        return parsed.type === "worker_hello";
+      });
+      const hello = JSON.parse(helloCalls[0][0] as string);
+      expect(hello.lastSeenEventSeqId).toBe(33);
     } finally {
       vi.restoreAllMocks();
       vi.useRealTimers();

@@ -372,7 +372,7 @@ describe("TaskManager.assignIdleWorkers", () => {
     expect(outcomes).toHaveLength(0);
   });
 
-  it("returns a success outcome with task, queued events, and workerId", async () => {
+  it("returns a success outcome with task and worker", async () => {
     await Task.upsert("42", 42, REPO, "Fix the bug", "Body", ["brunel:ready"]);
     manager.markBlockersLoaded(42);
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
@@ -384,7 +384,6 @@ describe("TaskManager.assignIdleWorkers", () => {
     expect(outcomes[0]).toMatchObject({
       ok: true,
       task: expect.objectContaining({ taskId: "42", workerId: "worker-1" }),
-      queued: [],
       worker: expect.objectContaining({ workerId: "worker-1" }),
     });
   });

@@ -298,26 +298,6 @@ export class ForemanWss {
 
   // ── Hello handlers ───────────────────────────────────────────────────────────
 
-  private flushQueuedEvents(worker: Worker, task: Task): void {
-    for (const evt of task.drainEvents()) {
-      const seqId = evt.id ?? undefined;
-      const sent = this.sendMsg(
-        worker,
-        { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload(), ...(seqId !== undefined && { seqId }) },
-        { onError: (err) => {
-          task.queueEvent(evt);
-          this.workerLog(worker.workerId, `✗ event_notification send error — requeued #${task.issueNumber} ${evt.eventName}: ${fmtError(err)}`);
-        } },
-      );
-      if (sent) {
-        this.workerLog(worker.workerId, `→ event_notification #${task.issueNumber} ${evt.eventName} (queued)`);
-      } else {
-        task.queueEvent(evt);
-        this.workerLog(worker.workerId, `✗ event_notification send failed — requeued #${task.issueNumber} ${evt.eventName}`);
-      }
-    }
-  }
-
   private cancelWorker(worker: Worker, task: Task | null): void {
     this.sendMsg(worker, { type: "hello_ack", workerId: worker.workerId, status: "cancelled", repoStatus: worker.repo.status }, { logTaskId: task?.taskId });
   }
@@ -348,9 +328,6 @@ export class ForemanWss {
     }
     // For complete tasks, the task stays complete while worker finishes cleanup/finalization work
     this.sendMsg(worker, { type: "hello_ack", workerId: worker.workerId, status: "assigned", repoStatus: worker.repo.status }, { logTaskId: task.taskId });
-    this.flushQueuedEvents(worker, task);
-    // DB replay: send any events the worker missed while disconnected (covers zombie window
-    // and foreman restart scenarios). Runs after the in-memory flush; duplicates are acceptable.
     if (lastSeenEventSeqId !== undefined) {
       await this.replayMissedEvents(worker, task, lastSeenEventSeqId);
     }
@@ -605,7 +582,8 @@ export class ForemanWss {
       return;
     }
     const { task } = outcome;
-    this.sendMsg(worker, { type: "task_assigned", taskId: task.taskId, issue: task.toAssignmentPayload() });
+    const baseSeqId = await WebhookEvent.currentMaxId();
+    this.sendMsg(worker, { type: "task_assigned", taskId: task.taskId, issue: task.toAssignmentPayload(), baseSeqId });
     this.workerLog(workerId, `→ claim task_assigned #${task.issueNumber} "${task.title}"`);
   }
 
@@ -618,32 +596,17 @@ export class ForemanWss {
         log(`[task ${ref}] ${evt.eventName} dropped — worker ${shortWorkerId(task.workerId)} is now on a different task`);
         return;
       }
-      if (worker?.status === "disconnected") {
-        task.queueEvent(evt);
-        log(`[task ${ref}] ${evt.eventName} queued (worker ${shortWorkerId(task.workerId)} disconnected)`);
-      } else if (worker) {
+      if (worker && worker.status !== "disconnected") {
         const sent = this.sendMsg(
           worker,
           { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload(), ...(seqId !== undefined && { seqId }) },
-          { onError: (err) => {
-            task.queueEvent(evt);
-            log(`[task ${ref}] ${evt.eventName} requeued (send error: ${fmtError(err)})`);
-          } },
         );
         if (sent) {
           log(`[worker ${shortWorkerId(task.workerId)}] → event_notification ${ref} ${evt.eventName}`);
-        } else {
-          task.queueEvent(evt);
-          log(`[task ${ref}] ${evt.eventName} queued (worker send failed)`);
         }
-      } else {
-        // Worker not in registry — treat as disconnected and queue for reconnect.
-        task.queueEvent(evt);
-        log(`[task ${ref}] ${evt.eventName} queued — worker ${shortWorkerId(task.workerId)} not in registry`);
+        // send failure: event is already in DB; worker will replay from lastSeenEventSeqId on reconnect
       }
-    } else if (task.status === "pending" || task.status === "blocked") {
-      task.queueEvent(evt);
-      log(`[task ${ref}] ${evt.eventName} queued (no worker assigned)`);
+      // worker disconnected or not in registry: event is in DB; worker replays on reconnect
     }
   }
 
@@ -660,18 +623,15 @@ export class ForemanWss {
         log(`[worker ${shortWorkerId(outcome.worker.workerId)}] → idle (DB write failed)`);
         continue;
       }
-      const { task, queued, worker } = outcome;
+      const { task, worker } = outcome;
+      const baseSeqId = await WebhookEvent.currentMaxId();
       this.sendMsg(worker, {
         type: "task_assigned",
         taskId: task.taskId,
         issue: task.toAssignmentPayload(),
+        baseSeqId,
       });
       log(`[worker ${shortWorkerId(worker.workerId)}] → task_assigned #${task.issueNumber} "${task.title}"`);
-      for (const evt of queued) {
-        const seqId = evt.id ?? undefined;
-        this.sendMsg(worker, { type: "event_notification", taskId: task.taskId, event: evt.toWorkerPayload(), ...(seqId !== undefined && { seqId }) });
-        log(`[worker ${shortWorkerId(worker.workerId)}] → event_notification #${task.issueNumber} ${evt.eventName} (queued)`);
-      }
     }
   }
 

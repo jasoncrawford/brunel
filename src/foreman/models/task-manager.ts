@@ -1,8 +1,6 @@
 import { EventEmitter } from "node:events";
-import type { WebhookEvent } from "./webhook-event.js";
 import * as Wire from "../../../shared/wire.js";
 import { GithubClient } from "../clients/github.js";
-import { EventQueue } from "./event-queue.js";
 import { Task } from "./task.js";
 import { Worker } from "./worker.js";
 import { fmtError, log } from "../../utils.js";
@@ -20,8 +18,9 @@ import type { Repo } from "./repo.js";
 // subscribers (e.g. admin dashboard, work assignment).
 
 export type AssignOutcome =
-  | { ok: true; task: Task; queued: WebhookEvent[]; worker: Worker }
+  | { ok: true; task: Task; worker: Worker }
   | { ok: false; worker: Worker; err: unknown };
+
 
 export type ClaimOutcome =
   | { ok: true; task: Task }
@@ -74,7 +73,6 @@ export class TaskManager extends EventEmitter {
   private readonly github: GithubClient;
 
   // ── Ephemeral in-memory state (no DB backing) ────────────────────────────
-  private eventQueue = new EventQueue();
   private branchToTaskId = new Map<string, string>();
   private assignLock = Promise.resolve();
 
@@ -165,7 +163,6 @@ export class TaskManager extends EventEmitter {
           worker.assign(task);
           try {
             await task.assign(worker);
-            this.drainEvents(task); // clear any queued events; new worker reads state fresh
             resolve({ ok: true, task });
           } catch (err) {
             worker.release();
@@ -188,21 +185,11 @@ export class TaskManager extends EventEmitter {
     worker.assign(task);
     try {
       await task.assign(worker);
-      return { ok: true, task, queued: this.drainEvents(task), worker };
+      return { ok: true, task, worker };
     } catch (err) {
       worker.release();
       return { ok: false, worker, err };
     }
-  }
-
-  // ── Memory-only write operations (ephemeral data) ─────────────────────────
-
-  queueEvent(task: Task, event: WebhookEvent): void {
-    this.eventQueue.enqueue(task, event);
-  }
-
-  drainEvents(task: Task): WebhookEvent[] {
-    return this.eventQueue.drain(task);
   }
 
   registerBranch(branch: string, task: Task): void {

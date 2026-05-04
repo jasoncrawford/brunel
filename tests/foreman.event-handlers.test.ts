@@ -39,7 +39,6 @@ async function makeDeps(): Promise<TestDeps> {
   const repo = await createTestRepo("owner/repo");
   const taskManager = repo.taskManager;
   // Spy on all TaskManager methods so the tests can assert calls without side effects
-  vi.spyOn(taskManager, "queueEvent").mockImplementation(() => {});
   vi.spyOn(taskManager, "dequeueIssue").mockResolvedValue(undefined);
   vi.spyOn(taskManager, "closeIssue").mockResolvedValue(undefined);
   vi.spyOn(taskManager, "reopenIssue").mockResolvedValue(undefined);

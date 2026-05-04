@@ -22,7 +22,6 @@ function fakeRepo(status: "new" | "active"): Repo {
 
 function makeTaskManager() {
   return {
-    queueEvent: vi.fn(),
     dequeueIssue: vi.fn().mockResolvedValue(undefined),
     closeIssue: vi.fn().mockResolvedValue(undefined),
     reopenIssue: vi.fn().mockResolvedValue(undefined),

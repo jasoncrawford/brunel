@@ -167,29 +167,6 @@ describe("handleAssignedHello", () => {
     });
   });
 
-  describe("queued events", () => {
-    it("flushes queued events after reclaim", async () => {
-      const task = await seedTask({
-        task_id: "10",
-        issue_number: 10,
-        repo_id: taskManager.repo.id,
-        worker_id: "w1",
-        assigned_at: new Date().toISOString(),
-      });
-
-      // Queue an event manually via the task manager
-      taskManager.queueEvent(task, { toWorkerPayload: () => ({ name: "issue_comment", payload: {} }), eventName: "issue_comment" } as any);
-
-      const { wss, sendMsg } = makeWss(taskManager);
-      await wss.handleAssignedHello("w1", "10", fakeWs(), fakeRepo());
-
-      const eventNotifs = sendMsg.mock.calls.filter(
-        ([, msg]) => (msg as { type: string }).type === "event_notification"
-      );
-      expect(eventNotifs).toHaveLength(1);
-    });
-  });
-
   describe("DB replay on reconnect (lastSeenEventSeqId)", () => {
     it("replays missed events from DB when lastSeenEventSeqId is provided", async () => {
       await seedTask({
