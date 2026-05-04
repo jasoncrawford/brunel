@@ -538,6 +538,126 @@ describe("reconnect", () => {
   });
 });
 
+// ── /worker:reconnect command ─────────────────────────────────────────────────
+
+describe("/worker:reconnect command", () => {
+  function registerAndGetHandler(): (args: string) => Promise<unknown> {
+    const handlers: Record<string, (args: string) => Promise<unknown>> = {};
+    const registry = {
+      register: (name: string, def: { handler: (args: string) => Promise<unknown> }) => {
+        handlers[name] = def.handler;
+      },
+    } as unknown as import("../src/agent/controllers/command-controller.js").CommandRegistry;
+    session.registerCommands(registry);
+    return handlers["reconnect"]!;
+  }
+
+  it("prints an amber message when worker mode is not active", async () => {
+    await session.stop();
+    const handler = registerAndGetHandler();
+    display.print.mockClear();
+    await handler("");
+    const printed = display.print.mock.calls.map(args => stripAnsi(String(args[0]))).join("\n");
+    expect(printed).toContain("not active");
+  });
+
+  it("cancels a pending backoff timer and reconnects immediately without advancing time", async () => {
+    vi.useFakeTimers();
+    try {
+      // Disconnect to start the backoff timer
+      fakeWs.emit("close", 1006, Buffer.from(""));
+      expect(wsFactory).toHaveBeenCalledTimes(1); // timer pending, not yet fired
+
+      const newWs = new FakeWs();
+      wsFactory.mockReturnValueOnce(newWs);
+
+      const handler = registerAndGetHandler();
+      await handler(""); // should connect immediately, no timer advance needed
+
+      expect(wsFactory).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("terminates an existing open connection before reconnecting", async () => {
+    vi.useFakeTimers();
+    try {
+      const newWs = new FakeWs();
+      wsFactory.mockReturnValueOnce(newWs);
+
+      const handler = registerAndGetHandler();
+      await handler("");
+
+      expect(fakeWs.terminate).toHaveBeenCalledOnce();
+      expect(wsFactory).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("resets reconnect attempt counter so the next backoff uses attempt 0 delay", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    try {
+      // Build up backoff: disconnect twice to reach attempt 1 (1000ms delay)
+      const ws2 = new FakeWs();
+      wsFactory.mockReturnValueOnce(ws2);
+      fakeWs.emit("close", 1006, Buffer.from(""));
+      vi.advanceTimersByTime(501); // attempt 0 fires at ~500ms
+      expect(wsFactory).toHaveBeenCalledTimes(2);
+
+      // ws2 closes — attempt 1 timer (1000ms) is now pending
+      ws2.emit("close", 1006, Buffer.from(""));
+
+      // Force reconnect — should fire immediately and reset the counter
+      const ws3 = new FakeWs();
+      wsFactory.mockReturnValueOnce(ws3);
+      const handler = registerAndGetHandler();
+      await handler("");
+      expect(wsFactory).toHaveBeenCalledTimes(3); // immediate
+
+      // ws3 closes — should use attempt 0 delay (~500ms), not attempt 2 (2000ms)
+      const ws4 = new FakeWs();
+      wsFactory.mockReturnValueOnce(ws4);
+      ws3.emit("close", 1006, Buffer.from(""));
+      vi.advanceTimersByTime(499);
+      expect(wsFactory).toHaveBeenCalledTimes(3); // not yet at 499ms
+      vi.advanceTimersByTime(2);
+      expect(wsFactory).toHaveBeenCalledTimes(4); // fires at ~500ms, not 2000ms
+    } finally {
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    }
+  });
+
+  it("stale close from the old ws after forceReconnect does not schedule another reconnect", async () => {
+    vi.useFakeTimers();
+    try {
+      const newWs = new FakeWs();
+      wsFactory.mockReturnValueOnce(newWs);
+
+      const handler = registerAndGetHandler();
+      await handler("");
+
+      // newWs is the active connection now; advancing time should not trigger another connect
+      vi.advanceTimersByTime(10_000);
+      expect(wsFactory).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("prints a green Reconnecting message", async () => {
+    const handler = registerAndGetHandler();
+    wsFactory.mockReturnValueOnce(new FakeWs());
+    display.print.mockClear();
+    await handler("");
+    const printed = display.print.mock.calls.map(args => stripAnsi(String(args[0]))).join("\n");
+    expect(printed).toMatch(/[Rr]econnect/);
+  });
+});
+
 // ── Stale WebSocket handlers ──────────────────────────────────────────────────
 
 describe("stale WebSocket handlers", () => {
