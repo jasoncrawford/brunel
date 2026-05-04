@@ -122,7 +122,7 @@ describe("forwardEvent — active tasks still receive events", () => {
     });
     const w = Worker.register("worker-1", fakeWs(), fakeRepo());
     w.assign(task);
-    const taskManager = { queueEvent: vi.fn(), assignIdleWorkers: vi.fn().mockResolvedValue([]), on: vi.fn() };
+    const taskManager = { assignIdleWorkers: vi.fn().mockResolvedValue([]), on: vi.fn() };
     const { wss, sendMsg } = makeWss(taskManager);
 
     wss.forwardEvent(task, makeEvent(), "#42");
@@ -131,7 +131,6 @@ describe("forwardEvent — active tasks still receive events", () => {
     expect(sendMsg).toHaveBeenCalledWith(
       expect.objectContaining({ workerId: "worker-1" }),
       expect.objectContaining({ type: "event_notification" }),
-      expect.objectContaining({ onError: expect.any(Function) }),
     );
   });
 
@@ -175,20 +174,20 @@ describe("forwardEvent — active tasks still receive events", () => {
   it("drops events for a pending task with no worker — worker reads state fresh on assignment", () => {
     const task = Task.fromTest({ task_id: "42", issue_number: 42, repo_id: testRepoId });
     task.blockersLoaded = true; // no open blockers → status is "pending"
-    const queueSpy = vi.spyOn(task.manager, "queueEvent");
     const { wss, sendMsg } = makeWss();
 
     wss.forwardEvent(task, makeEvent(), "#42");
 
-    expect(queueSpy).not.toHaveBeenCalled();
     expect(sendMsg).not.toHaveBeenCalled();
   });
 });
 
-// ── Send-failure recovery ──────────────────────────────────────────────────────
+// ── Events to unavailable workers ─────────────────────────────────────────────
+// Events are already logged to DB before forwardEvent is called, so missed
+// events are recovered via DB replay on reconnect — no in-memory queue needed.
 
-describe("forwardEvent — send failure recovery", () => {
-  it("queues event when sendMsg returns false (socket not open)", () => {
+describe("forwardEvent — worker unavailable", () => {
+  it("drops event (no queue) when sendMsg returns false — DB replay covers it on reconnect", () => {
     const task = Task.fromTest({
       task_id: "42",
       issue_number: 42,
@@ -197,18 +196,15 @@ describe("forwardEvent — send failure recovery", () => {
     });
     const w = Worker.register("worker-1", fakeWs(), fakeRepo());
     w.assign(task);
-    const queueSpy = vi.spyOn(task.manager, "queueEvent");
     const { wss, sendMsg } = makeWss();
     sendMsg.mockImplementation(() => false); // simulate closed socket
 
     wss.forwardEvent(task, makeEvent(), "#42");
 
     expect(sendMsg).toHaveBeenCalledOnce();
-    expect(queueSpy).toHaveBeenCalledOnce();
-    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("queued (worker send failed)"));
   });
 
-  it("queues event when worker is not in registry", () => {
+  it("drops event (no queue) when worker is not in registry — DB replay covers it on reconnect", () => {
     const task = Task.fromTest({
       task_id: "42",
       issue_number: 42,
@@ -216,14 +212,29 @@ describe("forwardEvent — send failure recovery", () => {
       worker_id: "worker-1",
     });
     // worker-1 not registered — simulates post-remove race or stale workerId
-    const queueSpy = vi.spyOn(task.manager, "queueEvent");
     const { wss, sendMsg } = makeWss();
 
     wss.forwardEvent(task, makeEvent(), "#42");
 
     expect(sendMsg).not.toHaveBeenCalled();
-    expect(queueSpy).toHaveBeenCalledOnce();
-    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("not in registry"));
+  });
+
+  it("drops event (no queue) when worker is disconnected — DB replay covers it on reconnect", () => {
+    const task = Task.fromTest({
+      task_id: "42",
+      issue_number: 42,
+      repo_id: testRepoId,
+      worker_id: "worker-1",
+      assigned_at: new Date().toISOString(),
+    });
+    const w = Worker.register("worker-1", fakeWs(), fakeRepo());
+    w.assign(task);
+    w.markDisconnected();
+    const { wss, sendMsg } = makeWss();
+
+    wss.forwardEvent(task, makeEvent(), "#42");
+
+    expect(sendMsg).not.toHaveBeenCalled();
   });
 });
 

@@ -3,7 +3,6 @@ import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
 import { Worker } from "../src/foreman/models/worker.js";
 import { fakeRepo, resetDb, createTestTaskManager, seedTask } from "./helpers/task.js";
-import { WebhookEvent } from "../src/foreman/models/webhook-event.js";
 
 const repoSlug = "test/repo";
 
@@ -58,25 +57,6 @@ describe("TaskManager — queue operations", () => {
     await t!.complete();
     const updated = await Task.get("42");
     expect(updated?.status).toBe("complete");
-  });
-
-  it("queueEvent appends to task event queue", async () => {
-    await registerBase();
-    const t = await Task.get("42");
-    const evt = WebhookEvent.fromIncoming("e1", "check_run", {});
-    m.queueEvent(t!, evt);
-    const drained = m.drainEvents(t!);
-    expect(drained).toHaveLength(1);
-  });
-
-  it("drainEvents returns all events and clears the queue", async () => {
-    await registerBase();
-    const t = await Task.get("42");
-    const evt = WebhookEvent.fromIncoming("e1", "check_run", {});
-    m.queueEvent(t!, evt);
-    const drained = m.drainEvents(t!);
-    expect(drained).toHaveLength(1);
-    expect(m.drainEvents(t!)).toHaveLength(0);
   });
 
   it("Task.getByIssue looks up by issueNumber", async () => {

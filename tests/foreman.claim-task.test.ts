@@ -10,6 +10,7 @@ import { ForemanWss } from "../src/foreman/controllers/wss.js";
 import { Worker } from "../src/foreman/models/worker.js";
 import { Task } from "../src/foreman/models/task.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
+import { WebhookEvent } from "../src/foreman/models/webhook-event.js";
 import { fakeRepo, resetDb, seedTask, createTestTaskManager } from "./helpers/task.js";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -156,21 +157,28 @@ describe("handleClaimTask", () => {
     expect(msg?.fatal).toBe(false);
   });
 
-  it("drains (clears) queued events without forwarding them to the new worker", async () => {
+  it("does not forward any event_notification messages — new worker reads state fresh", async () => {
     const { wss, sendMsg } = makeWss();
     const repo = taskManager.repo;
     Worker.register("w1", fakeWs(), repo);
-    const task = await seedTask({ task_id: "10", issue_number: 10, repo_id: repo.id, repo: repo.fullName });
-    // Queue a fake event on the task
-    const fakeEvent = { id: "evt-1", name: "issue_comment", payload: {}, toWorkerPayload: () => ({ id: "evt-1", name: "issue_comment", payload: {} }), eventName: "issue_comment", summary: () => "" } as any;
-    task.queueEvent(fakeEvent);
+    await seedTask({ task_id: "10", issue_number: 10, repo_id: repo.id, repo: repo.fullName });
 
     await wss.handleClaimTask("w1", { type: "claim_task", workerId: "w1", taskId: "10" });
 
-    // Events must NOT be forwarded — new worker reads task state fresh
     expect(sentMsgOfType(sendMsg, "event_notification")).toBeUndefined();
-    // But the queue should be cleared (drain was called)
-    expect(task.drainEvents()).toHaveLength(0);
+  });
+
+  it("includes baseSeqId in task_assigned so the worker knows where to start DB replay", async () => {
+    const { wss, sendMsg } = makeWss();
+    const repo = taskManager.repo;
+    Worker.register("w1", fakeWs(), repo);
+    await seedTask({ task_id: "10", issue_number: 10, repo_id: repo.id, repo: repo.fullName });
+    vi.spyOn(WebhookEvent, "currentMaxId").mockResolvedValue(55);
+
+    await wss.handleClaimTask("w1", { type: "claim_task", workerId: "w1", taskId: "10" });
+
+    const msg = sentMsgOfType(sendMsg, "task_assigned");
+    expect(msg?.baseSeqId).toBe(55);
   });
 });
 
