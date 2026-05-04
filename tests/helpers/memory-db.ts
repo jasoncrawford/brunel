@@ -9,8 +9,10 @@ import type { Database } from "../../src/database.types.js";
 type DbRow = Database["public"]["Tables"]["tasks"]["Row"];
 type RepoRow = Database["public"]["Tables"]["repos"]["Row"];
 type WorkerRow = Database["public"]["Tables"]["workers"]["Row"];
-type Filters = Array<{ col: keyof DbRow; op: "eq" | "is"; val: unknown }>;
+type WebhookRow = Database["public"]["Tables"]["webhook_events"]["Row"];
+type Filters = Array<{ col: keyof DbRow; op: "eq" | "is" | "gt" | "gte" | "lt" | "lte"; val: unknown }>;
 type WorkerFilters = Array<{ col: keyof WorkerRow; op: "eq" | "is" | "not_is"; val: unknown }>;
+type WebhookFilters = Array<{ col: keyof WebhookRow; op: "eq" | "gt" | "gte" | "lt" | "lte"; val: unknown }>;
 
 function applyFilters(rows: DbRow[], filters: Filters): DbRow[] {
   return rows.filter((r) =>
@@ -18,6 +20,24 @@ function applyFilters(rows: DbRow[], filters: Filters): DbRow[] {
       const val = r[f.col];
       if (f.op === "eq") return val === f.val;
       if (f.op === "is") return f.val === null ? val === null : val !== null;
+      if (f.op === "gt") return (val as number) > (f.val as number);
+      if (f.op === "gte") return (val as number) >= (f.val as number);
+      if (f.op === "lt") return (val as string | number) < (f.val as string | number);
+      if (f.op === "lte") return (val as string | number) <= (f.val as string | number);
+      return true;
+    }),
+  );
+}
+
+function applyWebhookFilters(rows: WebhookRow[], filters: WebhookFilters): WebhookRow[] {
+  return rows.filter((r) =>
+    filters.every((f) => {
+      const val = (r as Record<string, unknown>)[f.col as string];
+      if (f.op === "eq") return val === f.val;
+      if (f.op === "gt") return (val as number) > (f.val as number);
+      if (f.op === "gte") return (val as number) >= (f.val as number);
+      if (f.op === "lt") return (val as string | number) < (f.val as string | number);
+      if (f.op === "lte") return (val as string | number) <= (f.val as string | number);
       return true;
     }),
   );
@@ -137,6 +157,100 @@ export function createMemoryTaskDb(): SupabaseClient<Database> {
     };
   }
 
+  // ── WebhookEvents store ───────────────────────────────────────────────────────
+  const webhookEventsStore: WebhookRow[] = [];
+  let nextWebhookId = 1;
+
+  function buildWebhookEventsTable() {
+    return {
+      insert(data: Partial<WebhookRow> & { event_name: string; payload: unknown }) {
+        const id = (data as Record<string, unknown>).id as number | undefined ?? nextWebhookId++;
+        const now = new Date().toISOString();
+        const row: WebhookRow = {
+          id,
+          received_at: now,
+          delivery_id: null,
+          action: null,
+          repo_id: null,
+          sender: null,
+          issue_number: null,
+          pr_number: null,
+          branch: null,
+          task_id: null,
+          worker_id: null,
+          ...data,
+          id,
+        } as WebhookRow;
+        webhookEventsStore.push(row);
+        const sb = {
+          select() { return sb; },
+          single() { return ok(row); },
+        };
+        return sb;
+      },
+      select(_cols?: string) {
+        const filters: WebhookFilters = [];
+        let orderCol: keyof WebhookRow | null = null;
+        let orderAsc = true;
+        const sb = {
+          eq(col: string, val: unknown) {
+            filters.push({ col: col as keyof WebhookRow, op: "eq", val });
+            return sb;
+          },
+          gt(col: string, val: unknown) {
+            filters.push({ col: col as keyof WebhookRow, op: "gt", val });
+            return sb;
+          },
+          gte(col: string, val: unknown) {
+            filters.push({ col: col as keyof WebhookRow, op: "gte", val });
+            return sb;
+          },
+          lt(col: string, val: unknown) {
+            filters.push({ col: col as keyof WebhookRow, op: "lt", val });
+            return sb;
+          },
+          lte(col: string, val: unknown) {
+            filters.push({ col: col as keyof WebhookRow, op: "lte", val });
+            return sb;
+          },
+          order(col: string, opts?: { ascending?: boolean }) {
+            orderCol = col as keyof WebhookRow;
+            orderAsc = opts?.ascending !== false;
+            return sb;
+          },
+          limit(n: number) {
+            let rows = applyWebhookFilters([...webhookEventsStore], filters);
+            if (orderCol !== null) {
+              const col = orderCol;
+              const asc = orderAsc;
+              rows = [...rows].sort((a, b) => {
+                const av = (a as Record<string, unknown>)[col as string];
+                const bv = (b as Record<string, unknown>)[col as string];
+                if (av == null && bv == null) return 0;
+                if (av == null) return asc ? -1 : 1;
+                if (bv == null) return asc ? 1 : -1;
+                return asc ? (av < bv ? -1 : av > bv ? 1 : 0) : (av > bv ? -1 : av < bv ? 1 : 0);
+              });
+            }
+            return ok(rows.slice(0, n));
+          },
+          maybeSingle() {
+            const rows = applyWebhookFilters([...webhookEventsStore], filters);
+            return ok(rows[0] ?? null);
+          },
+          single() {
+            const rows = applyWebhookFilters([...webhookEventsStore], filters);
+            return ok(rows[0] ?? null);
+          },
+          then(resolve: (v: { data: WebhookRow[]; error: null }) => void) {
+            resolve({ data: applyWebhookFilters([...webhookEventsStore], filters), error: null });
+          },
+        };
+        return sb;
+      },
+    };
+  }
+
   function buildReposTable() {
     return {
       insert(rowData: { full_name: string }) {
@@ -232,6 +346,22 @@ export function createMemoryTaskDb(): SupabaseClient<Database> {
         filters.push({ col: col as keyof DbRow, op: "is", val });
         return sb;
       },
+      gt(col: string, val: unknown) {
+        filters.push({ col: col as keyof DbRow, op: "gt", val });
+        return sb;
+      },
+      gte(col: string, val: unknown) {
+        filters.push({ col: col as keyof DbRow, op: "gte", val });
+        return sb;
+      },
+      lt(col: string, val: unknown) {
+        filters.push({ col: col as keyof DbRow, op: "lt", val });
+        return sb;
+      },
+      lte(col: string, val: unknown) {
+        filters.push({ col: col as keyof DbRow, op: "lte", val });
+        return sb;
+      },
       order(_col: string, _opts?: unknown) { return sb; },
       limit(n: number) {
         const rows = applyFilters([...store.values()], filters);
@@ -283,7 +413,10 @@ export function createMemoryTaskDb(): SupabaseClient<Database> {
     select(_cols?: string) { return emptyBuilder; },
     eq(_col: string, _val: unknown) { return emptyBuilder; },
     is(_col: string, _val: unknown) { return emptyBuilder; },
+    gt(_col: string, _val: unknown) { return emptyBuilder; },
+    gte(_col: string, _val: unknown) { return emptyBuilder; },
     lt(_col: string, _val: unknown) { return emptyBuilder; },
+    lte(_col: string, _val: unknown) { return emptyBuilder; },
     order(_col: string, _opts?: unknown) { return emptyBuilder; },
     limit(_n: number) { return ok([] as DbRow[]); },
     maybeSingle() { return ok(null as DbRow | null); },
@@ -298,6 +431,9 @@ export function createMemoryTaskDb(): SupabaseClient<Database> {
       }
       if (table === "workers") {
         return buildWorkersTable();
+      }
+      if (table === "webhook_events") {
+        return buildWebhookEventsTable();
       }
       if (table !== "tasks") {
         return emptyBuilder;
