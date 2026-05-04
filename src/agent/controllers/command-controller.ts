@@ -108,6 +108,10 @@ export interface CommandEntry {
   aliasFor?: string;
   /** Alias names registered for this canonical command. */
   aliases?: string[];
+  /** Whether this command can be invoked via CLI args (e.g. `brunel worker:start`). Defaults to false. */
+  canRunFromArgs?: boolean;
+  /** Whether to exit after running this command from CLI args. Defaults to false. */
+  exitAfterRunFromArgs?: boolean;
 }
 
 /** A command name paired with a display description for autocomplete. */
@@ -332,7 +336,7 @@ export class CommandRegistry {
   }
 
   /** Register a command. In a scoped registry the name is automatically prefixed. */
-  register(name: string, opts: { description: string; handler: CommandHandler; aliases?: string[] }): void {
+  register(name: string, opts: { description: string; handler: CommandHandler; aliases?: string[]; canRunFromArgs?: boolean; exitAfterRunFromArgs?: boolean }): void {
     const fullName = this._qualify(name);
     const aliasFullNames = (opts.aliases ?? []).map(a => this._qualify(a));
 
@@ -348,6 +352,8 @@ export class CommandRegistry {
       description,
       handler: opts.handler,
       ...(aliasFullNames.length > 0 ? { aliases: aliasFullNames } : {}),
+      ...(opts.canRunFromArgs ? { canRunFromArgs: true } : {}),
+      ...(opts.exitAfterRunFromArgs ? { exitAfterRunFromArgs: true } : {}),
     });
 
     for (const aliasName of aliasFullNames) {
@@ -356,6 +362,8 @@ export class CommandRegistry {
         description: `${opts.description} (alias for ${fullName})`,
         handler: opts.handler,
         aliasFor: fullName,
+        ...(opts.canRunFromArgs ? { canRunFromArgs: true } : {}),
+        ...(opts.exitAfterRunFromArgs ? { exitAfterRunFromArgs: true } : {}),
       });
     }
   }

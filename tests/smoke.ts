@@ -154,7 +154,7 @@ async function run(): Promise<void> {
     }
 
     function spawnWorker() {
-      worker = spawn("tsx", ["src/agent/index.ts", "--worker-mode"], {
+      worker = spawn("tsx", ["src/agent/index.ts", "worker:start"], {
         ...spawnOpts,
         env: { ...process.env, BRUNEL_FOREMAN_URL: foremanUrl, GITHUB_REPO: "test/test", GITHUB_TOKEN: "dummy", BRUNEL_REPO_URL: SMOKE_REPO_URL },
       });

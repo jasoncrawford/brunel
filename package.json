@@ -10,7 +10,7 @@
     "start": "tsx src/foreman/index.ts",
     "dev": "tsx watch src/foreman/index.ts",
     "repl": "tsx src/agent/index.ts",
-    "worker": "tsx src/agent/index.ts --worker-mode",
+    "worker": "tsx src/agent/index.ts worker:start",
     "test": "vitest run",
     "test:watch": "vitest",
     "smoke": "tsx tests/smoke.ts",
