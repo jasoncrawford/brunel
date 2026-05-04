@@ -139,6 +139,30 @@ export function createMemoryTaskDb(): SupabaseClient<Database> {
 
   function buildReposTable() {
     return {
+      insert(rowData: { full_name: string }) {
+        if (reposStore.has(rowData.full_name)) {
+          // Simulate a unique constraint violation — caller falls back to SELECT.
+          const sb = {
+            select() { return sb; },
+            single(): Promise<{ data: null; error: Error }> {
+              return Promise.resolve({ data: null, error: new Error("duplicate key value violates unique constraint") });
+            },
+          };
+          return sb;
+        }
+        const newRow: RepoRow = {
+          id: nextRepoId++,
+          full_name: rowData.full_name,
+          status: "new",
+          created_at: new Date().toISOString(),
+        };
+        reposStore.set(rowData.full_name, newRow);
+        const sb = {
+          select() { return sb; },
+          single() { return ok(newRow); },
+        };
+        return sb;
+      },
       upsert(rowData: { full_name: string; status?: string }, _opts?: unknown) {
         if (!reposStore.has(rowData.full_name)) {
           reposStore.set(rowData.full_name, {

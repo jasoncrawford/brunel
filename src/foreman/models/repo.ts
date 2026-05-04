@@ -71,16 +71,22 @@ export class Repo extends ActiveRecord {
 
   /**
    * Find or create a repo by full_name (e.g. "owner/repo").
-   * Upserts on full_name so it's safe to call on every webhook.
+   * Uses SELECT-first to avoid burning sequence values on the hot path (every webhook).
    * Returns the persisted Repo instance.
    */
   static async findOrCreate(fullName: string): Promise<Repo> {
-    const { data, error } = await db.from("repos")
-      .upsert({ full_name: fullName }, { onConflict: "full_name" })
+    const existing = await Repo.getBy("full_name", fullName) as Repo | null;
+    if (existing) return existing;
+    // Attempt INSERT; a concurrent insert may win the race.
+    const { data } = await db.from("repos")
+      .insert({ full_name: fullName })
       .select()
       .single();
-    if (error) throw error;
-    Repo.events.emit("changed");
-    return new Repo(data);
+    if (data) {
+      Repo.events.emit("changed");
+      return new Repo(data);
+    }
+    // Concurrent insert won — fetch the winner.
+    return (await Repo.getBy("full_name", fullName) as Repo)!;
   }
 }
