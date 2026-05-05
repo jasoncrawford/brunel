@@ -145,21 +145,23 @@ ALTER TABLE repos ADD COLUMN installation_id bigint;
 
 ## Issue breakdown
 
+Each issue must leave the app fully functional for existing users. New App-based pathways are additive alongside the existing `workerSecret` / personal-token pathways; neither is removed during this milestone (cleanup is a separate decision).
+
 | # | Title | Depends on |
 |---|-------|------------|
 | — | Register brunel GitHub App (operator task) | — |
-| TBD | Add `installation_id` to `repos` table | — |
-| TBD | Handle `installation` webhooks → auto-activate repos | `installation_id` column |
-| TBD | Refactor `GithubClient` to use App installation tokens | `installation_id` column |
-| TBD | Worker auth: verify GitHub token push access via installation token | `GithubClient` refactor |
-| TBD | Provide installation token to workers in `task_assigned`; use `extraHeader` for git auth | `GithubClient` refactor |
-| TBD | Proactive token refresh: `request_token` / `token_issued`; 45-min timer in worker | token in `task_assigned` |
-| TBD | Worker: source GitHub token from `gh` / env / prompt | — |
-| TBD | Worker: handle App-not-installed error with install link | Worker auth |
-| TBD | Default public foreman URL in worker config | — |
+| TBD | Add `installation_id` to `repos` table (nullable — NULL means App not in use) | — |
+| TBD | Foreman: add App credentials to config (`appId`, `appPrivateKey`, `appWebhookSecret` — all optional); `GithubClient` gains installation-token minting; falls back to personal `githubToken` when App not configured | `installation_id` column |
+| TBD | Foreman: handle `installation` / `installation_repositories` webhooks → store `installation_id`, auto-activate direct-repo installs, deactivate on uninstall; uses installation token for seeding (personal token fallback for self-hosted) | App credentials in config |
+| TBD | Foreman: worker auth via GitHub token (additive) — `worker_hello` gains optional `githubToken`; when App is configured and repo has `installation_id`, verify push access via installation token; existing `workerSecret` path unchanged | App credentials in config |
+| TBD | Foreman: provide installation token to workers — add `githubToken` to `task_assigned` when App is configured; worker switches git auth from token-in-URL to `extraHeader` (works for both personal token and installation token); older workers that ignore the new field continue working | Worker auth |
+| TBD | Worker: proactive token refresh — `request_token` / `token_issued` wire messages; worker starts 45-min timer when `task_assigned.githubToken` is present; no-op for self-hosted workers that don't receive one | token in `task_assigned` |
+| TBD | Worker: source GitHub token from `gh auth token` → env var → prompt (additive — existing env var / config still works) | — |
+| TBD | Worker: handle App-not-installed `foreman_error` — display message and install link; older workers treat it as a generic error (acceptable) | Worker auth |
+| TBD | Worker: default `foremanUrl` to `wss://brunel.dev` (existing explicit config overrides it) | — |
 | TBD | Versioning + npm publish (see #892) | All of the above |
 
-Ready to start immediately: **`installation_id` column** and **`gh`-based token sourcing** (independent of each other and of everything else).
+Ready to start immediately: **`installation_id` column**, **`gh`-based token sourcing**, and **default foreman URL** (all independent of each other and of everything else).
 
 ---
 
