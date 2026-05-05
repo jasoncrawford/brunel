@@ -157,6 +157,7 @@ ALTER TABLE repos ADD COLUMN installation_id bigint;
 | TBD | Worker: source GitHub token from `gh` / env / prompt | — |
 | TBD | Worker: handle App-not-installed error with install link | Worker auth |
 | TBD | Default public foreman URL in worker config | — |
+| TBD | Dashboard basic auth (operator password) — dashboard is currently open with no auth | — |
 | TBD | Versioning + npm publish (see #892) | All of the above |
 
 Ready to start immediately: **`installation_id` column** and **`gh`-based token sourcing** (independent of each other and of everything else).
@@ -165,5 +166,5 @@ Ready to start immediately: **`installation_id` column** and **`gh`-based token 
 
 ## Out of scope
 
-- User-facing dashboard (separate milestone)
+- Per-user dashboard views (users log in with GitHub and see only their own repos/tasks — separate milestone)
 - Private repo support beyond what GitHub App permissions already provide
