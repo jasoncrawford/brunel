@@ -99,7 +99,9 @@ Developers running their own foreman (local dev, private deployment) continue to
 
 ### Public foreman URL as default
 
-The worker's `foremanUrl` config defaults to the production Railway deployment URL. A developer with no config file connects to the public foreman automatically.
+`brunel.dev` is the production domain. It serves the foreman dashboard (same as today) and handles GitHub App webhooks at `https://brunel.dev/webhook`. The worker WebSocket connects to `wss://brunel.dev`.
+
+The worker's `foremanUrl` config defaults to `wss://brunel.dev`. A developer with no config file connects to the public foreman automatically.
 
 ---
 
