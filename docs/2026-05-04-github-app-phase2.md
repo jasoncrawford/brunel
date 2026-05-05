@@ -33,13 +33,19 @@ A GitHub App replaces the current `workerSecret` + `webhookSecret` + per-operato
 
 The App declares exactly the permissions it needs (Issues, Pull Requests, Contents, Metadata — all read/write). Users see what they're granting before they install.
 
-### App installation = immediate activation
+### App installation and activation
 
-When a user installs the brunel GitHub App on a repo, the foreman receives an `installation` webhook and activates the repo automatically — seeding tasks from open `brunel:ready` issues. No worker needs to be running for this to happen.
+Activation is triggered differently depending on how the App was installed:
 
-This is intentional: installing the App is a clear expression of intent to use brunel on that repo. The existing worker-driven activation prompt (`activate_repo` / `repo_activated`) is preserved for self-hosted setups (local dev, private foreman) where the App is not in use.
+**Direct repo install** (user selects specific repos during App installation): the foreman receives an `installation` webhook listing exactly which repos were added and activates them immediately — seeding tasks from open `brunel:ready` issues. No worker needs to be running. This is a clear expression of intent to use brunel on those repos.
+
+**Org-level install** ("All repositories" or selected org repos): the foreman records the installation but does not activate any repos eagerly. An org "all repositories" install could cover hundreds of repos the user has no intention of running brunel on. Instead, activation is deferred: the first time a worker connects claiming a repo under that org, the foreman calls `GET /repos/{owner}/{repo}/installation` to confirm the App is installed, then activates that repo and seeds its tasks at that point.
+
+In both cases, `installation_id` is stored on the `Repo` row when the repo is first seen — either from the `installation` webhook (direct install) or from the API response on first worker connection (org install).
 
 When the App is later uninstalled, the repo is deactivated. Existing task records are preserved; new tasks stop being created and workers stop being assigned.
+
+The existing worker-driven activation prompt (`activate_repo` / `repo_activated`) is preserved for self-hosted setups (local dev, private foreman) where the App is not in use.
 
 ### Installation tokens replace all personal tokens
 
