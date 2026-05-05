@@ -165,7 +165,6 @@ Ready to start immediately: **`installation_id` column** and **`gh`-based token 
 
 ## Out of scope
 
-- Organizational App installs (install once, covers all repos in an org) — works today but not explicitly tested
 - Multiple workers per repo
 - User-facing dashboard (separate milestone)
 - Private repo support beyond what GitHub App permissions already provide
