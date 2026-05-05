@@ -79,7 +79,15 @@ The token only needs standard repo-collaborator scopes — no `admin:repo_hook` 
 
 Workers no longer configure their own GitHub credentials for git/API operations. Instead, the foreman generates an installation token when assigning a task and includes it in `task_assigned` (new `githubToken` field). The worker uses this token for cloning the workspace, pushing branches, and any GitHub API calls during task execution.
 
-Installation tokens expire after one hour. If a long-running task needs a fresh token, the worker can request one via a new `request_token` message (foreman responds with `token_issued`). This is a separate issue; for Phase 2 a token-in-task-assigned is sufficient.
+**Git authentication uses `http.extraHeader`, not a token-in-URL.** After cloning, the workspace sets:
+
+```bash
+git config --local http.https://github.com/.extraheader "Authorization: Bearer {token}"
+```
+
+The remote URL stays clean (`https://github.com/owner/repo.git`). This is how GitHub Actions handles `GITHUB_TOKEN` internally — the token doesn't appear in `git remote -v` or process listings.
+
+**Token refresh.** Installation tokens expire after one hour. The worker refreshes proactively on a 45-minute timer: request a new installation token from the foreman (`request_token` message; foreman responds with `token_issued`), then update the `extraHeader` config in the workspace. No error handling or retry logic needed — the refresh happens before expiry. The existing clone-URL approach in `Workspace` is replaced with the `extraHeader` pattern as part of this work.
 
 ### App not installed: clear error
 
@@ -130,10 +138,8 @@ ALTER TABLE repos ADD COLUMN installation_id bigint;
 
 ### New messages
 
-- `request_token` (worker → foreman) — request a fresh installation token (for long-running tasks)
+- `request_token` (worker → foreman) — request a fresh installation token
 - `token_issued` (foreman → worker) — response with a new installation token
-
-*(These are out of scope for the initial Phase 2 cut; document here for awareness.)*
 
 ---
 
@@ -146,7 +152,8 @@ ALTER TABLE repos ADD COLUMN installation_id bigint;
 | TBD | Handle `installation` webhooks → auto-activate repos | `installation_id` column |
 | TBD | Refactor `GithubClient` to use App installation tokens | `installation_id` column |
 | TBD | Worker auth: verify GitHub token push access via installation token | `GithubClient` refactor |
-| TBD | Provide installation token to workers in `task_assigned` | `GithubClient` refactor |
+| TBD | Provide installation token to workers in `task_assigned`; use `extraHeader` for git auth | `GithubClient` refactor |
+| TBD | Proactive token refresh: `request_token` / `token_issued`; 45-min timer in worker | token in `task_assigned` |
 | TBD | Worker: source GitHub token from `gh` / env / prompt | — |
 | TBD | Worker: handle App-not-installed error with install link | Worker auth |
 | TBD | Default public foreman URL in worker config | — |
@@ -158,7 +165,6 @@ Ready to start immediately: **`installation_id` column** and **`gh`-based token 
 
 ## Out of scope
 
-- Long-running task token refresh (`request_token` / `token_issued`)
 - Organizational App installs (install once, covers all repos in an org) — works today but not explicitly tested
 - Multiple workers per repo
 - User-facing dashboard (separate milestone)
