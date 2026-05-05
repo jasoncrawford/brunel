@@ -165,6 +165,5 @@ Ready to start immediately: **`installation_id` column** and **`gh`-based token 
 
 ## Out of scope
 
-- Multiple workers per repo
 - User-facing dashboard (separate milestone)
 - Private repo support beyond what GitHub App permissions already provide
