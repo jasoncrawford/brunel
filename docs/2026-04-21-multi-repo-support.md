@@ -1,6 +1,10 @@
-# Multi-repo support
+# Phase 1: Multi-repo support
+
+**Status: Complete** (May 2026)
 
 **Milestone:** [Multi-repo support](https://github.com/jasoncrawford/brunel/milestone/6)
+
+**Next:** See [`docs/2026-05-04-github-app-phase2.md`](./2026-05-04-github-app-phase2.md) for Phase 2.
 
 ## Goal
 
@@ -84,9 +88,9 @@ The current singleton TaskManager created in `src/foreman/index.ts` goes away. C
 
 ## Out of scope (Phase 1)
 
-- Other users' repos (Phase 2)
-- Easy first-time setup / `brunel init` (Phase 3)
-- GitHub App (per-repo webhooks configured manually for now)
+- Other users' repos → Phase 2
+- Easy first-time setup / zero-config worker → Phase 2 (merged with "other users")
+- GitHub App → Phase 2 (chosen as the foundation; see Phase 2 doc)
 - User accounts or credentials on the foreman
 - Private repo support (public repos only for now)
 
