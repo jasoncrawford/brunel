@@ -119,16 +119,17 @@ One new table and one new column:
 
 ```sql
 CREATE TABLE installations (
-  id         bigint PRIMARY KEY,   -- GitHub's installation_id
-  account_login text NOT NULL,     -- org or user login
+  id            bigserial PRIMARY KEY,
+  github_id     bigint NOT NULL UNIQUE,  -- GitHub's installation_id
+  account_login text NOT NULL,           -- org or user login
   account_type  text NOT NULL CHECK (account_type IN ('User', 'Organization')),
-  created_at timestamptz DEFAULT now()
+  created_at    timestamptz DEFAULT now()
 );
 
 ALTER TABLE repos ADD COLUMN installation_id bigint REFERENCES installations(id);
 ```
 
-`installations` tracks GitHub App installations as first-class records. A row is created when the `installation` webhook arrives and deleted on uninstall.
+`installations` tracks GitHub App installations as first-class records. A row is created when the `installation` webhook arrives and deleted on uninstall. `github_id` is the value passed to all GitHub API calls (token minting, etc.).
 
 `repos.installation_id` is a nullable FK to `installations.id`. `NULL` means the App is not in use for that repo (self-hosted / legacy). For direct-repo installs the FK is set immediately when the webhook arrives; for org-level installs it is set on first worker connection.
 
@@ -159,7 +160,7 @@ Each issue must leave the app fully functional for existing users. New App-based
 | # | Title | Depends on |
 |---|-------|------------|
 | — | Register brunel GitHub App (operator task) | — |
-| TBD | Add `installations` table (`id`, `account_login`, `account_type`) and nullable `installation_id` FK on `repos` | — |
+| TBD | Add `installations` table (`github_id`, `account_login`, `account_type`) and nullable `installation_id` FK on `repos` | — |
 | TBD | Foreman: add App credentials to config (`appId`, `appPrivateKey`, `appWebhookSecret` — all optional); `GithubClient` gains installation-token minting; falls back to personal `githubToken` when App not configured | `installation_id` column |
 | TBD | Foreman: handle `installation` / `installation_repositories` webhooks → create/delete `Installation` records; auto-activate direct-repo installs (link repos, seed tasks); for org installs store the installation only — repos linked on first worker connect; deactivate on uninstall; uses installation token for seeding | App credentials in config |
 | TBD | Foreman: worker auth via GitHub token (additive) — `worker_hello` gains optional `githubToken`; when App is configured and repo has `installation_id`, verify push access via installation token; existing `workerSecret` path unchanged | App credentials in config |
