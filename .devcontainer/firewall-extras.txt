@@ -1,2 +1,2 @@
-smee.io
 brunel-production.up.railway.app
+brunel.dev
