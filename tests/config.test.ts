@@ -69,7 +69,7 @@ describe("defaults", () => {
     expect(cfg.verbose).toBe(false);
     expect(cfg.port).toBe(3000);
     expect(cfg.webhookSecret).toBeUndefined();
-    expect(cfg.foremanUrl).toBe("ws://localhost:3000");
+    expect(cfg.foremanUrl).toBe("wss://brunel.dev");
     expect(cfg.permissionMode).toBe("default");
     expect(cfg.allowDangerouslySkipPermissions).toBe(false);
     expect(cfg.model).toBeUndefined();
