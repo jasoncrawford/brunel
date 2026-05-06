@@ -47,7 +47,7 @@ When the App is later uninstalled, the repo is deactivated. Existing task record
 
 The existing worker-driven activation prompt (`activate_repo` / `repo_activated`) is preserved for self-hosted setups (local dev, private foreman) where the App is not in use.
 
-### Installation tokens replace all personal tokens
+### Installation tokens for foreman API calls
 
 The foreman uses the App's private key to mint short-lived installation access tokens (1 hour TTL) scoped to individual repos. These replace the operator's personal `githubToken` for all foreman-side GitHub API calls:
 
@@ -55,9 +55,7 @@ The foreman uses the App's private key to mint short-lived installation access t
 - Checking blocker issue states
 - Verifying worker push access
 
-Workers receive an installation token in `task_assigned` and use it for git operations and any GitHub API calls they need to make during task execution. Workers no longer need a personal GitHub token in their config for anything repo-specific.
-
-The `githubToken` field in foreman config is replaced by `appPrivateKey` + `appId`. The foreman never touches a personal token.
+The `githubToken` field in foreman config is replaced by `appPrivateKey` + `appId`. Workers are not involved — they use their own personal GitHub token for git operations and any API calls they make during task execution.
 
 ### Worker identity: GitHub token verification
 
@@ -75,9 +73,9 @@ Workers obtain their GitHub token silently in this order:
 
 The token only needs standard repo-collaborator scopes — no `admin:repo_hook` or elevated permissions, since the App handles webhooks.
 
-### Foreman provides tokens to workers
+### Worker git authentication
 
-Workers no longer configure their own GitHub credentials for git/API operations. Instead, the foreman generates an installation token when sending `hello_ack` (new `githubToken` field) and the worker holds it for the duration of the connection. The worker uses this token for cloning the workspace, pushing branches, and any GitHub API calls during task execution.
+Workers use their own personal GitHub token (already obtained for identity verification) for git operations and any GitHub API calls they make during task execution.
 
 **Git authentication uses `http.extraHeader`, not a token-in-URL.** After cloning, the workspace sets:
 
@@ -85,9 +83,7 @@ Workers no longer configure their own GitHub credentials for git/API operations.
 git config --local http.https://github.com/.extraheader "Authorization: Bearer {token}"
 ```
 
-The remote URL stays clean (`https://github.com/owner/repo.git`). This is how GitHub Actions handles `GITHUB_TOKEN` internally — the token doesn't appear in `git remote -v` or process listings.
-
-**Token refresh.** Installation tokens expire after one hour. The worker refreshes proactively on a 45-minute timer: request a new installation token from the foreman (`request_token` message; foreman responds with `token_issued`), then update the `extraHeader` config in the workspace. No error handling or retry logic needed — the refresh happens before expiry. This means the token is always valid when a new task arrives, even if the worker waited hours between tasks. The existing clone-URL approach in `Workspace` is replaced with the `extraHeader` pattern as part of this work.
+The remote URL stays clean (`https://github.com/owner/repo.git`). This is how GitHub Actions handles `GITHUB_TOKEN` internally — the token doesn't appear in `git remote -v` or process listings. The existing clone-URL approach in `Workspace` is replaced with this pattern as part of this work.
 
 ### App not installed: clear error
 
@@ -142,15 +138,6 @@ ALTER TABLE repos ADD COLUMN installation_id bigint REFERENCES installations(id)
 - Add `githubToken: string` — the worker's personal GitHub token for identity verification
 - Remove `workerSecret?: string`
 
-### `hello_ack` (foreman → worker)
-
-- Add `githubToken?: string` — an installation access token for the repo, for use in git and API calls; omitted when App is not configured (self-hosted)
-
-### New messages
-
-- `request_token` (worker → foreman) — request a fresh installation token
-- `token_issued` (foreman → worker) — response with a new installation token
-
 ---
 
 ## Issue breakdown
@@ -164,9 +151,7 @@ Each issue must leave the app fully functional for existing users. New App-based
 | TBD | Foreman: add App credentials to config (`appId`, `appPrivateKey`, `appWebhookSecret` — all optional); `GithubClient` gains installation-token minting; falls back to personal `githubToken` when App not configured | `installation_id` column |
 | TBD | Foreman: handle `installation` / `installation_repositories` webhooks → create/delete `Installation` records; auto-activate direct-repo installs (link repos, seed tasks); for org installs store the installation only — repos linked on first worker connect; deactivate on uninstall; uses installation token for seeding | App credentials in config |
 | TBD | Foreman: worker auth via GitHub token (additive) — `worker_hello` gains optional `githubToken`; when App is configured and repo has `installation_id`, verify push access via installation token; existing `workerSecret` path unchanged | App credentials in config |
-| TBD | Foreman: provide installation token to workers — add `githubToken` to `hello_ack` when App is configured; worker switches git auth from token-in-URL to `extraHeader` (works for both personal token and installation token); older workers that ignore the new field continue working | Worker auth |
-| TBD | Worker: proactive token refresh — `request_token` / `token_issued` wire messages; worker starts 45-min timer when `hello_ack.githubToken` is present; no-op for self-hosted workers that don't receive one | token in `hello_ack` |
-| TBD | Worker: source GitHub token from `gh auth token` → env var → prompt (additive — existing env var / config still works) | — |
+| TBD | Worker: source GitHub token from `gh auth token` → env var → prompt; switch git auth from token-in-URL to `extraHeader` (additive — existing env var / config still works) | — |
 | TBD | Worker: handle App-not-installed `foreman_error` — display message and install link; older workers treat it as a generic error (acceptable) | Worker auth |
 | TBD | Worker: default `foremanUrl` to `wss://brunel.dev` (existing explicit config overrides it) | — |
 | TBD | Versioning + npm publish (see #892) | All of the above |
