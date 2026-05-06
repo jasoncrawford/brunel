@@ -147,7 +147,7 @@ Each issue must leave the app fully functional for existing users. New App-based
 | # | Title | Depends on |
 |---|-------|------------|
 | — | Register brunel GitHub App (operator task) | — |
-| TBD | Add `installations` table (`github_id`, `account_login`, `account_type`) and nullable `installation_id` FK on `repos` | — |
+| [#1038](https://github.com/jasoncrawford/brunel/issues/1038) | Add `installations` table (`github_id`, `account_login`, `account_type`) and nullable `installation_id` FK on `repos` | — |
 | TBD | Foreman: add App credentials to config (`appId`, `appPrivateKey`, `appWebhookSecret` — all optional); `GithubClient` gains installation-token minting; falls back to personal `githubToken` when App not configured | `installation_id` column |
 | TBD | Foreman: handle `installation` / `installation_repositories` webhooks → create/delete `Installation` records; auto-activate direct-repo installs (link repos, seed tasks); for org installs store the installation only — repos linked on first worker connect; deactivate on uninstall; uses installation token for seeding | App credentials in config |
 | TBD | Foreman: worker auth via GitHub token (additive) — `worker_hello` gains optional `githubToken`; when App is configured and repo has `installation_id`, verify push access via installation token; existing `workerSecret` path unchanged | App credentials in config |
