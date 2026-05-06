@@ -2,6 +2,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ── Module mocks ────────────────────────────────────────────────────────────
 
+// Stub gh-CLI token resolution so tests don't invoke the real `gh` binary.
+vi.mock("../src/agent/models/github-token.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/agent/models/github-token.js")>();
+  return { ...actual, resolveGithubTokenFromCli: vi.fn().mockResolvedValue(null) };
+});
+
 vi.mock("ws", async () => {
   const { EventEmitter } = await import("node:events");
   // Use a real class so `new WebSocket(...)` works correctly

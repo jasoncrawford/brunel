@@ -79,9 +79,10 @@ describe("defaults", () => {
 // ── Required fields ───────────────────────────────────────────────────────────
 
 describe("required field validation", () => {
-  it("exits 1 when githubToken is missing", async () => {
-    await loadConfig(["node", "repl.js"]);
-    expect(exitSpy).toHaveBeenCalledWith(1);
+  it("succeeds with undefined githubToken when token is absent (workers resolve it interactively)", async () => {
+    const cfg = await loadConfig(["node", "repl.js"]);
+    expect(exitSpy).not.toHaveBeenCalled();
+    expect(cfg.githubToken).toBeUndefined();
   });
 
   it("succeeds when githubRepo is omitted (it is optional)", async () => {

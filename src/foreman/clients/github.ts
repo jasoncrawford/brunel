@@ -33,6 +33,7 @@ export class GithubClient {
 
   async fetchIssues(): Promise<GithubIssue[]> {
     const { githubToken: token, taskLabel, githubApiUrl: apiUrl = "https://api.github.com" } = getConfig();
+    if (!token) throw new Error("GitHub token not configured");
     const url = `${apiUrl}/repos/${this.owner}/${this.repoName}/issues?labels=${encodeURIComponent(taskLabel)}&state=open&per_page=100`;
     const res = await fetch(url, { headers: ghHeaders(token) });
     if (!res.ok) throw new Error(`GitHub API error: ${res.status}`);
@@ -42,6 +43,7 @@ export class GithubClient {
   async fetchIssueStates(issueNumbers: number[]): Promise<Map<number, "open" | "closed">> {
     if (issueNumbers.length === 0) return new Map();
     const { githubToken: token, githubApiUrl: apiUrl = "https://api.github.com" } = getConfig();
+    if (!token) throw new Error("GitHub token not configured");
     const result = new Map<number, "open" | "closed">();
     await Promise.all(
       issueNumbers.map(async (n) => {
@@ -57,6 +59,7 @@ export class GithubClient {
 
   async fetchNativeBlockers(issueNumber: number): Promise<number[]> {
     const { githubToken: token, githubApiUrl: apiUrl = "https://api.github.com" } = getConfig();
+    if (!token) throw new Error("GitHub token not configured");
     const query = `
     query($owner: String!, $repo: String!, $number: Int!) {
       repository(owner: $owner, name: $repo) {
