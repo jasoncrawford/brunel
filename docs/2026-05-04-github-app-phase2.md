@@ -142,12 +142,14 @@ ALTER TABLE repos ADD COLUMN installation_id bigint REFERENCES installations(id)
 
 ## Issue breakdown
 
+> **Note:** This is a preliminary list of planned issues, not kept up to date. For current status, see the GitHub milestone.
+
 Each issue must leave the app fully functional for existing users. New App-based pathways are additive alongside the existing `workerSecret` / personal-token pathways; neither is removed during this milestone (cleanup is a separate decision).
 
 | # | Title | Depends on |
 |---|-------|------------|
 | — | Register brunel GitHub App (operator task) | — |
-| [#1038](https://github.com/jasoncrawford/brunel/issues/1038) | Add `installations` table (`github_id`, `account_login`, `account_type`) and nullable `installation_id` FK on `repos` | — |
+| TBD | Add `installations` table (`github_id`, `account_login`, `account_type`) and nullable `installation_id` FK on `repos` | — |
 | TBD | Foreman: add App credentials to config (`appId`, `appPrivateKey`, `appWebhookSecret` — all optional); `GithubClient` gains installation-token minting; falls back to personal `githubToken` when App not configured | `installation_id` column |
 | TBD | Foreman: handle `installation` / `installation_repositories` webhooks → create/delete `Installation` records; auto-activate direct-repo installs (link repos, seed tasks); for org installs store the installation only — repos linked on first worker connect; deactivate on uninstall; uses installation token for seeding | App credentials in config |
 | TBD | Foreman: worker auth via GitHub token (additive) — `worker_hello` gains optional `githubToken`; when App is configured and repo has `installation_id`, verify push access via installation token; existing `workerSecret` path unchanged | App credentials in config |
