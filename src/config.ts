@@ -50,7 +50,7 @@ const BrunelConfigSchema = z.object({
   // ── Worker-only ────────────────────────────────────────────────────────────
 
   /** WebSocket URL that workers connect to. */
-  foremanUrl:     z.string().default("ws://localhost:3000"),
+  foremanUrl:     z.string().default("wss://brunel.dev"),
   /** Maximum reconnect delay in ms. Reconnect uses full jitter: random(0, min(cap, 1s * 2^attempt)). */
   maxReconnectDelayMs: z.coerce.number().int().positive().default(300_000),
   /** Claude permission mode for worker sessions. */
