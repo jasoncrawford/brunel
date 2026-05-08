@@ -102,6 +102,31 @@ export class GithubClient {
     return result;
   }
 
+  /** Fetches the login of the user owning the given personal access token. */
+  async fetchUserLogin(personalToken: string): Promise<string> {
+    const { githubApiUrl: apiUrl = "https://api.github.com" } = getConfig();
+    const res = await fetch(`${apiUrl}/user`, { headers: ghHeaders(personalToken) });
+    if (!res.ok) throw new Error(`GitHub API error: ${res.status}`);
+    const body = await res.json() as { login: string };
+    return body.login;
+  }
+
+  /**
+   * Checks whether the given user has push (or admin) access to this repo.
+   * Uses an installation token minted for this client's installationGithubId.
+   */
+  async verifyPushAccess(username: string): Promise<boolean> {
+    const token = await this.mintInstallationToken();
+    const { githubApiUrl: apiUrl = "https://api.github.com" } = getConfig();
+    const res = await fetch(
+      `${apiUrl}/repos/${this.owner}/${this.repoName}/collaborators/${username}/permission`,
+      { headers: ghHeaders(token) },
+    );
+    if (!res.ok) throw new Error(`GitHub API error: ${res.status}`);
+    const body = await res.json() as { permission: string };
+    return body.permission === "push" || body.permission === "admin";
+  }
+
   async fetchNativeBlockers(issueNumber: number): Promise<number[]> {
     const token = await this.resolveToken();
     const { githubApiUrl: apiUrl = "https://api.github.com" } = getConfig();

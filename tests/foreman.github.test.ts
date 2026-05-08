@@ -298,3 +298,90 @@ describe("mintInstallationToken", () => {
     await expect(new GithubClient("owner/repo").mintInstallationToken()).rejects.toThrow();
   });
 });
+
+// ── fetchUserLogin ────────────────────────────────────────────────────────────
+
+describe("fetchUserLogin", () => {
+  it("returns the GitHub login for the authenticated user", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({ ok: true, json: async () => ({ login: "octocat" }) } as any);
+    const login = await new GithubClient("owner/repo").fetchUserLogin("personal-token");
+    expect(login).toBe("octocat");
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/user"),
+      expect.objectContaining({ headers: expect.objectContaining({ Authorization: "Bearer personal-token" }) }),
+    );
+  });
+
+  it("throws on non-ok response", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({ ok: false, status: 401 } as any);
+    await expect(new GithubClient("owner/repo").fetchUserLogin("bad-token")).rejects.toThrow("401");
+  });
+});
+
+// ── verifyPushAccess ──────────────────────────────────────────────────────────
+
+describe("verifyPushAccess", () => {
+  it("returns true when user has admin permission", async () => {
+    const { privateKey } = makeTestKeyPair();
+    getConfig().appId = "123";
+    getConfig().appPrivateKey = privateKey;
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ token: "inst_token" }) } as any)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ permission: "admin" }) } as any);
+    expect(await new GithubClient("owner/repo", 456).verifyPushAccess("testuser")).toBe(true);
+  });
+
+  it("returns true when user has push permission", async () => {
+    const { privateKey } = makeTestKeyPair();
+    getConfig().appId = "123";
+    getConfig().appPrivateKey = privateKey;
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ token: "inst_token" }) } as any)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ permission: "push" }) } as any);
+    expect(await new GithubClient("owner/repo", 456).verifyPushAccess("testuser")).toBe(true);
+  });
+
+  it("returns false when user has pull permission", async () => {
+    const { privateKey } = makeTestKeyPair();
+    getConfig().appId = "123";
+    getConfig().appPrivateKey = privateKey;
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ token: "inst_token" }) } as any)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ permission: "pull" }) } as any);
+    expect(await new GithubClient("owner/repo", 456).verifyPushAccess("testuser")).toBe(false);
+  });
+
+  it("returns false when user has read permission", async () => {
+    const { privateKey } = makeTestKeyPair();
+    getConfig().appId = "123";
+    getConfig().appPrivateKey = privateKey;
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ token: "inst_token" }) } as any)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ permission: "read" }) } as any);
+    expect(await new GithubClient("owner/repo", 456).verifyPushAccess("testuser")).toBe(false);
+  });
+
+  it("uses installation token for the permission check", async () => {
+    const { privateKey } = makeTestKeyPair();
+    getConfig().appId = "123";
+    getConfig().appPrivateKey = privateKey;
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ token: "ghs_inst_token" }) } as any)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ permission: "push" }) } as any);
+    await new GithubClient("owner/repo", 456).verifyPushAccess("someuser");
+    const permCall = vi.mocked(fetch).mock.calls[1];
+    expect(permCall[0]).toContain("/collaborators/someuser/permission");
+    expect((permCall[1] as RequestInit & { headers: Record<string, string> }).headers.Authorization)
+      .toBe("Bearer ghs_inst_token");
+  });
+
+  it("throws on non-ok permission check response", async () => {
+    const { privateKey } = makeTestKeyPair();
+    getConfig().appId = "123";
+    getConfig().appPrivateKey = privateKey;
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ token: "inst_token" }) } as any)
+      .mockResolvedValueOnce({ ok: false, status: 403 } as any);
+    await expect(new GithubClient("owner/repo", 456).verifyPushAccess("testuser")).rejects.toThrow("403");
+  });
+});

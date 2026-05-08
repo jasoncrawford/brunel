@@ -8,6 +8,7 @@ import type { Database } from "../../src/database.types.js";
 
 type DbRow = Database["public"]["Tables"]["tasks"]["Row"];
 type RepoRow = Database["public"]["Tables"]["repos"]["Row"];
+type InstallationRow = Database["public"]["Tables"]["installations"]["Row"];
 type WorkerRow = Database["public"]["Tables"]["workers"]["Row"];
 type WebhookRow = Database["public"]["Tables"]["webhook_events"]["Row"];
 type Filters = Array<{ col: keyof DbRow; op: "eq" | "is" | "gt" | "gte" | "lt" | "lte"; val: unknown }>;
@@ -54,6 +55,10 @@ export function createMemoryTaskDb(): SupabaseClient<Database> {
   // ── Repos store ───────────────────────────────────────────────────────────
   const reposStore = new Map<string, RepoRow>();
   let nextRepoId = 1;
+
+  // ── Installations store ───────────────────────────────────────────────────
+  const installationsStore = new Map<number, InstallationRow>();
+  let nextInstallationId = 1;
 
   // ── Workers store ─────────────────────────────────────────────────────────
   const workersStore = new Map<string, WorkerRow>();
@@ -251,9 +256,45 @@ export function createMemoryTaskDb(): SupabaseClient<Database> {
     };
   }
 
+  function buildInstallationsTable() {
+    return {
+      insert(rowData: { github_id: number; account_login: string; account_type: string }) {
+        const newRow: InstallationRow = {
+          id: nextInstallationId++,
+          github_id: rowData.github_id,
+          account_login: rowData.account_login,
+          account_type: rowData.account_type,
+          created_at: new Date().toISOString(),
+        };
+        installationsStore.set(newRow.id, newRow);
+        const sb = {
+          select() { return sb; },
+          single() { return ok(newRow); },
+        };
+        return sb;
+      },
+      select(_cols?: string) {
+        const sb = {
+          eq(col: string, val: unknown) {
+            const filtered = [...installationsStore.values()].filter(
+              (r) => (r as Record<string, unknown>)[col] === val,
+            );
+            return {
+              maybeSingle() { return ok(filtered[0] ?? null); },
+              single() { return ok(filtered[0] ?? null); },
+            };
+          },
+          maybeSingle() { return ok(null as InstallationRow | null); },
+          single() { return ok(null as InstallationRow | null); },
+        };
+        return sb;
+      },
+    };
+  }
+
   function buildReposTable() {
     return {
-      insert(rowData: { full_name: string }) {
+      insert(rowData: { full_name: string; installation_id?: number | null; status?: string }) {
         if (reposStore.has(rowData.full_name)) {
           // Simulate a unique constraint violation — caller falls back to SELECT.
           const sb = {
@@ -267,8 +308,9 @@ export function createMemoryTaskDb(): SupabaseClient<Database> {
         const newRow: RepoRow = {
           id: nextRepoId++,
           full_name: rowData.full_name,
-          status: "new",
+          status: rowData.status ?? "new",
           created_at: new Date().toISOString(),
+          installation_id: rowData.installation_id ?? null,
         };
         reposStore.set(rowData.full_name, newRow);
         const sb = {
@@ -409,6 +451,9 @@ export function createMemoryTaskDb(): SupabaseClient<Database> {
 
   return {
     from(table: string) {
+      if (table === "installations") {
+        return buildInstallationsTable();
+      }
       if (table === "repos") {
         return buildReposTable();
       }

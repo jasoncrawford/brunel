@@ -9,10 +9,12 @@ type AdminWssLike = Pick<AdminWss, "broadcastLogEvent">;
 import { fmtError, log } from "../../utils.js";
 import { shortWorkerId } from "../../../shared/utils.js";
 import type { BrunelConfig } from "../../config.js";
+import { getConfig } from "../../config.js";
 import { TaskManager } from "../models/task-manager.js";
 import { Repo } from "../models/repo.js";
 import { Task } from "../models/task.js";
 import { Worker } from "../models/worker.js";
+import { GithubClient } from "../clients/github.js";
 
 type R = Record<string, unknown>;
 
@@ -334,11 +336,6 @@ export class ForemanWss {
   }
 
   async handleWorkerHello(workerId: string, ws: WebSocket, msg: Extract<Wire.WorkerMessage, { type: "worker_hello" }>): Promise<void> {
-    if (this.config.workerSecret && msg.workerSecret !== this.config.workerSecret) {
-      ws.close(4001, "unauthorized");
-      return;
-    }
-
     if (!msg.repo) {
       log(`[worker ${shortWorkerId(workerId)}] worker_hello missing required repo field — rejecting`);
       this.sendError(ws, "worker_hello must include a repo field", true, workerId, null);
@@ -352,6 +349,34 @@ export class ForemanWss {
       log(`[worker ${shortWorkerId(workerId)}] failed to resolve repo ${msg.repo}: ${fmtError(err)}`);
       this.sendError(ws, `Failed to resolve repo ${msg.repo}: ${fmtError(err)}`, true, workerId, null);
       return;
+    }
+
+    const { appId, appPrivateKey } = getConfig();
+    const useGithubTokenAuth = !!(msg.githubToken && appId && appPrivateKey && repo.installationId !== null);
+
+    if (useGithubTokenAuth) {
+      let authorized: boolean;
+      try {
+        const installation = await repo.installation;
+        if (!installation) throw new Error("Installation record not found");
+        const client = new GithubClient(msg.repo, installation.githubId);
+        const username = await client.fetchUserLogin(msg.githubToken!);
+        authorized = await client.verifyPushAccess(username);
+      } catch (err) {
+        log(`[worker ${shortWorkerId(workerId)}] GitHub token auth error: ${fmtError(err)}`);
+        this.sendError(ws, `GitHub token auth failed: ${fmtError(err)}`, true, workerId, repo.id);
+        return;
+      }
+      if (!authorized) {
+        log(`[worker ${shortWorkerId(workerId)}] GitHub token auth rejected — insufficient repo access`);
+        this.sendError(ws, "Insufficient repository access — push or admin permission required", true, workerId, repo.id);
+        return;
+      }
+    } else {
+      if (this.config.workerSecret && msg.workerSecret !== this.config.workerSecret) {
+        ws.close(4001, "unauthorized");
+        return;
+      }
     }
 
     if (msg.status === "assigned" && msg.taskId) {
