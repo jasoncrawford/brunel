@@ -70,12 +70,9 @@ export class TaskManager extends EventEmitter {
 
   // ── Instance state ───────────────────────────────────────────────────────
   readonly repo: Repo;
-  private readonly _github: GithubClient;
 
   private get github(): GithubClient {
-    return this.repo.installationId !== null
-      ? new GithubClient(this.repo.fullName, this.repo.installationId)
-      : this._github;
+    return new GithubClient(this.repo.fullName, this.repo.installationId ?? undefined);
   }
 
   // ── Ephemeral in-memory state (no DB backing) ────────────────────────────
@@ -97,7 +94,6 @@ export class TaskManager extends EventEmitter {
   constructor(repo: Repo) {
     super();
     this.repo = repo;
-    this._github = new GithubClient(repo.fullName);
     this._openIssues = new Set();
     this._blockers = new Map();
     this._blockersLoaded = new Set();
