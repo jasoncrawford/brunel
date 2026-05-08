@@ -596,8 +596,7 @@ export class ForemanWss {
       return;
     }
     try {
-      const installation = await repo.installation;
-      await repo.taskManager.loadIssuesFromGithub(installation?.githubId);
+      await repo.taskManager.loadIssuesFromGithub();
       this.workerLog(workerId, `loaded issues for ${repo.fullName}`);
     } catch (err) {
       log(`ERROR Failed to load issues for ${repo.fullName}: ${fmtError(err)}`);

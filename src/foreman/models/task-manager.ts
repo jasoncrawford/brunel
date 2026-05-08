@@ -437,13 +437,11 @@ export class TaskManager extends EventEmitter {
   }
 
   /** Fetch brunel:ready issues from GitHub and load deps.
-   *  Called at startup after loadActiveTasksFromDb.
-   *  Pass installationGithubId to mint an installation token instead of the personal token. */
-  async loadIssuesFromGithub(installationGithubId?: number): Promise<void> {
+   *  Called at startup after loadActiveTasksFromDb, and on installation/activation events. */
+  async loadIssuesFromGithub(): Promise<void> {
     const repo = this.repo.fullName;
-    const github = installationGithubId !== undefined
-      ? new GithubClient(repo, installationGithubId)
-      : this.github;
+    const installation = await this.repo.installation;
+    const github = installation ? new GithubClient(repo, installation.githubId) : this.github;
     const issues = await github.fetchIssues();
 
     const allBlockerNumbers = new Set<number>();

@@ -19,7 +19,7 @@ export class InstallationsController {
 
     if (targetType === "User") {
       const repos = (p.repositories as Array<{ full_name: string }>) ?? [];
-      await Promise.all(repos.map((r) => this._activateRepo(r.full_name, installation.id, githubId)));
+      await Promise.all(repos.map((r) => this._activateRepo(r.full_name, installation.id)));
     }
   }
 
@@ -51,7 +51,7 @@ export class InstallationsController {
     }
 
     const repos = (p.repositories_added as Array<{ full_name: string }>) ?? [];
-    await Promise.all(repos.map((r) => this._activateRepo(r.full_name, installation.id, githubId)));
+    await Promise.all(repos.map((r) => this._activateRepo(r.full_name, installation.id)));
   }
 
   async handleReposRemoved(payload: unknown): Promise<void> {
@@ -63,19 +63,19 @@ export class InstallationsController {
     }));
   }
 
-  private async _activateRepo(fullName: string, installationId: number, installationGithubId: number): Promise<void> {
+  private async _activateRepo(fullName: string, installationId: number): Promise<void> {
     const repo = await Repo.findOrCreate(fullName);
     await repo.linkInstallation(installationId);
     await repo.activate();
     try {
-      await repo.taskManager.loadIssuesFromGithub(installationGithubId);
+      await repo.taskManager.loadIssuesFromGithub();
     } catch (err) {
       log(`[installations] ERROR loading issues for ${fullName}: ${fmtError(err)}`);
     }
   }
 
   private async _deactivateRepo(repo: Repo): Promise<void> {
-    await repo.unlink();
+    await repo.unlinkInstallation();
     await repo.deactivate();
   }
 }

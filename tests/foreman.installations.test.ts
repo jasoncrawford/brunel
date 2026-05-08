@@ -142,7 +142,7 @@ describe("handleInstallationCreated — User target", () => {
     expect(b.status).toBe("active");
   });
 
-  it("calls loadIssuesFromGithub with the installation GitHub id", async () => {
+  it("calls loadIssuesFromGithub", async () => {
     // Pre-create the repo so we can spy on its taskManager.
     const repo = await Repo.findOrCreate("alice/my-repo");
     const loadSpy = vi.spyOn(repo.taskManager, "loadIssuesFromGithub").mockResolvedValue(undefined);
@@ -151,7 +151,7 @@ describe("handleInstallationCreated — User target", () => {
       installationCreatedPayload(11111, "alice", "User", ["alice/my-repo"]),
     );
 
-    expect(loadSpy).toHaveBeenCalledWith(11111);
+    expect(loadSpy).toHaveBeenCalled();
   });
 });
 
@@ -259,7 +259,7 @@ describe("handleReposAdded — User target", () => {
     expect(repo.installationId).toBe(inst.id);
   });
 
-  it("calls loadIssuesFromGithub with the installation GitHub id", async () => {
+  it("calls loadIssuesFromGithub", async () => {
     await Installation.insert({
       github_id: 11111,
       account_login: "alice",
@@ -273,7 +273,7 @@ describe("handleReposAdded — User target", () => {
       installationRepositoriesAddedPayload(11111, "alice", "User", ["alice/new-repo"]),
     );
 
-    expect(loadSpy).toHaveBeenCalledWith(11111);
+    expect(loadSpy).toHaveBeenCalled();
   });
 });
 
