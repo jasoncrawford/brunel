@@ -3,13 +3,14 @@ import assert from "node:assert";
 import http from "http";
 import { WebSocket, WebSocketServer } from "ws";
 import type { AddressInfo } from "net";
+import { generateKeyPairSync } from "node:crypto";
 import { Worker } from "../src/foreman/models/worker.js";
 import { ForemanWss } from "../src/foreman/controllers/wss.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
 import { WebhookEvent } from "../src/foreman/models/webhook-event.js";
-import { fakeRepo, resetDb, createTestTaskManager } from "./helpers/task.js";
-import { loadDefaultConfig } from "../src/config.js";
+import { fakeRepo, resetDb, createTestTaskManager, seedRepoWithInstallation } from "./helpers/task.js";
+import { loadDefaultConfig, getConfig } from "../src/config.js";
 const defaultCfg = await loadDefaultConfig();
 import * as Wire from "../shared/wire.js";
 import { ForemanMessage } from "../src/foreman/models/foreman-message.js";
@@ -644,12 +645,15 @@ describe("worker secret enforcement", () => {
 
   it("rejects worker_hello with wrong secret when workerSecret is configured", async () => {
     const { server, secretWss, port } = await makeSecretServer("correct-secret");
+    const ws = await connectWorker(port);
     try {
-      const ws = await connectWorker(port);
       send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "ready", workerSecret: "wrong" });
-      await new Promise<void>((resolve) => ws.once("close", resolve));
-      expect(ws.readyState).toBe(WebSocket.CLOSED);
+      const msg = await nextMsg(ws);
+      expect(msg.type).toBe("foreman_error");
+      if (msg.type === "foreman_error") expect(msg.fatal).toBe(true);
+      expect(Worker.fromRegistry("w1")).toBeUndefined();
     } finally {
+      await closeClient(ws);
       await new Promise<void>((r) => secretWss.close(() => server.close(r)));
     }
   });
@@ -1267,5 +1271,175 @@ describe("graceful shutdown", () => {
     liveWs.close();
     await new Promise<void>((r) => liveWs.once("close", r));
     await new Promise<void>((r) => localForemanWss.wss.close(() => srv.close(r)));
+  });
+});
+
+// ── GitHub token auth ─────────────────────────────────────────────────────────
+
+describe("GitHub token auth in worker_hello", () => {
+  function makeTestPrivateKey(): string {
+    return generateKeyPairSync("rsa", {
+      modulusLength: 2048,
+      publicKeyEncoding: { type: "spki", format: "pem" },
+      privateKeyEncoding: { type: "pkcs8", format: "pem" },
+    }).privateKey;
+  }
+
+  beforeEach(() => {
+    vi.stubGlobal("fetch", vi.fn());
+    getConfig().appId = undefined as unknown as string;
+    getConfig().appPrivateKey = undefined as unknown as string;
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("accepts a worker with valid githubToken when push access is confirmed", async () => {
+    const privateKey = makeTestPrivateKey();
+    getConfig().appId = "app-1";
+    getConfig().appPrivateKey = privateKey;
+
+    const { repo } = await seedRepoWithInstallation("auth-owner/auth-repo", 789);
+    await repo.activate();
+
+    // GET /user → login; POST installation token; GET permission
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ login: "alice" }) } as any)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ token: "ghs_inst" }) } as any)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ permission: "push" }) } as any);
+
+    const ws = await connect();
+    const q = makeQueue(ws);
+    send(ws, { type: "worker_hello", repo: "auth-owner/auth-repo", workerId: "w-auth-1", status: "ready", githubToken: "ghp_personal" });
+    const ack = await q.next();
+    expect(ack.type).toBe("hello_ack");
+    if (ack.type === "hello_ack") expect(ack.status).toBe("ready");
+    expect(Worker.fromRegistry("w-auth-1")).toBeDefined();
+  });
+
+  it("accepts a worker with admin permission", async () => {
+    const privateKey = makeTestPrivateKey();
+    getConfig().appId = "app-1";
+    getConfig().appPrivateKey = privateKey;
+
+    const { repo } = await seedRepoWithInstallation("auth-owner/admin-repo", 790);
+    await repo.activate();
+
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ login: "alice" }) } as any)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ token: "ghs_inst" }) } as any)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ permission: "admin" }) } as any);
+
+    const ws = await connect();
+    const q = makeQueue(ws);
+    send(ws, { type: "worker_hello", repo: "auth-owner/admin-repo", workerId: "w-auth-2", status: "ready", githubToken: "ghp_personal" });
+    const ack = await q.next();
+    expect(ack.type).toBe("hello_ack");
+    expect(Worker.fromRegistry("w-auth-2")).toBeDefined();
+  });
+
+  it("sends fatal foreman_error when worker lacks push access", async () => {
+    const privateKey = makeTestPrivateKey();
+    getConfig().appId = "app-1";
+    getConfig().appPrivateKey = privateKey;
+
+    const { repo } = await seedRepoWithInstallation("auth-owner/read-only-repo", 791);
+    await repo.activate();
+
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ login: "alice" }) } as any)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ token: "ghs_inst" }) } as any)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ permission: "read" }) } as any);
+
+    const ws = await connect();
+    const q = makeQueue(ws);
+    send(ws, { type: "worker_hello", repo: "auth-owner/read-only-repo", workerId: "w-auth-3", status: "ready", githubToken: "ghp_personal" });
+    const msg = await q.next();
+    expect(msg.type).toBe("foreman_error");
+    if (msg.type === "foreman_error") {
+      expect(msg.fatal).toBe(true);
+    }
+    await waitUntil(() => Worker.fromRegistry("w-auth-3") === undefined);
+    expect(Worker.fromRegistry("w-auth-3")).toBeUndefined();
+  });
+
+  it("falls back to workerSecret auth when App is not configured", async () => {
+    // App not configured — githubToken should be ignored, workerSecret path taken
+    const srv = http.createServer();
+    const { wss: secretWss } = new ForemanWss({ server: srv, config: { ...defaultCfg, workerSecret: "s3cr3t" } });
+    const p = await new Promise<number>((r) => srv.listen(0, () => r((srv.address() as AddressInfo).port)));
+    const ws = await connectWorker(p);
+    try {
+      send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w-auth-4", status: "ready", githubToken: "ghp_personal", workerSecret: "s3cr3t" });
+      const ack = await nextMsg(ws);
+      expect(ack.type).toBe("hello_ack");
+      expect(fetch).not.toHaveBeenCalled();
+    } finally {
+      await closeClient(ws);
+      await new Promise<void>((r) => secretWss.close(() => srv.close(r)));
+    }
+  });
+
+  it("falls back to workerSecret auth when repo has no installation", async () => {
+    // App configured but repo has no installation_id — should fall back to workerSecret
+    getConfig().appId = "app-1";
+    getConfig().appPrivateKey = makeTestPrivateKey();
+
+    const srv = http.createServer();
+    const { wss: secretWss } = new ForemanWss({ server: srv, config: { ...defaultCfg, workerSecret: "s3cr3t" } });
+    const p = await new Promise<number>((r) => srv.listen(0, () => r((srv.address() as AddressInfo).port)));
+    const ws = await connectWorker(p);
+    try {
+      // "owner/repo" is the default test repo with no installation_id
+      send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w-auth-5", status: "ready", githubToken: "ghp_personal", workerSecret: "s3cr3t" });
+      const ack = await nextMsg(ws);
+      expect(ack.type).toBe("hello_ack");
+      expect(fetch).not.toHaveBeenCalled();
+    } finally {
+      await closeClient(ws);
+      await new Promise<void>((r) => secretWss.close(() => srv.close(r)));
+    }
+  });
+
+  it("falls back to workerSecret auth when githubToken is absent", async () => {
+    getConfig().appId = "app-1";
+    getConfig().appPrivateKey = makeTestPrivateKey();
+
+    const { repo } = await seedRepoWithInstallation("auth-owner/no-token-repo", 792);
+    await repo.activate();
+
+    const srv = http.createServer();
+    const { wss: secretWss } = new ForemanWss({ server: srv, config: { ...defaultCfg, workerSecret: "s3cr3t" } });
+    const p = await new Promise<number>((r) => srv.listen(0, () => r((srv.address() as AddressInfo).port)));
+    const ws = await connectWorker(p);
+    try {
+      // No githubToken field — should fall back to workerSecret
+      send(ws, { type: "worker_hello", repo: "auth-owner/no-token-repo", workerId: "w-auth-6", status: "ready", workerSecret: "s3cr3t" });
+      const ack = await nextMsg(ws);
+      expect(ack.type).toBe("hello_ack");
+      expect(fetch).not.toHaveBeenCalled();
+    } finally {
+      await closeClient(ws);
+      await new Promise<void>((r) => secretWss.close(() => srv.close(r)));
+    }
+  });
+
+  it("sends fatal foreman_error when GET /user fails", async () => {
+    const privateKey = makeTestPrivateKey();
+    getConfig().appId = "app-1";
+    getConfig().appPrivateKey = privateKey;
+
+    const { repo } = await seedRepoWithInstallation("auth-owner/error-repo", 793);
+    await repo.activate();
+
+    vi.mocked(fetch).mockResolvedValueOnce({ ok: false, status: 401 } as any);
+
+    const ws = await connect();
+    const q = makeQueue(ws);
+    send(ws, { type: "worker_hello", repo: "auth-owner/error-repo", workerId: "w-auth-7", status: "ready", githubToken: "ghp_bad" });
+    const msg = await q.next();
+    expect(msg.type).toBe("foreman_error");
+    if (msg.type === "foreman_error") expect(msg.fatal).toBe(true);
   });
 });

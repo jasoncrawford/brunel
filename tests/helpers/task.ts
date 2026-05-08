@@ -40,6 +40,26 @@ export function fakeRepo(fullName = "owner/repo", id = 1, status: "new" | "activ
 }
 
 /**
+ * Seeds an installation and a repo linked to it in the in-memory DB.
+ * Returns the Repo (with installationId set) and the installation's githubId.
+ * The repo starts as "new"; call repo.activate() if needed for task assignment.
+ */
+export async function seedRepoWithInstallation(
+  fullName: string,
+  githubInstallationId: number,
+): Promise<{ repo: Repo; githubInstallationId: number }> {
+  const instResult = await (db as any).from("installations")
+    .insert({ github_id: githubInstallationId, account_login: "test-account", account_type: "Organization" })
+    .select().single();
+  const installationDbId = instResult.data.id as number;
+  await (db as any).from("repos")
+    .insert({ full_name: fullName, installation_id: installationDbId })
+    .select().single();
+  const repo = await Repo.findOrCreate(fullName);
+  return { repo, githubInstallationId };
+}
+
+/**
  * Seeds a task directly into the DB shim with arbitrary field values,
  * including status fields like worker_id, assigned_at, completed_at, etc.
  * Returns the Task instance retrieved from the DB after insertion.
