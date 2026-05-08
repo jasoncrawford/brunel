@@ -7,8 +7,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 vi.mock("../src/agent/models/github-token.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/agent/models/github-token.js")>();
   class MockGithubToken {
-    constructor(private configToken?: string) {}
-    resolve() { return Promise.resolve(this.configToken ?? null); }
+    constructor(private config?: { githubToken?: string }) {}
+    resolve() { return Promise.resolve(this.config?.githubToken ?? null); }
   }
   return { ...actual, GithubToken: MockGithubToken };
 });

@@ -4,7 +4,7 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFileCb);
 
 export class GithubToken {
-  constructor(private readonly configToken?: string) {}
+  constructor(private readonly config: { githubToken?: string }) {}
 
   /**
    * Resolve a GitHub token in priority order:
@@ -14,7 +14,7 @@ export class GithubToken {
    * Returns null if no token is available.
    */
   async resolve(): Promise<string | null> {
-    if (this.configToken) return this.configToken;
+    if (this.config.githubToken) return this.config.githubToken;
     return this._fromCli();
   }
 

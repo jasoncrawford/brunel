@@ -77,7 +77,7 @@ export class BrunelAgent {
 
     // Resolve GitHub token: config/env → gh CLI fallback.
     const { config } = this;
-    const githubToken = await new GithubToken(config.githubToken).resolve();
+    const githubToken = await new GithubToken(config).resolve();
     if (!githubToken) {
       this.display.print(c.amber(
         "No GitHub token found. Run `gh auth login` or set GITHUB_TOKEN to enable workspace cloning.",
