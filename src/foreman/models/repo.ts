@@ -78,6 +78,33 @@ export class Repo extends ActiveRecord {
     return updated;
   }
 
+  /** Sets status to 'new' and persists. Returns the updated Repo instance. */
+  async deactivate(): Promise<Repo> {
+    const updated = await this.update({ status: "new" });
+    this.status = "new";
+    return updated;
+  }
+
+  /** Sets installation_id to the given value and persists. Returns the updated Repo instance. */
+  async linkInstallation(installationId: number): Promise<Repo> {
+    return this.update({ installation_id: installationId });
+  }
+
+  /** Clears installation_id and persists. Returns the updated Repo instance. */
+  async unlink(): Promise<Repo> {
+    return this.update({ installation_id: null });
+  }
+
+  /** Lists all repos linked to the given installation DB id. */
+  static async listByInstallation(installationId: number): Promise<Repo[]> {
+    return super.listBy("installation_id", installationId) as Promise<Repo[]>;
+  }
+
+  /** Finds a repo by full_name without creating one. Returns null if not found. */
+  static async findByFullName(fullName: string): Promise<Repo | null> {
+    return super.getBy("full_name", fullName) as Promise<Repo | null>;
+  }
+
   /**
    * Find or create a repo by full_name (e.g. "owner/repo").
    * Uses SELECT-first to avoid burning sequence values on the hot path (every webhook).

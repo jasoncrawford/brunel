@@ -437,10 +437,14 @@ export class TaskManager extends EventEmitter {
   }
 
   /** Fetch brunel:ready issues from GitHub and load deps.
-   *  Called at startup after loadActiveTasksFromDb. */
-  async loadIssuesFromGithub(): Promise<void> {
+   *  Called at startup after loadActiveTasksFromDb.
+   *  Pass installationGithubId to mint an installation token instead of the personal token. */
+  async loadIssuesFromGithub(installationGithubId?: number): Promise<void> {
     const repo = this.repo.fullName;
-    const issues = await this.github.fetchIssues();
+    const github = installationGithubId !== undefined
+      ? new GithubClient(repo, installationGithubId)
+      : this.github;
+    const issues = await github.fetchIssues();
 
     const allBlockerNumbers = new Set<number>();
     const loadedIssueNumbers: number[] = [];
@@ -464,7 +468,7 @@ export class TaskManager extends EventEmitter {
     }
 
     if (allBlockerNumbers.size > 0) {
-      const states = await this.github.fetchIssueStates(Array.from(allBlockerNumbers));
+      const states = await github.fetchIssueStates(Array.from(allBlockerNumbers));
       for (const [num, state] of states) {
         this.setIssueOpenState(num, state === "open");
       }
