@@ -50,8 +50,8 @@ Task assignment is **repo-scoped**: `TaskManager.tryAssignWork()` only assigns a
 Every `worker_hello` includes a `repo` field (owner/name parsed from `git remote get-url origin`). The foreman resolves this to a `Repo` via `Repo.findOrCreate()` and stores it on the `Worker` — every registered Worker always has a `Repo`. Missing or unresolvable repo is a fatal error.
 
 **Worker authentication** uses one of two paths, evaluated after repo resolution:
-- **GitHub token auth** (preferred): if `worker_hello` carries a `githubToken`, the App is configured (`appId` + `appPrivateKey`), and the repo has an `installation_id`, the foreman calls `GET /user` with the worker token to get the login, then `GET /repos/.../collaborators/{login}/permission` with a minted installation token. Workers without `push` or `admin` receive a fatal `foreman_error`.
-- **Worker secret fallback**: if any of the above conditions is absent, the foreman falls back to comparing `msg.workerSecret` against `config.workerSecret` (no-op when neither is set).
+- **GitHub token auth** (preferred): if `worker_hello` carries a `githubToken` and the App is configured (`appId` + `appPrivateKey`), the foreman checks for a repo installation. If no installation exists, it sends a non-fatal `foreman_error` with `errorType: "app_not_installed"` — the worker displays an actionable install link and exits worker mode. If an installation is found, the foreman calls `GET /user` with the worker token to get the login, then `GET /repos/.../collaborators/{login}/permission` with a minted installation token. Workers without `push` or `admin` receive a fatal `foreman_error`.
+- **Worker secret fallback**: if `githubToken` is absent or the App is not configured, the foreman falls back to comparing `msg.workerSecret` against `config.workerSecret` (no-op when neither is set).
 
 Every `worker_hello` gets a `hello_ack` with one of four statuses before any task is sent:
 - `ready` — worker is free and available for auto-assignment
@@ -68,7 +68,7 @@ The `/worker:claim` command connects with `status: "reserved"` (no `claimTaskId`
 
 `hello_ack` also carries `repoStatus: "new" | "active"`. If `"new"`, the worker prompts the user to activate the repo. On confirmation the worker sends `activate_repo`; the foreman activates the repo, seeds tasks from open labeled issues, and replies with `repo_activated`. The worker then transitions to idle and normal task assignment proceeds. If the user declines activation, the worker exits worker mode and returns to the interactive REPL.
 
-If a catastrophic error occurs, the foreman sends `foreman_error` (`{ type, message, fatal }`). `fatal: true` causes the worker to stop reconnecting and return to interactive REPL mode.
+If a catastrophic error occurs, the foreman sends `foreman_error` (`{ type, message, fatal, errorType? }`). `fatal: true` causes the worker to stop reconnecting and return to interactive REPL mode. Non-fatal errors with a recognized `errorType` (e.g. `"app_not_installed"`) are also treated as terminal by the worker — the worker exits worker mode after displaying an actionable message.
 
 ## Dev workflow
 

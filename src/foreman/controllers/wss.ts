@@ -290,8 +290,10 @@ export class ForemanWss {
    * processing — gives the worker an explanation instead of a silent drop.
    * Also persists the error to foreman_messages so it appears in the activity log.
    */
-  private sendError(ws: WebSocket, message: string, fatal: boolean, workerId: string | null, repoId: number | null, taskId: string | null = null): void {
-    const payload: Wire.ForemanMessage = { type: "foreman_error", message, fatal };
+  private sendError(ws: WebSocket, message: string, fatal: boolean, workerId: string | null, repoId: number | null, taskId: string | null = null, errorType?: string): void {
+    const payload: Wire.ForemanMessage = errorType
+      ? { type: "foreman_error", message, fatal, errorType }
+      : { type: "foreman_error", message, fatal };
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(payload));
     }
@@ -352,9 +354,13 @@ export class ForemanWss {
     }
 
     const { appId, appPrivateKey } = getConfig();
-    const useGithubTokenAuth = !!(msg.githubToken && appId && appPrivateKey && repo.installationId !== null);
 
-    if (useGithubTokenAuth) {
+    if (msg.githubToken && appId && appPrivateKey) {
+      if (repo.installationId === null) {
+        log(`[worker ${shortWorkerId(workerId)}] App not installed on ${msg.repo} — rejecting`);
+        this.sendError(ws, `Brunel is not installed on ${msg.repo}`, false, workerId, repo.id, null, "app_not_installed");
+        return;
+      }
       let authorized: boolean;
       try {
         const installation = await repo.installation;

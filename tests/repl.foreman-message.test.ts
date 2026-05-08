@@ -197,6 +197,31 @@ describe("printForemanMessage - foreman_error", () => {
     const output = captureOutput(() => testDisplay.printForemanMessage(msg));
     expect(stripAnsi(output)).toContain("[foreman error]");
   });
+
+  it("app_not_installed: renders the repo name and install link", () => {
+    const msg: Wire.ForemanMessage = {
+      type: "foreman_error",
+      message: "Brunel is not installed on owner/my-repo",
+      fatal: false,
+      errorType: "app_not_installed",
+    };
+    const output = captureOutput(() => testDisplay.printForemanMessage(msg));
+    const plain = stripAnsi(output);
+    expect(plain).toContain("Brunel is not installed on owner/my-repo");
+    expect(plain).toContain("https://github.com/apps/brunel");
+    expect(plain).toContain("Then run brunel again.");
+  });
+
+  it("app_not_installed: does not use the generic [foreman error] prefix", () => {
+    const msg: Wire.ForemanMessage = {
+      type: "foreman_error",
+      message: "Brunel is not installed on owner/my-repo",
+      fatal: false,
+      errorType: "app_not_installed",
+    };
+    const output = captureOutput(() => testDisplay.printForemanMessage(msg));
+    expect(stripAnsi(output)).not.toContain("[foreman error]");
+  });
 });
 
 describe("printForemanMessage - repo_activated", () => {

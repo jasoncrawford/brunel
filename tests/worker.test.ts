@@ -1657,6 +1657,37 @@ describe("foreman_error", () => {
     sendMsg(fakeWs, { type: "foreman_error", message: "Transient", fatal: false });
     expect(onFatal).not.toHaveBeenCalled();
   });
+
+  it("app_not_installed: calls printForemanMessage", () => {
+    sendMsg(fakeWs, { type: "foreman_error", message: "Brunel is not installed on owner/repo", fatal: false, errorType: "app_not_installed" });
+    expect(display.printForemanMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "foreman_error", errorType: "app_not_installed" })
+    );
+  });
+
+  it("app_not_installed: sets isActive to false", () => {
+    expect(session.isActive).toBe(true);
+    sendMsg(fakeWs, { type: "foreman_error", message: "Brunel is not installed on owner/repo", fatal: false, errorType: "app_not_installed" });
+    expect(session.isActive).toBe(false);
+  });
+
+  it("app_not_installed: emits 'fatal' event to return to REPL", () => {
+    const onFatal = vi.fn();
+    session.on("fatal", onFatal);
+    sendMsg(fakeWs, { type: "foreman_error", message: "Brunel is not installed on owner/repo", fatal: false, errorType: "app_not_installed" });
+    expect(onFatal).toHaveBeenCalledOnce();
+  });
+
+  it("app_not_installed: does not reconnect after handling", () => {
+    vi.useFakeTimers();
+    try {
+      sendMsg(fakeWs, { type: "foreman_error", message: "Brunel is not installed on owner/repo", fatal: false, errorType: "app_not_installed" });
+      vi.advanceTimersByTime(10000);
+      expect(wsFactory).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 // ── workspace slash commands via WorkerController ─────────────────────────────
