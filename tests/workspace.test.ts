@@ -30,7 +30,7 @@ async function makeWorkspace(
   exec = makeExec(),
   npm = makeNpmExec(),
 ): Promise<Workspace> {
-  const ws = new Workspace(BASE_DIR, WORKER_ID, REPO_URL, "/original-cwd", async () => true, exec, npm);
+  const ws = new Workspace(BASE_DIR, WORKER_ID, REPO_URL, "/original-cwd", async () => true, undefined, exec, npm);
   await ws.create();
   return ws;
 }
@@ -397,5 +397,70 @@ describe("Workspace.prune", () => {
     const removed = await ws.prune();
     expect(fs.existsSync(path.join(BASE_DIR, "somefile.txt"))).toBe(true);
     expect(removed).toHaveLength(0);
+  });
+});
+
+// ── http.extraHeader auth ─────────────────────────────────────────────────────
+
+const CLEAN_REPO_URL = "https://github.com/owner/repo.git";
+
+async function makeWorkspaceWithToken(
+  token: string,
+  exec = makeExec(),
+  npm = makeNpmExec(),
+): Promise<Workspace> {
+  const ws = new Workspace(BASE_DIR, WORKER_ID, CLEAN_REPO_URL, "/original-cwd", async () => true, token, exec, npm);
+  await ws.create();
+  return ws;
+}
+
+describe("Workspace git auth via extraHeader", () => {
+  it("sets http.extraHeader via git config after clone when token is provided", async () => {
+    const exec = makeExec();
+    await makeWorkspaceWithToken("ghp_mytoken", exec);
+    expect(exec).toHaveBeenCalledWith(
+      ["config", "--local", "http.https://github.com/.extraheader", "Authorization: Bearer ghp_mytoken"],
+      path.join(BASE_DIR, WORKER_ID),
+    );
+  });
+
+  it("does not set http.extraHeader when no token is provided", async () => {
+    const exec = makeExec();
+    await makeWorkspace(exec);
+    const configCalls = exec.mock.calls.filter((args) => args[0][0] === "config");
+    expect(configCalls).toHaveLength(0);
+  });
+
+  it("sets http.extraHeader after re-clone during reset when token is provided", async () => {
+    let fetchCalls = 0;
+    const exec = vi.fn().mockImplementation(async (args: string[]) => {
+      if (args[0] === "fetch") {
+        if (fetchCalls++ < 2) throw new Error("simulated network failure");
+      }
+      if (args[0] === "clone") {
+        fs.mkdirSync(path.join(args[2], ".git", "info"), { recursive: true });
+        fs.writeFileSync(path.join(args[2], "package.json"), "{}");
+      }
+      return "";
+    });
+    const ws = await makeWorkspaceWithToken("ghp_mytoken", exec);
+    exec.mockClear();
+    fetchCalls = 0;
+    await ws.reset();
+
+    expect(exec).toHaveBeenCalledWith(
+      ["config", "--local", "http.https://github.com/.extraheader", "Authorization: Bearer ghp_mytoken"],
+      path.join(BASE_DIR, WORKER_ID),
+    );
+  });
+
+  it("clone URL does not contain the token", async () => {
+    const exec = makeExec();
+    await makeWorkspaceWithToken("ghp_secret", exec);
+    const cloneCalls = exec.mock.calls.filter((args) => args[0][0] === "clone");
+    expect(cloneCalls.length).toBeGreaterThan(0);
+    const cloneUrl: string = cloneCalls[0][0][1];
+    expect(cloneUrl).not.toContain("ghp_secret");
+    expect(cloneUrl).toBe(CLEAN_REPO_URL);
   });
 });

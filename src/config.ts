@@ -27,8 +27,8 @@ const BrunelConfigSchema = z.object({
 
   /** GitHub repo in "owner/repo" format. Optional; workers detect it from git remote automatically. */
   githubRepo:     z.string().min(1).optional(),
-  /** GitHub personal access token with `repo` scope. Required. Prefer env var over config file. */
-  githubToken:    z.string().min(1),
+  /** GitHub personal access token with `repo` scope. Prefer env var over config file. Workers also fall back to `gh auth token` if this is unset. */
+  githubToken:    z.string().min(1).optional(),
   /** Issue label that triggers work (foreman picks up issues with this label). */
   taskLabel:      z.string().default(DEFAULT_TASK_LABEL),
   /** Enable verbose output (shows full Claude message stream). */
@@ -57,7 +57,7 @@ const BrunelConfigSchema = z.object({
   permissionMode: z.enum(VALID_PERMISSION_MODES).default("default"),
   /** Base directory for worker checkout directories. Defaults to ~/.brunel/workers at runtime. */
   workspaceDir:   z.string().optional(),
-  /** Override the git repo URL used for workspace clones. Defaults to https://{token}@github.com/{repo}.git. */
+  /** Override the git repo URL used for workspace clones. Defaults to https://github.com/{repo}.git. */
   repoUrl:        z.string().optional(),
   /** Claude model alias (e.g. 'sonnet', 'opus') or full model ID (e.g. 'claude-sonnet-4-6'). */
   model:          z.string().optional(),

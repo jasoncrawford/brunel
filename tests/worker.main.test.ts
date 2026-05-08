@@ -2,6 +2,17 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ── Module mocks ────────────────────────────────────────────────────────────
 
+// Mock GithubToken to prevent real `gh` CLI calls. resolve() returns
+// configToken directly (preserving env-token → workspace creation) with no CLI subprocess.
+vi.mock("../src/agent/models/github-token.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/agent/models/github-token.js")>();
+  class MockGithubToken {
+    constructor(private config?: { githubToken?: string }) {}
+    resolve() { return Promise.resolve(this.config?.githubToken ?? null); }
+  }
+  return { ...actual, GithubToken: MockGithubToken };
+});
+
 vi.mock("ws", async () => {
   const { EventEmitter } = await import("node:events");
   // Use a real class so `new WebSocket(...)` works correctly

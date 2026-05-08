@@ -40,6 +40,7 @@ export class Workspace extends EventEmitter {
     private readonly repoUrl: string,
     readonly originalCwd: string,
     readonly confirm: (msg: string) => Promise<boolean>,
+    private readonly githubToken?: string,
     private readonly exec: GitExec = defaultGitExec,
     private readonly npm: NpmExec = defaultNpmExec,
   ) {
@@ -60,6 +61,7 @@ export class Workspace extends EventEmitter {
       this.emit("create-start", { dir: this.dir });
       this.emit("clone-start", { repoUrl: this.repoUrl, dir: this.dir });
       await this.exec(["clone", this.repoUrl, this.dir], undefined);
+      await this._configureAuth();
       await this._npmInstall();
     }
     fs.writeFileSync(path.join(this.dir, ".brunel.lock"), String(process.pid));
@@ -89,6 +91,7 @@ export class Workspace extends EventEmitter {
       fs.mkdirSync(path.dirname(this.dir), { recursive: true });
       this.emit("clone-start", { repoUrl: this.repoUrl, dir: this.dir });
       await this.exec(["clone", this.repoUrl, this.dir], undefined);
+      await this._configureAuth();
       fs.writeFileSync(path.join(this.dir, ".brunel.lock"), String(process.pid));
       this._ensureLocallyIgnored(".brunel.lock");
       await this._doReset(); // throws if still broken — propagates to caller
@@ -101,6 +104,15 @@ export class Workspace extends EventEmitter {
     await this.exec(["reset", "--hard", "origin/main"], this.dir);
     await this.exec(["clean", "-fdx", "-e", "node_modules", "-e", ".env", "-e", ".brunel.lock"], this.dir);
     await this._npmInstall();
+  }
+
+  /** Set http.extraHeader so git auth uses a Bearer token instead of a token-in-URL. */
+  private async _configureAuth(): Promise<void> {
+    if (!this.githubToken) return;
+    await this.exec(
+      ["config", "--local", "http.https://github.com/.extraheader", `Authorization: Bearer ${this.githubToken}`],
+      this.dir,
+    );
   }
 
   private _ensureLocallyIgnored(pattern: string): void {

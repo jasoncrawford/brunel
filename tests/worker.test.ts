@@ -3116,3 +3116,43 @@ describe("lastSeenEventSeqId", () => {
     }
   });
 });
+
+// ── worker_hello githubToken ──────────────────────────────────────────────────
+
+describe("worker_hello githubToken", () => {
+  function getHelloMessages(ws: FakeWs): Record<string, unknown>[] {
+    return ws.send.mock.calls
+      .map((args) => { try { return JSON.parse(args[0] as string); } catch { return null; } })
+      .filter((m): m is Record<string, unknown> => m?.type === "worker_hello");
+  }
+
+  it("includes githubToken in worker_hello when provided in options", async () => {
+    const tokenWs = new FakeWs();
+    const tokenFactory = vi.fn().mockReturnValue(tokenWs);
+    const s = new WorkerController(
+      new AgentStatus({ agentId: AGENT_ID }),
+      display,
+      undefined,
+      undefined,
+      "owner/repo",
+      { wsFactory: tokenFactory, githubToken: "ghp_testtoken" },
+    );
+    await s.start();
+    tokenWs.emit("open");
+    await new Promise<void>((r) => setImmediate(r));
+
+    const hellos = getHelloMessages(tokenWs);
+    expect(hellos.length).toBeGreaterThan(0);
+    expect(hellos[0].githubToken).toBe("ghp_testtoken");
+  });
+
+  it("omits githubToken from worker_hello when not provided in options", async () => {
+    // The default session from beforeEach has no githubToken in options
+    fakeWs.emit("open");
+    await new Promise<void>((r) => setImmediate(r));
+
+    const hellos = getHelloMessages(fakeWs);
+    expect(hellos.length).toBeGreaterThan(0);
+    expect(hellos[0].githubToken).toBeUndefined();
+  });
+});

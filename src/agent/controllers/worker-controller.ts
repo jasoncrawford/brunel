@@ -43,6 +43,8 @@ export type WorkerControllerOptions = {
   wsFactory?: WsFactory;
   /** Override the afterTask hook (default: derived from workspaceController.onReset). */
   afterTask?: () => Promise<void>;
+  /** GitHub token to include in worker_hello for the foreman. */
+  githubToken?: string;
 };
 
 // Messages that must wait for hello_ack before being sent.
@@ -868,6 +870,7 @@ export class WorkerController extends EventEmitter {
         ...(this.currentTaskId !== undefined && { taskId: this.currentTaskId }),
         status: isAssigned ? "assigned" : (hasPendingClaim ? "reserved" : "ready"),
         ...(isAssigned && this.lastSeenEventSeqId !== undefined && { lastSeenEventSeqId: this.lastSeenEventSeqId }),
+        ...(this.options?.githubToken !== undefined && { githubToken: this.options.githubToken }),
       } satisfies Wire.WorkerMessage));
 
       this.connectionState = "hello_sent";

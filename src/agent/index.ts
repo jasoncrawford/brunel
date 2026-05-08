@@ -10,6 +10,7 @@ import { Picker } from "./views/picker.js";
 import { WorkerController } from "./controllers/worker-controller.js";
 import { loadConfig, getConfig, parseCommandFromArgs, type BrunelConfig } from "../config.js";
 import { Workspace } from "./models/workspace.js";
+import { GithubToken } from "./models/github-token.js";
 import { fmtError } from "../utils.js";
 import { Settings } from "./models/settings.js";
 import { CommandRegistry, CommandController } from "./controllers/command-controller.js";
@@ -67,17 +68,26 @@ export class BrunelAgent {
    * exit after running instead of entering the REPL loop. Commands must have
    * canRunFromArgs: true to be invocable this way.
    */
+
   async start(cliCommand: { command: string; args: string } | null): Promise<void> {
     // Always detect the repo so /worker:start can use it at runtime.
     const repo = await AgentStatus.getRemoteRepo();
     // Show current branch in the minimal status bar before worker mode activates.
     await this.agentStatus.refreshBranch();
 
-    // Build workspace config after repo detection. repoUrl can be set explicitly
-    // in config; otherwise it's derived from the detected git remote + token.
+    // Resolve GitHub token: config/env → gh CLI fallback.
     const { config } = this;
-    const repoUrl = config.repoUrl ?? (repo && config.githubToken
-      ? `https://${config.githubToken}@github.com/${repo}.git`
+    const githubToken = await new GithubToken(config).resolve();
+    if (!githubToken) {
+      this.display.print(c.amber(
+        "No GitHub token found. Run `gh auth login` or set GITHUB_TOKEN to enable workspace cloning.",
+      ));
+    }
+
+    // Build workspace config. Clean URL keeps the token out of process listings;
+    // auth is applied via http.extraHeader after clone (see Workspace._configureAuth).
+    const repoUrl = config.repoUrl ?? (repo && githubToken
+      ? `https://github.com/${repo}.git`
       : undefined);
     const workspaceCfg = repoUrl
       ? {
@@ -86,7 +96,7 @@ export class BrunelAgent {
         }
       : undefined;
     const workspace = workspaceCfg
-      ? new Workspace(workspaceCfg.workspaceDir, this.agentStatus.agentId, workspaceCfg.repoUrl, this.originalCwd, this.confirm)
+      ? new Workspace(workspaceCfg.workspaceDir, this.agentStatus.agentId, workspaceCfg.repoUrl, this.originalCwd, this.confirm, githubToken ?? undefined)
       : undefined;
     const workspaceController = new WorkspaceController(workspace, this.display, config);
 
@@ -123,7 +133,9 @@ export class BrunelAgent {
 
     // ── Worker controller ─────────────────────────────────────────────────────
 
-    const workerController = new WorkerController(this.agentStatus, this.display, this.picker, workspaceController, repo);
+    const workerController = new WorkerController(this.agentStatus, this.display, this.picker, workspaceController, repo, {
+      ...(githubToken !== null && { githubToken }),
+    });
     workerController.on("prompts_ready", () => {
       this.input.cancel();
       enqueueRoutingEvent({ type: "session", event: "prompts_ready" });
