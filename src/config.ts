@@ -27,7 +27,7 @@ const BrunelConfigSchema = z.object({
 
   /** GitHub repo in "owner/repo" format. Optional; workers detect it from git remote automatically. */
   githubRepo:     z.string().min(1).optional(),
-  /** GitHub personal access token with `repo` scope. Prefer env var over config file. Workers can also resolve this via `gh auth token` or an interactive prompt at startup. */
+  /** GitHub personal access token with `repo` scope. Prefer env var over config file. Workers also fall back to `gh auth token` if this is unset. */
   githubToken:    z.string().min(1).optional(),
   /** Issue label that triggers work (foreman picks up issues with this label). */
   taskLabel:      z.string().default(DEFAULT_TASK_LABEL),

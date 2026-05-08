@@ -75,9 +75,9 @@ export class BrunelAgent {
     // Show current branch in the minimal status bar before worker mode activates.
     await this.agentStatus.refreshBranch();
 
-    // Resolve GitHub token: gh CLI → env/config.
+    // Resolve GitHub token: config/env → gh CLI fallback.
     const { config } = this;
-    const githubToken = await GithubToken.resolve(config.githubToken);
+    const githubToken = await new GithubToken(config.githubToken).resolve();
     if (!githubToken) {
       this.display.print(c.amber(
         "No GitHub token found. Run `gh auth login` or set GITHUB_TOKEN to enable workspace cloning.",

@@ -2,12 +2,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ── Module mocks ────────────────────────────────────────────────────────────
 
-// Stub gh-CLI token resolution so tests don't invoke the real `gh` binary.
-// We only mock fromCli (the slow part) so resolve() still falls back to
-// config.githubToken from the environment, which is needed for workspace creation.
+// Mock GithubToken to prevent real `gh` CLI calls. resolve() returns
+// configToken directly (preserving env-token → workspace creation) with no CLI subprocess.
 vi.mock("../src/agent/models/github-token.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/agent/models/github-token.js")>();
-  return { ...actual, GithubToken: { ...actual.GithubToken, fromCli: vi.fn().mockResolvedValue(null) } };
+  class MockGithubToken {
+    constructor(private configToken?: string) {}
+    resolve() { return Promise.resolve(this.configToken ?? null); }
+  }
+  return { ...actual, GithubToken: MockGithubToken };
 });
 
 vi.mock("ws", async () => {
