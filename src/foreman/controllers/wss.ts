@@ -374,7 +374,8 @@ export class ForemanWss {
       }
     } else {
       if (this.config.workerSecret && msg.workerSecret !== this.config.workerSecret) {
-        ws.close(4001, "unauthorized");
+        log(`[worker ${shortWorkerId(workerId)}] worker secret mismatch — rejecting`);
+        this.sendError(ws, "Unauthorized: invalid worker secret", true, workerId, repo.id);
         return;
       }
     }

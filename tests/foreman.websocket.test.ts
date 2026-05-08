@@ -645,12 +645,15 @@ describe("worker secret enforcement", () => {
 
   it("rejects worker_hello with wrong secret when workerSecret is configured", async () => {
     const { server, secretWss, port } = await makeSecretServer("correct-secret");
+    const ws = await connectWorker(port);
     try {
-      const ws = await connectWorker(port);
       send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w1", status: "ready", workerSecret: "wrong" });
-      await new Promise<void>((resolve) => ws.once("close", resolve));
-      expect(ws.readyState).toBe(WebSocket.CLOSED);
+      const msg = await nextMsg(ws);
+      expect(msg.type).toBe("foreman_error");
+      if (msg.type === "foreman_error") expect(msg.fatal).toBe(true);
+      expect(Worker.fromRegistry("w1")).toBeUndefined();
     } finally {
+      await closeClient(ws);
       await new Promise<void>((r) => secretWss.close(() => server.close(r)));
     }
   });
