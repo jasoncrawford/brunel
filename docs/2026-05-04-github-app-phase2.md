@@ -142,6 +142,8 @@ ALTER TABLE repos ADD COLUMN installation_id bigint REFERENCES installations(id)
 
 ## Issue breakdown
 
+> **Note:** This is a preliminary list of planned issues, not kept up to date. For current status, see the GitHub milestone.
+
 Each issue must leave the app fully functional for existing users. New App-based pathways are additive alongside the existing `workerSecret` / personal-token pathways; neither is removed during this milestone (cleanup is a separate decision).
 
 | # | Title | Depends on |

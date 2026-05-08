@@ -3,6 +3,7 @@ import type { Database } from "../../database.types.js";
 import * as Wire from "../../../shared/wire.js";
 import { db } from "../clients/db-client.js";
 import { ActiveRecord } from "./active-record.js";
+import { Installation } from "./installation.js";
 import { Task } from "./task.js";
 import { TaskManager } from "./task-manager.js";
 
@@ -20,6 +21,7 @@ export class Repo extends ActiveRecord {
   readonly fullName: string;
   status: RepoStatus;
   readonly createdAt: string;
+  readonly installationId: number | null;
 
   private constructor(row: DbRow) {
     super();
@@ -27,6 +29,7 @@ export class Repo extends ActiveRecord {
     this.fullName = row.full_name;
     this.status = row.status as RepoStatus;
     this.createdAt = row.created_at;
+    this.installationId = row.installation_id;
   }
 
   protected getPrimaryKeyValue(): number {
@@ -52,6 +55,12 @@ export class Repo extends ActiveRecord {
   /** Convenience accessor — returns the per-repo TaskManager instance. */
   get taskManager(): TaskManager {
     return TaskManager.forRepo(this);
+  }
+
+  /** Returns the GitHub App installation linked to this repo, or null if not set. */
+  get installation(): Promise<Installation | null> {
+    if (this.installationId === null) return Promise.resolve(null);
+    return Installation.get(this.installationId);
   }
 
   async getTaskByIssue(issueNumber: number): Promise<Task | null> {

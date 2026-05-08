@@ -12,26 +12,61 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      installations: {
+        Row: {
+          id: number
+          github_id: number
+          account_login: string
+          account_type: string
+          created_at: string
+        }
+        Insert: {
+          id?: never
+          github_id: number
+          account_login: string
+          account_type: string
+          created_at?: string
+        }
+        Update: {
+          id?: never
+          github_id?: number
+          account_login?: string
+          account_type?: string
+          created_at?: string
+        }
+        Relationships: []
+      }
       repos: {
         Row: {
           id: number
           full_name: string
           status: string
           created_at: string
+          installation_id: number | null
         }
         Insert: {
           id?: never
           full_name: string
           status?: string
           created_at?: string
+          installation_id?: number | null
         }
         Update: {
           id?: never
           full_name?: string
           status?: string
           created_at?: string
+          installation_id?: number | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "repos_installation_id_fkey"
+            columns: ["installation_id"]
+            isOneToOne: false
+            referencedRelation: "installations"
+            referencedColumns: ["id"]
+          }
+        ]
       }
       workers: {
         Row: {
