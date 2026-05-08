@@ -352,9 +352,13 @@ export class ForemanWss {
     }
 
     const { appId, appPrivateKey } = getConfig();
-    const useGithubTokenAuth = !!(msg.githubToken && appId && appPrivateKey && repo.installationId !== null);
 
-    if (useGithubTokenAuth) {
+    if (msg.githubToken && appId && appPrivateKey) {
+      if (repo.installationId === null) {
+        log(`[worker ${shortWorkerId(workerId)}] App not installed on ${msg.repo} — rejecting`);
+        this.sendError(ws, `Brunel is not installed on ${msg.repo}.\nInstall it at: https://github.com/apps/brunel\nThen run brunel again.`, true, workerId, repo.id);
+        return;
+      }
       let authorized: boolean;
       try {
         const installation = await repo.installation;

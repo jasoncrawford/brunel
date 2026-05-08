@@ -1381,24 +1381,28 @@ describe("GitHub token auth in worker_hello", () => {
     }
   });
 
-  it("falls back to workerSecret auth when repo has no installation", async () => {
-    // App configured but repo has no installation_id — should fall back to workerSecret
+  it("sends fatal foreman_error when App is configured but repo has no installation", async () => {
     getConfig().appId = "app-1";
     getConfig().appPrivateKey = makeTestPrivateKey();
 
     const srv = http.createServer();
-    const { wss: secretWss } = new ForemanWss({ server: srv, config: { ...defaultCfg, workerSecret: "s3cr3t" } });
+    const { wss: appWss } = new ForemanWss({ server: srv, config: { ...defaultCfg } });
     const p = await new Promise<number>((r) => srv.listen(0, () => r((srv.address() as AddressInfo).port)));
     const ws = await connectWorker(p);
     try {
       // "owner/repo" is the default test repo with no installation_id
-      send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w-auth-5", status: "ready", githubToken: "ghp_personal", workerSecret: "s3cr3t" });
-      const ack = await nextMsg(ws);
-      expect(ack.type).toBe("hello_ack");
+      send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w-auth-5", status: "ready", githubToken: "ghp_personal" });
+      const msg = await nextMsg(ws);
+      expect(msg.type).toBe("foreman_error");
+      if (msg.type === "foreman_error") {
+        expect(msg.fatal).toBe(true);
+        expect(msg.message).toContain("owner/repo");
+        expect(msg.message).toContain("https://github.com/apps/brunel");
+      }
       expect(fetch).not.toHaveBeenCalled();
     } finally {
       await closeClient(ws);
-      await new Promise<void>((r) => secretWss.close(() => srv.close(r)));
+      await new Promise<void>((r) => appWss.close(() => srv.close(r)));
     }
   });
 
