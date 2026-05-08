@@ -1381,7 +1381,7 @@ describe("GitHub token auth in worker_hello", () => {
     }
   });
 
-  it("sends app_not_installed error when App is configured but repo has no installation", async () => {
+  it("sends fatal foreman_error when App is configured but repo has no installation", async () => {
     getConfig().appId = "app-1";
     getConfig().appPrivateKey = makeTestPrivateKey();
 
@@ -1395,9 +1395,9 @@ describe("GitHub token auth in worker_hello", () => {
       const msg = await nextMsg(ws);
       expect(msg.type).toBe("foreman_error");
       if (msg.type === "foreman_error") {
-        expect(msg.fatal).toBe(false);
-        expect(msg.errorType).toBe("app_not_installed");
+        expect(msg.fatal).toBe(true);
         expect(msg.message).toContain("owner/repo");
+        expect(msg.message).toContain("https://github.com/apps/brunel");
       }
       expect(fetch).not.toHaveBeenCalled();
     } finally {

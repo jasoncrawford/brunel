@@ -964,14 +964,6 @@ export class WorkerController extends EventEmitter {
         this.currentAc?.abort(); // abort any running query immediately
         this.ws?.close();
         this.emit("fatal");
-      } else if (msg.errorType === "app_not_installed") {
-        this._stopped = true;
-        this.ws?.close();
-        this.resetSessionState();
-        this._isActive = false;
-        this.agentStatus.setWorkerModeActive(false);
-        this.emit("fatal"); // wake up the routing loop to return to REPL
-        await this.agentStatus.refreshBranch();
       }
       return;
     }

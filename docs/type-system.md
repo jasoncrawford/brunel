@@ -83,7 +83,7 @@ export type ForemanMessage =
   | { type: "event_notification"; taskId: string; event: WebhookEvent }
   | { type: "hello_ack"; workerId: string; status: "ready" | "reserved" | "assigned" | "cancelled"; repoStatus: "new" | "active" }
   | { type: "repo_activated"; workerId: string }
-  | { type: "foreman_error"; message: string; fatal: boolean; errorType?: string };
+  | { type: "foreman_error"; message: string; fatal: boolean };
 
 export type WorkerMessage =
   | { type: "worker_hello"; workerId: string; repo: string; taskId?: string; status: "ready" | "reserved" | "assigned" }

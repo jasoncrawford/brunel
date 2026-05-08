@@ -400,16 +400,7 @@ export class Renderer {
     event_notification: { verbose: (m) => c.darkGray(`Event received [${fmtTime()}]: ${fmtEvent(m.event as Wire.WebhookEvent)}`) },
     hello_ack:          { verbose: (m) => c.darkGray(`hello_ack: ${m.status}`) },
     repo_activated:     () => c.sageGreen("Repo activated. Waiting for tasks..."),
-    foreman_error:      (m) => {
-      if (m.errorType === "app_not_installed") {
-        return [
-          c.boldRed(m.message),
-          c.amber("Install it at: https://github.com/apps/brunel"),
-          c.amber("Then run brunel again."),
-        ].join("\n");
-      }
-      return c.boldRed(`[foreman error] ${m.message}`);
-    },
+    foreman_error:      (m) => c.boldRed(`[foreman error] ${m.message}`),
     _default:           (m) => c.darkGray(`Unknown foreman message: ${m.type}`),
   };
 
