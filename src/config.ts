@@ -72,6 +72,15 @@ const BrunelConfigSchema = z.object({
   supabaseSecretKey: z.string().optional(),
   /** Shared secret used to authenticate workers connecting to the foreman. Optional. Prefer env var over config file. */
   workerSecret:           z.string().optional(),
+
+  // ── GitHub App ─────────────────────────────────────────────────────────────
+
+  /** GitHub App ID. Optional; required for App-based auth. */
+  appId:               z.string().optional(),
+  /** PEM private key for signing GitHub App JWTs. Optional; required for App-based auth. Prefer env var over config file. */
+  appPrivateKey:       z.string().optional(),
+  /** Webhook secret for verifying GitHub App webhook signatures. Optional. Prefer env var over config file. */
+  appWebhookSecret:    z.string().optional(),
 });
 
 export type BrunelConfig = Omit<z.infer<typeof BrunelConfigSchema>, "thinkOutLoud" | "effort"> & {
@@ -96,7 +105,7 @@ const explorer = cosmiconfig("brunel", {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /** Config keys whose values should never be committed to source control. */
-const SECRET_KEYS = ["githubToken", "webhookSecret", "supabaseSecretKey", "workerSecret"] as const;
+const SECRET_KEYS = ["githubToken", "webhookSecret", "supabaseSecretKey", "workerSecret", "appPrivateKey", "appWebhookSecret"] as const;
 
 function warnIfSecretsInFile(
   config: Record<string, unknown>,

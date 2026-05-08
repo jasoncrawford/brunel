@@ -22,6 +22,9 @@ const ENV_KEYS = [
   "BRUNEL_WORKSPACE_DIR",
   "BRUNEL_MODEL",
   "BRUNEL_EFFORT",
+  "BRUNEL_APP_ID",
+  "BRUNEL_APP_PRIVATE_KEY",
+  "BRUNEL_APP_WEBHOOK_SECRET",
 ];
 
 beforeEach(() => {
@@ -641,5 +644,97 @@ describe("parseCommandFromArgs", () => {
       command: "prune",
       args: "",
     });
+  });
+});
+
+// ── GitHub App credentials ────────────────────────────────────────────────────
+
+describe("appId", () => {
+  it("is undefined by default", async () => {
+    baseEnv();
+    const cfg = await loadConfig(["node", "repl.js"]);
+    expect(cfg.appId).toBeUndefined();
+  });
+
+  it("BRUNEL_APP_ID sets appId", async () => {
+    baseEnv();
+    process.env.BRUNEL_APP_ID = "123456";
+    const cfg = await loadConfig(["node", "repl.js"]);
+    expect(cfg.appId).toBe("123456");
+  });
+
+  it("--app-id CLI flag sets appId", async () => {
+    baseEnv();
+    const cfg = await loadConfig(["node", "repl.js", "--app-id", "789"]);
+    expect(cfg.appId).toBe("789");
+  });
+
+  it("CLI flag beats BRUNEL_APP_ID", async () => {
+    baseEnv();
+    process.env.BRUNEL_APP_ID = "env-id";
+    const cfg = await loadConfig(["node", "repl.js", "--app-id", "cli-id"]);
+    expect(cfg.appId).toBe("cli-id");
+  });
+});
+
+describe("appPrivateKey", () => {
+  it("is undefined by default", async () => {
+    baseEnv();
+    const cfg = await loadConfig(["node", "repl.js"]);
+    expect(cfg.appPrivateKey).toBeUndefined();
+  });
+
+  it("BRUNEL_APP_PRIVATE_KEY sets appPrivateKey", async () => {
+    baseEnv();
+    process.env.BRUNEL_APP_PRIVATE_KEY = "-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END RSA PRIVATE KEY-----";
+    const cfg = await loadConfig(["node", "repl.js"]);
+    expect(cfg.appPrivateKey).toContain("BEGIN RSA PRIVATE KEY");
+  });
+
+  it("warns when appPrivateKey in file config", async () => {
+    baseEnv();
+    await loadConfig(["node", "repl.js"], { appPrivateKey: "-----BEGIN RSA PRIVATE KEY-----\ntest" });
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("appPrivateKey"));
+  });
+
+  it("does NOT warn when appPrivateKey from env var", async () => {
+    baseEnv();
+    process.env.BRUNEL_APP_PRIVATE_KEY = "pem-key";
+    await loadConfig(["node", "repl.js"]);
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("appWebhookSecret", () => {
+  it("is undefined by default", async () => {
+    baseEnv();
+    const cfg = await loadConfig(["node", "repl.js"]);
+    expect(cfg.appWebhookSecret).toBeUndefined();
+  });
+
+  it("BRUNEL_APP_WEBHOOK_SECRET sets appWebhookSecret", async () => {
+    baseEnv();
+    process.env.BRUNEL_APP_WEBHOOK_SECRET = "my-app-secret";
+    const cfg = await loadConfig(["node", "repl.js"]);
+    expect(cfg.appWebhookSecret).toBe("my-app-secret");
+  });
+
+  it("--app-webhook-secret CLI flag sets appWebhookSecret", async () => {
+    baseEnv();
+    const cfg = await loadConfig(["node", "repl.js", "--app-webhook-secret", "cli-secret"]);
+    expect(cfg.appWebhookSecret).toBe("cli-secret");
+  });
+
+  it("warns when appWebhookSecret in file config", async () => {
+    baseEnv();
+    await loadConfig(["node", "repl.js"], { appWebhookSecret: "file-secret" });
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("appWebhookSecret"));
+  });
+
+  it("does NOT warn when appWebhookSecret from env var", async () => {
+    baseEnv();
+    process.env.BRUNEL_APP_WEBHOOK_SECRET = "env-secret";
+    await loadConfig(["node", "repl.js"]);
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 });
