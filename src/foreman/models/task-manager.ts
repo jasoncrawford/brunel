@@ -70,7 +70,13 @@ export class TaskManager extends EventEmitter {
 
   // ── Instance state ───────────────────────────────────────────────────────
   readonly repo: Repo;
-  private readonly github: GithubClient;
+  private readonly _github: GithubClient;
+
+  private get github(): GithubClient {
+    return this.repo.installationId !== null
+      ? new GithubClient(this.repo.fullName, this.repo.installationId)
+      : this._github;
+  }
 
   // ── Ephemeral in-memory state (no DB backing) ────────────────────────────
   private branchToTaskId = new Map<string, string>();
@@ -91,7 +97,7 @@ export class TaskManager extends EventEmitter {
   constructor(repo: Repo) {
     super();
     this.repo = repo;
-    this.github = new GithubClient(repo.fullName);
+    this._github = new GithubClient(repo.fullName);
     this._openIssues = new Set();
     this._blockers = new Map();
     this._blockersLoaded = new Set();
@@ -440,8 +446,7 @@ export class TaskManager extends EventEmitter {
    *  Called at startup after loadActiveTasksFromDb, and on installation/activation events. */
   async loadIssuesFromGithub(): Promise<void> {
     const repo = this.repo.fullName;
-    const installation = await this.repo.installation;
-    const github = installation ? new GithubClient(repo, installation.githubId) : this.github;
+    const github = this.github;
     const issues = await github.fetchIssues();
 
     const allBlockerNumbers = new Set<number>();
