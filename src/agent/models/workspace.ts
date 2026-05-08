@@ -40,9 +40,9 @@ export class Workspace extends EventEmitter {
     private readonly repoUrl: string,
     readonly originalCwd: string,
     readonly confirm: (msg: string) => Promise<boolean>,
+    private readonly githubToken?: string,
     private readonly exec: GitExec = defaultGitExec,
     private readonly npm: NpmExec = defaultNpmExec,
-    private readonly githubToken?: string,
   ) {
     super();
     this.workspaceDir = workspaceDir;

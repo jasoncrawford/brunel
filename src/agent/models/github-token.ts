@@ -3,48 +3,28 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFileCb);
 
-export type GhExec = (cmd: string, args: string[]) => Promise<string>;
+export const GithubToken = {
+  /** Try `gh auth token`. Returns the token string, or null on any failure. */
+  async fromCli(): Promise<string | null> {
+    try {
+      const { stdout } = await execFileAsync("gh", ["auth", "token"]);
+      return stdout.trim() || null;
+    } catch {
+      return null;
+    }
+  },
 
-const defaultGhExec: GhExec = async (cmd, args) => {
-  const { stdout } = await execFileAsync(cmd, args);
-  return stdout;
-};
-
-/**
- * Try to get a GitHub token from the gh CLI (`gh auth token`).
- * Returns the token string, or null if gh is not installed, not authenticated,
- * or the command fails for any reason.
- */
-export async function resolveGithubTokenFromCli(exec: GhExec = defaultGhExec): Promise<string | null> {
-  try {
-    const output = await exec("gh", ["auth", "token"]);
-    const token = output.trim();
-    return token || null;
-  } catch {
+  /**
+   * Resolve a GitHub token in priority order:
+   * 1. gh CLI (`gh auth token`)
+   * 2. configToken (from GITHUB_TOKEN / BRUNEL_GITHUB_TOKEN env / config file)
+   *
+   * Returns null if no token is available.
+   */
+  async resolve(configToken?: string): Promise<string | null> {
+    const cliToken = await this.fromCli();
+    if (cliToken) return cliToken;
+    if (configToken) return configToken;
     return null;
-  }
-}
-
-export type ResolveGithubTokenOptions = {
-  /** Token from gh CLI (pass null if not available or failed). */
-  cliToken: string | null;
-  /** Token from config/env vars (may be undefined if not set). */
-  configToken: string | undefined;
-  /** Async function to prompt the user for a token. Called only as last resort. */
-  promptFn?: () => Promise<string | null>;
+  },
 };
-
-/**
- * Resolve a GitHub token using the priority order:
- * 1. gh CLI token (cliToken)
- * 2. Config/env-var token (configToken)
- * 3. Prompt the user (promptFn)
- *
- * Returns null if no token could be resolved.
- */
-export async function resolveGithubToken(opts: ResolveGithubTokenOptions): Promise<string | null> {
-  if (opts.cliToken) return opts.cliToken;
-  if (opts.configToken) return opts.configToken;
-  if (opts.promptFn) return opts.promptFn();
-  return null;
-}

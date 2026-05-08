@@ -30,7 +30,7 @@ async function makeWorkspace(
   exec = makeExec(),
   npm = makeNpmExec(),
 ): Promise<Workspace> {
-  const ws = new Workspace(BASE_DIR, WORKER_ID, REPO_URL, "/original-cwd", async () => true, exec, npm);
+  const ws = new Workspace(BASE_DIR, WORKER_ID, REPO_URL, "/original-cwd", async () => true, undefined, exec, npm);
   await ws.create();
   return ws;
 }
@@ -409,7 +409,7 @@ async function makeWorkspaceWithToken(
   exec = makeExec(),
   npm = makeNpmExec(),
 ): Promise<Workspace> {
-  const ws = new Workspace(BASE_DIR, WORKER_ID, CLEAN_REPO_URL, "/original-cwd", async () => true, exec, npm, token);
+  const ws = new Workspace(BASE_DIR, WORKER_ID, CLEAN_REPO_URL, "/original-cwd", async () => true, token, exec, npm);
   await ws.create();
   return ws;
 }
