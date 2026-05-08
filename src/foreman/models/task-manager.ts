@@ -442,8 +442,7 @@ export class TaskManager extends EventEmitter {
    *  Called at startup after loadActiveTasksFromDb, and on installation/activation events. */
   async loadIssuesFromGithub(): Promise<void> {
     const repo = this.repo.fullName;
-    const github = this.github;
-    const issues = await github.fetchIssues();
+    const issues = await this.github.fetchIssues();
 
     const allBlockerNumbers = new Set<number>();
     const loadedIssueNumbers: number[] = [];
@@ -467,7 +466,7 @@ export class TaskManager extends EventEmitter {
     }
 
     if (allBlockerNumbers.size > 0) {
-      const states = await github.fetchIssueStates(Array.from(allBlockerNumbers));
+      const states = await this.github.fetchIssueStates(Array.from(allBlockerNumbers));
       for (const [num, state] of states) {
         this.setIssueOpenState(num, state === "open");
       }
