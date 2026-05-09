@@ -3167,3 +3167,91 @@ describe("worker_hello githubToken", () => {
     expect(hellos[0].githubToken).toBeUndefined();
   });
 });
+
+// ── _deactivate() — unified teardown invariant ────────────────────────────────
+
+describe("_deactivate() — unified teardown invariant", () => {
+  it("stop() sets connectionStatus to 'disconnected' even when no socket exists (backoff case)", async () => {
+    vi.useFakeTimers();
+    try {
+      // Let the socket connect, then close it to enter reconnect backoff.
+      fakeWs.emit("close", 1006, Buffer.from(""));
+      // At this point we are in reconnect backoff — ws is pending a timer, no open socket.
+      // Call stop() before the backoff timer fires.
+      await session.stop();
+      // _deactivate() must have set connectionStatus directly without relying on a close event.
+      expect(sb.connectionStatus).toBe("disconnected");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stop() during reconnect backoff clears reconnectAt (countdown timer stopped)", async () => {
+    vi.useFakeTimers();
+    try {
+      fakeWs.emit("close", 1006, Buffer.from("")); // triggers backoff, sets reconnectAt
+      expect(sb.reconnectAt).toBeDefined(); // confirm it's set by the close handler
+
+      await session.stop();
+      // _deactivate() must clear reconnectAt — current code's _stopped path does not do this.
+      expect(sb.reconnectAt).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stop() sets workerModeActive to false synchronously before close event fires", async () => {
+    // Intercept the close handler to inspect state at the moment it fires.
+    let workerModeActiveAtClose: boolean | undefined;
+    const origClose = fakeWs.close.getMockImplementation();
+    fakeWs.close.mockImplementation(function(this: FakeWs) {
+      workerModeActiveAtClose = sb.workerModeActive;
+      origClose?.call(this);
+    });
+
+    await session.stop();
+
+    // workerModeActive must be false by the time close fires (set by _deactivate() before ws.close()).
+    expect(workerModeActiveAtClose).toBe(false);
+    expect(sb.workerModeActive).toBe(false);
+  });
+
+  it("stop() does not schedule a reconnect when the socket close event fires", async () => {
+    vi.useFakeTimers();
+    try {
+      await session.stop();
+      vi.advanceTimersByTime(10_000);
+      // wsFactory was called once on start(); stop() must not trigger a second call.
+      expect(wsFactory).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("fatal foreman_error sets connectionStatus to 'disconnected' synchronously", () => {
+    // _deactivate() must update status before ws.close() fires.
+    let statusAtClose: string | undefined;
+    const origClose = fakeWs.close.getMockImplementation();
+    fakeWs.close.mockImplementation(function(this: FakeWs) {
+      statusAtClose = sb.connectionStatus;
+      origClose?.call(this);
+    });
+
+    sendMsg(fakeWs, { type: "foreman_error", message: "Fatal error", fatal: true });
+    // Status should be "disconnected" both at close-event time and after.
+    expect(statusAtClose).toBe("disconnected");
+    expect(sb.connectionStatus).toBe("disconnected");
+  });
+
+  it("fatal foreman_error sets workerModeActive to false before close event fires", () => {
+    let workerModeActiveAtClose: boolean | undefined;
+    const origClose = fakeWs.close.getMockImplementation();
+    fakeWs.close.mockImplementation(function(this: FakeWs) {
+      workerModeActiveAtClose = sb.workerModeActive;
+      origClose?.call(this);
+    });
+
+    sendMsg(fakeWs, { type: "foreman_error", message: "Fatal error", fatal: true });
+    expect(workerModeActiveAtClose).toBe(false);
+  });
+});
