@@ -1657,6 +1657,17 @@ describe("foreman_error", () => {
     sendMsg(fakeWs, { type: "foreman_error", message: "Transient", fatal: false });
     expect(onFatal).not.toHaveBeenCalled();
   });
+
+  it("fatal: sets connectionStatus to 'disconnected' after ws closes", () => {
+    sendMsg(fakeWs, { type: "foreman_error", message: "Fatal error", fatal: true });
+    // FakeWs.close() fires the close event synchronously; connectionStatus must be updated
+    expect(sb.connectionStatus).toBe("disconnected");
+  });
+
+  it("fatal: sets isActive to false so the routing loop shows the REPL prompt", () => {
+    sendMsg(fakeWs, { type: "foreman_error", message: "Fatal error", fatal: true });
+    expect(session.isActive).toBe(false);
+  });
 });
 
 // ── workspace slash commands via WorkerController ─────────────────────────────
