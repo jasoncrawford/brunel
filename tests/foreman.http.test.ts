@@ -14,7 +14,7 @@ import http from "http";
 import type { AddressInfo } from "net";
 import { HttpServer } from "../src/foreman/controllers/http-server.js";
 import { Task } from "../src/foreman/models/task.js";
-import { resetDb, createTestTaskManager } from "./helpers/task.js";
+import { resetDb, createTestTaskManager, createTestRepo, seedRepoWithInstallation } from "./helpers/task.js";
 
 vi.mock("../src/foreman/models/activity-log.js", () => ({
   queryActivityLog: vi.fn().mockResolvedValue([]),
@@ -318,6 +318,57 @@ describe("GET /api/tasks", () => {
       expect(body[0].status).toBe("complete");
     } finally {
       vi.restoreAllMocks();
+      await stopServer(s);
+    }
+  });
+});
+
+describe("GET /api/repos/:owner/:repo", () => {
+  it("returns 404 when repo does not exist", async () => {
+    resetDb();
+    const s = new HttpServer({ webhooks: null, routeEvent: vi.fn() }).server;
+    const p = await startServer(s);
+    try {
+      const res = await request(p, "GET", "/api/repos/owner/nonexistent");
+      expect(res.status).toBe(404);
+    } finally {
+      await stopServer(s);
+    }
+  });
+
+  it("returns repo with installation: null when no installation is linked", async () => {
+    resetDb();
+    await createTestRepo("owner/http-repo-1");
+    const s = new HttpServer({ webhooks: null, routeEvent: vi.fn() }).server;
+    const p = await startServer(s);
+    try {
+      const res = await request(p, "GET", "/api/repos/owner/http-repo-1");
+      expect(res.status).toBe(200);
+      const body = JSON.parse(res.body);
+      expect(body).toMatchObject({ fullName: "owner/http-repo-1", installation: null });
+    } finally {
+      await stopServer(s);
+    }
+  });
+
+  it("returns repo with installation details when App is linked", async () => {
+    resetDb();
+    await seedRepoWithInstallation("owner/http-repo-2", 77001);
+    const s = new HttpServer({ webhooks: null, routeEvent: vi.fn() }).server;
+    const p = await startServer(s);
+    try {
+      const res = await request(p, "GET", "/api/repos/owner/http-repo-2");
+      expect(res.status).toBe(200);
+      const body = JSON.parse(res.body);
+      expect(body).toMatchObject({
+        fullName: "owner/http-repo-2",
+        installation: {
+          accountLogin: "test-account",
+          accountType: "Organization",
+          githubId: 77001,
+        },
+      });
+    } finally {
       await stopServer(s);
     }
   });

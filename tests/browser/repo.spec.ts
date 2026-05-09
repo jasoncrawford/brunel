@@ -146,6 +146,34 @@ test("dashboard: shows new (unactivated) repo with 'not activated' label", async
   await expect(repoItem.getByText("not activated")).toBeVisible();
 });
 
+test("repo detail page: shows installation status when App is installed", async ({ page }) => {
+  // owner/repo has an installation linked at server startup (owner-org, Organization)
+  await page.goto("/repos/owner/repo");
+  await expect(page.getByRole("heading", { name: /GitHub App/i })).toBeVisible();
+  await expect(page.getByText(/Installed/)).toBeVisible();
+  await expect(page.getByText(/owner-org/)).toBeVisible();
+  await expect(page.getByText(/Organization/)).toBeVisible();
+});
+
+test("repo detail page: shows 'not installed' when App is not linked", async ({ page }) => {
+  // Create a new repo without any installation via a webhook
+  await postWebhook("issues", {
+    action: "labeled",
+    label: { name: "brunel:ready" },
+    issue: {
+      number: 9200,
+      title: "Test issue for no-install repo",
+      body: "",
+      labels: [{ name: "brunel:ready" }],
+    },
+    repository: { full_name: "owner/no-install-9200" },
+  });
+
+  await page.goto("/repos/owner/no-install-9200");
+  await expect(page.getByRole("heading", { name: /GitHub App/i })).toBeVisible();
+  await expect(page.getByText(/Not installed/)).toBeVisible();
+});
+
 test("repo detail page: shows activation banner for new (unactivated) repo", async ({ page }) => {
   await postWebhook("issues", {
     action: "labeled",

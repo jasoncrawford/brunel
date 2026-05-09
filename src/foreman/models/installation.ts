@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import type { Database } from "../../database.types.js";
+import * as Wire from "../../../shared/wire.js";
 import { ActiveRecord } from "./active-record.js";
 
 type DbRow = Database["public"]["Tables"]["installations"]["Row"];
@@ -27,6 +28,15 @@ export class Installation extends ActiveRecord {
 
   protected getPrimaryKeyValue(): number {
     return this.id;
+  }
+
+  toWire(): Wire.Installation {
+    return {
+      installationId: this.id,
+      githubId: this.githubId,
+      accountLogin: this.accountLogin,
+      accountType: this.accountType,
+    };
   }
 
   static async get(id: number): Promise<Installation | null> {

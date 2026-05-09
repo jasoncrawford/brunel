@@ -31,7 +31,8 @@ export default function RepoDetail() {
     if (msg.type === "snapshot") {
       const repoRecord = msg.repos.find((r) => r.fullName === fullName);
       if (repoRecord) {
-        setRepo(repoRecord);
+        // Preserve extended REST-only fields (installation) that are absent from WS snapshots
+        setRepo((prev) => ({ ...repoRecord, installation: prev?.installation }));
         const repoTasks = msg.tasks.filter((t) => t.repo === repoRecord.fullName);
         setTasks(repoTasks);
         setWorkers(msg.workers.filter((w) => w.repo === repoRecord.fullName));
@@ -59,6 +60,18 @@ export default function RepoDetail() {
           </p>
         </section>
       )}
+
+      <section style={{ marginBottom: "2rem" }}>
+        <h3>GitHub App</h3>
+        {repo?.installation === undefined ? null : repo.installation === null ? (
+          <p>Not installed</p>
+        ) : (
+          <p>
+            Installed — <strong>{repo.installation.accountLogin}</strong>
+            {" "}({repo.installation.accountType})
+          </p>
+        )}
+      </section>
 
       <section>
         <h3>Tasks ({tasks.length})</h3>

@@ -149,7 +149,8 @@ export class HttpServer {
       const fullName = `${c.req.param("owner")}/${c.req.param("repo")}`;
       const repo = await Repo.findByFullName(fullName);
       if (!repo) return c.json({ error: "not found" }, 404);
-      return c.json(repo.toWire());
+      const installation = await repo.installation;
+      return c.json({ ...repo.toWire(), installation: installation?.toWire() ?? null });
     } catch (err) {
       log(`ERROR API query failed: ${fmtError(err)}`);
       return c.json({ error: "internal error" }, 500);

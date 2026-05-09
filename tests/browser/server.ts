@@ -41,6 +41,7 @@ import { HttpServer } from "../../src/foreman/controllers/http-server.js";
 import { initDb } from "../../src/foreman/clients/db-client.js";
 import { createMemoryTaskDb } from "../helpers/memory-db.js";
 import { createTestTaskManager } from "../helpers/task.js";
+import { Installation } from "../../src/foreman/models/installation.js";
 import { AdminWss } from "../../src/foreman/controllers/admin-ws.js";
 import { loadDefaultConfig } from "../../src/config.js";
 
@@ -53,6 +54,10 @@ const cfg = await loadDefaultConfig();
 initDb(createMemoryTaskDb());
 const taskModel = await createTestTaskManager("owner/repo");
 await taskModel.repo.activate();
+
+// Link a GitHub App installation to owner/repo so browser tests can verify installation status display
+const installation = await Installation.insert({ github_id: 98765, account_login: "owner-org", account_type: "Organization" });
+await taskModel.repo.linkInstallation(installation.id);
 
 // Mock workers managed by /test/connect-worker and /test/workers/:id
 const mockWorkers = new Map<string, WebSocket>();
