@@ -497,6 +497,8 @@ export class WorkerController extends EventEmitter {
         return "exit";
       default:
         await this.runAfterTaskReset();
+        this._eventsPaused = false;
+        this._syncPendingEventsStatus();
         this.sendWorkerReady();
         this.display.print(c.sageGreen("Waiting for next task..."));
         return "task-complete";
