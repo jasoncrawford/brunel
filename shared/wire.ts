@@ -10,11 +10,21 @@ export interface BlockerInfo {
   isOpen: boolean;
 }
 
+/** Wire representation of a GitHub App installation. */
+export interface Installation {
+  installationId: number;
+  githubId: number;
+  accountLogin: string;
+  accountType: "User" | "Organization";
+}
+
 /** Wire representation of a repo — sent over the admin WebSocket and REST API. */
 export interface Repo {
   repoId: number;
   fullName: string;
   status: "new" | "active";
+  // Extended field — present in REST responses, absent from WebSocket snapshots
+  installation?: Installation | null;
 }
 
 /** Wire representation of a task — sent over the admin WebSocket and REST API. */

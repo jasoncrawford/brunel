@@ -22,6 +22,15 @@ async function postWebhook(name: string, payload: object): Promise<void> {
   if (!res.ok) throw new Error(`Webhook POST failed: ${res.status}`);
 }
 
+async function linkInstallation(fullName: string, accountLogin: string): Promise<void> {
+  const res = await fetch(`${BASE}/test/link-installation`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fullName, accountLogin, accountType: "Organization" }),
+  });
+  if (!res.ok) throw new Error(`link-installation failed: ${res.status}`);
+}
+
 async function connectWorker(): Promise<string> {
   const res = await fetch(`${BASE}/test/connect-worker`, { method: "POST" });
   if (!res.ok) throw new Error(`connect-worker failed: ${res.status}`);
@@ -144,6 +153,39 @@ test("dashboard: shows new (unactivated) repo with 'not activated' label", async
   // The new repo should be labeled "not activated"
   const repoItem = reposSection.getByRole("listitem").filter({ has: page.getByRole("link", { name: "owner/new-repo-9001" }) });
   await expect(repoItem.getByText("not activated")).toBeVisible();
+});
+
+test("repo detail page: shows installation status when App is installed", async ({ page }) => {
+  // Create a fresh repo and link an installation via the test endpoint.
+  // Using a dedicated repo avoids affecting owner/repo (task-assignment tests
+  // break if owner/repo has an installation, because GithubClient then tries
+  // App token auth which fails in the test server — no appId/appPrivateKey).
+  await linkInstallation("owner/install-display-9300", "install-test-org");
+
+  await page.goto("/repos/owner/install-display-9300");
+  await expect(page.getByRole("heading", { name: /GitHub App/i })).toBeVisible();
+  await expect(page.getByText(/Installed/)).toBeVisible();
+  await expect(page.getByText(/install-test-org/)).toBeVisible();
+  await expect(page.getByText(/Organization/)).toBeVisible();
+});
+
+test("repo detail page: shows 'not installed' when App is not linked", async ({ page }) => {
+  // Create a new repo without any installation via a webhook
+  await postWebhook("issues", {
+    action: "labeled",
+    label: { name: "brunel:ready" },
+    issue: {
+      number: 9200,
+      title: "Test issue for no-install repo",
+      body: "",
+      labels: [{ name: "brunel:ready" }],
+    },
+    repository: { full_name: "owner/no-install-9200" },
+  });
+
+  await page.goto("/repos/owner/no-install-9200");
+  await expect(page.getByRole("heading", { name: /GitHub App/i })).toBeVisible();
+  await expect(page.getByText(/Not installed/)).toBeVisible();
 });
 
 test("repo detail page: shows activation banner for new (unactivated) repo", async ({ page }) => {

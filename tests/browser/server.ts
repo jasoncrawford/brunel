@@ -41,6 +41,8 @@ import { HttpServer } from "../../src/foreman/controllers/http-server.js";
 import { initDb } from "../../src/foreman/clients/db-client.js";
 import { createMemoryTaskDb } from "../helpers/memory-db.js";
 import { createTestTaskManager } from "../helpers/task.js";
+import { Installation } from "../../src/foreman/models/installation.js";
+import { Repo } from "../../src/foreman/models/repo.js";
 import { AdminWss } from "../../src/foreman/controllers/admin-ws.js";
 import { loadDefaultConfig } from "../../src/config.js";
 
@@ -134,6 +136,39 @@ async function handleTestRoute(
     }
     res.writeHead(200);
     res.end("OK");
+    return;
+  }
+
+  // POST /test/link-installation
+  // Body: { fullName, accountLogin, accountType? }
+  // Creates an Installation record and links it to the named repo (creating the
+  // repo if needed). Returns { ok: true }. Used by browser tests that need to
+  // verify installation-status display without touching owner/repo (which would
+  // break task-assignment tests by causing GithubClient to attempt App token auth).
+  if (req.method === "POST" && url === "/test/link-installation") {
+    const chunks: Buffer[] = [];
+    await new Promise<void>((resolve) => {
+      req.on("data", (c) => chunks.push(c as Buffer));
+      req.on("end", () => resolve());
+    });
+    try {
+      const { fullName, accountLogin, accountType = "Organization" } = JSON.parse(
+        Buffer.concat(chunks).toString(),
+      ) as { fullName: string; accountLogin: string; accountType?: string };
+      const repo = await Repo.findOrCreate(fullName);
+      const inst = await Installation.insert({
+        github_id: Date.now(),
+        account_login: accountLogin,
+        account_type: accountType,
+      });
+      await repo.linkInstallation(inst.id);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+    } catch (err) {
+      console.error("[test] link-installation failed:", err);
+      res.writeHead(500, { "Content-Type": "text/plain" });
+      res.end("Internal server error");
+    }
     return;
   }
 
