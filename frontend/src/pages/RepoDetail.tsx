@@ -6,8 +6,8 @@ import type { Task, Worker, Repo, LogEntry, AdminMessage } from "../types.ts";
 import { shortWorkerId } from "../../../shared/utils.ts";
 
 export default function RepoDetail() {
-  const { id } = useParams<{ id: string }>();
-  const repoId = Number(id);
+  const { owner, repo: repoName } = useParams<{ owner: string; repo: string }>();
+  const fullName = `${owner}/${repoName}`;
 
   const [repo, setRepo] = useState<Repo | null>(null);
   usePageTitle(repo ? `${repo.fullName} \u2013 Brunel` : "Brunel");
@@ -16,19 +16,20 @@ export default function RepoDetail() {
   const [recentLog, setRecentLog] = useState<LogEntry[]>([]);
 
   useEffect(() => {
-    fetch(`/api/repos/${repoId}`)
+    fetch(`/api/repos/${fullName}`)
       .then((r) => r.json() as Promise<Repo>)
-      .then(setRepo)
-      .catch(console.error);
-    fetch(`/api/repos/${repoId}/log`)
+      .then((r) => {
+        setRepo(r);
+        return fetch(`/api/repos/${r.repoId}/log`);
+      })
       .then((r) => r.json() as Promise<LogEntry[]>)
       .then((entries) => setRecentLog(entries.slice(0, 50)))
       .catch(console.error);
-  }, [repoId]);
+  }, [fullName]);
 
   const handleMessage = useCallback((msg: AdminMessage) => {
     if (msg.type === "snapshot") {
-      const repoRecord = msg.repos.find((r) => r.repoId === repoId);
+      const repoRecord = msg.repos.find((r) => r.fullName === fullName);
       if (repoRecord) {
         setRepo(repoRecord);
         const repoTasks = msg.tasks.filter((t) => t.repo === repoRecord.fullName);
@@ -40,13 +41,13 @@ export default function RepoDetail() {
         setRecentLog((prev) => [msg.entry, ...prev].slice(0, 50));
       }
     }
-  }, [repoId, repo]);
+  }, [fullName, repo]);
 
   useAdminWs(handleMessage);
 
   return (
     <div>
-      <h2>{repo ? repo.fullName : `Repo #${id}`}</h2>
+      <h2>{repo ? repo.fullName : fullName}</h2>
       <p><Link to="/">← Dashboard</Link></p>
 
       {repo?.status === "new" && (

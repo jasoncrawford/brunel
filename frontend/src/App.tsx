@@ -23,7 +23,7 @@ export default function App() {
         <Route path="/tasks" element={<TaskList />} />
         <Route path="/tasks/:id" element={<TaskDetail />} />
         <Route path="/log" element={<EventLog />} />
-        <Route path="/repos/:id" element={<RepoDetail />} />
+        <Route path="/repos/:owner/:repo" element={<RepoDetail />} />
         <Route path="/workers/:id" element={<WorkerDetail />} />
       </Routes>
     </div>

@@ -44,6 +44,10 @@ export class Repo extends ActiveRecord {
     return super.get(id) as Promise<Repo | null>;
   }
 
+  static async getByFullName(fullName: string): Promise<Repo | null> {
+    return super.getBy("full_name", fullName) as Promise<Repo | null>;
+  }
+
   static async list(): Promise<Repo[]> {
     return super.list() as Promise<Repo[]>;
   }
