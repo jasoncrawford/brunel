@@ -2014,6 +2014,12 @@ describe("completeCurrentTask: post-completion prompt", () => {
     await sess.completeCurrentTask();
     expect(sess.eventsPaused).toBe(false);
   });
+
+  it("option 0 (wait for next task): sets workerReady to true so status bar shows 'waiting for task'", async () => {
+    const { sess } = await makeSession(async () => 0);
+    await sess.completeCurrentTask();
+    expect(sb.workerReady).toBe(true);
+  });
 });
 
 // ── sendGoodbye ───────────────────────────────────────────────────────────────
