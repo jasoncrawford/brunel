@@ -27,26 +27,32 @@ export class WorkerController {
   constructor({ config, messenger }: WorkerControllerOptions) {
     this.config = config;
     this.messenger = messenger;
+  }
 
-    this.handlers.set("worker_hello", async (workerId, ws, msg) => {
+  private handle(type: Wire.WorkerMessage["type"], handler: MsgHandler): void {
+    this.handlers.set(type, handler);
+  }
+
+  register(): void {
+    this.handle("worker_hello", async (workerId, ws, msg) => {
       await this.handleWorkerHello(workerId, ws, msg as Extract<Wire.WorkerMessage, { type: "worker_hello" }>);
     });
-    this.handlers.set("task_complete", async (workerId, _ws, msg) => {
+    this.handle("task_complete", async (workerId, _ws, msg) => {
       await this.handleTaskComplete(workerId, msg as Extract<Wire.WorkerMessage, { type: "task_complete" }>);
     });
-    this.handlers.set("worker_goodbye", async (workerId, _ws, msg) => {
+    this.handle("worker_goodbye", async (workerId, _ws, msg) => {
       await this.handleWorkerGoodbye(workerId, msg as Extract<Wire.WorkerMessage, { type: "worker_goodbye" }>);
     });
-    this.handlers.set("activate_repo", async (workerId, ws) => {
+    this.handle("activate_repo", async (workerId, ws) => {
       await this.handleActivateRepo(workerId, ws);
     });
-    this.handlers.set("claim_task", async (workerId, _ws, msg) => {
+    this.handle("claim_task", async (workerId, _ws, msg) => {
       await this.handleClaimTask(workerId, msg as Extract<Wire.WorkerMessage, { type: "claim_task" }>);
     });
-    this.handlers.set("worker_ready", async (workerId) => {
+    this.handle("worker_ready", async (workerId) => {
       await this.handleWorkerReady(workerId);
     });
-    this.handlers.set("worker_reserved", async (workerId) => {
+    this.handle("worker_reserved", async (workerId) => {
       await this.handleWorkerReserve(workerId);
     });
 

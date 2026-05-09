@@ -5,19 +5,21 @@ import { join, extname } from "path";
 import { fileURLToPath } from "url";
 import { Hono } from "hono";
 import { getRequestListener } from "@hono/node-server";
-import { ApiController } from "./controllers/api-controller.js";
-import { fmtError, log } from "../utils.js";
+import { ApiController } from "../controllers/api-controller.js";
+import { fmtError, log } from "../../utils.js";
 
 export interface HttpServerOptions {
-  webhooks: InstanceType<typeof Webhooks>;
-  /** When true, incoming webhook requests must carry a valid signature. */
-  verifySignature: boolean;
+  webhookSecret?: string;
 }
 
 export class HttpServer {
   readonly server: http.Server;
+  readonly webhooks: InstanceType<typeof Webhooks>;
 
-  constructor({ webhooks, verifySignature }: HttpServerOptions) {
+  constructor({ webhookSecret }: HttpServerOptions = {}) {
+    const verifySignature = !!webhookSecret;
+    this.webhooks = new Webhooks({ secret: webhookSecret ?? "no-secret" });
+    const webhooks = this.webhooks;
     const app = new Hono();
 
   // ── Webhook ────────────────────────────────────────────────────────────────

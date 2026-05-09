@@ -36,15 +36,14 @@ const _realFetch = globalThis.fetch;
 import http from "http";
 import type { AddressInfo } from "net";
 import { WebSocket } from "ws";
-import { Webhooks } from "@octokit/webhooks";
-import { ForemanWss } from "../../src/foreman/wss.js";
-import { HttpServer } from "../../src/foreman/http-server.js";
+import { ForemanWss } from "../../src/foreman/servers/wss.js";
+import { HttpServer } from "../../src/foreman/servers/http-server.js";
 import { initDb } from "../../src/foreman/clients/db-client.js";
 import { createMemoryTaskDb } from "../helpers/memory-db.js";
 import { createTestTaskManager } from "../helpers/task.js";
 import { Installation } from "../../src/foreman/models/installation.js";
 import { Repo } from "../../src/foreman/models/repo.js";
-import { AdminWss } from "../../src/foreman/controllers/admin-ws.js";
+import { AdminWss } from "../../src/foreman/servers/admin-ws.js";
 import { loadDefaultConfig } from "../../src/config.js";
 
 const PORT = parseInt(process.env.PORT ?? "14567", 10);
@@ -64,10 +63,9 @@ const mockWorkers = new Map<string, WebSocket>();
 
 let foremanWss: ForemanWss;
 
-const webhooks = new Webhooks({ secret: "dev-mode-placeholder" });
-
 // Build the foreman HTTP server (handles /webhook, /health, /api/*, static dist/)
-const { server } = new HttpServer({ webhooks, verifySignature: false });
+const httpServer = new HttpServer({});
+const { server } = httpServer;
 
 // Intercept the request event so we can add /test/* routes without touching
 // the production createHttpServer factory.
@@ -182,7 +180,7 @@ const adminWss = new AdminWss(server);
 
 // ── Foreman WebSocket ─────────────────────────────────────────────────────────
 
-foremanWss = new ForemanWss({ server, config: cfg, adminWss, webhooks });
+foremanWss = new ForemanWss({ server, config: cfg, adminWss, webhooks: httpServer.webhooks });
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 

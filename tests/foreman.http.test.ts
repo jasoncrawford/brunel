@@ -12,8 +12,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import http from "http";
 import type { AddressInfo } from "net";
-import { Webhooks } from "@octokit/webhooks";
-import { HttpServer } from "../src/foreman/http-server.js";
+import type { Webhooks } from "@octokit/webhooks";
+import { HttpServer } from "../src/foreman/servers/http-server.js";
 import { Task } from "../src/foreman/models/task.js";
 import { resetDb, createTestTaskManager, createTestRepo, seedRepoWithInstallation } from "./helpers/task.js";
 
@@ -68,13 +68,12 @@ async function request(
 
 /** Create a test HttpServer with a Webhooks instance and an onAny spy. */
 function makeTestServer(): { webhooks: InstanceType<typeof Webhooks>; handler: ReturnType<typeof vi.fn>; server: http.Server } {
-  const webhooks = new Webhooks({ secret: "test-secret" });
+  const httpServer = new HttpServer({});
   const handler = vi.fn();
-  webhooks.onAny(({ id, name, payload }) => {
+  httpServer.webhooks.onAny(({ id, name, payload }) => {
     handler(id, name as string, payload);
   });
-  const server = new HttpServer({ webhooks, verifySignature: false }).server;
-  return { webhooks, handler, server };
+  return { webhooks: httpServer.webhooks, handler, server: httpServer.server };
 }
 
 // ── Test harness ───────────────────────────────────────────────────────────────
@@ -129,9 +128,8 @@ describe("POST /webhook", () => {
     expect(handler).toHaveBeenCalledWith("unknown", "issues", payload);
   });
 
-  it("requires signature when verifySignature=true and returns 401 if missing", async () => {
-    const webhooks = new Webhooks({ secret: "mysecret" });
-    const s = new HttpServer({ webhooks, verifySignature: true }).server;
+  it("requires signature when webhookSecret is provided and returns 401 if missing", async () => {
+    const s = new HttpServer({ webhookSecret: "mysecret" }).server;
     const p = await startServer(s);
     try {
       const res = await request(p, "POST", "/webhook", {

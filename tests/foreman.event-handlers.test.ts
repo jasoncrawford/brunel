@@ -239,7 +239,6 @@ describe("routeCheckEvent — via PR number", () => {
     const result = await wss.routeCheckEvent(
       { check_run: { pull_requests: [{ number: 99 }] }, repository: { full_name: "owner/repo" } },
       makeEvent("check_run"),
-      "check_run",
     );
     expect(taskManager.getTaskForCheckEvent).toHaveBeenCalledWith([99], "");
     expect(result.task?.taskId).toBe("42");
@@ -252,7 +251,6 @@ describe("routeCheckEvent — via PR number", () => {
     const result = await wss.routeCheckEvent(
       { check_suite: { pull_requests: [{ number: 99 }] }, repository: { full_name: "owner/repo" } },
       makeEvent("check_suite"),
-      "check_suite",
     );
     expect(taskManager.getTaskForCheckEvent).toHaveBeenCalledWith([99], "");
     expect(result.task?.taskId).toBe("42");
@@ -267,7 +265,6 @@ describe("routeCheckEvent — via branch name", () => {
     const result = await wss.routeCheckEvent(
       { check_run: { pull_requests: [], check_suite: { head_branch: "feature-branch" } }, repository: { full_name: "owner/repo" } },
       makeEvent("check_run"),
-      "check_run",
     );
     expect(taskManager.getTaskForCheckEvent).toHaveBeenCalledWith([], "feature-branch");
     expect(result.task?.taskId).toBe("42");
@@ -280,7 +277,6 @@ describe("routeCheckEvent — via branch name", () => {
     const result = await wss.routeCheckEvent(
       { check_suite: { pull_requests: [], head_branch: "feature-branch" }, repository: { full_name: "owner/repo" } },
       makeEvent("check_suite"),
-      "check_suite",
     );
     expect(taskManager.getTaskForCheckEvent).toHaveBeenCalledWith([], "feature-branch");
     expect(result.task?.taskId).toBe("42");
@@ -291,7 +287,6 @@ describe("routeCheckEvent — via branch name", () => {
     const result = await wss.routeCheckEvent(
       { check_run: { pull_requests: [], check_suite: { head_branch: "unknown-branch" } }, repository: { full_name: "owner/repo" } },
       makeEvent("check_run"),
-      "check_run",
     );
     expect(result.task).toBeNull();
   });

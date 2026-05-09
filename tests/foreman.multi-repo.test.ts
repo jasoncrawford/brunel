@@ -12,7 +12,7 @@ import type { AddressInfo } from "net";
 import { Task } from "../src/foreman/models/task.js";
 import { Worker } from "../src/foreman/models/worker.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
-import { ForemanWss } from "../src/foreman/wss.js";
+import { ForemanWss } from "../src/foreman/servers/wss.js";
 import { Repo } from "../src/foreman/models/repo.js";
 import { resetDb, createTestTaskManager, seedTask, fakeRepo } from "./helpers/task.js";
 import { loadDefaultConfig } from "../src/config.js";

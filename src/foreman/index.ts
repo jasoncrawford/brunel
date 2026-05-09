@@ -3,14 +3,13 @@
 import "dotenv/config";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "../database.types.js";
-import { Webhooks } from "@octokit/webhooks";
 import { loadConfig } from "../config.js";
 import { TaskManager } from "./models/task-manager.js";
 import { Repo } from "./models/repo.js";
 import { initDb } from "./clients/db-client.js";
-import { HttpServer } from "./http-server.js";
-import { ForemanWss } from "./wss.js";
-import { AdminWss } from "./controllers/admin-ws.js";
+import { HttpServer } from "./servers/http-server.js";
+import { ForemanWss } from "./servers/wss.js";
+import { AdminWss } from "./servers/admin-ws.js";
 import { fmtError, log } from "../utils.js";
 
 // Only start listening when run directly (not when imported by tests)
@@ -18,10 +17,6 @@ import { fileURLToPath } from "url";
 const isMain = process.argv[1] === fileURLToPath(import.meta.url);
 if (isMain) {
   const config = await loadConfig(process.argv);
-
-  // Always create a Webhooks instance. In dev mode (no webhook secret), use a
-  // placeholder secret — receive() bypasses verification so the secret is unused.
-  const webhooks = new Webhooks({ secret: config.webhookSecret ?? "dev-mode-placeholder" });
 
   // Setup DB (share the same Supabase client)
   if (!config.supabaseUrl || !config.supabaseSecretKey) {
@@ -31,13 +26,13 @@ if (isMain) {
   const supabase = createClient<Database>(config.supabaseUrl, config.supabaseSecretKey);
   initDb(supabase);
 
-  const httpServer = new HttpServer({ webhooks, verifySignature: !!config.webhookSecret });
+  const httpServer = new HttpServer({ webhookSecret: config.webhookSecret });
   const { server } = httpServer;
 
   // Admin WebSocket broadcaster — owns snapshot lifecycle and event subscriptions
   const adminWss = new AdminWss(server);
 
-  const foremanWss = new ForemanWss({ config, server, webhooks, adminWss });
+  const foremanWss = new ForemanWss({ config, server, webhooks: httpServer.webhooks, adminWss });
 
   // Load all state before accepting WebSocket connections.
 

@@ -24,13 +24,13 @@ function fakeRepo(status: "new" | "active"): Repo {
 function makeWss() {
   const messenger = new WorkerMessenger({});
   const wss = new WebhookController({
-    webhooks: new Webhooks({ secret: "test-secret" }),
     config: { taskLabel: "brunel:ready" },
     messenger,
     assignWork: async () => {},
   });
   const routePrEvent = vi.spyOn(wss, "routePrEvent");
   const routeIssueEvent = vi.spyOn(wss, "routeIssueEvent");
+  wss.register(new Webhooks({ secret: "test-secret" }));
   return { wss, routePrEvent, routeIssueEvent };
 }
 

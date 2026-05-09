@@ -34,7 +34,6 @@ export interface RouteResult { task: Task | null; ref: string; forward?: boolean
 type WebhookHandler = (p: R, evt: WebhookEvent) => Promise<RouteResult | void>;
 
 type WebhookControllerOptions = {
-  webhooks: InstanceType<typeof Webhooks>;
   config: Pick<BrunelConfig, "taskLabel">;
   messenger: WorkerMessenger;
   assignWork: () => Promise<void>;
@@ -47,12 +46,18 @@ export class WebhookController {
   private readonly installationsController = new InstallationsController();
   private readonly handlerMap = new Map<string, WebhookHandler>();
 
-  constructor({ webhooks, config, messenger, assignWork }: WebhookControllerOptions) {
+  constructor({ config, messenger, assignWork }: WebhookControllerOptions) {
     this.config = config;
     this.messenger = messenger;
     this.assignWork = assignWork;
+  }
 
-    this.on("installation", async (p) => {
+  private handle(name: string, handler: WebhookHandler): void {
+    this.handlerMap.set(name, handler);
+  }
+
+  register(webhooks: InstanceType<typeof Webhooks>): void {
+    this.handle("installation", async (p) => {
       const action = strProp(p, "action");
       try {
         if (action === "created") await this.installationsController.handleInstallationCreated(p);
@@ -62,7 +67,7 @@ export class WebhookController {
       }
     });
 
-    this.on("installation_repositories", async (p) => {
+    this.handle("installation_repositories", async (p) => {
       const action = strProp(p, "action");
       try {
         if (action === "added") await this.installationsController.handleReposAdded(p);
@@ -72,19 +77,15 @@ export class WebhookController {
       }
     });
 
-    this.on("pull_request", (p, evt) => this.routePrEvent(p, evt));
-    this.on("pull_request_review", (p, evt) => this.routePrReviewEvent(p, evt));
-    this.on("pull_request_review_comment", (p, evt) => this.routePrReviewEvent(p, evt));
-    this.on("check_run", (p, evt) => this.routeCheckEvent(p, evt, "check_run"));
-    this.on("check_suite", (p, evt) => this.routeCheckEvent(p, evt, "check_suite"));
+    this.handle("pull_request", (p, evt) => this.routePrEvent(p, evt));
+    this.handle("pull_request_review", (p, evt) => this.routePrReviewEvent(p, evt));
+    this.handle("pull_request_review_comment", (p, evt) => this.routePrReviewEvent(p, evt));
+    this.handle("check_run", (p, evt) => this.routeCheckEvent(p, evt));
+    this.handle("check_suite", (p, evt) => this.routeCheckEvent(p, evt));
 
     webhooks.onAny(async ({ id, name, payload }) => {
       await this.handleEvent(id, name as string, payload);
     });
-  }
-
-  private on(name: string, handler: WebhookHandler): void {
-    this.handlerMap.set(name, handler);
   }
 
   async handleEvent(id: string, name: string, payload: unknown): Promise<void> {
@@ -214,7 +215,8 @@ export class WebhookController {
     return { task: await repo.getTaskByPr(prNumber), ref: `PR #${prNumber}` };
   }
 
-  async routeCheckEvent(p: R, evt: WebhookEvent, name: string): Promise<RouteResult> {
+  async routeCheckEvent(p: R, evt: WebhookEvent): Promise<RouteResult> {
+    const name = evt.eventName;
     const inner = (name === "check_run" ? p.check_run : p.check_suite) as R | undefined;
     const prs = inner?.pull_requests as Array<{ number: number }> | undefined;
     const headBranch = name === "check_run"

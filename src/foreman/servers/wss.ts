@@ -1,16 +1,16 @@
 import http from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { Webhooks } from "@octokit/webhooks";
-import * as Wire from "../../shared/wire.js";
-import { ForemanMessage } from "./models/foreman-message.js";
-import { Worker } from "./models/worker.js";
-import type { AdminWss } from "./controllers/admin-ws.js";
-import { WorkerMessenger } from "./controllers/worker-messenger.js";
-import { WorkerController } from "./controllers/worker-controller.js";
-import { WebhookController } from "./controllers/webhook-controller.js";
-import { fmtError, log } from "../utils.js";
-import { shortWorkerId } from "../../shared/utils.js";
-import type { BrunelConfig } from "../config.js";
+import * as Wire from "../../../shared/wire.js";
+import { ForemanMessage } from "../models/foreman-message.js";
+import { Worker } from "../models/worker.js";
+import type { AdminWss } from "./admin-ws.js";
+import { WorkerMessenger } from "../controllers/worker-messenger.js";
+import { WorkerController } from "../controllers/worker-controller.js";
+import { WebhookController } from "../controllers/webhook-controller.js";
+import { fmtError, log } from "../../utils.js";
+import { shortWorkerId } from "../../../shared/utils.js";
+import type { BrunelConfig } from "../../config.js";
 
 type AdminWssLike = Pick<AdminWss, "broadcastLogEvent">;
 
@@ -28,15 +28,17 @@ export class ForemanWss {
   readonly webhookController: WebhookController;
 
   constructor({ config, server, webhooks, adminWss }: ForemanWssOptions) {
-    const resolvedWebhooks = webhooks ?? new Webhooks({ secret: "dev-mode-placeholder" });
+    const resolvedWebhooks = webhooks ?? new Webhooks({ secret: "no-secret" });
     const messenger = new WorkerMessenger({ adminWss });
     this.workerController = new WorkerController({ config, messenger });
     this.webhookController = new WebhookController({
-      webhooks: resolvedWebhooks,
       config,
       messenger,
       assignWork: () => this.workerController.assignWork(),
     });
+
+    this.workerController.register();
+    this.webhookController.register(resolvedWebhooks);
 
     const wss = new WebSocketServer({ noServer: true });
     this.wss = wss;

@@ -2,7 +2,7 @@ import { WebSocket } from "ws";
 import * as Wire from "../../../shared/wire.js";
 import { ForemanMessage } from "../models/foreman-message.js";
 import { Worker } from "../models/worker.js";
-import type { AdminWss } from "./admin-ws.js";
+import type { AdminWss } from "../servers/admin-ws.js";
 
 type AdminWssLike = Pick<AdminWss, "broadcastLogEvent">;
 type LogEntryWithoutId = Omit<Wire.LogEntry, "id">;

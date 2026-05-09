@@ -19,7 +19,7 @@ import { WebSocket, WebSocketServer } from "ws";
 import type { AddressInfo } from "net";
 import * as Wire from "../shared/wire.js";
 import { Worker } from "../src/foreman/models/worker.js";
-import { ForemanWss } from "../src/foreman/wss.js";
+import { ForemanWss } from "../src/foreman/servers/wss.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
 import { initDb } from "../src/foreman/clients/db-client.js";
