@@ -915,7 +915,11 @@ export class WorkerController extends EventEmitter {
     ws.on("close", (code: number, _reason: Buffer) => {
       clearPingTimer(); // always clean up the ping timer when this socket closes
       if (ws !== this.ws) return; // stale close from a previous connection
-      if (this._stopped) return; // fatal error received; don't reconnect
+      if (this._stopped) {
+        // Fatal error path: update status but skip reconnect scheduling.
+        this.agentStatus.update({ connectionStatus: "disconnected", disconnectCode: code });
+        return;
+      }
       // Full Jitter (Brooker 2015): spread = entire [0, cap] window at high attempt counts.
       const delay = Math.random() * Math.min(this._activeMaxReconnectDelayMs, 1000 * Math.pow(2, this.reconnectAttempts));
       this.reconnectAttempts++;
@@ -961,6 +965,8 @@ export class WorkerController extends EventEmitter {
     if (msg.type === "foreman_error") {
       if (msg.fatal) {
         this._stopped = true;
+        this._isActive = false;
+        this.agentStatus.setWorkerModeActive(false);
         this.currentAc?.abort(); // abort any running query immediately
         this.ws?.close();
         this.emit("fatal");
