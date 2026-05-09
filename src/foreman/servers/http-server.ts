@@ -70,7 +70,7 @@ export class HttpServer {
 
   // ── Static files (React SPA) ───────────────────────────────────────────────
   app.use("*", async (c) => {
-    const root = join(fileURLToPath(import.meta.url), "../../../dist");
+    const root = join(fileURLToPath(import.meta.url), "../../../../dist");
 
     if (!existsSync(root)) {
       return c.text("Not Found", 404);
