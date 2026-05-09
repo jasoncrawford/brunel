@@ -165,8 +165,9 @@ async function handleTestRoute(
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: true }));
     } catch (err) {
+      console.error("[test] link-installation failed:", err);
       res.writeHead(500, { "Content-Type": "text/plain" });
-      res.end(String(err));
+      res.end("Internal server error");
     }
     return;
   }
