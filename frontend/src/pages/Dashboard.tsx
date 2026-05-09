@@ -48,7 +48,7 @@ export default function Dashboard() {
           <ul>
             {repos.map((r) => (
               <li key={r.repoId}>
-                <Link to={`/repos/${r.repoId}`}>{r.fullName}</Link>
+                <Link to={`/repos/${r.fullName}`}>{r.fullName}</Link>
                 {r.status === "new" && (
                   <span style={{ marginLeft: "0.5rem", color: "#999", fontSize: "0.85em" }}>not activated</span>
                 )}
@@ -150,7 +150,7 @@ function LogTable({ entries }: { entries: LogEntry[] }) {
 function repoLink(fullName: string | undefined, repos: Repo[]): React.ReactNode {
   if (!fullName) return "—";
   const repo = repos.find((r) => r.fullName === fullName);
-  if (repo) return <Link to={`/repos/${repo.repoId}`}>{fullName}</Link>;
+  if (repo) return <Link to={`/repos/${repo.fullName}`}>{fullName}</Link>;
   return fullName;
 }
 

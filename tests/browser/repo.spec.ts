@@ -62,7 +62,7 @@ test("repo detail page: shows repo name and tasks", async ({ page }) => {
   const reposSection = page.locator("section").filter({ has: page.locator("h3").filter({ hasText: /Repos/ }) });
   await reposSection.getByRole("link", { name: "owner/repo" }).click();
 
-  // Should be on a /repos/:id page showing the repo name
+  // Should be on a /repos/:owner/:repo page showing the repo name
   await expect(page.getByRole("heading", { name: "owner/repo" })).toBeVisible();
   // The task should be visible
   await expect(page.getByRole("link", { name: "#5002" }).first()).toBeVisible();

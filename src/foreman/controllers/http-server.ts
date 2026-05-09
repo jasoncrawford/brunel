@@ -144,9 +144,10 @@ export class HttpServer {
     }
   });
 
-  app.get("/api/repos/:id", async (c) => {
+  app.get("/api/repos/:owner/:repo", async (c) => {
     try {
-      const repo = await Repo.get(Number(c.req.param("id")));
+      const fullName = `${c.req.param("owner")}/${c.req.param("repo")}`;
+      const repo = await Repo.getByFullName(fullName);
       if (!repo) return c.json({ error: "not found" }, 404);
       return c.json(repo.toWire());
     } catch (err) {
@@ -155,11 +156,13 @@ export class HttpServer {
     }
   });
 
-  app.get("/api/repos/:id/log", async (c) => {
+  app.get("/api/repos/:owner/:repo/log", async (c) => {
     try {
-      const repoId = Number(c.req.param("id"));
+      const fullName = `${c.req.param("owner")}/${c.req.param("repo")}`;
+      const repo = await Repo.getByFullName(fullName);
+      if (!repo) return c.json({ error: "not found" }, 404);
       const before = c.req.query("before");
-      const entries = await queryActivityLog({ repoId, limit: 50, ...(before ? { before } : {}) });
+      const entries = await queryActivityLog({ repoId: repo.id, limit: 50, ...(before ? { before } : {}) });
       return c.json(entries);
     } catch (err) {
       log(`ERROR API query failed: ${fmtError(err)}`);

@@ -12,11 +12,11 @@ vi.mock("../src/hooks/useAdminWs.ts", () => ({
   },
 }));
 
-function renderRepoDetail(repoId = "5") {
+function renderRepoDetail(fullName = "user/my-repo") {
   return render(
-    <MemoryRouter initialEntries={[`/repos/${repoId}`]}>
+    <MemoryRouter initialEntries={[`/repos/${fullName}`]}>
       <Routes>
-        <Route path="/repos/:id" element={<RepoDetail />} />
+        <Route path="/repos/:owner/:repo" element={<RepoDetail />} />
       </Routes>
     </MemoryRouter>
   );
@@ -76,7 +76,7 @@ describe("RepoDetail", () => {
         .mockResolvedValueOnce({ json: () => Promise.resolve(mockRepo) })
         .mockResolvedValueOnce({ json: () => Promise.resolve([]) })
     );
-    renderRepoDetail("5");
+    renderRepoDetail();
     await waitFor(() => expect(document.title).toBe("user/my-repo \u2013 Brunel"));
   });
 
@@ -87,10 +87,10 @@ describe("RepoDetail", () => {
         .mockResolvedValueOnce({ json: () => Promise.resolve(mockRepo) })
         .mockResolvedValueOnce({ json: () => Promise.resolve([]) })
     );
-    renderRepoDetail("5");
+    renderRepoDetail();
     await waitFor(() => {
-      expect(fetch).toHaveBeenCalledWith("/api/repos/5");
-      expect(fetch).toHaveBeenCalledWith("/api/repos/5/log");
+      expect(fetch).toHaveBeenCalledWith("/api/repos/user/my-repo");
+      expect(fetch).toHaveBeenCalledWith("/api/repos/user/my-repo/log");
     });
   });
 
@@ -101,7 +101,7 @@ describe("RepoDetail", () => {
         .mockResolvedValueOnce({ json: () => Promise.resolve(mockRepo) })
         .mockResolvedValueOnce({ json: () => Promise.resolve([]) })
     );
-    renderRepoDetail("5");
+    renderRepoDetail();
 
     act(() => {
       capturedHandler!({
@@ -125,7 +125,7 @@ describe("RepoDetail", () => {
         .mockResolvedValueOnce({ json: () => Promise.resolve(mockRepo) })
         .mockResolvedValueOnce({ json: () => Promise.resolve([entry1]) })
     );
-    renderRepoDetail("5");
+    renderRepoDetail();
     await waitFor(() => expect(screen.getByText("issue labeled")).toBeInTheDocument());
 
     const newEntry: LogEntry = {
@@ -155,7 +155,7 @@ describe("RepoDetail", () => {
         .mockResolvedValueOnce({ json: () => Promise.resolve(mockRepo) })
         .mockResolvedValueOnce({ json: () => Promise.resolve([entry1]) })
     );
-    renderRepoDetail("5");
+    renderRepoDetail();
     await waitFor(() => expect(screen.getByText("issue labeled")).toBeInTheDocument());
 
     act(() => {
