@@ -336,5 +336,5 @@ export async function loadConfig(
  * that need default values (e.g. taskLabel) without a real GitHub repo or token.
  */
 export function loadDefaultConfig(): Promise<BrunelConfig> {
-  return loadConfig([], {});
+  return loadConfig([], { githubToken: "tok" });
 }
