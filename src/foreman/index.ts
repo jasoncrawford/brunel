@@ -19,9 +19,9 @@ const isMain = process.argv[1] === fileURLToPath(import.meta.url);
 if (isMain) {
   const config = await loadConfig(process.argv);
 
-  const webhooks = config.webhookSecret
-    ? new Webhooks({ secret: config.webhookSecret })
-    : null;
+  // Always create a Webhooks instance. In dev mode (no webhook secret), use a
+  // placeholder secret — receive() bypasses verification so the secret is unused.
+  const webhooks = new Webhooks({ secret: config.webhookSecret ?? "dev-mode-placeholder" });
 
   // Setup DB (share the same Supabase client)
   if (!config.supabaseUrl || !config.supabaseSecretKey) {
@@ -31,20 +31,13 @@ if (isMain) {
   const supabase = createClient<Database>(config.supabaseUrl, config.supabaseSecretKey);
   initDb(supabase);
 
-  let foremanWss: ForemanWss;
-  const httpServer = new HttpServer({ webhooks, routeEvent: (id, name, payload) => foremanWss.routeEvent(id, name, payload) });
+  const httpServer = new HttpServer({ webhooks, verifySignature: !!config.webhookSecret });
   const { server } = httpServer;
 
   // Admin WebSocket broadcaster — owns snapshot lifecycle and event subscriptions
   const adminWss = new AdminWss(server);
 
-  foremanWss = new ForemanWss({ config, server, adminWss });
-
-  if (webhooks) {
-    webhooks.onAny(async ({ id, name, payload }) => {
-      await foremanWss.routeEvent(id, name as string, payload);
-    });
-  }
+  const foremanWss = new ForemanWss({ config, server, webhooks, adminWss });
 
   // Load all state before accepting WebSocket connections.
 

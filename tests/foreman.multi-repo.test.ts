@@ -454,10 +454,10 @@ describe("Negative: worker from repo-a cannot claim task from repo-b", () => {
 
     await Task.upsert("t63b", 63, "owner/repo-b", "Task B", "body", ["brunel:ready"]);
 
-    // Invoke handleBusyHello directly (same pattern as foreman.hello-handlers.test.ts).
+    // Invoke handleAssignedHello directly (same pattern as foreman.hello-handlers.test.ts).
     const foremanWss = new ForemanWss({ server: httpServer, config: defaultCfg });
     ({ wss } = foremanWss);
-    const sendMsg = vi.spyOn(foremanWss, "sendMsg").mockImplementation(() => {});
+    const sendMsg = vi.spyOn(foremanWss.messenger, "send").mockImplementation(() => false);
 
     // Worker from repo-a claims task "t63b" which belongs to repo-b.
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;

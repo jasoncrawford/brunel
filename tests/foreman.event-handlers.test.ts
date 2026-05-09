@@ -9,9 +9,10 @@
  * Tests here verify the task-determination and side-effect logic only.
  * End-to-end forwarding behavior is covered in foreman.webhook-routing.test.ts.
  */
-import http from "http";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { ForemanWss } from "../src/foreman/controllers/wss.js";
+import { Webhooks } from "@octokit/webhooks";
+import { WebhookController } from "../src/foreman/controllers/webhook-controller.js";
+import { WorkerMessenger } from "../src/foreman/controllers/worker-messenger.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
 import { Worker } from "../src/foreman/models/worker.js";
@@ -30,7 +31,7 @@ function makeEvent(name = "pull_request"): WebhookEvent {
 }
 
 interface TestDeps {
-  wss: ForemanWss;
+  wss: WebhookController;
   sendMsg: ReturnType<typeof vi.fn>;
   taskManager: TaskManager;
 }
@@ -48,11 +49,14 @@ async function makeDeps(): Promise<TestDeps> {
   vi.spyOn(taskManager, "handlePrOpenedEvent").mockResolvedValue(null);
   vi.spyOn(taskManager, "handlePrClosedEvent").mockResolvedValue(null);
   vi.spyOn(taskManager, "getTaskForCheckEvent").mockResolvedValue(null);
-  const wss = new ForemanWss({
-    config: { taskLabel: "brunel:ready", workerSecret: undefined, pingIntervalMs: 1e9 },
-    server: http.createServer(),
+  const messenger = new WorkerMessenger({});
+  const wss = new WebhookController({
+    webhooks: new Webhooks({ secret: "test-secret" }),
+    config: { taskLabel: "brunel:ready" },
+    messenger,
+    assignWork: async () => {},
   });
-  const sendMsg = vi.spyOn(wss, "sendMsg").mockImplementation(() => {});
+  const sendMsg = vi.spyOn(messenger, "send").mockImplementation(() => false);
   return { wss, sendMsg, taskManager };
 }
 

@@ -5,8 +5,8 @@
  * disconnected worker (allowed), and assigned to connected worker (rejected).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import http from "http";
-import { ForemanWss } from "../src/foreman/controllers/wss.js";
+import { ForemanWorkerController } from "../src/foreman/controllers/foreman-worker-controller.js";
+import { WorkerMessenger } from "../src/foreman/controllers/worker-messenger.js";
 import { Worker } from "../src/foreman/models/worker.js";
 import { Task } from "../src/foreman/models/task.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
@@ -20,11 +20,12 @@ function fakeWs() {
 }
 
 function makeWss() {
-  const wss = new ForemanWss({
+  const messenger = new WorkerMessenger({});
+  const wss = new ForemanWorkerController({
     config: { taskLabel: "brunel:ready", workerSecret: undefined, pingIntervalMs: 1e9 },
-    server: http.createServer(),
+    messenger,
   });
-  const sendMsg = vi.spyOn(wss, "sendMsg").mockImplementation(() => true);
+  const sendMsg = vi.spyOn(messenger, "send").mockImplementation(() => true);
   return { wss, sendMsg };
 }
 

@@ -12,6 +12,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import http from "http";
 import type { AddressInfo } from "net";
+import { Webhooks } from "@octokit/webhooks";
 import { HttpServer } from "../src/foreman/controllers/http-server.js";
 import { Task } from "../src/foreman/models/task.js";
 import { resetDb, createTestTaskManager, createTestRepo, seedRepoWithInstallation } from "./helpers/task.js";
@@ -65,16 +66,26 @@ async function request(
   });
 }
 
+/** Create a test HttpServer with a Webhooks instance and an onAny spy. */
+function makeTestServer(): { webhooks: InstanceType<typeof Webhooks>; handler: ReturnType<typeof vi.fn>; server: http.Server } {
+  const webhooks = new Webhooks({ secret: "test-secret" });
+  const handler = vi.fn();
+  webhooks.onAny(({ id, name, payload }) => {
+    handler(id, name as string, payload);
+  });
+  const server = new HttpServer({ webhooks, verifySignature: false }).server;
+  return { webhooks, handler, server };
+}
+
 // ── Test harness ───────────────────────────────────────────────────────────────
 
 let server: http.Server;
 let port: number;
-let routeEvent: ReturnType<typeof vi.fn>;
+let handler: ReturnType<typeof vi.fn>;
 
 beforeEach(async () => {
-  routeEvent = vi.fn();
   vi.mocked(queryActivityLog).mockResolvedValue([]);
-  server = new HttpServer({ webhooks: null, routeEvent }).server;
+  ({ server, handler } = makeTestServer());
   port = await startServer(server);
 });
 
@@ -94,7 +105,7 @@ describe("POST /webhook", () => {
     expect(res.status).toBe(400);
   });
 
-  it("returns 200 and calls routeEvent when x-github-event is present (no webhooks secret)", async () => {
+  it("returns 200 and dispatches to webhook registry when x-github-event is present (no signature required)", async () => {
     const payload = { action: "labeled", issue: { number: 1 } };
     const res = await request(port, "POST", "/webhook", {
       body: JSON.stringify(payload),
@@ -105,8 +116,8 @@ describe("POST /webhook", () => {
       },
     });
     expect(res.status).toBe(200);
-    expect(routeEvent).toHaveBeenCalledOnce();
-    expect(routeEvent).toHaveBeenCalledWith("abc123", "issues", payload);
+    expect(handler).toHaveBeenCalledOnce();
+    expect(handler).toHaveBeenCalledWith("abc123", "issues", payload);
   });
 
   it("uses 'unknown' as delivery id when header is absent", async () => {
@@ -115,7 +126,22 @@ describe("POST /webhook", () => {
       body: JSON.stringify(payload),
       headers: { "x-github-event": "issues" },
     });
-    expect(routeEvent).toHaveBeenCalledWith("unknown", "issues", payload);
+    expect(handler).toHaveBeenCalledWith("unknown", "issues", payload);
+  });
+
+  it("requires signature when verifySignature=true and returns 401 if missing", async () => {
+    const webhooks = new Webhooks({ secret: "mysecret" });
+    const s = new HttpServer({ webhooks, verifySignature: true }).server;
+    const p = await startServer(s);
+    try {
+      const res = await request(p, "POST", "/webhook", {
+        body: JSON.stringify({ action: "labeled" }),
+        headers: { "x-github-event": "issues" },
+      });
+      expect(res.status).toBe(401);
+    } finally {
+      await stopServer(s);
+    }
   });
 });
 
@@ -155,7 +181,7 @@ describe("GET /api/log", () => {
 describe("GET /api/tasks/:id", () => {
   it("returns 404 when task does not exist", async () => {
     resetDb();
-    const s = new HttpServer({ webhooks: null, routeEvent: vi.fn() }).server;
+    const { server: s } = makeTestServer();
     const p = await startServer(s);
     try {
       const res = await request(p, "GET", "/api/tasks/nonexistent");
@@ -172,7 +198,7 @@ describe("GET /api/tasks/:id", () => {
     const t = await Task.upsert("http-t1", 9901, "test/repo", "Fix bug", "body", []);
     await t.complete({ inputTokens: 1000, outputTokens: 500, costUsd: 0.05 });
 
-    const s = new HttpServer({ webhooks: null, routeEvent: vi.fn() }).server;
+    const { server: s } = makeTestServer();
     const p = await startServer(s);
     try {
       const res = await request(p, "GET", "/api/tasks/http-t1");
@@ -257,7 +283,7 @@ describe("GET /api/tasks", () => {
     const t2 = await Task.upsert("2", 2, "test/repo", "Done bug", "Description", []);
     await t2.complete();
 
-    const s = new HttpServer({ webhooks: null, routeEvent: vi.fn() }).server;
+    const { server: s } = makeTestServer();
     const p = await startServer(s);
     try {
       const res = await request(p, "GET", "/api/tasks");
@@ -285,7 +311,7 @@ describe("GET /api/tasks", () => {
     const t = await Task.upsert("42", 42, "test/repo", "Fix bug", "Description", []);
     await t.complete();
 
-    const s = new HttpServer({ webhooks: null, routeEvent: vi.fn() }).server;
+    const { server: s } = makeTestServer();
     const p = await startServer(s);
     try {
       const res = await request(p, "GET", "/api/tasks?status=complete");
@@ -307,7 +333,7 @@ describe("GET /api/tasks", () => {
     await t1.complete();
     await Task.upsert("2", 2, "test/repo", "T2", "b", []);
 
-    const s = new HttpServer({ webhooks: null, routeEvent: vi.fn() }).server;
+    const { server: s } = makeTestServer();
     const p = await startServer(s);
     try {
       const res = await request(p, "GET", "/api/tasks?status=complete");
@@ -326,7 +352,7 @@ describe("GET /api/tasks", () => {
 describe("GET /api/repos/:owner/:repo", () => {
   it("returns 404 when repo does not exist", async () => {
     resetDb();
-    const s = new HttpServer({ webhooks: null, routeEvent: vi.fn() }).server;
+    const { server: s } = makeTestServer();
     const p = await startServer(s);
     try {
       const res = await request(p, "GET", "/api/repos/owner/nonexistent");
@@ -339,7 +365,7 @@ describe("GET /api/repos/:owner/:repo", () => {
   it("returns repo with installation: null when no installation is linked", async () => {
     resetDb();
     await createTestRepo("owner/http-repo-1");
-    const s = new HttpServer({ webhooks: null, routeEvent: vi.fn() }).server;
+    const { server: s } = makeTestServer();
     const p = await startServer(s);
     try {
       const res = await request(p, "GET", "/api/repos/owner/http-repo-1");
@@ -354,7 +380,7 @@ describe("GET /api/repos/:owner/:repo", () => {
   it("returns repo with installation details when App is linked", async () => {
     resetDb();
     await seedRepoWithInstallation("owner/http-repo-2", 77001);
-    const s = new HttpServer({ webhooks: null, routeEvent: vi.fn() }).server;
+    const { server: s } = makeTestServer();
     const p = await startServer(s);
     try {
       const res = await request(p, "GET", "/api/repos/owner/http-repo-2");
