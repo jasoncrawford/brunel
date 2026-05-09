@@ -333,7 +333,9 @@ export async function loadConfig(
 
 /**
  * Returns a config object populated with schema defaults. Useful in tests
- * that need default values (e.g. taskLabel) without a real GitHub repo or token.
+ * that need default values (e.g. taskLabel) without a real GitHub repo or .env.
+ * Passes a placeholder githubToken so GithubClient.resolveToken() doesn't throw
+ * in tests that exercise code paths involving GithubClient (fetch is mocked separately).
  */
 export function loadDefaultConfig(): Promise<BrunelConfig> {
   return loadConfig([], { githubToken: "tok" });
