@@ -385,3 +385,17 @@ describe("verifyPushAccess", () => {
     await expect(new GithubClient("owner/repo", 456).verifyPushAccess("testuser")).rejects.toThrow("403");
   });
 });
+
+// ── No auth configured ────────────────────────────────────────────────────────
+
+describe("GithubClient without auth", () => {
+  it("throws 'GitHub token not configured' when no token and no installation ID", async () => {
+    getConfig().githubToken = undefined as unknown as string;
+    await expect(new GithubClient("owner/repo").fetchIssues()).rejects.toThrow("GitHub token not configured");
+  });
+
+  it("throws 'GitHub token not configured' for fetchIssueStates without auth", async () => {
+    getConfig().githubToken = undefined as unknown as string;
+    await expect(new GithubClient("owner/repo").fetchIssueStates([1])).rejects.toThrow("GitHub token not configured");
+  });
+});
