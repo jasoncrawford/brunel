@@ -1,6 +1,7 @@
 /**
  * In-memory Supabase client shim for use when Supabase is not configured.
- * Implements just the query patterns that Task (task.ts) and Repo (repo.ts) use.
+ * Implements just the query patterns that Task (task.ts), Repo (repo.ts), and
+ * Installation (installation.ts) use.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -52,13 +53,56 @@ function ok<T>(data: T): Promise<{ data: T; error: null }> {
 export function createMemoryTaskDb(): SupabaseClient<Database> {
   const store = new Map<string, DbRow>();
 
-  // ── Repos store ───────────────────────────────────────────────────────────
-  const reposStore = new Map<string, RepoRow>();
-  let nextRepoId = 1;
-
   // ── Installations store ───────────────────────────────────────────────────
   const installationsStore = new Map<number, InstallationRow>();
   let nextInstallationId = 1;
+
+  function buildInstallationsTable() {
+    return {
+      insert(data: Omit<InstallationRow, "id" | "created_at"> & { created_at?: string }) {
+        const id = nextInstallationId++;
+        const row: InstallationRow = { id, created_at: new Date().toISOString(), ...data };
+        installationsStore.set(id, row);
+        const sb = {
+          select() { return sb; },
+          single() { return ok(row); },
+        };
+        return sb;
+      },
+      delete() {
+        let matchId: number | null = null;
+        const thenable = {
+          eq(_col: string, val: unknown) { matchId = val as number; return thenable; },
+          then(resolve: (v: { data: null; error: null }) => void) {
+            if (matchId !== null) installationsStore.delete(matchId);
+            resolve({ data: null, error: null });
+          },
+        };
+        return thenable;
+      },
+      select(_cols?: string) {
+        let filteredRows = [...installationsStore.values()];
+        const sb = {
+          eq(col: string, val: unknown) {
+            filteredRows = filteredRows.filter((r) => (r as Record<string, unknown>)[col] === val);
+            return sb;
+          },
+          order(_col: string, _opts?: unknown) { return sb; },
+          limit(n: number) { return ok(filteredRows.slice(0, n)); },
+          maybeSingle() { return ok(filteredRows[0] ?? null); },
+          single() { return ok(filteredRows[0] ?? null); },
+          then(resolve: (v: { data: InstallationRow[]; error: null }) => void) {
+            resolve({ data: filteredRows, error: null });
+          },
+        };
+        return sb;
+      },
+    };
+  }
+
+  // ── Repos store ───────────────────────────────────────────────────────────
+  const reposStore = new Map<string, RepoRow>();
+  let nextRepoId = 1;
 
   // ── Workers store ─────────────────────────────────────────────────────────
   const workersStore = new Map<string, WorkerRow>();
@@ -250,42 +294,6 @@ export function createMemoryTaskDb(): SupabaseClient<Database> {
           then(resolve: (v: { data: WebhookRow[]; error: null }) => void) {
             resolve({ data: applyWebhookFilters([...webhookEventsStore], filters), error: null });
           },
-        };
-        return sb;
-      },
-    };
-  }
-
-  function buildInstallationsTable() {
-    return {
-      insert(rowData: { github_id: number; account_login: string; account_type: string }) {
-        const newRow: InstallationRow = {
-          id: nextInstallationId++,
-          github_id: rowData.github_id,
-          account_login: rowData.account_login,
-          account_type: rowData.account_type,
-          created_at: new Date().toISOString(),
-        };
-        installationsStore.set(newRow.id, newRow);
-        const sb = {
-          select() { return sb; },
-          single() { return ok(newRow); },
-        };
-        return sb;
-      },
-      select(_cols?: string) {
-        const sb = {
-          eq(col: string, val: unknown) {
-            const filtered = [...installationsStore.values()].filter(
-              (r) => (r as Record<string, unknown>)[col] === val,
-            );
-            return {
-              maybeSingle() { return ok(filtered[0] ?? null); },
-              single() { return ok(filtered[0] ?? null); },
-            };
-          },
-          maybeSingle() { return ok(null as InstallationRow | null); },
-          single() { return ok(null as InstallationRow | null); },
         };
         return sb;
       },

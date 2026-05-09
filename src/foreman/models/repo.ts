@@ -21,7 +21,7 @@ export class Repo extends ActiveRecord {
   readonly fullName: string;
   status: RepoStatus;
   readonly createdAt: string;
-  readonly installationId: number | null;
+  installationId: number | null;
 
   private constructor(row: DbRow) {
     super();
@@ -76,6 +76,37 @@ export class Repo extends ActiveRecord {
     const updated = await this.update({ status: "active" });
     this.status = "active";
     return updated;
+  }
+
+  /** Sets status to 'new' and persists. Returns the updated Repo instance. */
+  async deactivate(): Promise<Repo> {
+    const updated = await this.update({ status: "new" });
+    this.status = "new";
+    return updated;
+  }
+
+  /** Sets installation_id to the given value and persists. Returns the updated Repo instance. */
+  async linkInstallation(installationId: number): Promise<Repo> {
+    const updated = await this.update({ installation_id: installationId });
+    this.installationId = installationId;
+    return updated;
+  }
+
+  /** Clears installation_id and persists. Returns the updated Repo instance. */
+  async unlinkInstallation(): Promise<Repo> {
+    const updated = await this.update({ installation_id: null });
+    this.installationId = null;
+    return updated;
+  }
+
+  /** Lists all repos linked to the given installation DB id. */
+  static async listByInstallation(installationId: number): Promise<Repo[]> {
+    return super.listBy("installation_id", installationId) as Promise<Repo[]>;
+  }
+
+  /** Finds a repo by full_name without creating one. Returns null if not found. */
+  static async findByFullName(fullName: string): Promise<Repo | null> {
+    return super.getBy("full_name", fullName) as Promise<Repo | null>;
   }
 
   /**

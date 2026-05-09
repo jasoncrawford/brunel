@@ -15,6 +15,7 @@ import { Repo } from "../models/repo.js";
 import { Task } from "../models/task.js";
 import { Worker } from "../models/worker.js";
 import { GithubClient } from "../clients/github.js";
+import { InstallationsController } from "./installations-controller.js";
 
 type R = Record<string, unknown>;
 
@@ -52,6 +53,7 @@ export class ForemanWss {
   readonly wss: WebSocketServer;
   private readonly config: Pick<BrunelConfig, "taskLabel" | "githubToken" | "githubApiUrl" | "workerSecret" | "pingIntervalMs">;
   private readonly adminWss?: AdminWssLike;
+  private readonly installationsController = new InstallationsController();
   private nextBroadcastId = 1;
 
   constructor({ config, server, adminWss }: ForemanWssOptions) {
@@ -188,7 +190,11 @@ export class ForemanWss {
     let task: Task | null = null;
     let ref = "";
     let forward = true;
-    if (name === "pull_request") {
+    if (name === "installation") {
+      await this.routeInstallationEvent(p);
+    } else if (name === "installation_repositories") {
+      await this.routeInstallationRepositoriesEvent(p);
+    } else if (name === "pull_request") {
       ({ task, ref, forward = true } = await this.routePrEvent(p, evt));
     } else if (name === "pull_request_review" || name === "pull_request_review_comment") {
       ({ task, ref } = await this.routePrReviewEvent(p, evt));
@@ -670,6 +676,32 @@ export class ForemanWss {
     const repoFullName = strProp(p.repository, "full_name");
     if (!repoFullName) throw new Error("Webhook payload missing repository.full_name");
     return Repo.findOrCreate(repoFullName);
+  }
+
+  private async routeInstallationEvent(p: R): Promise<void> {
+    const action = strProp(p, "action");
+    try {
+      if (action === "created") {
+        await this.installationsController.handleInstallationCreated(p);
+      } else if (action === "deleted") {
+        await this.installationsController.handleInstallationDeleted(p);
+      }
+    } catch (err) {
+      log(`ERROR handling installation/${action}: ${fmtError(err)}`);
+    }
+  }
+
+  private async routeInstallationRepositoriesEvent(p: R): Promise<void> {
+    const action = strProp(p, "action");
+    try {
+      if (action === "added") {
+        await this.installationsController.handleReposAdded(p);
+      } else if (action === "removed") {
+        await this.installationsController.handleReposRemoved(p);
+      }
+    } catch (err) {
+      log(`ERROR handling installation_repositories/${action}: ${fmtError(err)}`);
+    }
   }
 
   async routePrEvent(p: R, evt: WebhookEvent): Promise<RouteResult> {

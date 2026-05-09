@@ -70,7 +70,10 @@ export class TaskManager extends EventEmitter {
 
   // ── Instance state ───────────────────────────────────────────────────────
   readonly repo: Repo;
-  private readonly github: GithubClient;
+
+  private get github(): GithubClient {
+    return new GithubClient(this.repo.fullName, this.repo.installationId ?? undefined);
+  }
 
   // ── Ephemeral in-memory state (no DB backing) ────────────────────────────
   private branchToTaskId = new Map<string, string>();
@@ -91,7 +94,6 @@ export class TaskManager extends EventEmitter {
   constructor(repo: Repo) {
     super();
     this.repo = repo;
-    this.github = new GithubClient(repo.fullName);
     this._openIssues = new Set();
     this._blockers = new Map();
     this._blockersLoaded = new Set();
@@ -437,7 +439,7 @@ export class TaskManager extends EventEmitter {
   }
 
   /** Fetch brunel:ready issues from GitHub and load deps.
-   *  Called at startup after loadActiveTasksFromDb. */
+   *  Called at startup after loadActiveTasksFromDb, and on installation/activation events. */
   async loadIssuesFromGithub(): Promise<void> {
     const repo = this.repo.fullName;
     const issues = await this.github.fetchIssues();
