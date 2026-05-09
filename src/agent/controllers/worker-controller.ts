@@ -822,10 +822,10 @@ export class WorkerController extends EventEmitter {
     }
   }
 
-  private transitionToIdle(): void {
+  private transitionToIdle(opts?: { silent?: boolean }): void {
     this.transitionToRegistered();
     this.agentStatus.update({ workerReady: true });
-    this.display.print(c.sageGreen("Waiting for tasks..."));
+    if (!opts?.silent) this.display.print(c.sageGreen("Waiting for tasks..."));
   }
 
   /**
@@ -1049,7 +1049,7 @@ export class WorkerController extends EventEmitter {
         // "reserved" and "assigned" both call transitionToRegistered(), which
         // flushes the buffer and sends any pending claim_task message.
         if (msg.status === "ready") {
-          this.transitionToIdle();
+          this.transitionToIdle({ silent: true });
         } else {
           this.transitionToRegistered();
         }
