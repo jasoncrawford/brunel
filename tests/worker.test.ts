@@ -1960,6 +1960,14 @@ describe("completeCurrentTask: post-completion prompt", () => {
     const msgs = ws.send.mock.calls.map(([s]: [string]) => JSON.parse(s));
     expect(msgs.some((m: { type: string }) => m.type === "worker_ready")).toBe(false);
   });
+
+  it("option 0 (wait for next task): clears eventsPaused so status bar does not show 'Events paused'", async () => {
+    const { sess } = await makeSession(async () => 0);
+    sess.pauseEvents();
+    expect(sess.eventsPaused).toBe(true);
+    await sess.completeCurrentTask();
+    expect(sess.eventsPaused).toBe(false);
+  });
 });
 
 // ── sendGoodbye ───────────────────────────────────────────────────────────────
