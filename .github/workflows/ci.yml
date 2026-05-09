@@ -34,14 +34,14 @@ jobs:
           if [ -z "$KEY" ]; then
             KEY=$(echo "$STATUS" | grep 'service_role' | awk '{print $NF}')
           fi
+          if [ -z "$KEY" ]; then
+            echo "ERROR: Could not extract Supabase service role key from 'supabase status' output" >&2
+            exit 1
+          fi
           {
             echo "SUPABASE_URL=http://127.0.0.1:54321"
             echo "SUPABASE_SERVICE_ROLE_KEY=${KEY}"
           } >> "$GITHUB_ENV"
-
-      - run: npm test
-        env:
-          CI: true
 
       - name: Run frontend component tests
         run: cd frontend && npm ci && npm test
@@ -49,7 +49,6 @@ jobs:
           CI: true
 
       - run: npm run coverage
-        if: always()
 
       - uses: actions/upload-artifact@v7
         if: always()
