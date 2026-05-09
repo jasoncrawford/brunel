@@ -90,7 +90,7 @@ describe("RepoDetail", () => {
     renderRepoDetail();
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith("/api/repos/user/my-repo");
-      expect(fetch).toHaveBeenCalledWith("/api/repos/user/my-repo/log");
+      expect(fetch).toHaveBeenCalledWith("/api/repos/5/log");
     });
   });
 

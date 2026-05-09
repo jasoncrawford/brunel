@@ -18,9 +18,10 @@ export default function RepoDetail() {
   useEffect(() => {
     fetch(`/api/repos/${fullName}`)
       .then((r) => r.json() as Promise<Repo>)
-      .then(setRepo)
-      .catch(console.error);
-    fetch(`/api/repos/${fullName}/log`)
+      .then((r) => {
+        setRepo(r);
+        return fetch(`/api/repos/${r.repoId}/log`);
+      })
       .then((r) => r.json() as Promise<LogEntry[]>)
       .then((entries) => setRecentLog(entries.slice(0, 50)))
       .catch(console.error);
