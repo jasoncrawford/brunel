@@ -13,7 +13,7 @@ import http from "http";
 import { WebSocket, WebSocketServer } from "ws";
 import type { AddressInfo } from "net";
 import { Worker } from "../src/foreman/models/worker.js";
-import { ForemanWss } from "../src/foreman/controllers/wss.js";
+import { ForemanWss } from "../src/foreman/wss.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
 import { fakeRepo, resetDb, createTestTaskManager } from "./helpers/task.js";

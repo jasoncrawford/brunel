@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Worker } from "../src/foreman/models/worker.js";
-import { ForemanWss } from "../src/foreman/controllers/wss.js";
+import { ForemanWss } from "../src/foreman/wss.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
 import { resetDb, createTestTaskManager } from "./helpers/task.js";
@@ -58,7 +58,7 @@ describe("foreman — blocker transitions via routeEvent", () => {
     expect(snapshots1[0].status).toBe("blocked");
 
     // Close the blocker
-    await foremanWss.routeEvent("evt-1", "issues", {
+    await foremanWss.webhookController.handleEvent("evt-1", "issues", {
       action: "closed",
       issue: { number: 5, title: "Blocker", labels: [] },
       repository: { full_name: "owner/repo" },
@@ -89,7 +89,7 @@ describe("foreman — blocker transitions via routeEvent", () => {
     expect(snapshots1[0].status).toBe("blocked");
 
     // Close issue 5 — but 6 is still open
-    await foremanWss.routeEvent("evt-1", "issues", {
+    await foremanWss.webhookController.handleEvent("evt-1", "issues", {
       action: "closed",
       issue: { number: 5, title: "Blocker 5", labels: [] },
       repository: { full_name: "owner/repo" },

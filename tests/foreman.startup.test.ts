@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Worker } from "../src/foreman/models/worker.js";
-import { ForemanWss } from "../src/foreman/controllers/wss.js";
+import { ForemanWss } from "../src/foreman/wss.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
 import { fakeRepo, resetDb, createTestTaskManager } from "./helpers/task.js";
@@ -234,7 +234,7 @@ describe("PR tracking persistence", () => {
     const result = new ForemanWss({ server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } });
     ({ wss } = result);
 
-    await result.routeEvent("evt-1", "pull_request", {
+    await result.webhookController.handleEvent("evt-1", "pull_request", {
       action: "opened",
       pull_request: {
         number: 10,
@@ -257,7 +257,7 @@ describe("PR tracking persistence", () => {
     const result = new ForemanWss({ server: httpServer, config: { ...defaultCfg, taskLabel: "brunel:ready" } });
     ({ wss } = result);
 
-    await result.routeEvent("evt-1", "pull_request", {
+    await result.webhookController.handleEvent("evt-1", "pull_request", {
       action: "opened",
       pull_request: {
         number: 10,

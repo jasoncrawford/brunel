@@ -5,7 +5,7 @@
  * disconnected worker (allowed), and assigned to connected worker (rejected).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { ForemanWorkerController } from "../src/foreman/controllers/foreman-worker-controller.js";
+import { WorkerController } from "../src/foreman/controllers/worker-controller.js";
 import { WorkerMessenger } from "../src/foreman/controllers/worker-messenger.js";
 import { Worker } from "../src/foreman/models/worker.js";
 import { Task } from "../src/foreman/models/task.js";
@@ -21,7 +21,7 @@ function fakeWs() {
 
 function makeWss() {
   const messenger = new WorkerMessenger({});
-  const wss = new ForemanWorkerController({
+  const wss = new WorkerController({
     config: { taskLabel: "brunel:ready", workerSecret: undefined, pingIntervalMs: 1e9 },
     messenger,
   });

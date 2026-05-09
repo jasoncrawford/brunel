@@ -1,17 +1,16 @@
 import http from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { Webhooks } from "@octokit/webhooks";
-import * as Wire from "../../../shared/wire.js";
-import { ForemanMessage } from "../models/foreman-message.js";
-import { Worker } from "../models/worker.js";
-import { Repo } from "../models/repo.js";
-import type { AdminWss } from "./admin-ws.js";
-import { WorkerMessenger } from "./worker-messenger.js";
-import { ForemanWorkerController } from "./foreman-worker-controller.js";
-import { WebhookController } from "./webhook-controller.js";
-import { fmtError, log } from "../../utils.js";
-import { shortWorkerId } from "../../../shared/utils.js";
-import type { BrunelConfig } from "../../config.js";
+import * as Wire from "../../shared/wire.js";
+import { ForemanMessage } from "./models/foreman-message.js";
+import { Worker } from "./models/worker.js";
+import type { AdminWss } from "./controllers/admin-ws.js";
+import { WorkerMessenger } from "./controllers/worker-messenger.js";
+import { WorkerController } from "./controllers/worker-controller.js";
+import { WebhookController } from "./controllers/webhook-controller.js";
+import { fmtError, log } from "../utils.js";
+import { shortWorkerId } from "../../shared/utils.js";
+import type { BrunelConfig } from "../config.js";
 
 type AdminWssLike = Pick<AdminWss, "broadcastLogEvent">;
 
@@ -23,59 +22,21 @@ type ForemanWssOptions = {
   adminWss?: AdminWssLike;
 };
 
-// ── WorkerMsgRouter ───────────────────────────────────────────────────────────
-
-type WorkerMsgHandler = (workerId: string, ws: WebSocket, msg: Wire.WorkerMessage) => Promise<void>;
-
-function buildWorkerMsgRouter(controller: ForemanWorkerController): Map<Wire.WorkerMessage["type"], WorkerMsgHandler> {
-  const map = new Map<Wire.WorkerMessage["type"], WorkerMsgHandler>();
-
-  map.set("worker_hello", async (workerId, ws, msg) => {
-    await controller.handleWorkerHello(workerId, ws, msg as Extract<Wire.WorkerMessage, { type: "worker_hello" }>);
-  });
-  map.set("task_complete", async (workerId, _ws, msg) => {
-    await controller.handleTaskComplete(workerId, msg as Extract<Wire.WorkerMessage, { type: "task_complete" }>);
-  });
-  map.set("worker_goodbye", async (workerId, _ws, msg) => {
-    await controller.handleWorkerGoodbye(workerId, msg as Extract<Wire.WorkerMessage, { type: "worker_goodbye" }>);
-  });
-  map.set("activate_repo", async (workerId, ws, _msg) => {
-    await controller.handleActivateRepo(workerId, ws);
-  });
-  map.set("claim_task", async (workerId, _ws, msg) => {
-    await controller.handleClaimTask(workerId, msg as Extract<Wire.WorkerMessage, { type: "claim_task" }>);
-  });
-  map.set("worker_ready", async (workerId, _ws, _msg) => {
-    await controller.handleWorkerReady(workerId);
-  });
-  map.set("worker_reserved", async (workerId, _ws, _msg) => {
-    await controller.handleWorkerReserve(workerId);
-  });
-
-  return map;
-}
-
-// ── ForemanWss class ──────────────────────────────────────────────────────────
-
 export class ForemanWss {
   readonly wss: WebSocketServer;
-  private readonly workerController: ForemanWorkerController;
-  private readonly webhookController: WebhookController;
-  /** Exposed for callers (e.g., tests and index.ts) that want to send directly. */
-  readonly messenger: WorkerMessenger;
+  readonly workerController: WorkerController;
+  readonly webhookController: WebhookController;
 
   constructor({ config, server, webhooks, adminWss }: ForemanWssOptions) {
     const resolvedWebhooks = webhooks ?? new Webhooks({ secret: "dev-mode-placeholder" });
-    this.messenger = new WorkerMessenger({ adminWss });
-    this.workerController = new ForemanWorkerController({ config, messenger: this.messenger });
+    const messenger = new WorkerMessenger({ adminWss });
+    this.workerController = new WorkerController({ config, messenger });
     this.webhookController = new WebhookController({
       webhooks: resolvedWebhooks,
       config,
-      messenger: this.messenger,
+      messenger,
       assignWork: () => this.workerController.assignWork(),
     });
-
-    const router = buildWorkerMsgRouter(this.workerController);
 
     const wss = new WebSocketServer({ noServer: true });
     this.wss = wss;
@@ -122,7 +83,7 @@ export class ForemanWss {
             msgType: msg.type,
             payload: rcvPayload,
           });
-          this.messenger.broadcastLogEvent({
+          messenger.broadcastLogEvent({
             kind: "message",
             timestamp: new Date().toISOString(),
             taskId: rcvTaskId,
@@ -131,19 +92,12 @@ export class ForemanWss {
             summary: ForemanMessage.buildSummary("received", msg.type, rcvTaskId, rcvPayload),
           });
 
-          // Route to handler.
-          const handler = router.get(msg.type);
-          if (handler) {
-            await handler(workerId, ws, msg);
-          } else {
-            log(`[worker ${workerId}] unknown message type: ${(msg as Record<string, unknown>).type}`);
-            return;
-          }
-
+          // Dispatch to handler.
+          await this.workerController.dispatch(workerId, ws, msg);
           await this.workerController.assignWork();
         })().catch(err => {
           log(`ERROR handling worker message: ${fmtError(err)}`);
-          this.messenger.sendError(ws, `Internal error: ${fmtError(err)}`, false, workerId || null, Worker.fromRegistry(workerId)?.repo.id ?? null);
+          messenger.sendError(ws, `Internal error: ${fmtError(err)}`, false, workerId || null, Worker.fromRegistry(workerId)?.repo.id ?? null);
         });
       });
 
@@ -164,7 +118,7 @@ export class ForemanWss {
             msgType: "worker_disconnected",
             payload: disconnPayload,
           });
-          this.messenger.broadcastLogEvent({
+          messenger.broadcastLogEvent({
             kind: "message",
             timestamp: new Date().toISOString(),
             taskId,
@@ -190,11 +144,6 @@ export class ForemanWss {
     });
   }
 
-  /** Convenience method for tests and dev-mode: route an event directly without webhook verification. */
-  async routeEvent(id: string, name: string, payload: unknown): Promise<void> {
-    await this.webhookController.handleEvent(id, name, payload);
-  }
-
   async reconcile(): Promise<void> {
     await this.workerController.reconcile();
   }
@@ -208,15 +157,5 @@ export class ForemanWss {
         client.close(1001, "Server shutting down");
       }
     });
-  }
-
-  /** Expose sendMsg for backwards compatibility with tests that spy on it. Delegates to messenger.send. */
-  sendMsg(worker: Worker, msg: Wire.ForemanMessage, opts: { logTaskId?: string; onError?: (err: Error) => void } = {}): boolean {
-    return this.messenger.send(worker, msg, opts);
-  }
-
-  /** Proxy for integration tests that call handleAssignedHello directly. */
-  async handleAssignedHello(workerId: string, claimedTaskId: string, ws: WebSocket, repo: Repo, lastSeenEventSeqId?: number): Promise<void> {
-    return this.workerController.handleAssignedHello(workerId, claimedTaskId, ws, repo, lastSeenEventSeqId);
   }
 }

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import http from "http";
 import { Worker } from "../src/foreman/models/worker.js";
-import { ForemanWss } from "../src/foreman/controllers/wss.js";
+import { ForemanWss } from "../src/foreman/wss.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
 import { fakeRepo, resetDb, createTestTaskManager } from "./helpers/task.js";
@@ -94,7 +94,7 @@ describe("issues/closed — task lifecycle", () => {
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
     await t!.assign(Worker.register("worker-1", fakeWs, fakeRepo()));
 
-    await foremanWss.routeEvent("evt-1", "issues", {
+    await foremanWss.webhookController.handleEvent("evt-1", "issues", {
       action: "closed",
       issue: { number: 142, title: "T", body: "", labels: [] },
       repository: { full_name: "owner/repo" },
@@ -110,7 +110,7 @@ describe("issues/closed — task lifecycle", () => {
     const t = await Task.get("143");
     await t!.complete();
 
-    await foremanWss.routeEvent("evt-1", "issues", {
+    await foremanWss.webhookController.handleEvent("evt-1", "issues", {
       action: "closed",
       issue: { number: 143, title: "T", body: "", labels: [] },
       repository: { full_name: "owner/repo" },
@@ -124,7 +124,7 @@ describe("issues/closed — task lifecycle", () => {
     taskManager.markBlockersLoaded(144);
     await Task.upsert("144", 144, "owner/repo", "T", "b", []);
 
-    await foremanWss.routeEvent("evt-1", "issues", {
+    await foremanWss.webhookController.handleEvent("evt-1", "issues", {
       action: "closed",
       issue: { number: 144, title: "T", body: "", labels: [] },
       repository: { full_name: "owner/repo" },
@@ -141,7 +141,7 @@ describe("issues/closed — task lifecycle", () => {
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
     await t!.assign(Worker.register("worker-1", fakeWs, fakeRepo()));
 
-    await foremanWss.routeEvent("evt-1", "issues", {
+    await foremanWss.webhookController.handleEvent("evt-1", "issues", {
       action: "closed",
       issue: { number: 145, title: "T", body: "", labels: [] },
       repository: { full_name: "owner/repo" },
@@ -157,7 +157,7 @@ describe("issues/closed — task lifecycle", () => {
     taskManager.trackIssue(42);
     taskManager.markBlockersLoaded(42);
 
-    await foremanWss.routeEvent("evt-1", "issues", {
+    await foremanWss.webhookController.handleEvent("evt-1", "issues", {
       action: "closed",
       issue: { number: 42, title: "T", body: "", labels: [] },
       repository: { full_name: "owner/repo" },
@@ -176,7 +176,7 @@ describe("startDepsLoad() error handling", () => {
   it("task remains pending with blockersLoaded: false when dep fetch fails", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network error")));
 
-    await foremanWss.routeEvent("evt-1", "issues", {
+    await foremanWss.webhookController.handleEvent("evt-1", "issues", {
       action: "labeled",
       label: { name: TASK_LABEL },
       issue: {

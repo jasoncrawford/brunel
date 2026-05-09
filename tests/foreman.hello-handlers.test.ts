@@ -1,11 +1,11 @@
 /**
- * Unit tests for ForemanWorkerController.handleAssignedHello and handleReadyHello.
+ * Unit tests for WorkerController.handleAssignedHello and handleReadyHello.
  *
  * Each reconnection case is verified by calling the public methods directly on
- * a ForemanWorkerController instance with messenger.send spied out.
+ * a WorkerController instance with messenger.send spied out.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { ForemanWorkerController } from "../src/foreman/controllers/foreman-worker-controller.js";
+import { WorkerController } from "../src/foreman/controllers/worker-controller.js";
 import { WorkerMessenger } from "../src/foreman/controllers/worker-messenger.js";
 import { Worker } from "../src/foreman/models/worker.js";
 import { Task } from "../src/foreman/models/task.js";
@@ -24,7 +24,7 @@ function fakeWs() {
 
 function makeDeps(_taskManager: TaskManager) {
   const messenger = new WorkerMessenger({});
-  const wss = new ForemanWorkerController({
+  const wss = new WorkerController({
     config: { taskLabel: "brunel:ready", workerSecret: undefined, pingIntervalMs: 1e9 },
     messenger,
   });
@@ -559,7 +559,7 @@ describe("repoStatus in hello_ack", () => {
 describe("activate_repo", () => {
   function makeWssForActivate() {
     const messenger = new WorkerMessenger({});
-    const wss = new ForemanWorkerController({
+    const wss = new WorkerController({
       config: { taskLabel: "brunel:ready", workerSecret: undefined, pingIntervalMs: 1e9 },
       messenger,
     });

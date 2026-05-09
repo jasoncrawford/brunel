@@ -31,6 +31,8 @@ function numProp(obj: unknown, key: string): number | null {
  */
 export interface RouteResult { task: Task | null; ref: string; forward?: boolean; }
 
+type WebhookHandler = (p: R, evt: WebhookEvent) => Promise<RouteResult | void>;
+
 type WebhookControllerOptions = {
   webhooks: InstanceType<typeof Webhooks>;
   config: Pick<BrunelConfig, "taskLabel">;
@@ -43,15 +45,46 @@ export class WebhookController {
   private readonly messenger: WorkerMessenger;
   private readonly assignWork: () => Promise<void>;
   private readonly installationsController = new InstallationsController();
+  private readonly handlerMap = new Map<string, WebhookHandler>();
 
   constructor({ webhooks, config, messenger, assignWork }: WebhookControllerOptions) {
     this.config = config;
     this.messenger = messenger;
     this.assignWork = assignWork;
 
+    this.on("installation", async (p) => {
+      const action = strProp(p, "action");
+      try {
+        if (action === "created") await this.installationsController.handleInstallationCreated(p);
+        else if (action === "deleted") await this.installationsController.handleInstallationDeleted(p);
+      } catch (err) {
+        log(`ERROR handling installation/${action}: ${fmtError(err)}`);
+      }
+    });
+
+    this.on("installation_repositories", async (p) => {
+      const action = strProp(p, "action");
+      try {
+        if (action === "added") await this.installationsController.handleReposAdded(p);
+        else if (action === "removed") await this.installationsController.handleReposRemoved(p);
+      } catch (err) {
+        log(`ERROR handling installation_repositories/${action}: ${fmtError(err)}`);
+      }
+    });
+
+    this.on("pull_request", (p, evt) => this.routePrEvent(p, evt));
+    this.on("pull_request_review", (p, evt) => this.routePrReviewEvent(p, evt));
+    this.on("pull_request_review_comment", (p, evt) => this.routePrReviewEvent(p, evt));
+    this.on("check_run", (p, evt) => this.routeCheckEvent(p, evt, "check_run"));
+    this.on("check_suite", (p, evt) => this.routeCheckEvent(p, evt, "check_suite"));
+
     webhooks.onAny(async ({ id, name, payload }) => {
       await this.handleEvent(id, name as string, payload);
     });
+  }
+
+  private on(name: string, handler: WebhookHandler): void {
+    this.handlerMap.set(name, handler);
   }
 
   async handleEvent(id: string, name: string, payload: unknown): Promise<void> {
@@ -72,17 +105,13 @@ export class WebhookController {
     let task: Task | null = null;
     let ref = "";
     let forward = true;
-    if (name === "installation") {
-      await this.routeInstallationEvent(p);
-    } else if (name === "installation_repositories") {
-      await this.routeInstallationRepositoriesEvent(p);
-    } else if (name === "pull_request") {
-      ({ task, ref, forward = true } = await this.routePrEvent(p, evt));
-    } else if (name === "pull_request_review" || name === "pull_request_review_comment") {
-      ({ task, ref } = await this.routePrReviewEvent(p, evt));
-    } else if (name === "check_run" || name === "check_suite") {
-      ({ task, ref } = await this.routeCheckEvent(p, evt, name));
+
+    const handler = this.handlerMap.get(name);
+    if (handler) {
+      const result = await handler(p, evt);
+      if (result) ({ task, ref, forward = true } = result);
     } else {
+      // Catch-all: any event that carries an issue number routes through routeIssueEvent.
       const issue = p.issue as R | undefined;
       const issueNumber = numProp(issue, "number");
       if (issueNumber !== null) {
@@ -142,32 +171,6 @@ export class WebhookController {
         // send failure: event is already in DB; worker will replay from lastSeenEventSeqId on reconnect
       }
       // worker disconnected or not in registry: event is in DB; worker replays on reconnect
-    }
-  }
-
-  private async routeInstallationEvent(p: R): Promise<void> {
-    const action = strProp(p, "action");
-    try {
-      if (action === "created") {
-        await this.installationsController.handleInstallationCreated(p);
-      } else if (action === "deleted") {
-        await this.installationsController.handleInstallationDeleted(p);
-      }
-    } catch (err) {
-      log(`ERROR handling installation/${action}: ${fmtError(err)}`);
-    }
-  }
-
-  private async routeInstallationRepositoriesEvent(p: R): Promise<void> {
-    const action = strProp(p, "action");
-    try {
-      if (action === "added") {
-        await this.installationsController.handleReposAdded(p);
-      } else if (action === "removed") {
-        await this.installationsController.handleReposRemoved(p);
-      }
-    } catch (err) {
-      log(`ERROR handling installation_repositories/${action}: ${fmtError(err)}`);
     }
   }
 

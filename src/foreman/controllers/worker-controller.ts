@@ -12,22 +12,56 @@ import { shortWorkerId } from "../../../shared/utils.js";
 import { getConfig } from "../../config.js";
 import type { BrunelConfig } from "../../config.js";
 
-type ForemanWorkerControllerOptions = {
+type WorkerControllerOptions = {
   config: Pick<BrunelConfig, "taskLabel" | "githubToken" | "githubApiUrl" | "workerSecret" | "pingIntervalMs">;
   messenger: WorkerMessenger;
 };
 
-export class ForemanWorkerController {
+type MsgHandler = (workerId: string, ws: WebSocket, msg: Wire.WorkerMessage) => Promise<void>;
+
+export class WorkerController {
   private readonly config: Pick<BrunelConfig, "taskLabel" | "githubToken" | "githubApiUrl" | "workerSecret" | "pingIntervalMs">;
   readonly messenger: WorkerMessenger;
+  private readonly handlers = new Map<Wire.WorkerMessage["type"], MsgHandler>();
 
-  constructor({ config, messenger }: ForemanWorkerControllerOptions) {
+  constructor({ config, messenger }: WorkerControllerOptions) {
     this.config = config;
     this.messenger = messenger;
+
+    this.handlers.set("worker_hello", async (workerId, ws, msg) => {
+      await this.handleWorkerHello(workerId, ws, msg as Extract<Wire.WorkerMessage, { type: "worker_hello" }>);
+    });
+    this.handlers.set("task_complete", async (workerId, _ws, msg) => {
+      await this.handleTaskComplete(workerId, msg as Extract<Wire.WorkerMessage, { type: "task_complete" }>);
+    });
+    this.handlers.set("worker_goodbye", async (workerId, _ws, msg) => {
+      await this.handleWorkerGoodbye(workerId, msg as Extract<Wire.WorkerMessage, { type: "worker_goodbye" }>);
+    });
+    this.handlers.set("activate_repo", async (workerId, ws) => {
+      await this.handleActivateRepo(workerId, ws);
+    });
+    this.handlers.set("claim_task", async (workerId, _ws, msg) => {
+      await this.handleClaimTask(workerId, msg as Extract<Wire.WorkerMessage, { type: "claim_task" }>);
+    });
+    this.handlers.set("worker_ready", async (workerId) => {
+      await this.handleWorkerReady(workerId);
+    });
+    this.handlers.set("worker_reserved", async (workerId) => {
+      await this.handleWorkerReserve(workerId);
+    });
 
     TaskManager.events.on("deps_loaded", (taskManager: TaskManager) => {
       this.assignWorkForRepo(taskManager).catch((err) => log(`ERROR assignWork after deps_loaded: ${fmtError(err)}`));
     });
+  }
+
+  async dispatch(workerId: string, ws: WebSocket, msg: Wire.WorkerMessage): Promise<void> {
+    const handler = this.handlers.get(msg.type);
+    if (handler) {
+      await handler(workerId, ws, msg);
+    } else {
+      log(`[worker ${workerId}] unknown message type: ${(msg as Record<string, unknown>).type}`);
+    }
   }
 
   async reconcile(): Promise<void> {

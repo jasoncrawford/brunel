@@ -13,7 +13,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import http from "http";
 import type { AddressInfo } from "net";
 import { Webhooks } from "@octokit/webhooks";
-import { HttpServer } from "../src/foreman/controllers/http-server.js";
+import { HttpServer } from "../src/foreman/http-server.js";
 import { Task } from "../src/foreman/models/task.js";
 import { resetDb, createTestTaskManager, createTestRepo, seedRepoWithInstallation } from "./helpers/task.js";
 

@@ -8,8 +8,8 @@ import { loadConfig } from "../config.js";
 import { TaskManager } from "./models/task-manager.js";
 import { Repo } from "./models/repo.js";
 import { initDb } from "./clients/db-client.js";
-import { HttpServer } from "./controllers/http-server.js";
-import { ForemanWss } from "./controllers/wss.js";
+import { HttpServer } from "./http-server.js";
+import { ForemanWss } from "./wss.js";
 import { AdminWss } from "./controllers/admin-ws.js";
 import { fmtError, log } from "../utils.js";
 

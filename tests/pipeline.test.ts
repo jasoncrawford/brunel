@@ -19,7 +19,7 @@ import { WebSocket, WebSocketServer } from "ws";
 import type { AddressInfo } from "net";
 import * as Wire from "../shared/wire.js";
 import { Worker } from "../src/foreman/models/worker.js";
-import { ForemanWss } from "../src/foreman/controllers/wss.js";
+import { ForemanWss } from "../src/foreman/wss.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
 import { initDb } from "../src/foreman/clients/db-client.js";
@@ -298,7 +298,7 @@ describe("pipeline: happy path and queued-then-assigned", () => {
     const { taskModel, foremanWss, connect } = foreman;
 
     // 1. Webhook fires; foreman enqueues the task
-    await foremanWss.routeEvent("evt-1", "issues", labeledPayload(42));
+    await foremanWss.webhookController.handleEvent("evt-1", "issues", labeledPayload(42));
 
     // 2. Task row appears in DB with status=pending
     const pendingRow = await pollUntil(() => getDbTask("42"));
@@ -340,7 +340,7 @@ describe("pipeline: happy path and queued-then-assigned", () => {
     const { foremanWss, connect } = foreman;
 
     // 1. Webhook fires but no worker is connected
-    await foremanWss.routeEvent("evt-1", "issues", labeledPayload(55));
+    await foremanWss.webhookController.handleEvent("evt-1", "issues", labeledPayload(55));
 
     // 2. Task appears as pending in DB
     const pendingRow = await pollUntil(() => getDbTask("55"));
@@ -398,7 +398,7 @@ describe("pipeline: worker disconnect/reclaim", () => {
     const { foremanWss, connect, openClients } = foreman;
 
     // 1. Assign task to a worker
-    await foremanWss.routeEvent("evt-1", "issues", labeledPayload(70));
+    await foremanWss.webhookController.handleEvent("evt-1", "issues", labeledPayload(70));
     const ws1 = await connect();
     const q1 = makeQueue(ws1);
     send(ws1, { type: "worker_hello", repo: "owner/repo", workerId: "w-reclaim", status: "ready" });
@@ -500,7 +500,7 @@ describe("pipeline: dependency blocking", () => {
     expect((ack as any).status).toBe("ready");
 
     // 2. Issue #92 depends on issue #91 (via body text). Issue #91 is open.
-    await foremanWss.routeEvent("evt-1", "issues", labeledPayload(92, "Depends on #91"));
+    await foremanWss.webhookController.handleEvent("evt-1", "issues", labeledPayload(92, "Depends on #91"));
 
     // 3. Wait for the task row to appear in DB as pending (deps loaded, but blocked)
     await pollUntil(() => getDbTask("92"));
@@ -511,7 +511,7 @@ describe("pipeline: dependency blocking", () => {
     expect(q.isEmpty()).toBe(true);
 
     // 5. Close the blocker issue — this unblocks task #92
-    await foremanWss.routeEvent("evt-2", "issues", closedPayload(91));
+    await foremanWss.webhookController.handleEvent("evt-2", "issues", closedPayload(91));
 
     // 6. Worker now receives task_assigned
     const assigned = await q.next();
@@ -559,7 +559,7 @@ describe("pipeline: PR events forwarded and logged to DB", () => {
     const { foremanWss, connect } = foreman;
 
     // 1. Get a task assigned to a worker
-    await foremanWss.routeEvent("evt-1", "issues", labeledPayload(100));
+    await foremanWss.webhookController.handleEvent("evt-1", "issues", labeledPayload(100));
     const ws = await connect();
     const q = makeQueue(ws);
     send(ws, { type: "worker_hello", repo: "owner/repo", workerId: "w-pr", status: "ready" });
@@ -571,8 +571,8 @@ describe("pipeline: PR events forwarded and logged to DB", () => {
     //    and a check_run fires for the PR.  Both are routed before awaiting any
     //    notifications to avoid a race where the check_run notification arrives
     //    before the pull_request notification due to async processing order.
-    await foremanWss.routeEvent("evt-pr", "pull_request", prOpenedPayload(20, "Closes #100"));
-    await foremanWss.routeEvent("evt-cr", "check_run", checkRunPayload(20));
+    await foremanWss.webhookController.handleEvent("evt-pr", "pull_request", prOpenedPayload(20, "Closes #100"));
+    await foremanWss.webhookController.handleEvent("evt-cr", "check_run", checkRunPayload(20));
 
     // 3. Collect both event_notifications.  Ordering is not guaranteed because
     //    the two events may be processed at different speeds on the foreman side.

@@ -5,8 +5,8 @@ import { join, extname } from "path";
 import { fileURLToPath } from "url";
 import { Hono } from "hono";
 import { getRequestListener } from "@hono/node-server";
-import { ApiController } from "./api-controller.js";
-import { fmtError, log } from "../../utils.js";
+import { ApiController } from "./controllers/api-controller.js";
+import { fmtError, log } from "../utils.js";
 
 export interface HttpServerOptions {
   webhooks: InstanceType<typeof Webhooks>;
@@ -68,7 +68,7 @@ export class HttpServer {
 
   // ── Static files (React SPA) ───────────────────────────────────────────────
   app.use("*", async (c) => {
-    const root = join(fileURLToPath(import.meta.url), "../../../../dist");
+    const root = join(fileURLToPath(import.meta.url), "../../../dist");
 
     if (!existsSync(root)) {
       return c.text("Not Found", 404);
