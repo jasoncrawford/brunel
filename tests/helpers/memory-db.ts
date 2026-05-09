@@ -84,9 +84,11 @@ function addFilters(target: Record<string, unknown>, filters: Filter[]): void {
 // Only needed for columns models read but don't provide in INSERT data.
 // Implemented as factory functions so each insert gets fresh values.
 const columnDefaultFns: Partial<Record<string, () => Row>> = {
-  repos:         () => ({ status: "new", created_at: new Date().toISOString() }),
-  tasks:         () => ({ created_at: new Date().toISOString() }),
-  installations: () => ({ created_at: new Date().toISOString() }),
+  repos:            () => ({ status: "new", created_at: new Date().toISOString() }),
+  tasks:            () => ({ created_at: new Date().toISOString() }),
+  installations:    () => ({ created_at: new Date().toISOString() }),
+  webhook_events:   () => ({ received_at: new Date().toISOString() }),
+  foreman_messages: () => ({ created_at: new Date().toISOString() }),
 };
 
 function applyColumnDefaults(tableName: string, rowData: Row): Row {
