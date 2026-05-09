@@ -22,6 +22,15 @@ async function postWebhook(name: string, payload: object): Promise<void> {
   if (!res.ok) throw new Error(`Webhook POST failed: ${res.status}`);
 }
 
+async function linkInstallation(fullName: string, accountLogin: string): Promise<void> {
+  const res = await fetch(`${BASE}/test/link-installation`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fullName, accountLogin, accountType: "Organization" }),
+  });
+  if (!res.ok) throw new Error(`link-installation failed: ${res.status}`);
+}
+
 async function connectWorker(): Promise<string> {
   const res = await fetch(`${BASE}/test/connect-worker`, { method: "POST" });
   if (!res.ok) throw new Error(`connect-worker failed: ${res.status}`);
@@ -147,11 +156,16 @@ test("dashboard: shows new (unactivated) repo with 'not activated' label", async
 });
 
 test("repo detail page: shows installation status when App is installed", async ({ page }) => {
-  // owner/repo has an installation linked at server startup (owner-org, Organization)
-  await page.goto("/repos/owner/repo");
+  // Create a fresh repo and link an installation via the test endpoint.
+  // Using a dedicated repo avoids affecting owner/repo (task-assignment tests
+  // break if owner/repo has an installation, because GithubClient then tries
+  // App token auth which fails in the test server — no appId/appPrivateKey).
+  await linkInstallation("owner/install-display-9300", "install-test-org");
+
+  await page.goto("/repos/owner/install-display-9300");
   await expect(page.getByRole("heading", { name: /GitHub App/i })).toBeVisible();
   await expect(page.getByText(/Installed/)).toBeVisible();
-  await expect(page.getByText(/owner-org/)).toBeVisible();
+  await expect(page.getByText(/install-test-org/)).toBeVisible();
   await expect(page.getByText(/Organization/)).toBeVisible();
 });
 
