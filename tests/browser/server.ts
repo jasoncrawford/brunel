@@ -44,11 +44,15 @@ import { createTestTaskManager } from "../helpers/task.js";
 import { Installation } from "../../src/foreman/models/installation.js";
 import { Repo } from "../../src/foreman/models/repo.js";
 import { AdminWss } from "../../src/foreman/controllers/admin-ws.js";
-import { loadDefaultConfig } from "../../src/config.js";
+import { loadDefaultConfig, getConfig } from "../../src/config.js";
 
 const PORT = parseInt(process.env.PORT ?? "14567", 10);
 
 const cfg = await loadDefaultConfig();
+// Provide a fake token so GithubClient.resolveToken() doesn't throw when
+// checking native blockers — the fetch mock above intercepts all api.github.com
+// calls so the token value doesn't matter for actual auth.
+getConfig().githubToken = "fake-test-token";
 
 // ── Foreman state ─────────────────────────────────────────────────────────────
 
