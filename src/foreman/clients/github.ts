@@ -36,10 +36,19 @@ export interface GithubIssue {
 
 // ── GitHub client ─────────────────────────────────────────────────────────────
 
+const TOKEN_TTL_MS = 55 * 60 * 1000;
+const TOKEN_BUFFER_MS = 5 * 60 * 1000;
+
 export class GithubClient {
   private readonly owner: string;
   private readonly repoName: string;
   private readonly installationGithubId?: number;
+
+  private static tokenCache = new Map<number, { token: string; expiresAt: number }>();
+
+  static _resetTokenCache(): void {
+    GithubClient.tokenCache.clear();
+  }
 
   constructor(repo: string, installationGithubId?: number) {
     const [owner, repoName] = repo.split("/");
@@ -67,9 +76,21 @@ export class GithubClient {
     return body.token;
   }
 
+  private async cachedInstallationToken(): Promise<string> {
+    const id = this.installationGithubId!;
+    const now = Date.now();
+    const entry = GithubClient.tokenCache.get(id);
+    if (entry && entry.expiresAt - now > TOKEN_BUFFER_MS) {
+      return entry.token;
+    }
+    const token = await this.mintInstallationToken();
+    GithubClient.tokenCache.set(id, { token, expiresAt: now + TOKEN_TTL_MS });
+    return token;
+  }
+
   private async resolveToken(): Promise<string> {
     if (this.installationGithubId !== undefined) {
-      return this.mintInstallationToken();
+      return this.cachedInstallationToken();
     }
     const token = getConfig().githubToken;
     if (!token) throw new Error("GitHub token not configured");
@@ -116,7 +137,7 @@ export class GithubClient {
    * Uses an installation token minted for this client's installationGithubId.
    */
   async verifyPushAccess(username: string): Promise<boolean> {
-    const token = await this.mintInstallationToken();
+    const token = await this.cachedInstallationToken();
     const { githubApiUrl: apiUrl = "https://api.github.com" } = getConfig();
     const res = await fetch(
       `${apiUrl}/repos/${this.owner}/${this.repoName}/collaborators/${username}/permission`,
