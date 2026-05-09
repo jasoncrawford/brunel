@@ -147,7 +147,7 @@ export class HttpServer {
   app.get("/api/repos/:owner/:repo", async (c) => {
     try {
       const fullName = `${c.req.param("owner")}/${c.req.param("repo")}`;
-      const repo = await Repo.getByFullName(fullName);
+      const repo = await Repo.findByFullName(fullName);
       if (!repo) return c.json({ error: "not found" }, 404);
       return c.json(repo.toWire());
     } catch (err) {
