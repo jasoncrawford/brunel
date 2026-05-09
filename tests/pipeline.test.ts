@@ -218,10 +218,7 @@ async function buildForeman(): Promise<{
   const httpServer = http.createServer();
   const openClients: WebSocket[] = [];
 
-  const foremanWss = new ForemanWss({ server: httpServer, config: {
-    ...defaultCfg,
-    githubToken: "token",
-  } });
+  const foremanWss = new ForemanWss({ server: httpServer, config: defaultCfg });
   const { wss } = foremanWss;
 
   // port is assigned synchronously when listen() resolves; we'll resolve it

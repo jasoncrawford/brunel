@@ -19,11 +19,6 @@ const isMain = process.argv[1] === fileURLToPath(import.meta.url);
 if (isMain) {
   const config = await loadConfig(process.argv);
 
-  if (!config.githubToken) {
-    log("ERROR GitHub token required. Set GITHUB_TOKEN or BRUNEL_GITHUB_TOKEN.");
-    process.exit(1);
-  }
-
   const webhooks = config.webhookSecret
     ? new Webhooks({ secret: config.webhookSecret })
     : null;

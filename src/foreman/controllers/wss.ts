@@ -44,14 +44,14 @@ export interface RouteResult { task: Task | null; ref: string; forward?: boolean
 // ── ForemanWss class ──────────────────────────────────────────────────────────
 
 type ForemanWssOptions = {
-  config: Pick<BrunelConfig, "taskLabel" | "githubToken" | "githubApiUrl" | "workerSecret" | "pingIntervalMs">;
+  config: Pick<BrunelConfig, "taskLabel" | "githubApiUrl" | "workerSecret" | "pingIntervalMs">;
   server: http.Server;
   adminWss?: AdminWssLike;
 };
 
 export class ForemanWss {
   readonly wss: WebSocketServer;
-  private readonly config: Pick<BrunelConfig, "taskLabel" | "githubToken" | "githubApiUrl" | "workerSecret" | "pingIntervalMs">;
+  private readonly config: Pick<BrunelConfig, "taskLabel" | "githubApiUrl" | "workerSecret" | "pingIntervalMs">;
   private readonly adminWss?: AdminWssLike;
   private readonly installationsController = new InstallationsController();
   private nextBroadcastId = 1;
