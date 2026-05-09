@@ -1163,6 +1163,52 @@ describe("hello_ack handshake — buffering", () => {
       expect.objectContaining({ type: "hello_ack", workerId: AGENT_ID, status: "ready" })
     );
   });
+
+  it("does not print 'Waiting for tasks...' when reconnecting in idle state", async () => {
+    vi.useFakeTimers();
+    try {
+      // First: establish idle state via hello_ack ready on the initial connection
+      sendMsg(fakeWs, { type: "hello_ack", workerId: AGENT_ID, status: "ready" });
+
+      // Now reconnect while idle
+      const newWs = reconnectWithNewWs();
+      newWs.emit("open");
+
+      display.print.mockClear();
+      sendMsg(newWs, { type: "hello_ack", workerId: AGENT_ID, status: "ready" });
+
+      const printed = display.print.mock.calls.map(args => stripAnsi(String(args[0]))).join("\n");
+      expect(printed).not.toContain("Waiting for tasks");
+    } finally {
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not print 'Waiting for tasks...' when reconnecting after post-task wait selection", async () => {
+    vi.useFakeTimers();
+    try {
+      // Assign and complete a task, then select "wait for next task" (which calls sendWorkerReady)
+      const issue = makeIssue();
+      sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+      session.takeNextPrompt();
+      await session.completeCurrentTask("reserved");
+      session.sendWorkerReady();
+
+      // Now reconnect — worker is in idle state waiting for a task
+      const newWs = reconnectWithNewWs();
+      newWs.emit("open");
+
+      display.print.mockClear();
+      sendMsg(newWs, { type: "hello_ack", workerId: AGENT_ID, status: "ready" });
+
+      const printed = display.print.mock.calls.map(args => stripAnsi(String(args[0]))).join("\n");
+      expect(printed).not.toContain("Waiting for tasks");
+    } finally {
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    }
+  });
 });
 
 // ── log_only filtering ────────────────────────────────────────────────────────
@@ -2540,11 +2586,11 @@ function makeSessionWithPickResult(pickResult: number): { s: WorkerController; w
 }
 
 describe("transitionToIdle — Waiting for tasks message", () => {
-  it("prints 'Waiting for tasks...' on hello_ack idle", () => {
+  it("does NOT print 'Waiting for tasks...' on hello_ack ready (reconnect handshake is silent)", () => {
     display.print.mockClear();
     sendMsg(fakeWs, { type: "hello_ack", workerId: AGENT_ID, status: "ready" });
     const printed = display.print.mock.calls.map(([l]: [string]) => stripAnsi(l)).join("\n");
-    expect(printed).toContain("Waiting for tasks");
+    expect(printed).not.toContain("Waiting for tasks");
   });
 
   it("does NOT print 'Waiting for tasks...' on hello_ack busy", () => {
