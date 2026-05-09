@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll, beforeAll } from "vitest";
 import { generateKeyPairSync } from "node:crypto";
 import { GithubClient } from "../src/foreman/clients/github.js";
 import { Worker } from "../src/foreman/models/worker.js";
@@ -6,6 +6,7 @@ import { getConfig } from "../src/config.js";
 
 beforeEach(() => {
   Worker._reset();
+  GithubClient._resetTokenCache();
   vi.stubGlobal("fetch", vi.fn());
   getConfig().githubToken = "token123";
   getConfig().taskLabel = "brunel:ready";
@@ -397,5 +398,95 @@ describe("GithubClient without auth", () => {
   it("throws 'GitHub token not configured' for fetchIssueStates without auth", async () => {
     getConfig().githubToken = undefined as unknown as string;
     await expect(new GithubClient("owner/repo").fetchIssueStates([1])).rejects.toThrow("GitHub token not configured");
+  });
+});
+
+// ── Installation token caching ────────────────────────────────────────────────
+
+describe("installation token cache", () => {
+  // Generate one key pair for the whole block to avoid repeated expensive RSA generation.
+  let sharedPrivateKey: string;
+  beforeAll(() => {
+    sharedPrivateKey = makeTestKeyPair().privateKey;
+  });
+
+  beforeEach(() => {
+    getConfig().appId = "123";
+    getConfig().appPrivateKey = sharedPrivateKey;
+  });
+
+  afterAll(() => {
+    vi.useRealTimers();
+  });
+
+  it("reuses the cached token on a second resolveToken call without re-minting", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ token: "ghs_cached" }) } as any)
+      .mockResolvedValueOnce({ ok: true, json: async () => [] } as any)
+      .mockResolvedValueOnce({ ok: true, json: async () => [] } as any);
+
+    const client = new GithubClient("owner/repo", 789);
+    await client.fetchIssues();
+    await client.fetchIssues();
+
+    const mintCalls = vi.mocked(fetch).mock.calls.filter((c) =>
+      (c[0] as string).includes("/access_tokens"),
+    );
+    expect(mintCalls).toHaveLength(1);
+  });
+
+  it("different installationGithubIds use separate cache entries", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ token: "ghs_a" }) } as any)
+      .mockResolvedValueOnce({ ok: true, json: async () => [] } as any)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ token: "ghs_b" }) } as any)
+      .mockResolvedValueOnce({ ok: true, json: async () => [] } as any);
+
+    await new GithubClient("owner/repo", 111).fetchIssues();
+    await new GithubClient("owner/repo", 222).fetchIssues();
+
+    const mintCalls = vi.mocked(fetch).mock.calls.filter((c) =>
+      (c[0] as string).includes("/access_tokens"),
+    );
+    expect(mintCalls).toHaveLength(2);
+  });
+
+  it("re-mints when the cached token is within the expiry buffer", async () => {
+    vi.useFakeTimers();
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ token: "ghs_old" }) } as any)
+      .mockResolvedValueOnce({ ok: true, json: async () => [] } as any)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ token: "ghs_new" }) } as any)
+      .mockResolvedValueOnce({ ok: true, json: async () => [] } as any);
+
+    const client = new GithubClient("owner/repo", 789);
+    await client.fetchIssues();
+
+    // Advance time so the token is within 5 minutes of expiry (55 min TTL, advance 51 min)
+    vi.advanceTimersByTime(51 * 60 * 1000);
+    await client.fetchIssues();
+
+    const mintCalls = vi.mocked(fetch).mock.calls.filter((c) =>
+      (c[0] as string).includes("/access_tokens"),
+    );
+    expect(mintCalls).toHaveLength(2);
+
+    vi.useRealTimers();
+  });
+
+  it("verifyPushAccess uses the cached token from a prior resolveToken call", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ token: "ghs_shared" }) } as any)
+      .mockResolvedValueOnce({ ok: true, json: async () => [] } as any)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ permission: "push" }) } as any);
+
+    const client = new GithubClient("owner/repo", 789);
+    await client.fetchIssues();
+    await client.verifyPushAccess("someuser");
+
+    const mintCalls = vi.mocked(fetch).mock.calls.filter((c) =>
+      (c[0] as string).includes("/access_tokens"),
+    );
+    expect(mintCalls).toHaveLength(1);
   });
 });
