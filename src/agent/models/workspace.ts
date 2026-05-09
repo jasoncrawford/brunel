@@ -7,15 +7,12 @@ import { fmtError } from "../../utils.js";
 
 const execFileAsync = promisify(execFileCb);
 
-export type GitExec = (args: string[], cwd?: string) => Promise<string>;
-export type NpmExec = (args: string[], cwd: string) => Promise<string>;
-
-const defaultGitExec: GitExec = async (args, cwd) => {
+const gitExec = async (args: string[], cwd?: string): Promise<string> => {
   const { stdout } = await execFileAsync("git", args, cwd ? { cwd } : {});
   return stdout.trimEnd();
 };
 
-const defaultNpmExec: NpmExec = async (args, cwd) => {
+const npmExec = async (args: string[], cwd: string): Promise<string> => {
   const { stdout } = await execFileAsync("npm", args, { cwd });
   return stdout.trimEnd();
 };
@@ -41,8 +38,6 @@ export class Workspace extends EventEmitter {
     readonly originalCwd: string,
     readonly confirm: (msg: string) => Promise<boolean>,
     private readonly githubToken?: string,
-    private readonly exec: GitExec = defaultGitExec,
-    private readonly npm: NpmExec = defaultNpmExec,
   ) {
     super();
     this.workspaceDir = workspaceDir;
@@ -60,7 +55,7 @@ export class Workspace extends EventEmitter {
       if (fs.existsSync(this.dir)) fs.rmSync(this.dir, { recursive: true, force: true });
       this.emit("create-start", { dir: this.dir });
       this.emit("clone-start", { repoUrl: this.repoUrl, dir: this.dir });
-      await this.exec(["clone", this.repoUrl, this.dir], undefined);
+      await gitExec(["clone", this.repoUrl, this.dir], undefined);
       await this._configureAuth();
       await this._npmInstall();
     }
@@ -90,7 +85,7 @@ export class Workspace extends EventEmitter {
       fs.rmSync(this.dir, { recursive: true, force: true });
       fs.mkdirSync(path.dirname(this.dir), { recursive: true });
       this.emit("clone-start", { repoUrl: this.repoUrl, dir: this.dir });
-      await this.exec(["clone", this.repoUrl, this.dir], undefined);
+      await gitExec(["clone", this.repoUrl, this.dir], undefined);
       await this._configureAuth();
       fs.writeFileSync(path.join(this.dir, ".brunel.lock"), String(process.pid));
       this._ensureLocallyIgnored(".brunel.lock");
@@ -99,17 +94,17 @@ export class Workspace extends EventEmitter {
   }
 
   private async _doReset(): Promise<void> {
-    await this.exec(["fetch", "origin"], this.dir);
-    await this.exec(["checkout", "main"], this.dir);
-    await this.exec(["reset", "--hard", "origin/main"], this.dir);
-    await this.exec(["clean", "-fdx", "-e", "node_modules", "-e", ".env", "-e", ".brunel.lock"], this.dir);
+    await gitExec(["fetch", "origin"], this.dir);
+    await gitExec(["checkout", "main"], this.dir);
+    await gitExec(["reset", "--hard", "origin/main"], this.dir);
+    await gitExec(["clean", "-fdx", "-e", "node_modules", "-e", ".env", "-e", ".brunel.lock"], this.dir);
     await this._npmInstall();
   }
 
   /** Set http.extraHeader so git auth uses a Bearer token instead of a token-in-URL. */
   private async _configureAuth(): Promise<void> {
     if (!this.githubToken) return;
-    await this.exec(
+    await gitExec(
       ["config", "--local", "http.https://github.com/.extraheader", `Authorization: Bearer ${this.githubToken}`],
       this.dir,
     );
@@ -130,7 +125,7 @@ export class Workspace extends EventEmitter {
   private async _npmInstall(): Promise<void> {
     if (!fs.existsSync(path.join(this.dir, "package.json"))) return;
     this.emit("npm-install", { dir: this.dir });
-    await this.npm(["install"], this.dir);
+    await npmExec(["install"], this.dir);
   }
 
   /** Return safety info about the current checkout state. */
@@ -139,7 +134,7 @@ export class Workspace extends EventEmitter {
     unpushedCommits: string[];
     noUpstream: boolean;
   }> {
-    const statusOut = await this.exec(["status", "--porcelain"], this.dir);
+    const statusOut = await gitExec(["status", "--porcelain"], this.dir);
     const uncommittedFiles = statusOut
       .split("\n")
       .map(l => l.trim())
@@ -148,7 +143,7 @@ export class Workspace extends EventEmitter {
     let unpushedCommits: string[] = [];
     let noUpstream = false;
     try {
-      const logOut = await this.exec(["log", "@{u}..HEAD", "--oneline"], this.dir);
+      const logOut = await gitExec(["log", "@{u}..HEAD", "--oneline"], this.dir);
       unpushedCommits = logOut
         .split("\n")
         .map(l => l.trim())

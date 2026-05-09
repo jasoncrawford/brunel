@@ -2,7 +2,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import os from "node:os";
 import fs from "node:fs";
 import path from "node:path";
+import { execFile as execFileCb } from "node:child_process";
 import { Workspace, confirmIfUnsafe } from "../src/agent/models/workspace.js";
+
+vi.mock("node:child_process", () => ({
+  execFile: vi.fn(),
+}));
+
+const mockExecFile = vi.mocked(execFileCb);
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -10,49 +17,48 @@ const BASE_DIR = path.join(os.tmpdir(), `brunel-test-${process.pid}`);
 const WORKER_ID = "test-worker-abc";
 const REPO_URL = "https://token@github.com/owner/repo.git";
 
-function makeExec(responses: Record<string, string> = {}) {
-  return vi.fn().mockImplementation(async (args: string[]) => {
-    // Simulate git clone creating the target directory with .git and package.json
-    if (args[0] === "clone") {
+/**
+ * Set up the execFile mock with default git/npm behavior.
+ * On `git clone`, creates the target .git dir and package.json.
+ * Other commands return the matching entry from `responses` (or "").
+ */
+function setupExecMock(responses: Record<string, string> = {}) {
+  mockExecFile.mockImplementation((cmd: string, args: string[], _opts: object, cb: Function) => {
+    if (cmd === "git" && args[0] === "clone") {
       fs.mkdirSync(path.join(args[2], ".git"), { recursive: true });
       fs.writeFileSync(path.join(args[2], "package.json"), "{}");
     }
     const key = args.join(" ");
-    return responses[key] ?? "";
+    cb(null, { stdout: responses[key] ?? "", stderr: "" });
   });
 }
 
-function makeNpmExec() {
-  return vi.fn().mockResolvedValue("");
-}
-
-async function makeWorkspace(
-  exec = makeExec(),
-  npm = makeNpmExec(),
-): Promise<Workspace> {
-  const ws = new Workspace(BASE_DIR, WORKER_ID, REPO_URL, "/original-cwd", async () => true, undefined, exec, npm);
+async function makeWorkspace(): Promise<Workspace> {
+  const ws = new Workspace(BASE_DIR, WORKER_ID, REPO_URL, "/original-cwd", async () => true);
   await ws.create();
   return ws;
 }
 
 beforeEach(() => {
   fs.mkdirSync(BASE_DIR, { recursive: true });
+  setupExecMock();
 });
 
 afterEach(() => {
   fs.rmSync(BASE_DIR, { recursive: true, force: true });
+  mockExecFile.mockReset();
 });
 
 // ── create ─────────────────────────────────────────────────────────────────
 
 describe("Workspace.create", () => {
   it("runs git clone when directory does not exist", async () => {
-    const exec = makeExec();
-    const npm = makeNpmExec();
-    const ws = await makeWorkspace(exec, npm);
-    expect(exec).toHaveBeenCalledWith(
+    const ws = await makeWorkspace();
+    expect(mockExecFile).toHaveBeenCalledWith(
+      "git",
       ["clone", REPO_URL, path.join(BASE_DIR, WORKER_ID)],
-      undefined,
+      {},
+      expect.any(Function),
     );
     expect(ws.dir).toBe(path.join(BASE_DIR, WORKER_ID));
   });
@@ -60,12 +66,12 @@ describe("Workspace.create", () => {
   it("skips git clone if .git already exists", async () => {
     const workerDir = path.join(BASE_DIR, WORKER_ID);
     fs.mkdirSync(path.join(workerDir, ".git"), { recursive: true });
-    const exec = makeExec();
-    const npm = makeNpmExec();
-    await makeWorkspace(exec, npm);
-    expect(exec).not.toHaveBeenCalledWith(
+    await makeWorkspace();
+    expect(mockExecFile).not.toHaveBeenCalledWith(
+      "git",
       expect.arrayContaining(["clone"]),
       expect.anything(),
+      expect.any(Function),
     );
   });
 
@@ -77,30 +83,41 @@ describe("Workspace.create", () => {
   });
 
   it("runs npm install after cloning", async () => {
-    const exec = makeExec();
-    const npm = makeNpmExec();
-    await makeWorkspace(exec, npm);
-    expect(npm).toHaveBeenCalledWith(["install"], path.join(BASE_DIR, WORKER_ID));
+    await makeWorkspace();
+    expect(mockExecFile).toHaveBeenCalledWith(
+      "npm",
+      ["install"],
+      { cwd: path.join(BASE_DIR, WORKER_ID) },
+      expect.any(Function),
+    );
   });
 
   it("does not run npm install when directory already exists", async () => {
     const workerDir = path.join(BASE_DIR, WORKER_ID);
     fs.mkdirSync(path.join(workerDir, ".git"), { recursive: true });
-    const exec = makeExec();
-    const npm = makeNpmExec();
-    await makeWorkspace(exec, npm);
-    expect(npm).not.toHaveBeenCalled();
+    await makeWorkspace();
+    expect(mockExecFile).not.toHaveBeenCalledWith(
+      "npm",
+      expect.anything(),
+      expect.anything(),
+      expect.any(Function),
+    );
   });
 
   it("does not run npm install when cloned repo has no package.json", async () => {
-    const exec = vi.fn().mockImplementation(async (args: string[]) => {
-      // Clone creates .git but no package.json
-      if (args[0] === "clone") fs.mkdirSync(path.join(args[2], ".git"), { recursive: true });
-      return "";
+    mockExecFile.mockImplementation((cmd: string, args: string[], _opts: object, cb: Function) => {
+      if (cmd === "git" && args[0] === "clone") {
+        fs.mkdirSync(path.join(args[2], ".git"), { recursive: true }); // no package.json
+      }
+      cb(null, { stdout: "", stderr: "" });
     });
-    const npm = makeNpmExec();
-    await makeWorkspace(exec, npm);
-    expect(npm).not.toHaveBeenCalled();
+    await makeWorkspace();
+    expect(mockExecFile).not.toHaveBeenCalledWith(
+      "npm",
+      expect.anything(),
+      expect.anything(),
+      expect.any(Function),
+    );
   });
 });
 
@@ -129,18 +146,17 @@ describe("Workspace.create — git excludes", () => {
 describe("Workspace.reset — re-clone path", () => {
   it("adds .brunel.lock to .git/info/exclude after a forced re-clone", async () => {
     let fetchCalls = 0;
-    const exec = vi.fn().mockImplementation(async (args: string[]) => {
-      if (args[0] === "fetch") {
-        if (fetchCalls++ < 2) throw new Error("simulated network failure");
+    mockExecFile.mockImplementation((cmd: string, args: string[], _opts: object, cb: Function) => {
+      if (cmd === "git" && args[0] === "fetch") {
+        if (fetchCalls++ < 2) { cb(new Error("simulated network failure")); return; }
       }
-      if (args[0] === "clone") {
-        // Simulate git clone creating a minimal repo structure
+      if (cmd === "git" && args[0] === "clone") {
         fs.mkdirSync(path.join(args[2], ".git", "info"), { recursive: true });
         fs.writeFileSync(path.join(args[2], "package.json"), "{}");
       }
-      return "";
+      cb(null, { stdout: "", stderr: "" });
     });
-    const ws = await makeWorkspace(exec);
+    const ws = await makeWorkspace();
     await ws.reset(); // fails twice, then re-clones
     const excludePath = path.join(ws.dir, ".git", "info", "exclude");
     expect(fs.existsSync(excludePath)).toBe(true);
@@ -164,85 +180,80 @@ describe("Workspace.destroy", () => {
 
 describe("Workspace.reset", () => {
   it("runs fetch, checkout main, reset --hard, clean -fdx", async () => {
-    const exec = makeExec();
-    const npm = makeNpmExec();
-    const ws = await makeWorkspace(exec, npm);
-    exec.mockClear();
+    const ws = await makeWorkspace();
+    mockExecFile.mockClear();
     await ws.reset();
-    expect(exec).toHaveBeenCalledWith(["fetch", "origin"], ws.dir);
-    expect(exec).toHaveBeenCalledWith(["checkout", "main"], ws.dir);
-    expect(exec).toHaveBeenCalledWith(["reset", "--hard", "origin/main"], ws.dir);
-    expect(exec).toHaveBeenCalledWith(["clean", "-fdx", "-e", "node_modules", "-e", ".env", "-e", ".brunel.lock"], ws.dir);
+    expect(mockExecFile).toHaveBeenCalledWith("git", ["fetch", "origin"], { cwd: ws.dir }, expect.any(Function));
+    expect(mockExecFile).toHaveBeenCalledWith("git", ["checkout", "main"], { cwd: ws.dir }, expect.any(Function));
+    expect(mockExecFile).toHaveBeenCalledWith("git", ["reset", "--hard", "origin/main"], { cwd: ws.dir }, expect.any(Function));
+    expect(mockExecFile).toHaveBeenCalledWith("git", ["clean", "-fdx", "-e", "node_modules", "-e", ".env", "-e", ".brunel.lock"], { cwd: ws.dir }, expect.any(Function));
   });
 
   it("runs npm install after git operations", async () => {
-    const exec = makeExec();
-    const npm = makeNpmExec();
-    const ws = await makeWorkspace(exec, npm);
-    // makeExec clone creates package.json; it persists through the mocked clean
-    npm.mockClear();
+    const ws = await makeWorkspace();
+    // makeWorkspace clone creates package.json; it persists through the mocked clean
+    mockExecFile.mockClear();
     await ws.reset();
-    expect(npm).toHaveBeenCalledWith(["install"], ws.dir);
+    expect(mockExecFile).toHaveBeenCalledWith("npm", ["install"], { cwd: ws.dir }, expect.any(Function));
   });
 
   it("does not run npm install on reset when repo has no package.json", async () => {
     const workerDir = path.join(BASE_DIR, WORKER_ID);
     fs.mkdirSync(path.join(workerDir, ".git"), { recursive: true });
     // No package.json in this workspace
-    const exec = makeExec();
-    const npm = makeNpmExec();
-    const ws = await makeWorkspace(exec, npm);
-    npm.mockClear();
+    const ws = await makeWorkspace();
+    mockExecFile.mockClear();
     await ws.reset();
-    expect(npm).not.toHaveBeenCalled();
+    expect(mockExecFile).not.toHaveBeenCalledWith("npm", expect.anything(), expect.anything(), expect.any(Function));
   });
 
   it("retries once on failure before succeeding", async () => {
-    const exec = vi.fn()
-      .mockRejectedValueOnce(new Error("transient"))
-      .mockResolvedValue("");
-    const npm = makeNpmExec();
-    // Pre-create the .git dir so create() skips cloning
     fs.mkdirSync(path.join(BASE_DIR, WORKER_ID, ".git"), { recursive: true });
-    const ws = await makeWorkspace(exec, npm);
-    exec.mockReset();
-    // First reset attempt fails, second succeeds
-    exec
-      .mockRejectedValueOnce(new Error("network error"))
-      .mockResolvedValue("");
+    const ws = await makeWorkspace();
+
+    let callCount = 0;
+    mockExecFile.mockImplementation((_cmd: string, _args: string[], _opts: object, cb: Function) => {
+      callCount++;
+      if (callCount === 1) { cb(new Error("network error")); } else { cb(null, { stdout: "", stderr: "" }); }
+    });
     await ws.reset();
-    // reset was called at least twice (first fail, then success)
-    expect(exec.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(callCount).toBeGreaterThanOrEqual(2);
   });
 
   it("destroys and re-clones if both retries fail, then succeeds", async () => {
     const dir = path.join(BASE_DIR, WORKER_ID);
     fs.mkdirSync(path.join(dir, ".git"), { recursive: true });
-    let callCount = 0;
-    const exec = vi.fn().mockImplementation(async (args: string[]) => {
-      if (args[0] === "clone") { fs.mkdirSync(path.join(args[2], ".git"), { recursive: true }); return ""; }
-      callCount++;
-      if (callCount <= 2) throw new Error("reset fail");
-      return ""; // third attempt (after re-clone) succeeds
+    const ws = await makeWorkspace();
+    mockExecFile.mockClear();
+
+    let nonCloneCount = 0;
+    mockExecFile.mockImplementation((cmd: string, args: string[], _opts: object, cb: Function) => {
+      if (cmd === "git" && args[0] === "clone") {
+        fs.mkdirSync(path.join(args[2], ".git"), { recursive: true });
+        cb(null, { stdout: "", stderr: "" });
+        return;
+      }
+      nonCloneCount++;
+      if (nonCloneCount <= 2) { cb(new Error("reset fail")); } else { cb(null, { stdout: "", stderr: "" }); }
     });
-    const npm = makeNpmExec();
-    const ws = await makeWorkspace(exec, npm);
-    exec.mockClear();
-    callCount = 0;
+    nonCloneCount = 0;
     await ws.reset();
-    expect(exec).toHaveBeenCalledWith(expect.arrayContaining(["clone"]), undefined);
+    expect(mockExecFile).toHaveBeenCalledWith("git", expect.arrayContaining(["clone"]), {}, expect.any(Function));
   });
 
   it("throws if reset still fails after destroy + re-clone", async () => {
     const dir = path.join(BASE_DIR, WORKER_ID);
     fs.mkdirSync(path.join(dir, ".git"), { recursive: true });
-    const exec = vi.fn().mockImplementation(async (args: string[]) => {
-      if (args[0] === "clone") { fs.mkdirSync(path.join(args[2], ".git"), { recursive: true }); return ""; }
-      throw new Error("always fails");
+    const ws = await makeWorkspace();
+
+    mockExecFile.mockImplementation((cmd: string, args: string[], _opts: object, cb: Function) => {
+      if (cmd === "git" && args[0] === "clone") {
+        fs.mkdirSync(path.join(args[2], ".git"), { recursive: true });
+        cb(null, { stdout: "", stderr: "" });
+        return;
+      }
+      cb(new Error("always fails"));
     });
-    const npm = makeNpmExec();
-    const ws = await makeWorkspace(exec, npm);
-    exec.mockClear();
     await expect(ws.reset()).rejects.toThrow("always fails");
   });
 });
@@ -251,11 +262,11 @@ describe("Workspace.reset", () => {
 
 describe("Workspace.checkSafety", () => {
   it("returns empty arrays when working tree is clean and branch is pushed", async () => {
-    const exec = makeExec({
+    setupExecMock({
       "status --porcelain": "",
       "log @{u}..HEAD --oneline": "",
     });
-    const ws = await makeWorkspace(exec);
+    const ws = await makeWorkspace();
     const result = await ws.checkSafety();
     expect(result.uncommittedFiles).toEqual([]);
     expect(result.unpushedCommits).toEqual([]);
@@ -263,46 +274,57 @@ describe("Workspace.checkSafety", () => {
   });
 
   it("returns uncommitted files when working tree is dirty", async () => {
-    const exec = makeExec({
+    setupExecMock({
       "status --porcelain": " M src/foo.ts\n?? newfile.ts",
       "log @{u}..HEAD --oneline": "",
     });
-    const ws = await makeWorkspace(exec);
+    const ws = await makeWorkspace();
     const result = await ws.checkSafety();
     expect(result.uncommittedFiles).toEqual(["M src/foo.ts", "?? newfile.ts"]);
   });
 
   it("returns unpushed commits when ahead of upstream", async () => {
-    const exec = makeExec({
+    setupExecMock({
       "status --porcelain": "",
       "log @{u}..HEAD --oneline": "abc1234 feat: my commit",
     });
-    const ws = await makeWorkspace(exec);
+    const ws = await makeWorkspace();
     const result = await ws.checkSafety();
     expect(result.unpushedCommits).toEqual(["abc1234 feat: my commit"]);
     expect(result.noUpstream).toBe(false);
   });
 
   it("sets noUpstream when branch has no tracking remote", async () => {
-    const exec = vi.fn().mockImplementation(async (args: string[]) => {
-      if (args[0] === "clone") { fs.mkdirSync(path.join(args[2], ".git"), { recursive: true }); return ""; }
-      if (args[0] === "status") return "";
-      if (args[0] === "log") throw new Error("fatal: no upstream configured for branch 'my-branch'");
-      return "";
+    mockExecFile.mockImplementation((cmd: string, args: string[], _opts: object, cb: Function) => {
+      if (cmd === "git" && args[0] === "clone") {
+        fs.mkdirSync(path.join(args[2], ".git"), { recursive: true });
+        cb(null, { stdout: "", stderr: "" });
+        return;
+      }
+      if (cmd === "git" && args[0] === "status") { cb(null, { stdout: "", stderr: "" }); return; }
+      if (cmd === "git" && args[0] === "log") {
+        cb(new Error("fatal: no upstream configured for branch 'my-branch'"));
+        return;
+      }
+      cb(null, { stdout: "", stderr: "" });
     });
-    const ws = await makeWorkspace(exec);
+    const ws = await makeWorkspace();
     const result = await ws.checkSafety();
     expect(result.noUpstream).toBe(true);
   });
 
   it("re-throws unexpected git errors (not 'no upstream')", async () => {
-    const exec = vi.fn().mockImplementation(async (args: string[]) => {
-      if (args[0] === "clone") { fs.mkdirSync(path.join(args[2], ".git"), { recursive: true }); return ""; }
-      if (args[0] === "status") return "";
-      if (args[0] === "log") throw new Error("fatal: corrupt object store");
-      return "";
+    mockExecFile.mockImplementation((cmd: string, args: string[], _opts: object, cb: Function) => {
+      if (cmd === "git" && args[0] === "clone") {
+        fs.mkdirSync(path.join(args[2], ".git"), { recursive: true });
+        cb(null, { stdout: "", stderr: "" });
+        return;
+      }
+      if (cmd === "git" && args[0] === "status") { cb(null, { stdout: "", stderr: "" }); return; }
+      if (cmd === "git" && args[0] === "log") { cb(new Error("fatal: corrupt object store")); return; }
+      cb(null, { stdout: "", stderr: "" });
     });
-    const ws = await makeWorkspace(exec);
+    const ws = await makeWorkspace();
     await expect(ws.checkSafety()).rejects.toThrow("corrupt object store");
   });
 });
@@ -311,11 +333,11 @@ describe("Workspace.checkSafety", () => {
 
 describe("confirmIfUnsafe", () => {
   it("returns true without calling confirm when workspace is clean", async () => {
-    const exec = makeExec({
+    setupExecMock({
       "status --porcelain": "",
       "log @{u}..HEAD --oneline": "",
     });
-    const ws = await makeWorkspace(exec);
+    const ws = await makeWorkspace();
     const confirm = vi.fn().mockResolvedValue(true);
     const result = await confirmIfUnsafe(ws, confirm);
     expect(result).toBe(true);
@@ -323,11 +345,11 @@ describe("confirmIfUnsafe", () => {
   });
 
   it("calls confirm with warning when there are uncommitted files", async () => {
-    const exec = makeExec({
+    setupExecMock({
       "status --porcelain": " M src/foo.ts",
       "log @{u}..HEAD --oneline": "",
     });
-    const ws = await makeWorkspace(exec);
+    const ws = await makeWorkspace();
     const confirm = vi.fn().mockResolvedValue(true);
     const result = await confirmIfUnsafe(ws, confirm);
     expect(confirm).toHaveBeenCalledOnce();
@@ -336,11 +358,11 @@ describe("confirmIfUnsafe", () => {
   });
 
   it("returns false when user declines", async () => {
-    const exec = makeExec({
+    setupExecMock({
       "status --porcelain": " M src/foo.ts",
       "log @{u}..HEAD --oneline": "",
     });
-    const ws = await makeWorkspace(exec);
+    const ws = await makeWorkspace();
     const confirm = vi.fn().mockResolvedValue(false);
     const result = await confirmIfUnsafe(ws, confirm);
     expect(result).toBe(false);
@@ -404,62 +426,63 @@ describe("Workspace.prune", () => {
 
 const CLEAN_REPO_URL = "https://github.com/owner/repo.git";
 
-async function makeWorkspaceWithToken(
-  token: string,
-  exec = makeExec(),
-  npm = makeNpmExec(),
-): Promise<Workspace> {
-  const ws = new Workspace(BASE_DIR, WORKER_ID, CLEAN_REPO_URL, "/original-cwd", async () => true, token, exec, npm);
+async function makeWorkspaceWithToken(token: string): Promise<Workspace> {
+  const ws = new Workspace(BASE_DIR, WORKER_ID, CLEAN_REPO_URL, "/original-cwd", async () => true, token);
   await ws.create();
   return ws;
 }
 
 describe("Workspace git auth via extraHeader", () => {
   it("sets http.extraHeader via git config after clone when token is provided", async () => {
-    const exec = makeExec();
-    await makeWorkspaceWithToken("ghp_mytoken", exec);
-    expect(exec).toHaveBeenCalledWith(
+    await makeWorkspaceWithToken("ghp_mytoken");
+    expect(mockExecFile).toHaveBeenCalledWith(
+      "git",
       ["config", "--local", "http.https://github.com/.extraheader", "Authorization: Bearer ghp_mytoken"],
-      path.join(BASE_DIR, WORKER_ID),
+      { cwd: path.join(BASE_DIR, WORKER_ID) },
+      expect.any(Function),
     );
   });
 
   it("does not set http.extraHeader when no token is provided", async () => {
-    const exec = makeExec();
-    await makeWorkspace(exec);
-    const configCalls = exec.mock.calls.filter((args) => args[0][0] === "config");
+    await makeWorkspace();
+    const configCalls = mockExecFile.mock.calls.filter(
+      ([cmd, args]) => cmd === "git" && (args as string[])[0] === "config",
+    );
     expect(configCalls).toHaveLength(0);
   });
 
   it("sets http.extraHeader after re-clone during reset when token is provided", async () => {
     let fetchCalls = 0;
-    const exec = vi.fn().mockImplementation(async (args: string[]) => {
-      if (args[0] === "fetch") {
-        if (fetchCalls++ < 2) throw new Error("simulated network failure");
+    mockExecFile.mockImplementation((cmd: string, args: string[], _opts: object, cb: Function) => {
+      if (cmd === "git" && args[0] === "fetch") {
+        if (fetchCalls++ < 2) { cb(new Error("simulated network failure")); return; }
       }
-      if (args[0] === "clone") {
+      if (cmd === "git" && args[0] === "clone") {
         fs.mkdirSync(path.join(args[2], ".git", "info"), { recursive: true });
         fs.writeFileSync(path.join(args[2], "package.json"), "{}");
       }
-      return "";
+      cb(null, { stdout: "", stderr: "" });
     });
-    const ws = await makeWorkspaceWithToken("ghp_mytoken", exec);
-    exec.mockClear();
+    const ws = await makeWorkspaceWithToken("ghp_mytoken");
+    mockExecFile.mockClear();
     fetchCalls = 0;
     await ws.reset();
 
-    expect(exec).toHaveBeenCalledWith(
+    expect(mockExecFile).toHaveBeenCalledWith(
+      "git",
       ["config", "--local", "http.https://github.com/.extraheader", "Authorization: Bearer ghp_mytoken"],
-      path.join(BASE_DIR, WORKER_ID),
+      { cwd: path.join(BASE_DIR, WORKER_ID) },
+      expect.any(Function),
     );
   });
 
   it("clone URL does not contain the token", async () => {
-    const exec = makeExec();
-    await makeWorkspaceWithToken("ghp_secret", exec);
-    const cloneCalls = exec.mock.calls.filter((args) => args[0][0] === "clone");
+    await makeWorkspaceWithToken("ghp_secret");
+    const cloneCalls = mockExecFile.mock.calls.filter(
+      ([cmd, args]) => cmd === "git" && (args as string[])[0] === "clone",
+    );
     expect(cloneCalls.length).toBeGreaterThan(0);
-    const cloneUrl: string = cloneCalls[0][0][1];
+    const cloneUrl = cloneCalls[0][1][1] as string;
     expect(cloneUrl).not.toContain("ghp_secret");
     expect(cloneUrl).toBe(CLEAN_REPO_URL);
   });
