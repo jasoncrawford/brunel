@@ -148,8 +148,6 @@ export class WorkerController extends EventEmitter {
   private bufferedMessages: BufferableMessage[] = [];
   private reconnectAttempts = 0;
   private _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private _stopped = false;
-
   // ── Reserved state ────────────────────────────────────────────────────────
   private _isReserved = false;
 
@@ -550,7 +548,6 @@ export class WorkerController extends EventEmitter {
     this._activePingIntervalMs = getConfig().pingIntervalMs ?? 25_000;
     this._activeMaxReconnectDelayMs = getConfig().maxReconnectDelayMs ?? 300_000;
 
-    this._stopped = false;
     this._isActive = true;
 
     this.agentStatus.update({ model: getConfig().model, effort: getConfig().effort });
@@ -580,16 +577,14 @@ export class WorkerController extends EventEmitter {
         }
       }
     }
-    this._stopped = true;
     this.sendGoodbye(goodbyeOpts);
+    this._deactivate();
     this.ws?.close();
     if (this.debounceTimer) {
       clearTimeout(this.debounceTimer);
       this.debounceTimer = null;
     }
     this.resetSessionState();
-    this._isActive = false;
-    this.agentStatus.setWorkerModeActive(false);
     this.display.print(c.sageGreen("Worker mode stopped."));
     await this.agentStatus.refreshBranch();
   }
@@ -749,6 +744,18 @@ export class WorkerController extends EventEmitter {
 
   // ── Private ───────────────────────────────────────────────────────────────
 
+  /**
+   * Own the full "worker mode is done" invariant. Sets all three fields
+   * atomically so every deactivation path (stop, fatal) stays in sync.
+   * Sets connectionStatus immediately — even if the socket is already closed
+   * and no close event will fire.
+   */
+  private _deactivate(): void {
+    this._isActive = false;
+    this.agentStatus.setWorkerModeActive(false);
+    this.agentStatus.update({ connectionStatus: "disconnected", reconnectAt: undefined });
+  }
+
   private buildWsFactory(): WsFactory {
     return () => new WebSocket(`${getConfig().foremanUrl}/worker`);
   }
@@ -843,6 +850,7 @@ export class WorkerController extends EventEmitter {
   }
 
   private connect(): void {
+    if (!this._isActive) return;
     // Clearing reconnectAt stops the countdown timer in the model.
     this.agentStatus.update({ connectionStatus: "reconnecting", reconnectAt: undefined });
     const ws = this._activeWsFactory!(this.agentStatus.agentId, this.currentTaskId);
@@ -915,11 +923,7 @@ export class WorkerController extends EventEmitter {
     ws.on("close", (code: number, _reason: Buffer) => {
       clearPingTimer(); // always clean up the ping timer when this socket closes
       if (ws !== this.ws) return; // stale close from a previous connection
-      if (this._stopped) {
-        // Fatal error path: update status but skip reconnect scheduling.
-        this.agentStatus.update({ connectionStatus: "disconnected", disconnectCode: code });
-        return;
-      }
+      if (!this._isActive) return; // already deactivated (stop or fatal) — skip reconnect
       // Full Jitter (Brooker 2015): spread = entire [0, cap] window at high attempt counts.
       const delay = Math.random() * Math.min(this._activeMaxReconnectDelayMs, 1000 * Math.pow(2, this.reconnectAttempts));
       this.reconnectAttempts++;
@@ -964,9 +968,7 @@ export class WorkerController extends EventEmitter {
 
     if (msg.type === "foreman_error") {
       if (msg.fatal) {
-        this._stopped = true;
-        this._isActive = false;
-        this.agentStatus.setWorkerModeActive(false);
+        this._deactivate();
         this.currentAc?.abort(); // abort any running query immediately
         this.ws?.close();
         this.emit("fatal");
