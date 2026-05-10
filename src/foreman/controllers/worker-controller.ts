@@ -127,7 +127,7 @@ export class WorkerController {
     if (msg.githubToken && appId && appPrivateKey) {
       if (repo.installationId === null) {
         log(`[worker ${shortWorkerId(workerId)}] App not installed on ${msg.repo} — rejecting`);
-        this.messenger.sendError(ws, `Brunel is not installed on ${msg.repo}.\nInstall it at: https://github.com/apps/brunel\nThen run brunel again.`, true, workerId, repo.id);
+        this.messenger.sendError(ws, `Brunel is not installed on ${msg.repo}. Install it at: https://github.com/apps/brunel-foreman`, true, workerId, repo.id);
         return;
       }
       let authorized: boolean;
