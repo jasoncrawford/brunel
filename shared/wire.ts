@@ -3,6 +3,9 @@
 
 export type TaskStatus = "pending" | "assigned" | "pushed" | "merged" | "closed" | "complete" | "blocked";
 
+/** Current foreman ↔ worker wire protocol version. Increment when making incompatible changes. */
+export const PROTOCOL_VERSION = 1;
+
 // ── Admin WebSocket wire types (admin dashboard ↔ server) ────────────────────
 
 export interface BlockerInfo {
@@ -54,6 +57,8 @@ export interface Worker {
   status: "ready" | "reserved" | "assigned" | "disconnected";
   currentTaskId?: string;
   repo?: string;
+  version?: string;
+  protocolVersion?: number;
   // Diagnostic fields — present in REST responses, optional in WebSocket snapshots
   firstConnectedAt?: string;
   lastConnectedAt?: string;
@@ -105,7 +110,7 @@ export interface TaskIssue {
 
 // Worker → Foreman messages
 export type WorkerMessage =
-  | { type: "worker_hello"; workerId: string; repo: string; taskId?: string; status: "ready" | "reserved" | "assigned"; workerSecret?: string; lastSeenEventSeqId?: number; githubToken?: string }
+  | { type: "worker_hello"; workerId: string; repo: string; taskId?: string; status: "ready" | "reserved" | "assigned"; workerSecret?: string; lastSeenEventSeqId?: number; githubToken?: string; version?: string; protocolVersion?: number }
   | { type: "task_complete"; workerId: string; taskId: string; nextState?: "ready" | "reserved"; stats?: { inputTokens: number; outputTokens: number; costUsd?: number } }
   | { type: "worker_goodbye"; workerId: string; taskId?: string; task_complete?: boolean; stats?: { inputTokens: number; outputTokens: number; costUsd?: number } }
   | { type: "activate_repo"; workerId: string }

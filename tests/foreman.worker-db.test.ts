@@ -102,6 +102,45 @@ describe("Worker DB persistence", () => {
     expect(worker).toBeNull();
   });
 
+  it("register persists version and protocol_version when provided", async () => {
+    const repo = fakeRepo("owner/repo", 1, "new");
+    Worker.register("w-ver", fakeWs(), repo, { version: "0.1.0", protocolVersion: 1 });
+    await vi.waitFor(async () => {
+      const { data } = await (db.from as any)("workers")
+        .select("*").eq("worker_id", "w-ver").maybeSingle();
+      expect(data?.version).toBe("0.1.0");
+      expect(data?.protocol_version).toBe(1);
+    });
+  });
+
+  it("register persists null version and protocol_version when not provided", async () => {
+    const repo = fakeRepo("owner/repo", 1, "new");
+    Worker.register("w-nover", fakeWs(), repo);
+    await vi.waitFor(async () => {
+      const { data } = await (db.from as any)("workers")
+        .select("*").eq("worker_id", "w-nover").maybeSingle();
+      expect(data?.version).toBeNull();
+      expect(data?.protocol_version).toBeNull();
+    });
+  });
+
+  it("reconnect updates version and protocol_version to latest values", async () => {
+    const repo = fakeRepo("owner/repo", 1, "new");
+    Worker.register("w-recon-ver", fakeWs(), repo, { version: "0.0.9", protocolVersion: 1 });
+    await vi.waitFor(async () => {
+      const { data } = await (db.from as any)("workers")
+        .select("*").eq("worker_id", "w-recon-ver").maybeSingle();
+      expect(data?.version).toBe("0.0.9");
+    });
+    Worker._reset();
+    Worker.register("w-recon-ver", fakeWs(), repo, { version: "0.1.0", protocolVersion: 1 });
+    await vi.waitFor(async () => {
+      const { data } = await (db.from as any)("workers")
+        .select("*").eq("worker_id", "w-recon-ver").maybeSingle();
+      expect(data?.version).toBe("0.1.0");
+    });
+  });
+
   it("allForDashboard includes in-memory connected workers", async () => {
     const repo = fakeRepo("owner/repo", 1, "new");
     Worker.register("w1", fakeWs(), repo);

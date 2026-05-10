@@ -741,7 +741,7 @@ describe("handleWorkerHello routing", () => {
       status: "assigned",
     });
 
-    expect(spy).toHaveBeenCalledWith("w1", "77", expect.anything(), expect.anything(), undefined);
+    expect(spy).toHaveBeenCalledWith("w1", "77", expect.anything(), expect.anything(), undefined, expect.anything());
   });
 
   it("status='reserved' → routes to handleReservedHello", async () => {
@@ -772,6 +772,83 @@ describe("handleWorkerHello routing", () => {
     });
 
     expect(spy).toHaveBeenCalled();
+  });
+});
+
+// ── protocol version validation ────────────────────────────────────────────────
+
+describe("handleWorkerHello protocol version", () => {
+  it("rejects worker with an incompatible protocolVersion (fatal error)", async () => {
+    const { wss } = makeDeps(taskManager);
+    vi.spyOn(Repo, "findOrCreate").mockResolvedValue(taskManager.repo as unknown as Repo);
+    const ws = fakeWs();
+
+    await wss.handleWorkerHello("w1", ws, {
+      type: "worker_hello",
+      workerId: "w1",
+      repo: "owner/repo",
+      status: "ready",
+      protocolVersion: 999,
+    });
+
+    const calls = ws.send.mock.calls.map(([data]: [string]) => JSON.parse(data));
+    const errorMsg = calls.find((m: Record<string, unknown>) => m.type === "foreman_error");
+    expect(errorMsg).toBeDefined();
+    expect(errorMsg.fatal).toBe(true);
+    expect(errorMsg.message).toMatch(/too old|update/i);
+  });
+
+  it("accepts worker with matching protocolVersion", async () => {
+    const { wss } = makeDeps(taskManager);
+    vi.spyOn(Repo, "findOrCreate").mockResolvedValue(taskManager.repo as unknown as Repo);
+    const spy = vi.spyOn(wss, "handleReadyHello" as any).mockResolvedValue(undefined);
+
+    await wss.handleWorkerHello("w1", fakeWs(), {
+      type: "worker_hello",
+      workerId: "w1",
+      repo: "owner/repo",
+      status: "ready",
+      protocolVersion: 1,
+    });
+
+    expect(spy).toHaveBeenCalled();
+  });
+
+  it("accepts worker with no protocolVersion (older worker, backward-compatible)", async () => {
+    const { wss } = makeDeps(taskManager);
+    vi.spyOn(Repo, "findOrCreate").mockResolvedValue(taskManager.repo as unknown as Repo);
+    const spy = vi.spyOn(wss, "handleReadyHello" as any).mockResolvedValue(undefined);
+
+    await wss.handleWorkerHello("w1", fakeWs(), {
+      type: "worker_hello",
+      workerId: "w1",
+      repo: "owner/repo",
+      status: "ready",
+    });
+
+    expect(spy).toHaveBeenCalled();
+  });
+
+  it("passes version and protocolVersion through to handleReadyHello", async () => {
+    const { wss } = makeDeps(taskManager);
+    vi.spyOn(Repo, "findOrCreate").mockResolvedValue(taskManager.repo as unknown as Repo);
+    const spy = vi.spyOn(wss, "handleReadyHello" as any).mockResolvedValue(undefined);
+
+    await wss.handleWorkerHello("w1", fakeWs(), {
+      type: "worker_hello",
+      workerId: "w1",
+      repo: "owner/repo",
+      status: "ready",
+      version: "0.1.0",
+      protocolVersion: 1,
+    });
+
+    expect(spy).toHaveBeenCalledWith(
+      "w1",
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ version: "0.1.0", protocolVersion: 1 }),
+    );
   });
 });
 

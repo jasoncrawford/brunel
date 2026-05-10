@@ -2,6 +2,10 @@ import "dotenv/config";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "url";
+import { createRequire } from "node:module";
+
+const _require = createRequire(import.meta.url);
+const { version: PACKAGE_VERSION } = _require("../../package.json") as { version: string };
 import { Display } from "./views/display.js";
 import { c, hr } from "./views/style.js";
 import { AgentStatus } from "./models/agent-status.js";
@@ -175,7 +179,7 @@ export class BrunelAgent {
 
     // Print the startup banner.
     this.display.print(c.sageGreen(hr("═")));
-    this.display.print(c.skyBlue(this.display.s.bold("  Brunel Agent")));
+    this.display.print(c.skyBlue(this.display.s.bold(`  brunel-agent v${PACKAGE_VERSION}`)));
     this.display.print(c.lavender(`  Permissions: ${this.settings.permissionMode ?? "default"} | Model: ${this.settings.model ?? "default"} | Effort: ${this.settings.effort ?? "auto"} | Output: ${getConfig().verbose ? "verbose" : "quiet"} | Log: repl.log`));
     this.display.print(c.sageGreen(hr("═")));
 

@@ -1,9 +1,18 @@
 {
-  "name": "brunel",
+  "name": "brunel-agent",
   "version": "0.1.0",
   "type": "module",
   "bin": {
     "brunel": "bin/brunel.cjs"
+  },
+  "files": [
+    "bin/",
+    "dist/",
+    "shared/",
+    "src/"
+  ],
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "build": "cd frontend && npm install && npm run build",
