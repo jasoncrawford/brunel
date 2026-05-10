@@ -22,6 +22,7 @@ export class Repo extends ActiveRecord {
   status: RepoStatus;
   readonly createdAt: string;
   installationId: number | null;
+  private _installation: Promise<Installation | null> | undefined;
 
   private constructor(row: DbRow) {
     super();
@@ -57,10 +58,14 @@ export class Repo extends ActiveRecord {
     return TaskManager.forRepo(this);
   }
 
-  /** Returns the GitHub App installation linked to this repo, or null if not set. */
+  /** Returns the GitHub App installation linked to this repo, or null if not set. Memoized. */
   get installation(): Promise<Installation | null> {
-    if (this.installationId === null) return Promise.resolve(null);
-    return Installation.get(this.installationId);
+    if (this._installation === undefined) {
+      this._installation = this.installationId === null
+        ? Promise.resolve(null)
+        : Installation.get(this.installationId);
+    }
+    return this._installation;
   }
 
   async getTaskByIssue(issueNumber: number): Promise<Task | null> {
@@ -89,6 +94,7 @@ export class Repo extends ActiveRecord {
   async linkInstallation(installationId: number): Promise<Repo> {
     const updated = await this.update({ installation_id: installationId });
     this.installationId = installationId;
+    this._installation = undefined;
     return updated;
   }
 
@@ -96,6 +102,7 @@ export class Repo extends ActiveRecord {
   async unlinkInstallation(): Promise<Repo> {
     const updated = await this.update({ installation_id: null });
     this.installationId = null;
+    this._installation = undefined;
     return updated;
   }
 
