@@ -3,6 +3,7 @@ import * as Wire from "../../../shared/wire.js";
 import { GithubClient } from "../clients/github.js";
 import { Task } from "./task.js";
 import { Worker } from "./worker.js";
+import { Installation } from "./installation.js";
 import { fmtError, log } from "../../utils.js";
 import type { Repo } from "./repo.js";
 
@@ -71,8 +72,12 @@ export class TaskManager extends EventEmitter {
   // ── Instance state ───────────────────────────────────────────────────────
   readonly repo: Repo;
 
-  private get github(): GithubClient {
-    return new GithubClient(this.repo.fullName, this.repo.installationId ?? undefined);
+  private async github(): Promise<GithubClient> {
+    if (this.repo.installationId !== null) {
+      const installation = await Installation.get(this.repo.installationId);
+      if (installation) return new GithubClient(this.repo.fullName, installation.githubId);
+    }
+    return new GithubClient(this.repo.fullName);
   }
 
   // ── Ephemeral in-memory state (no DB backing) ────────────────────────────
@@ -302,7 +307,7 @@ export class TaskManager extends EventEmitter {
   async fetchBlockers(issueNumber: number, body: string): Promise<number[]> {
     const [bodyBlockers, nativeBlockers] = await Promise.all([
       Task.parseBodyBlockers(body),
-      this.github.fetchNativeBlockers(issueNumber),
+      (await this.github()).fetchNativeBlockers(issueNumber),
     ]);
     return Array.from(new Set([...bodyBlockers, ...nativeBlockers]));
   }
@@ -316,7 +321,7 @@ export class TaskManager extends EventEmitter {
     const blockers = await this.fetchBlockers(issueNumber, body);
     this.setBlockers(issueNumber, blockers);
     if (blockers.length > 0) {
-      const states = await this.github.fetchIssueStates(blockers);
+      const states = await (await this.github()).fetchIssueStates(blockers);
       for (const [num, state] of states) {
         this.setIssueOpenState(num, state === "open");
       }
@@ -442,7 +447,7 @@ export class TaskManager extends EventEmitter {
    *  Called at startup after loadActiveTasksFromDb, and on installation/activation events. */
   async loadIssuesFromGithub(): Promise<void> {
     const repo = this.repo.fullName;
-    const issues = await this.github.fetchIssues();
+    const issues = await (await this.github()).fetchIssues();
 
     const allBlockerNumbers = new Set<number>();
     const loadedIssueNumbers: number[] = [];
@@ -466,7 +471,7 @@ export class TaskManager extends EventEmitter {
     }
 
     if (allBlockerNumbers.size > 0) {
-      const states = await this.github.fetchIssueStates(Array.from(allBlockerNumbers));
+      const states = await (await this.github()).fetchIssueStates(Array.from(allBlockerNumbers));
       for (const [num, state] of states) {
         this.setIssueOpenState(num, state === "open");
       }
