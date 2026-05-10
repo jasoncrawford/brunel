@@ -161,14 +161,14 @@ export class WorkerController {
       return;
     }
 
-    const workerInfo = { version: msg.version, protocolVersion: msg.protocolVersion };
+    const versionInfo = { version: msg.version, protocolVersion: msg.protocolVersion };
 
     if (msg.status === "assigned" && msg.taskId) {
-      await this.handleAssignedHello(workerId, msg.taskId, ws, repo, msg.lastSeenEventSeqId, workerInfo);
+      await this.handleAssignedHello(workerId, msg.taskId, ws, repo, msg.lastSeenEventSeqId, versionInfo);
     } else if (msg.status === "reserved") {
-      await this.handleReservedHello(workerId, ws, repo, workerInfo);
+      await this.handleReservedHello(workerId, ws, repo, versionInfo);
     } else {
-      await this.handleReadyHello(workerId, ws, repo, workerInfo);
+      await this.handleReadyHello(workerId, ws, repo, versionInfo);
     }
   }
 
@@ -228,10 +228,10 @@ export class WorkerController {
    * 6. Live task, different worker → cancel
    * 7. Otherwise (live task, same or no worker) → reclaim
    */
-  async handleAssignedHello(workerId: string, claimedTaskId: string, ws: WebSocket, repo: Repo, lastSeenEventSeqId?: number, workerInfo?: { version?: string; protocolVersion?: number }): Promise<void> {
+  async handleAssignedHello(workerId: string, claimedTaskId: string, ws: WebSocket, repo: Repo, lastSeenEventSeqId?: number, versionInfo?: { version?: string; protocolVersion?: number }): Promise<void> {
     try {
       const existing = await Task.get(claimedTaskId);
-      const worker = Worker.register(workerId, ws, repo, workerInfo);
+      const worker = Worker.register(workerId, ws, repo, versionInfo);
 
       if (!existing) {
         this._workerLog(workerId, `hello busy task=#${claimedTaskId} — unknown task, respecting busy status`);
@@ -276,7 +276,7 @@ export class WorkerController {
    * Reverts any stale prior assignment, registers the worker.
    * Returns the registered Worker, or null if an error was sent to ws.
    */
-  private async _registerFresh(workerId: string, ws: WebSocket, repo: Repo, workerInfo?: { version?: string; protocolVersion?: number }): Promise<Worker | null> {
+  private async _registerFresh(workerId: string, ws: WebSocket, repo: Repo, versionInfo?: { version?: string; protocolVersion?: number }): Promise<Worker | null> {
     // DB error here is transient — recoverable: worker retries on reconnect.
     const priorTask = await Task.getByWorker(workerId);
     if (priorTask) {
@@ -292,7 +292,7 @@ export class WorkerController {
         return null; // don't register — task stays assigned, worker retries on reconnect
       }
     }
-    return Worker.register(workerId, ws, repo, workerInfo);
+    return Worker.register(workerId, ws, repo, versionInfo);
   }
 
   /**
@@ -300,9 +300,9 @@ export class WorkerController {
    * fresh, available for auto-assignment. Reverts any stale prior assignment,
    * registers the worker, and sends a ready hello_ack.
    */
-  async handleReadyHello(workerId: string, ws: WebSocket, repo: Repo, workerInfo?: { version?: string; protocolVersion?: number }): Promise<void> {
+  async handleReadyHello(workerId: string, ws: WebSocket, repo: Repo, versionInfo?: { version?: string; protocolVersion?: number }): Promise<void> {
     try {
-      const worker = await this._registerFresh(workerId, ws, repo, workerInfo);
+      const worker = await this._registerFresh(workerId, ws, repo, versionInfo);
       if (!worker) return; // error already sent
       this._workerLog(workerId, "hello ready");
       this.messenger.send(worker, { type: "hello_ack", workerId: worker.workerId, status: "ready", repoStatus: repo.status });
@@ -319,9 +319,9 @@ export class WorkerController {
    * sends hello_ack { status: "reserved" }. The worker will send claim_task
    * separately after receiving the ack.
    */
-  async handleReservedHello(workerId: string, ws: WebSocket, repo: Repo, workerInfo?: { version?: string; protocolVersion?: number }): Promise<void> {
+  async handleReservedHello(workerId: string, ws: WebSocket, repo: Repo, versionInfo?: { version?: string; protocolVersion?: number }): Promise<void> {
     try {
-      const worker = await this._registerFresh(workerId, ws, repo, workerInfo);
+      const worker = await this._registerFresh(workerId, ws, repo, versionInfo);
       if (!worker) return; // error already sent
       this._workerLog(workerId, "hello reserved");
       worker.markReserved();

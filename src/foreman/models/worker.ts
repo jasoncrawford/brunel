@@ -87,7 +87,7 @@ export class Worker extends ActiveRecord {
 
   // ── Static registry operations ───────────────────────────────────────────
 
-  static register(workerId: string, ws: WsSocket, repo: Repo, workerInfo?: { version?: string; protocolVersion?: number }): Worker {
+  static register(workerId: string, ws: WsSocket, repo: Repo, versionInfo?: { version?: string; protocolVersion?: number }): Worker {
     let worker = registry.get(workerId);
     if (!worker) {
       // Synthetic row for the in-memory registry instance — diagnostic fields
@@ -112,12 +112,12 @@ export class Worker extends ActiveRecord {
     worker.status = "ready";
     worker.currentTask = undefined;
     worker.disconnectedAt = undefined;
-    worker.version = workerInfo?.version ?? undefined;
-    worker.protocolVersion = workerInfo?.protocolVersion ?? undefined;
+    worker.version = versionInfo?.version ?? undefined;
+    worker.protocolVersion = versionInfo?.protocolVersion ?? undefined;
     sockets.set(workerId, ws);
     registry.set(workerId, worker);
     Worker.events.emit("changed");
-    worker._chain(() => Worker._persistRegister(workerId, repo, workerInfo));
+    worker._chain(() => Worker._persistRegister(workerId, repo, versionInfo));
     return worker;
   }
 
@@ -197,7 +197,7 @@ export class Worker extends ActiveRecord {
 
   // ── DB persistence helpers ───────────────────────────────────────────────
 
-  private static async _persistRegister(workerId: string, repo: Repo, workerInfo?: { version?: string; protocolVersion?: number }): Promise<void> {
+  private static async _persistRegister(workerId: string, repo: Repo, versionInfo?: { version?: string; protocolVersion?: number }): Promise<void> {
     const now = new Date().toISOString();
     const existing = await Worker.get(workerId);
     if (existing) {
@@ -209,8 +209,8 @@ export class Worker extends ActiveRecord {
         num_connections: (existing.numConnections ?? 0) + 1,
         disconnected_at: null,
         goodbye_at: null,
-        version: workerInfo?.version ?? null,
-        protocol_version: workerInfo?.protocolVersion ?? null,
+        version: versionInfo?.version ?? null,
+        protocol_version: versionInfo?.protocolVersion ?? null,
       });
     } else {
       await Worker.insert({
@@ -223,8 +223,8 @@ export class Worker extends ActiveRecord {
         num_connections: 1,
         disconnected_at: null,
         goodbye_at: null,
-        version: workerInfo?.version ?? null,
-        protocol_version: workerInfo?.protocolVersion ?? null,
+        version: versionInfo?.version ?? null,
+        protocol_version: versionInfo?.protocolVersion ?? null,
       });
     }
   }
