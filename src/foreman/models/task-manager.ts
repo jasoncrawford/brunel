@@ -3,7 +3,6 @@ import * as Wire from "../../../shared/wire.js";
 import { GithubClient } from "../clients/github.js";
 import { Task } from "./task.js";
 import { Worker } from "./worker.js";
-import { Installation } from "./installation.js";
 import { fmtError, log } from "../../utils.js";
 import type { Repo } from "./repo.js";
 
@@ -73,11 +72,8 @@ export class TaskManager extends EventEmitter {
   readonly repo: Repo;
 
   private async github(): Promise<GithubClient> {
-    if (this.repo.installationId !== null) {
-      const installation = await Installation.get(this.repo.installationId);
-      if (installation) return new GithubClient(this.repo.fullName, installation.githubId);
-    }
-    return new GithubClient(this.repo.fullName);
+    const installation = await this.repo.installation;
+    return new GithubClient(this.repo.fullName, installation?.githubId);
   }
 
   // ── Ephemeral in-memory state (no DB backing) ────────────────────────────
