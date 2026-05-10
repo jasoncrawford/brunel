@@ -10,6 +10,7 @@
  * - 404 fallback when no static dist/ exists
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import crypto from "crypto";
 import http from "http";
 import type { AddressInfo } from "net";
 import type { Webhooks } from "@octokit/webhooks";
@@ -139,6 +140,31 @@ describe("POST /webhook", () => {
       expect(res.status).toBe(401);
     } finally {
       await stopServer(s);
+    }
+  });
+
+  it("accepts a valid signature when webhookSecret is provided and dispatches the event", async () => {
+    const secret = "mysecret";
+    const body = JSON.stringify({ action: "labeled", issue: { number: 1 } });
+    const sig = "sha256=" + crypto.createHmac("sha256", secret).update(body).digest("hex");
+    const httpServer = new HttpServer({ webhookSecret: secret });
+    const dispatched = vi.fn();
+    httpServer.webhooks.onAny(({ name, payload }) => dispatched(name, payload));
+    const p = await startServer(httpServer.server);
+    try {
+      const res = await request(p, "POST", "/webhook", {
+        body,
+        headers: {
+          "content-type": "application/json",
+          "x-github-event": "issues",
+          "x-github-delivery": "sig-test-1",
+          "x-hub-signature-256": sig,
+        },
+      });
+      expect(res.status).toBe(200);
+      expect(dispatched).toHaveBeenCalledOnce();
+    } finally {
+      await stopServer(httpServer.server);
     }
   });
 });

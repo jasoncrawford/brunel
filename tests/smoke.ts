@@ -128,6 +128,8 @@ async function run(): Promise<void> {
 
   const spawnOpts = { cwd: REPO_ROOT, stdio: ["ignore", "pipe", "pipe"] as const };
 
+  const WEBHOOK_SECRET = "smoke-test-secret";
+
   const foreman = spawn("tsx", ["src/foreman/index.ts"], {
     ...spawnOpts,
     env: {
@@ -136,6 +138,7 @@ async function run(): Promise<void> {
       GITHUB_REPO: "test/test",
       GITHUB_TOKEN: "dummy",
       BRUNEL_GITHUB_API_URL: `http://localhost:${mockApiPort}`,
+      BRUNEL_APP_WEBHOOK_SECRET: WEBHOOK_SECRET,
     },
   });
 
@@ -281,6 +284,8 @@ async function run(): Promise<void> {
     },
   });
 
+  const webhookSig = "sha256=" + crypto.createHmac("sha256", WEBHOOK_SECRET).update(webhookPayload).digest("hex");
+
   await new Promise<void>((resolve, reject) => {
     const req = http.request(
       {
@@ -292,6 +297,7 @@ async function run(): Promise<void> {
           "Content-Type": "application/json",
           "x-github-event": "issues",
           "x-github-delivery": "smoke-test-delivery-1",
+          "x-hub-signature-256": webhookSig,
           "Content-Length": Buffer.byteLength(webhookPayload),
         },
       },
