@@ -1,4 +1,3 @@
-import type { Webhooks } from "@octokit/webhooks";
 import { WebhookEvent } from "../models/webhook-event.js";
 import { Repo } from "../models/repo.js";
 import { Task } from "../models/task.js";
@@ -31,8 +30,6 @@ function numProp(obj: unknown, key: string): number | null {
  */
 export interface RouteResult { task: Task | null; ref: string; forward?: boolean; }
 
-type WebhookHandler = (p: R, evt: WebhookEvent) => Promise<RouteResult | void>;
-
 type WebhookControllerOptions = {
   config: Pick<BrunelConfig, "taskLabel">;
   messenger: WorkerMessenger;
@@ -44,48 +41,11 @@ export class WebhookController {
   private readonly messenger: WorkerMessenger;
   private readonly assignWork: () => Promise<void>;
   private readonly installationsController = new InstallationsController();
-  private readonly handlerMap = new Map<string, WebhookHandler>();
 
   constructor({ config, messenger, assignWork }: WebhookControllerOptions) {
     this.config = config;
     this.messenger = messenger;
     this.assignWork = assignWork;
-  }
-
-  private handle(name: string, handler: WebhookHandler): void {
-    this.handlerMap.set(name, handler);
-  }
-
-  register(webhooks: InstanceType<typeof Webhooks>): void {
-    this.handle("installation", async (p) => {
-      const action = strProp(p, "action");
-      try {
-        if (action === "created") await this.installationsController.handleInstallationCreated(p);
-        else if (action === "deleted") await this.installationsController.handleInstallationDeleted(p);
-      } catch (err) {
-        log(`ERROR handling installation/${action}: ${fmtError(err)}`);
-      }
-    });
-
-    this.handle("installation_repositories", async (p) => {
-      const action = strProp(p, "action");
-      try {
-        if (action === "added") await this.installationsController.handleReposAdded(p);
-        else if (action === "removed") await this.installationsController.handleReposRemoved(p);
-      } catch (err) {
-        log(`ERROR handling installation_repositories/${action}: ${fmtError(err)}`);
-      }
-    });
-
-    this.handle("pull_request", (p, evt) => this.routePrEvent(p, evt));
-    this.handle("pull_request_review", (p, evt) => this.routePrReviewEvent(p, evt));
-    this.handle("pull_request_review_comment", (p, evt) => this.routePrReviewEvent(p, evt));
-    this.handle("check_run", (p, evt) => this.routeCheckEvent(p, evt));
-    this.handle("check_suite", (p, evt) => this.routeCheckEvent(p, evt));
-
-    webhooks.onAny(async ({ id, name, payload }) => {
-      await this.handleEvent(id, name as string, payload);
-    });
   }
 
   async handleEvent(id: string, name: string, payload: unknown): Promise<void> {
@@ -103,21 +63,16 @@ export class WebhookController {
     }
 
     // Step 1: determine task (side effects, DB lookups) — no forwarding yet.
+    // Convention: foo_bar event → routeFooBarEvent method.
     let task: Task | null = null;
     let ref = "";
     let forward = true;
 
-    const handler = this.handlerMap.get(name);
-    if (handler) {
-      const result = await handler(p, evt);
+    const handlerName = "route" + name.split("_").map((s: string) => s.charAt(0).toUpperCase() + s.slice(1)).join("") + "Event";
+    const handler = (this as Record<string, unknown>)[handlerName];
+    if (typeof handler === "function") {
+      const result = await (handler as (p: R, evt: WebhookEvent) => Promise<RouteResult | void>).call(this, p, evt);
       if (result) ({ task, ref, forward = true } = result);
-    } else {
-      // Catch-all: any event that carries an issue number routes through routeIssueEvent.
-      const issue = p.issue as R | undefined;
-      const issueNumber = numProp(issue, "number");
-      if (issueNumber !== null) {
-        ({ task, ref } = await this.routeIssueEvent(p, evt, issue!, issueNumber));
-      }
     }
 
     const taskId = task?.taskId ?? null;
@@ -175,7 +130,31 @@ export class WebhookController {
     }
   }
 
-  async routePrEvent(p: R, evt: WebhookEvent): Promise<RouteResult> {
+  // ── Installation events ────────────────────────────────────────────────────
+
+  async routeInstallationEvent(p: R, _evt: WebhookEvent): Promise<void> {
+    const action = strProp(p, "action");
+    try {
+      if (action === "created") await this.installationsController.handleInstallationCreated(p);
+      else if (action === "deleted") await this.installationsController.handleInstallationDeleted(p);
+    } catch (err) {
+      log(`ERROR handling installation/${action}: ${fmtError(err)}`);
+    }
+  }
+
+  async routeInstallationRepositoriesEvent(p: R, _evt: WebhookEvent): Promise<void> {
+    const action = strProp(p, "action");
+    try {
+      if (action === "added") await this.installationsController.handleReposAdded(p);
+      else if (action === "removed") await this.installationsController.handleReposRemoved(p);
+    } catch (err) {
+      log(`ERROR handling installation_repositories/${action}: ${fmtError(err)}`);
+    }
+  }
+
+  // ── Pull request events ────────────────────────────────────────────────────
+
+  async routePullRequestEvent(p: R, _evt: WebhookEvent): Promise<RouteResult> {
     const pr = p.pull_request as R | undefined;
     const prNumber = numProp(pr, "number");
     if (prNumber === null) return { task: null, ref: "" };
@@ -207,7 +186,7 @@ export class WebhookController {
     return { task: await repo.getTaskByPr(prNumber), ref };
   }
 
-  async routePrReviewEvent(p: R, evt: WebhookEvent): Promise<RouteResult> {
+  async routePullRequestReviewEvent(p: R, _evt: WebhookEvent): Promise<RouteResult> {
     const pr = p.pull_request as R | undefined;
     const prNumber = numProp(pr, "number");
     if (prNumber === null) return { task: null, ref: "" };
@@ -215,14 +194,16 @@ export class WebhookController {
     return { task: await repo.getTaskByPr(prNumber), ref: `PR #${prNumber}` };
   }
 
-  async routeCheckEvent(p: R, evt: WebhookEvent): Promise<RouteResult> {
-    const name = evt.eventName;
-    const inner = (name === "check_run" ? p.check_run : p.check_suite) as R | undefined;
-    const prs = inner?.pull_requests as Array<{ number: number }> | undefined;
-    const headBranch = name === "check_run"
-      ? strProp(inner?.check_suite, "head_branch") ?? ""
-      : strProp(inner, "head_branch") ?? "";
+  async routePullRequestReviewCommentEvent(p: R, evt: WebhookEvent): Promise<RouteResult> {
+    return this.routePullRequestReviewEvent(p, evt);
+  }
 
+  // ── Check events ───────────────────────────────────────────────────────────
+
+  async routeCheckRunEvent(p: R, _evt: WebhookEvent): Promise<RouteResult> {
+    const inner = p.check_run as R | undefined;
+    const prs = inner?.pull_requests as Array<{ number: number }> | undefined;
+    const headBranch = strProp(inner?.check_suite, "head_branch") ?? "";
     const repo = await this._resolveRepo(p);
     const found = await repo.taskManager.getTaskForCheckEvent(
       prs?.map((pr) => pr.number) ?? [],
@@ -230,6 +211,35 @@ export class WebhookController {
     );
     if (found) return { task: found.task, ref: found.ref };
     return { task: null, ref: "" };
+  }
+
+  async routeCheckSuiteEvent(p: R, _evt: WebhookEvent): Promise<RouteResult> {
+    const inner = p.check_suite as R | undefined;
+    const prs = inner?.pull_requests as Array<{ number: number }> | undefined;
+    const headBranch = strProp(inner, "head_branch") ?? "";
+    const repo = await this._resolveRepo(p);
+    const found = await repo.taskManager.getTaskForCheckEvent(
+      prs?.map((pr) => pr.number) ?? [],
+      headBranch,
+    );
+    if (found) return { task: found.task, ref: found.ref };
+    return { task: null, ref: "" };
+  }
+
+  // ── Issue events ───────────────────────────────────────────────────────────
+
+  async routeIssuesEvent(p: R, evt: WebhookEvent): Promise<RouteResult> {
+    const issue = p.issue as R | undefined;
+    const issueNumber = numProp(issue, "number");
+    if (issueNumber === null) return { task: null, ref: "" };
+    return { task: await this.applyIssueEffects(p, issue!, issueNumber), ref: `#${issueNumber}` };
+  }
+
+  async routeIssueCommentEvent(p: R, evt: WebhookEvent): Promise<RouteResult> {
+    const issue = p.issue as R | undefined;
+    const issueNumber = numProp(issue, "number");
+    if (issueNumber === null) return { task: null, ref: "" };
+    return { task: await this.applyIssueEffects(p, issue!, issueNumber), ref: `#${issueNumber}` };
   }
 
   /**
@@ -335,10 +345,6 @@ export class WebhookController {
     }
 
     return task; // null if no task (e.g., dependency issue — nothing to forward)
-  }
-
-  async routeIssueEvent(p: R, evt: WebhookEvent, issue: R, issueNumber: number): Promise<RouteResult> {
-    return { task: await this.applyIssueEffects(p, issue, issueNumber), ref: `#${issueNumber}` };
   }
 
   /** Resolve the Repo from a webhook payload's repository.full_name, creating it if needed. */

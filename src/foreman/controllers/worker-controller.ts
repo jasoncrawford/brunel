@@ -17,54 +17,24 @@ type WorkerControllerOptions = {
   messenger: WorkerMessenger;
 };
 
-type MsgHandler = (workerId: string, ws: WebSocket, msg: Wire.WorkerMessage) => Promise<void>;
-
 export class WorkerController {
   private readonly config: Pick<BrunelConfig, "taskLabel" | "githubToken" | "githubApiUrl" | "workerSecret" | "pingIntervalMs">;
   readonly messenger: WorkerMessenger;
-  private readonly handlers = new Map<Wire.WorkerMessage["type"], MsgHandler>();
 
   constructor({ config, messenger }: WorkerControllerOptions) {
     this.config = config;
     this.messenger = messenger;
-  }
-
-  private handle(type: Wire.WorkerMessage["type"], handler: MsgHandler): void {
-    this.handlers.set(type, handler);
-  }
-
-  register(): void {
-    this.handle("worker_hello", async (workerId, ws, msg) => {
-      await this.handleWorkerHello(workerId, ws, msg as Extract<Wire.WorkerMessage, { type: "worker_hello" }>);
-    });
-    this.handle("task_complete", async (workerId, _ws, msg) => {
-      await this.handleTaskComplete(workerId, msg as Extract<Wire.WorkerMessage, { type: "task_complete" }>);
-    });
-    this.handle("worker_goodbye", async (workerId, _ws, msg) => {
-      await this.handleWorkerGoodbye(workerId, msg as Extract<Wire.WorkerMessage, { type: "worker_goodbye" }>);
-    });
-    this.handle("activate_repo", async (workerId, ws) => {
-      await this.handleActivateRepo(workerId, ws);
-    });
-    this.handle("claim_task", async (workerId, _ws, msg) => {
-      await this.handleClaimTask(workerId, msg as Extract<Wire.WorkerMessage, { type: "claim_task" }>);
-    });
-    this.handle("worker_ready", async (workerId) => {
-      await this.handleWorkerReady(workerId);
-    });
-    this.handle("worker_reserved", async (workerId) => {
-      await this.handleWorkerReserve(workerId);
-    });
-
     TaskManager.events.on("deps_loaded", (taskManager: TaskManager) => {
       this.assignWorkForRepo(taskManager).catch((err) => log(`ERROR assignWork after deps_loaded: ${fmtError(err)}`));
     });
   }
 
   async dispatch(workerId: string, ws: WebSocket, msg: Wire.WorkerMessage): Promise<void> {
-    const handler = this.handlers.get(msg.type);
-    if (handler) {
-      await handler(workerId, ws, msg);
+    // Convention: foo_bar message type → handleFooBar method.
+    const handlerName = "handle" + msg.type.split("_").map((s: string) => s.charAt(0).toUpperCase() + s.slice(1)).join("");
+    const handler = (this as Record<string, unknown>)[handlerName];
+    if (typeof handler === "function") {
+      await (handler as (workerId: string, ws: WebSocket, msg: Wire.WorkerMessage) => Promise<void>).call(this, workerId, ws, msg);
     } else {
       log(`[worker ${workerId}] unknown message type: ${(msg as Record<string, unknown>).type}`);
     }
@@ -194,7 +164,7 @@ export class WorkerController {
     }
   }
 
-  async handleTaskComplete(workerId: string, msg: Extract<Wire.WorkerMessage, { type: "task_complete" }>): Promise<void> {
+  async handleTaskComplete(workerId: string, _ws: WebSocket, msg: Extract<Wire.WorkerMessage, { type: "task_complete" }>): Promise<void> {
     this._workerLog(workerId, `task_complete #${msg.taskId} (nextState=${msg.nextState ?? "ready"})`);
     const task = await Task.get(msg.taskId);
     if (task && task.workerId !== workerId) {
@@ -217,7 +187,7 @@ export class WorkerController {
     }
   }
 
-  async handleWorkerGoodbye(workerId: string, msg: Extract<Wire.WorkerMessage, { type: "worker_goodbye" }>): Promise<void> {
+  async handleWorkerGoodbye(workerId: string, _ws: WebSocket, msg: Extract<Wire.WorkerMessage, { type: "worker_goodbye" }>): Promise<void> {
     this._workerLog(workerId, `worker_goodbye (task=${msg.taskId ?? "none"}, complete=${msg.task_complete ?? false})`);
     if (msg.taskId) {
       const task = await Task.get(msg.taskId);
@@ -364,7 +334,7 @@ export class WorkerController {
     await worker.becomeReady();
   }
 
-  async handleWorkerReserve(workerId: string): Promise<void> {
+  async handleWorkerReserved(workerId: string): Promise<void> {
     const worker = Worker.fromRegistry(workerId);
     if (!worker) {
       log(`[worker ${shortWorkerId(workerId)}] worker_reserved received but worker not in registry — ignoring`);
@@ -400,7 +370,7 @@ export class WorkerController {
     this.messenger.send(worker, { type: "repo_activated", workerId: worker.workerId });
   }
 
-  async handleClaimTask(workerId: string, msg: Extract<Wire.WorkerMessage, { type: "claim_task" }>): Promise<void> {
+  async handleClaimTask(workerId: string, _ws: WebSocket, msg: Extract<Wire.WorkerMessage, { type: "claim_task" }>): Promise<void> {
     const worker = Worker.fromRegistry(workerId);
     if (!worker) {
       log(`[worker ${shortWorkerId(workerId)}] claim_task received but worker not in registry`);

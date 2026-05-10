@@ -704,15 +704,15 @@ describe("handleWorkerReady", () => {
   });
 });
 
-// ── handleWorkerReserve ────────────────────────────────────────────────────────
+// ── handleWorkerReserved ────────────────────────────────────────────────────────
 
-describe("handleWorkerReserve", () => {
+describe("handleWorkerReserved", () => {
   it("marks a ready worker as reserved", async () => {
     const { wss } = makeDeps(taskManager);
     await wss.handleReadyHello("w1", fakeWs(), taskManager.repo);
     expect(Worker.fromRegistry("w1")?.isReady).toBe(true);
 
-    await wss.handleWorkerReserve("w1");
+    await wss.handleWorkerReserved("w1");
 
     expect(Worker.fromRegistry("w1")?.isReady).toBe(false);
     expect(Worker.fromRegistry("w1")?.status).toBe("reserved");
@@ -720,7 +720,7 @@ describe("handleWorkerReserve", () => {
 
   it("no-op when worker not in registry", async () => {
     const { wss } = makeDeps(taskManager);
-    await expect(wss.handleWorkerReserve("unknown-worker")).resolves.toBeUndefined();
+    await expect(wss.handleWorkerReserved("unknown-worker")).resolves.toBeUndefined();
   });
 });
 

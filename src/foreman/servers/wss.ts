@@ -37,8 +37,9 @@ export class ForemanWss {
       assignWork: () => this.workerController.assignWork(),
     });
 
-    this.workerController.register();
-    this.webhookController.register(resolvedWebhooks);
+    resolvedWebhooks.onAny(async ({ id, name, payload }) => {
+      await this.webhookController.handleEvent(id, name as string, payload);
+    });
 
     const wss = new WebSocketServer({ noServer: true });
     this.wss = wss;

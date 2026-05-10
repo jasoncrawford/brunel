@@ -7,7 +7,6 @@
  * be forwarded to any worker that has a task from that repo.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { Webhooks } from "@octokit/webhooks";
 import { WebhookController } from "../src/foreman/controllers/webhook-controller.js";
 import { WorkerMessenger } from "../src/foreman/controllers/worker-messenger.js";
 import { Repo } from "../src/foreman/models/repo.js";
@@ -28,10 +27,9 @@ function makeWss() {
     messenger,
     assignWork: async () => {},
   });
-  const routePrEvent = vi.spyOn(wss, "routePrEvent");
-  const routeIssueEvent = vi.spyOn(wss, "routeIssueEvent");
-  wss.register(new Webhooks({ secret: "test-secret" }));
-  return { wss, routePrEvent, routeIssueEvent };
+  const routePullRequestEvent = vi.spyOn(wss, "routePullRequestEvent");
+  const routeIssuesEvent = vi.spyOn(wss, "routeIssuesEvent");
+  return { wss, routePullRequestEvent, routeIssuesEvent };
 }
 
 let logSpy: ReturnType<typeof vi.spyOn>;
@@ -53,8 +51,8 @@ afterEach(() => {
 describe("routeEvent — repository.full_name present", () => {
   it("calls Repo.findOrCreate with the full_name", async () => {
     findOrCreate.mockResolvedValue(fakeRepo("new"));
-    const { wss, routeIssueEvent } = makeWss();
-    routeIssueEvent.mockResolvedValue({ task: null, ref: "" });
+    const { wss, routeIssuesEvent } = makeWss();
+    routeIssuesEvent.mockResolvedValue({ task: null, ref: "" });
 
     await wss.handleEvent("evt-1", "issues", {
       action: "labeled",
@@ -68,8 +66,8 @@ describe("routeEvent — repository.full_name present", () => {
 
   it("routes the event even when repo status is 'new'", async () => {
     findOrCreate.mockResolvedValue(fakeRepo("new"));
-    const { wss, routeIssueEvent } = makeWss();
-    routeIssueEvent.mockResolvedValue({ task: null, ref: "" });
+    const { wss, routeIssuesEvent } = makeWss();
+    routeIssuesEvent.mockResolvedValue({ task: null, ref: "" });
 
     await wss.handleEvent("evt-1", "issues", {
       action: "labeled",
@@ -78,13 +76,13 @@ describe("routeEvent — repository.full_name present", () => {
       repository: { full_name: "owner/repo" },
     });
 
-    expect(routeIssueEvent).toHaveBeenCalledOnce();
+    expect(routeIssuesEvent).toHaveBeenCalledOnce();
   });
 
   it("routes the event when repo status is 'active'", async () => {
     findOrCreate.mockResolvedValue(fakeRepo("active"));
-    const { wss, routePrEvent } = makeWss();
-    routePrEvent.mockResolvedValue({ task: null, ref: "" });
+    const { wss, routePullRequestEvent } = makeWss();
+    routePullRequestEvent.mockResolvedValue({ task: null, ref: "" });
 
     await wss.handleEvent("evt-1", "pull_request", {
       action: "opened",
@@ -93,7 +91,7 @@ describe("routeEvent — repository.full_name present", () => {
     });
 
     expect(findOrCreate).toHaveBeenCalledWith("owner/repo");
-    expect(routePrEvent).toHaveBeenCalledOnce();
+    expect(routePullRequestEvent).toHaveBeenCalledOnce();
   });
 });
 
@@ -101,8 +99,8 @@ describe("routeEvent — repository.full_name present", () => {
 
 describe("routeEvent — no repository.full_name in payload", () => {
   it("does not call Repo.findOrCreate and still routes the event", async () => {
-    const { wss, routePrEvent } = makeWss();
-    routePrEvent.mockResolvedValue({ task: null, ref: "" });
+    const { wss, routePullRequestEvent } = makeWss();
+    routePullRequestEvent.mockResolvedValue({ task: null, ref: "" });
 
     await wss.handleEvent("evt-1", "pull_request", {
       action: "opened",
@@ -111,12 +109,12 @@ describe("routeEvent — no repository.full_name in payload", () => {
     });
 
     expect(findOrCreate).not.toHaveBeenCalled();
-    expect(routePrEvent).toHaveBeenCalledOnce();
+    expect(routePullRequestEvent).toHaveBeenCalledOnce();
   });
 
   it("does not call Repo.findOrCreate when repository has no full_name", async () => {
-    const { wss, routeIssueEvent } = makeWss();
-    routeIssueEvent.mockResolvedValue({ task: null, ref: "" });
+    const { wss, routeIssuesEvent } = makeWss();
+    routeIssuesEvent.mockResolvedValue({ task: null, ref: "" });
 
     await wss.handleEvent("evt-1", "issues", {
       action: "labeled",
@@ -125,6 +123,6 @@ describe("routeEvent — no repository.full_name in payload", () => {
     });
 
     expect(findOrCreate).not.toHaveBeenCalled();
-    expect(routeIssueEvent).toHaveBeenCalledOnce();
+    expect(routeIssuesEvent).toHaveBeenCalledOnce();
   });
 });
