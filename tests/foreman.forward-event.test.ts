@@ -7,9 +7,10 @@
  * registry's currentTaskId rather than task status — mirroring the worker-side
  * guard — so any case where the worker has moved on is caught.
  */
-import http from "http";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { ForemanWss } from "../src/foreman/controllers/wss.js";
+import { Webhooks } from "@octokit/webhooks";
+import { WebhookController } from "../src/foreman/controllers/webhook-controller.js";
+import { WorkerMessenger } from "../src/foreman/controllers/worker-messenger.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
 import { Worker } from "../src/foreman/models/worker.js";
@@ -28,12 +29,15 @@ function makeEvent(name = "issue_comment"): WebhookEvent {
   return WebhookEvent.fromIncoming("evt-1", name, {});
 }
 
-function makeWss(_taskManager?: any): { wss: ForemanWss; sendMsg: ReturnType<typeof vi.fn> } {
-  const wss = new ForemanWss({
-    config: { taskLabel: "brunel:ready", workerSecret: undefined, pingIntervalMs: 1e9 },
-    server: http.createServer(),
+function makeWss(_taskManager?: any): { wss: WebhookController; sendMsg: ReturnType<typeof vi.fn> } {
+  const messenger = new WorkerMessenger({});
+  const wss = new WebhookController({
+    webhooks: new Webhooks({ secret: "test-secret" }),
+    config: { taskLabel: "brunel:ready" },
+    messenger,
+    assignWork: async () => {},
   });
-  const sendMsg = vi.spyOn(wss, "sendMsg").mockImplementation(() => true);
+  const sendMsg = vi.spyOn(messenger, "send").mockImplementation(() => true);
   return { wss, sendMsg };
 }
 

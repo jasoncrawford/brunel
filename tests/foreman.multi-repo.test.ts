@@ -12,7 +12,7 @@ import type { AddressInfo } from "net";
 import { Task } from "../src/foreman/models/task.js";
 import { Worker } from "../src/foreman/models/worker.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
-import { ForemanWss } from "../src/foreman/controllers/wss.js";
+import { ForemanWss } from "../src/foreman/servers/wss.js";
 import { Repo } from "../src/foreman/models/repo.js";
 import { resetDb, createTestTaskManager, seedTask, fakeRepo } from "./helpers/task.js";
 import { loadDefaultConfig } from "../src/config.js";
@@ -320,7 +320,7 @@ describe("Webhook routing: issue-closed only affects the target repo", () => {
     ({ wss } = foremanWss);
     port = await startServer();
 
-    await foremanWss.routeEvent("evt-close", "issues", {
+    await foremanWss.webhookController.handleEvent("evt-close", "issues", {
       action: "closed",
       issue: { number: 60, title: "Issue 60", body: "body", labels: [{ name: "brunel:ready" }] },
       repository: { full_name: "owner/repo-a" },
@@ -454,14 +454,14 @@ describe("Negative: worker from repo-a cannot claim task from repo-b", () => {
 
     await Task.upsert("t63b", 63, "owner/repo-b", "Task B", "body", ["brunel:ready"]);
 
-    // Invoke handleBusyHello directly (same pattern as foreman.hello-handlers.test.ts).
+    // Invoke handleAssignedHello directly (same pattern as foreman.hello-handlers.test.ts).
     const foremanWss = new ForemanWss({ server: httpServer, config: defaultCfg });
     ({ wss } = foremanWss);
-    const sendMsg = vi.spyOn(foremanWss, "sendMsg").mockImplementation(() => {});
+    const sendMsg = vi.spyOn(foremanWss.workerController.messenger, "send").mockImplementation(() => false);
 
     // Worker from repo-a claims task "t63b" which belongs to repo-b.
     const fakeWs = { send: vi.fn(), close: vi.fn(), readyState: 1 } as any;
-    await foremanWss.handleAssignedHello("wA", "t63b", fakeWs, m1.repo);
+    await foremanWss.workerController.handleAssignedHello("wA", "t63b", fakeWs, m1.repo);
 
     const ackCall = sendMsg.mock.calls.find(([, msg]) => (msg as { type: string }).type === "hello_ack");
     expect(ackCall).toBeDefined();

@@ -5,8 +5,8 @@
  * disconnected worker (allowed), and assigned to connected worker (rejected).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import http from "http";
-import { ForemanWss } from "../src/foreman/controllers/wss.js";
+import { WorkerController } from "../src/foreman/controllers/worker-controller.js";
+import { WorkerMessenger } from "../src/foreman/controllers/worker-messenger.js";
 import { Worker } from "../src/foreman/models/worker.js";
 import { Task } from "../src/foreman/models/task.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
@@ -20,11 +20,12 @@ function fakeWs() {
 }
 
 function makeWss() {
-  const wss = new ForemanWss({
+  const messenger = new WorkerMessenger({});
+  const wss = new WorkerController({
     config: { taskLabel: "brunel:ready", workerSecret: undefined, pingIntervalMs: 1e9 },
-    server: http.createServer(),
+    messenger,
   });
-  const sendMsg = vi.spyOn(wss, "sendMsg").mockImplementation(() => true);
+  const sendMsg = vi.spyOn(messenger, "send").mockImplementation(() => true);
   return { wss, sendMsg };
 }
 
@@ -57,7 +58,7 @@ describe("handleClaimTask", () => {
     Worker.register("w1", fakeWs(), repo);
     await seedTask({ task_id: "10", issue_number: 10, repo_id: repo.id, repo: repo.fullName });
 
-    await wss.handleClaimTask("w1", { type: "claim_task", workerId: "w1", taskId: "10" });
+    await wss.handleClaimTask("w1", fakeWs(), { type: "claim_task", workerId: "w1", taskId: "10" });
 
     const msg = sentMsgOfType(sendMsg, "task_assigned");
     expect(msg).toBeDefined();
@@ -70,7 +71,7 @@ describe("handleClaimTask", () => {
     Worker.register("w1", fakeWs(), repo);
     await seedTask({ task_id: "10", issue_number: 10, repo_id: repo.id, repo: repo.fullName });
 
-    await wss.handleClaimTask("w1", { type: "claim_task", workerId: "w1", taskId: "10" });
+    await wss.handleClaimTask("w1", fakeWs(), { type: "claim_task", workerId: "w1", taskId: "10" });
 
     expect(Worker.fromRegistry("w1")?.currentTaskId).toBe("10");
     expect(Worker.fromRegistry("w1")?.status).toBe("assigned");
@@ -80,7 +81,7 @@ describe("handleClaimTask", () => {
     const { wss, sendMsg } = makeWss();
     Worker.register("w1", fakeWs(), taskManager.repo);
 
-    await wss.handleClaimTask("w1", { type: "claim_task", workerId: "w1", taskId: "999" });
+    await wss.handleClaimTask("w1", fakeWs(), { type: "claim_task", workerId: "w1", taskId: "999" });
 
     const msg = sentMsgOfType(sendMsg, "foreman_error");
     expect(msg).toBeDefined();
@@ -96,7 +97,7 @@ describe("handleClaimTask", () => {
     const task = await seedTask({ task_id: "10", issue_number: 10, repo_id: repo.id, repo: repo.fullName, worker_id: "w2" });
     w2.assign(task);
 
-    await wss.handleClaimTask("w1", { type: "claim_task", workerId: "w1", taskId: "10" });
+    await wss.handleClaimTask("w1", fakeWs(), { type: "claim_task", workerId: "w1", taskId: "10" });
 
     const msg = sentMsgOfType(sendMsg, "foreman_error");
     expect(msg).toBeDefined();
@@ -113,7 +114,7 @@ describe("handleClaimTask", () => {
     w2.markDisconnected();
 
     Worker.register("w1", fakeWs(), repo);
-    await wss.handleClaimTask("w1", { type: "claim_task", workerId: "w1", taskId: "10" });
+    await wss.handleClaimTask("w1", fakeWs(), { type: "claim_task", workerId: "w1", taskId: "10" });
 
     const msg = sentMsgOfType(sendMsg, "task_assigned");
     expect(msg).toBeDefined();
@@ -128,7 +129,7 @@ describe("handleClaimTask", () => {
     // Seed task with a worker_id that is not in the registry
     await seedTask({ task_id: "10", issue_number: 10, repo_id: repo.id, repo: repo.fullName, worker_id: "ghost-worker" });
 
-    await wss.handleClaimTask("w1", { type: "claim_task", workerId: "w1", taskId: "10" });
+    await wss.handleClaimTask("w1", fakeWs(), { type: "claim_task", workerId: "w1", taskId: "10" });
 
     const msg = sentMsgOfType(sendMsg, "task_assigned");
     expect(msg).toBeDefined();
@@ -138,7 +139,7 @@ describe("handleClaimTask", () => {
     const { wss, sendMsg } = makeWss();
     await seedTask({ task_id: "10", issue_number: 10, repo_id: taskManager.repo.id, repo: taskManager.repo.fullName });
 
-    await wss.handleClaimTask("unknown-worker", { type: "claim_task", workerId: "unknown-worker", taskId: "10" });
+    await wss.handleClaimTask("unknown-worker", fakeWs(), { type: "claim_task", workerId: "unknown-worker", taskId: "10" });
 
     expect(sendMsg).not.toHaveBeenCalled();
   });
@@ -150,7 +151,7 @@ describe("handleClaimTask", () => {
     // Seed task with a different repo_id
     await seedTask({ task_id: "10", issue_number: 10, repo_id: 9999, repo: "other/repo" });
 
-    await wss.handleClaimTask("w1", { type: "claim_task", workerId: "w1", taskId: "10" });
+    await wss.handleClaimTask("w1", fakeWs(), { type: "claim_task", workerId: "w1", taskId: "10" });
 
     const msg = sentMsgOfType(sendMsg, "foreman_error");
     expect(msg).toBeDefined();
@@ -163,7 +164,7 @@ describe("handleClaimTask", () => {
     Worker.register("w1", fakeWs(), repo);
     await seedTask({ task_id: "10", issue_number: 10, repo_id: repo.id, repo: repo.fullName });
 
-    await wss.handleClaimTask("w1", { type: "claim_task", workerId: "w1", taskId: "10" });
+    await wss.handleClaimTask("w1", fakeWs(), { type: "claim_task", workerId: "w1", taskId: "10" });
 
     expect(sentMsgOfType(sendMsg, "event_notification")).toBeUndefined();
   });
@@ -175,7 +176,7 @@ describe("handleClaimTask", () => {
     await seedTask({ task_id: "10", issue_number: 10, repo_id: repo.id, repo: repo.fullName });
     vi.spyOn(WebhookEvent, "currentMaxId").mockResolvedValue(55);
 
-    await wss.handleClaimTask("w1", { type: "claim_task", workerId: "w1", taskId: "10" });
+    await wss.handleClaimTask("w1", fakeWs(), { type: "claim_task", workerId: "w1", taskId: "10" });
 
     const msg = sentMsgOfType(sendMsg, "task_assigned");
     expect(msg?.baseSeqId).toBe(55);

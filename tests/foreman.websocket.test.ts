@@ -5,7 +5,7 @@ import { WebSocket, WebSocketServer } from "ws";
 import type { AddressInfo } from "net";
 import { generateKeyPairSync } from "node:crypto";
 import { Worker } from "../src/foreman/models/worker.js";
-import { ForemanWss } from "../src/foreman/controllers/wss.js";
+import { ForemanWss } from "../src/foreman/servers/wss.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
 import { WebhookEvent } from "../src/foreman/models/webhook-event.js";
@@ -298,7 +298,7 @@ describe("foreman WebSocket protocol", () => {
     await nextMsg(ws); // task_assigned
 
     const reply = nextMsg(ws);
-    foremanWss.routeEvent("evt-1", "issue_comment", { issue: { number: 1 }, comment: { body: "hi" }, repository: { full_name: "owner/repo" } });
+    foremanWss.webhookController.handleEvent("evt-1", "issue_comment", { issue: { number: 1 }, comment: { body: "hi" }, repository: { full_name: "owner/repo" } });
     const msg = await reply;
     assert(msg.type === "event_notification");
     expect(msg.taskId).toBe("1");
@@ -307,7 +307,7 @@ describe("foreman WebSocket protocol", () => {
 
   it("drops event silently when no worker is assigned — worker reads state fresh on assignment", async () => {
     await makeTask(taskManager, 1);
-    await foremanWss.routeEvent("evt-1", "issue_comment", { issue: { number: 1 }, repository: { full_name: "owner/repo" } });
+    await foremanWss.webhookController.handleEvent("evt-1", "issue_comment", { issue: { number: 1 }, repository: { full_name: "owner/repo" } });
     const t = await Task.get("1");
     expect(t?.workerId).toBeNull();
     expect(t?.status).toBe("pending");
@@ -412,7 +412,7 @@ describe("foreman WebSocket protocol", () => {
       nextMsg(wsB).then(() => "message" as const),
       new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
     ]);
-    foremanWss.routeEvent("evt-1", "issue_comment", { issue: { number: taskA }, comment: { body: "update" }, repository: { full_name: "owner/repo" } });
+    foremanWss.webhookController.handleEvent("evt-1", "issue_comment", { issue: { number: taskA }, comment: { body: "update" }, repository: { full_name: "owner/repo" } });
     expect(await replyA).toMatchObject({ type: "event_notification", taskId: String(taskA) });
     expect(await noMsgB).toBe("timeout");
 
@@ -421,7 +421,7 @@ describe("foreman WebSocket protocol", () => {
       nextMsg(wsA).then(() => "message" as const),
       new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 50)),
     ]);
-    foremanWss.routeEvent("evt-2", "issue_comment", { issue: { number: taskB }, comment: { body: "update" }, repository: { full_name: "owner/repo" } });
+    foremanWss.webhookController.handleEvent("evt-2", "issue_comment", { issue: { number: taskB }, comment: { body: "update" }, repository: { full_name: "owner/repo" } });
     expect(await replyB).toMatchObject({ type: "event_notification", taskId: String(taskB) });
     expect(await noMsgA).toBe("timeout");
   });
@@ -589,7 +589,7 @@ describe("dependency-aware task assignment", () => {
     await ackP; // hello_ack (no task yet — task is blocked)
 
     const reply = nextMsg(ws);
-    foremanWss.routeEvent("evt-1", "issues", {
+    foremanWss.webhookController.handleEvent("evt-1", "issues", {
       action: "closed",
       issue: { number: 10, title: "Blocker", body: "", labels: [] },
       repository: { full_name: "owner/repo" },
@@ -601,7 +601,7 @@ describe("dependency-aware task assignment", () => {
     await makeTask(taskManager, 43);
     taskManager.setBlockers(43, [10]);
 
-    foremanWss.routeEvent("evt-1", "issues", {
+    foremanWss.webhookController.handleEvent("evt-1", "issues", {
       action: "reopened",
       issue: { number: 10, title: "Blocker", body: "", labels: [] },
       repository: { full_name: "owner/repo" },
@@ -844,7 +844,7 @@ describe("disconnected worker state", () => {
     await closeClient(ws);
     await waitUntil(() => Worker.fromRegistry("w1")?.status === "disconnected");
 
-    await foremanWss.routeEvent("evt-1", "issue_comment", { issue: { number: 1 }, comment: { body: "hi" }, repository: { full_name: "owner/repo" } });
+    await foremanWss.webhookController.handleEvent("evt-1", "issue_comment", { issue: { number: 1 }, comment: { body: "hi" }, repository: { full_name: "owner/repo" } });
 
     const t = await Task.get("1");
     expect(t?.status).toBe("assigned");
@@ -1091,7 +1091,7 @@ describe("issues/closed — close persistence", () => {
     taskManager.trackIssue(1);
     taskManager.markBlockersLoaded(1);
 
-    await foremanWss.routeEvent("evt-1", "issues", { action: "closed", issue: { number: 1, title: "T", body: "", labels: [] }, repository: { full_name: "owner/repo" } });
+    await foremanWss.webhookController.handleEvent("evt-1", "issues", { action: "closed", issue: { number: 1, title: "T", body: "", labels: [] }, repository: { full_name: "owner/repo" } });
 
     await waitUntil(() => spyClose.mock.calls.length > 0);
     expect(spyClose).toHaveBeenCalled();

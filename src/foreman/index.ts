@@ -3,14 +3,13 @@
 import "dotenv/config";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "../database.types.js";
-import { Webhooks } from "@octokit/webhooks";
 import { loadConfig } from "../config.js";
 import { TaskManager } from "./models/task-manager.js";
 import { Repo } from "./models/repo.js";
 import { initDb } from "./clients/db-client.js";
-import { HttpServer } from "./controllers/http-server.js";
-import { ForemanWss } from "./controllers/wss.js";
-import { AdminWss } from "./controllers/admin-ws.js";
+import { HttpServer } from "./servers/http-server.js";
+import { ForemanWss } from "./servers/wss.js";
+import { AdminWss } from "./servers/admin-ws.js";
 import { fmtError, log } from "../utils.js";
 
 // Only start listening when run directly (not when imported by tests)
@@ -18,10 +17,6 @@ import { fileURLToPath } from "url";
 const isMain = process.argv[1] === fileURLToPath(import.meta.url);
 if (isMain) {
   const config = await loadConfig(process.argv);
-
-  const webhooks = config.webhookSecret
-    ? new Webhooks({ secret: config.webhookSecret })
-    : null;
 
   // Setup DB (share the same Supabase client)
   if (!config.supabaseUrl || !config.supabaseSecretKey) {
@@ -31,20 +26,13 @@ if (isMain) {
   const supabase = createClient<Database>(config.supabaseUrl, config.supabaseSecretKey);
   initDb(supabase);
 
-  let foremanWss: ForemanWss;
-  const httpServer = new HttpServer({ webhooks, routeEvent: (id, name, payload) => foremanWss.routeEvent(id, name, payload) });
+  const httpServer = new HttpServer({ webhookSecret: config.webhookSecret });
   const { server } = httpServer;
 
   // Admin WebSocket broadcaster — owns snapshot lifecycle and event subscriptions
   const adminWss = new AdminWss(server);
 
-  foremanWss = new ForemanWss({ config, server, adminWss });
-
-  if (webhooks) {
-    webhooks.onAny(async ({ id, name, payload }) => {
-      await foremanWss.routeEvent(id, name as string, payload);
-    });
-  }
+  const foremanWss = new ForemanWss({ config, server, webhooks: httpServer.webhooks, adminWss });
 
   // Load all state before accepting WebSocket connections.
 

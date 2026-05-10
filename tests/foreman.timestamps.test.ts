@@ -6,7 +6,7 @@ import http from "http";
 import { WebSocket, WebSocketServer } from "ws";
 import type { AddressInfo } from "net";
 import { Worker } from "../src/foreman/models/worker.js";
-import { ForemanWss } from "../src/foreman/controllers/wss.js";
+import { ForemanWss } from "../src/foreman/servers/wss.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
 import { resetDb, createTestTaskManager } from "./helpers/task.js";
@@ -171,7 +171,7 @@ describe("foreman log timestamps", () => {
 
     logLines.length = 0;
     const reply = nextMsg(ws);
-    foremanWss.routeEvent("evt-1", "issue_comment", { issue: { number: 1 }, comment: { body: "hi" }, repository: { full_name: "owner/repo" } });
+    foremanWss.webhookController.handleEvent("evt-1", "issue_comment", { issue: { number: 1 }, comment: { body: "hi" }, repository: { full_name: "owner/repo" } });
     await reply;
 
     for (const line of logLines) {
@@ -185,7 +185,7 @@ describe("foreman log timestamps", () => {
     await waitUntil(() => !!Worker.fromRegistry("worker-abc123"));
 
     logLines.length = 0;
-    foremanWss.routeEvent("evt-1", "issues", {
+    foremanWss.webhookController.handleEvent("evt-1", "issues", {
       action: "labeled",
       label: { name: "brunel:ready" },
       issue: { number: 5, title: "Do something", body: "", labels: [{ name: "brunel:ready" }] },

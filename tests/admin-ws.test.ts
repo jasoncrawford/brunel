@@ -3,7 +3,7 @@ import http from "http";
 import net from "net";
 import { WebSocket } from "ws";
 import type { AddressInfo } from "net";
-import { AdminWss } from "../src/foreman/controllers/admin-ws.js";
+import { AdminWss } from "../src/foreman/servers/admin-ws.js";
 import type { AdminMessage, LogEntry } from "../shared/wire.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Worker } from "../src/foreman/models/worker.js";
