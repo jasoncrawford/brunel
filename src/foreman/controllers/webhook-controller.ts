@@ -236,10 +236,7 @@ export class WebhookController {
   }
 
   async routeIssueCommentEvent(p: R, evt: WebhookEvent): Promise<RouteResult> {
-    const issue = p.issue as R | undefined;
-    const issueNumber = numProp(issue, "number");
-    if (issueNumber === null) return { task: null, ref: "" };
-    return { task: await this.applyIssueEffects(p, issue!, issueNumber), ref: `#${issueNumber}` };
+    return this.routeIssuesEvent(p, evt);
   }
 
   /**
