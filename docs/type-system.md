@@ -86,7 +86,7 @@ export type ForemanMessage =
   | { type: "foreman_error"; message: string; fatal: boolean };
 
 export type WorkerMessage =
-  | { type: "worker_hello"; workerId: string; repo: string; taskId?: string; status: "ready" | "reserved" | "assigned" }
+  | { type: "worker_hello"; workerId: string; repo: string; taskId?: string; status: "ready" | "reserved" | "assigned"; version?: string; protocolVersion?: number; /* ... */ }
   | { type: "task_complete"; workerId: string; taskId: string; nextState?: "ready" | "reserved" }
   | { type: "worker_goodbye"; workerId: string; taskId?: string }
   | { type: "activate_repo"; workerId: string }

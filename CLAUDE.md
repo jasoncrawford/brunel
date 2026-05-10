@@ -36,7 +36,7 @@ Follows MVC with three subdirectories:
 ### Shared
 
 - `src/` root — `config.ts` (unified config loader with `getConfig()` singleton; also exports `parseCommandFromArgs()` which extracts the first positional CLI arg as a command name for direct CLI invocation), `wire.ts` (re-exports from `shared/wire.ts`)
-- `shared/` — utilities needed by both Node backend and Vite frontend: `wire.ts` (wire protocol types), `formatters.ts` (pure data-to-string helpers)
+- `shared/` — utilities needed by both Node backend and Vite frontend: `wire.ts` (wire protocol types and the `PROTOCOL_VERSION` integer constant), `formatters.ts` (pure data-to-string helpers)
 
 ## Task lifecycle
 
@@ -48,7 +48,7 @@ Task assignment is **repo-scoped**: `TaskManager.tryAssignWork()` only assigns a
 
 ## Worker/Foreman handshake
 
-Every `worker_hello` includes a `repo` field (owner/name parsed from `git remote get-url origin`). The foreman resolves this to a `Repo` via `Repo.findOrCreate()` and stores it on the `Worker` — every registered Worker always has a `Repo`. Missing or unresolvable repo is a fatal error.
+Every `worker_hello` includes a `repo` field (owner/name parsed from `git remote get-url origin`), a `version` string (package version), and a `protocolVersion` integer. The foreman resolves the repo to a `Repo` via `Repo.findOrCreate()` and stores it on the `Worker` — every registered Worker always has a `Repo`. Missing or unresolvable repo is a fatal error. An incompatible `protocolVersion` is also a fatal error ("your worker is too old, please update"). `version` and `protocolVersion` are recorded in the `workers` table on each connection.
 
 **Worker authentication** uses one of two paths, evaluated after repo resolution:
 - **GitHub token auth** (preferred): if `worker_hello` carries a `githubToken` and the App is configured (`appId` + `appPrivateKey`), the foreman checks for a repo installation. If no installation exists, it sends a fatal `foreman_error` with an actionable message directing the user to install the App. If an installation is found, the foreman calls `GET /user` with the worker token to get the login, then `GET /repos/.../collaborators/{login}/permission` with a minted installation token. Workers without `push` or `admin` receive a fatal `foreman_error`.
