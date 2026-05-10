@@ -79,6 +79,8 @@ export type Database = {
           num_connections: number
           disconnected_at: string | null
           goodbye_at: string | null
+          version: string | null
+          protocol_version: number | null
         }
         Insert: {
           worker_id: string
@@ -90,6 +92,8 @@ export type Database = {
           num_connections?: number
           disconnected_at?: string | null
           goodbye_at?: string | null
+          version?: string | null
+          protocol_version?: number | null
         }
         Update: {
           worker_id?: string
@@ -101,6 +105,8 @@ export type Database = {
           num_connections?: number
           disconnected_at?: string | null
           goodbye_at?: string | null
+          version?: string | null
+          protocol_version?: number | null
         }
         Relationships: [
           {

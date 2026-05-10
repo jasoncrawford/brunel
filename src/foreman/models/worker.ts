@@ -50,6 +50,8 @@ export class Worker extends ActiveRecord {
   readonly firstConnectedAt?: string;
   readonly lastConnectedAt?: string;
   readonly dbCurrentTaskId?: string;
+  version?: string;
+  protocolVersion?: number;
 
   // In-memory only — not persisted to DB
   currentTask?: Task;
@@ -72,6 +74,8 @@ export class Worker extends ActiveRecord {
     this.lastConnectedAt = row.last_connected_at ?? undefined;
     this.dbCurrentTaskId = row.current_task_id ?? undefined;
     this.disconnectedAt = row.disconnected_at ? new Date(row.disconnected_at) : undefined;
+    this.version = row.version ?? undefined;
+    this.protocolVersion = row.protocol_version ?? undefined;
   }
 
   /** Chain a DB write onto this worker's serialized write queue (fire-and-forget). */
@@ -83,7 +87,7 @@ export class Worker extends ActiveRecord {
 
   // ── Static registry operations ───────────────────────────────────────────
 
-  static register(workerId: string, ws: WsSocket, repo: Repo): Worker {
+  static register(workerId: string, ws: WsSocket, repo: Repo, versionInfo?: { version?: string; protocolVersion?: number }): Worker {
     let worker = registry.get(workerId);
     if (!worker) {
       // Synthetic row for the in-memory registry instance — diagnostic fields
@@ -100,16 +104,20 @@ export class Worker extends ActiveRecord {
         num_connections: null,
         disconnected_at: null,
         goodbye_at: null,
+        version: null,
+        protocol_version: null,
       } as unknown as WorkerDbRow);
     }
     worker.repo = repo;
     worker.status = "ready";
     worker.currentTask = undefined;
     worker.disconnectedAt = undefined;
+    worker.version = versionInfo?.version ?? undefined;
+    worker.protocolVersion = versionInfo?.protocolVersion ?? undefined;
     sockets.set(workerId, ws);
     registry.set(workerId, worker);
     Worker.events.emit("changed");
-    worker._chain(() => Worker._persistRegister(workerId, repo));
+    worker._chain(() => Worker._persistRegister(workerId, repo, versionInfo));
     return worker;
   }
 
@@ -189,7 +197,7 @@ export class Worker extends ActiveRecord {
 
   // ── DB persistence helpers ───────────────────────────────────────────────
 
-  private static async _persistRegister(workerId: string, repo: Repo): Promise<void> {
+  private static async _persistRegister(workerId: string, repo: Repo, versionInfo?: { version?: string; protocolVersion?: number }): Promise<void> {
     const now = new Date().toISOString();
     const existing = await Worker.get(workerId);
     if (existing) {
@@ -201,6 +209,8 @@ export class Worker extends ActiveRecord {
         num_connections: (existing.numConnections ?? 0) + 1,
         disconnected_at: null,
         goodbye_at: null,
+        version: versionInfo?.version ?? null,
+        protocol_version: versionInfo?.protocolVersion ?? null,
       });
     } else {
       await Worker.insert({
@@ -213,6 +223,8 @@ export class Worker extends ActiveRecord {
         num_connections: 1,
         disconnected_at: null,
         goodbye_at: null,
+        version: versionInfo?.version ?? null,
+        protocol_version: versionInfo?.protocolVersion ?? null,
       });
     }
   }
@@ -305,6 +317,8 @@ export class Worker extends ActiveRecord {
       status: this.status,
       currentTaskId: this.currentTaskId,
       repo: this.repo?.fullName ?? this.repoFullName,
+      version: this.version,
+      protocolVersion: this.protocolVersion,
       numConnections: this.numConnections,
       firstConnectedAt: this.firstConnectedAt,
       lastConnectedAt: this.lastConnectedAt,

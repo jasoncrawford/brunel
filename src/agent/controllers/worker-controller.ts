@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { createRequire } from "node:module";
 import { WebSocket } from "ws";
 import { c } from "../views/style.js";
 import { AgentStatus } from "../models/agent-status.js";
@@ -11,6 +12,9 @@ import { getConfig } from "../../config.js";
 import type { CommandRegistry } from "./command-controller.js";
 import { Picker, type PickResult } from "../views/picker.js";
 import { WorkspaceController, UserCancelledError } from "./workspace-controller.js";
+
+const _require = createRequire(import.meta.url);
+const { version: PACKAGE_VERSION } = _require("../../../package.json") as { version: string };
 
 // ── WorkerDisplay interface ───────────────────────────────────────────────────
 
@@ -892,6 +896,8 @@ export class WorkerController extends EventEmitter {
         status: isAssigned ? "assigned" : (hasPendingClaim ? "reserved" : "ready"),
         ...(isAssigned && this.lastSeenEventSeqId !== undefined && { lastSeenEventSeqId: this.lastSeenEventSeqId }),
         ...(this.options?.githubToken !== undefined && { githubToken: this.options.githubToken }),
+        version: PACKAGE_VERSION,
+        protocolVersion: Wire.PROTOCOL_VERSION,
       } satisfies Wire.WorkerMessage));
 
       this.connectionState = "hello_sent";
