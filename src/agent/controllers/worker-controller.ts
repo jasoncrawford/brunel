@@ -497,9 +497,8 @@ export class WorkerController extends EventEmitter {
         return "exit";
       default:
         await this.runAfterTaskReset();
-        this._eventsPaused = false;
-        this._syncPendingEventsStatus();
         this.sendWorkerReady();
+        this._setIdleState();
         this.display.print(c.sageGreen("Waiting for next task..."));
         return "task-complete";
     }
@@ -822,9 +821,21 @@ export class WorkerController extends EventEmitter {
     }
   }
 
+  /**
+   * Apply all idle-state invariants. Every code path that enters the waiting state
+   * must call this. Safe in any connection state — does not touch the message buffer.
+   * transitionToIdle() wraps this for reconnect paths that also need transitionToRegistered().
+   * promptAfterTaskComplete() calls this directly since the connection is already registered.
+   */
+  private _setIdleState(): void {
+    this._eventsPaused = false;
+    this._syncPendingEventsStatus();
+    this.agentStatus.update({ workerReady: true });
+  }
+
   private transitionToIdle(opts?: { silent?: boolean }): void {
     this.transitionToRegistered();
-    this.agentStatus.update({ workerReady: true });
+    this._setIdleState();
     if (!opts?.silent) this.display.print(c.sageGreen("Waiting for tasks..."));
   }
 
