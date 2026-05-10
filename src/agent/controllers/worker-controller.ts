@@ -821,7 +821,12 @@ export class WorkerController extends EventEmitter {
     }
   }
 
-  /** Apply all idle-state invariants. Safe in any connection state — no buffer flush. */
+  /**
+   * Apply all idle-state invariants. Every code path that enters the waiting state
+   * must call this. Safe in any connection state — does not touch the message buffer.
+   * transitionToIdle() wraps this for reconnect paths that also need transitionToRegistered().
+   * promptAfterTaskComplete() calls this directly since the connection is already registered.
+   */
   private _setIdleState(): void {
     this._eventsPaused = false;
     this._syncPendingEventsStatus();
