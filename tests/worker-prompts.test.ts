@@ -385,6 +385,24 @@ describe("buildEventPrompt", () => {
     expect(p).toContain("Can you also handle edge case Y?");
   });
 
+  it("issue_comment — preserves full multi-paragraph body including third paragraph", () => {
+    const body = [
+      "But in this case there *was* a comment, we just missed it somehow?",
+      "",
+      'It correctly shows up in the foreman dashboard: `issue_comment/created — "Closed by #54"`',
+      "",
+      "So we're just not looking in the right place for the comment body. The task here is to find the text, not to drop the event.",
+    ].join("\n");
+    const evt: Wire.WebhookEvent = {
+      id: "e1",
+      name: "issue_comment",
+      payload: { issue: { number: 1092 }, comment: { body } },
+    };
+    const p = buildEventPrompt([evt]);
+    expect(p).toContain("So we're just not looking in the right place");
+    expect(p).toContain("not to drop the event");
+  });
+
   it("unknown event type — returns empty string (unrecognised events are log_only, never reach prompt builder)", () => {
     const evt: Wire.WebhookEvent = { id: "e1", name: "deployment", payload: {} };
     const p = buildEventPrompt([evt]);
