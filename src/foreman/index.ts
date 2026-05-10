@@ -26,7 +26,7 @@ if (isMain) {
   const supabase = createClient<Database>(config.supabaseUrl, config.supabaseSecretKey);
   initDb(supabase);
 
-  const httpServer = new HttpServer({ webhookSecret: config.webhookSecret });
+  const httpServer = new HttpServer({ webhookSecret: config.appWebhookSecret ?? config.webhookSecret });
   const { server } = httpServer;
 
   // Admin WebSocket broadcaster — owns snapshot lifecycle and event subscriptions
