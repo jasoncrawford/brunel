@@ -1,6 +1,3 @@
-// Generated from Supabase schema via: supabase gen types typescript --local > src/database.types.ts
-// Regenerate after any migration.
-
 export type Json =
   | string
   | number
@@ -12,51 +9,92 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
-      installations: {
+      foreman_messages: {
         Row: {
-          id: number
-          github_id: number
-          account_login: string
-          account_type: string
           created_at: string
+          direction: string
+          id: number
+          msg_type: string
+          payload: Json
+          repo_id: number | null
+          task_id: string | null
+          worker_id: string | null
         }
         Insert: {
-          id?: never
-          github_id: number
-          account_login: string
-          account_type: string
           created_at?: string
+          direction: string
+          id?: never
+          msg_type: string
+          payload: Json
+          repo_id?: number | null
+          task_id?: string | null
+          worker_id?: string | null
         }
         Update: {
+          created_at?: string
+          direction?: string
           id?: never
-          github_id?: number
+          msg_type?: string
+          payload?: Json
+          repo_id?: number | null
+          task_id?: string | null
+          worker_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "foreman_messages_repo_id_fkey"
+            columns: ["repo_id"]
+            isOneToOne: false
+            referencedRelation: "repos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      installations: {
+        Row: {
+          account_login: string
+          account_type: string
+          created_at: string | null
+          github_id: number
+          id: number
+        }
+        Insert: {
+          account_login: string
+          account_type: string
+          created_at?: string | null
+          github_id: number
+          id?: number
+        }
+        Update: {
           account_login?: string
           account_type?: string
-          created_at?: string
+          created_at?: string | null
+          github_id?: number
+          id?: number
         }
         Relationships: []
       }
       repos: {
         Row: {
-          id: number
-          full_name: string
-          status: string
           created_at: string
+          full_name: string
+          id: number
           installation_id: number | null
+          status: string
         }
         Insert: {
-          id?: never
-          full_name: string
-          status?: string
           created_at?: string
+          full_name: string
+          id?: never
           installation_id?: number | null
+          status?: string
         }
         Update: {
-          id?: never
-          full_name?: string
-          status?: string
           created_at?: string
+          full_name?: string
+          id?: never
           installation_id?: number | null
+          status?: string
         }
         Relationships: [
           {
@@ -65,152 +103,69 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "installations"
             referencedColumns: ["id"]
-          }
+          },
         ]
-      }
-      workers: {
-        Row: {
-          worker_id: string
-          repo_id: number
-          status: string
-          current_task_id: string | null
-          first_connected_at: string
-          last_connected_at: string
-          num_connections: number
-          disconnected_at: string | null
-          goodbye_at: string | null
-          version: string | null
-          protocol_version: number | null
-        }
-        Insert: {
-          worker_id: string
-          repo_id: number
-          status?: string
-          current_task_id?: string | null
-          first_connected_at?: string
-          last_connected_at?: string
-          num_connections?: number
-          disconnected_at?: string | null
-          goodbye_at?: string | null
-          version?: string | null
-          protocol_version?: number | null
-        }
-        Update: {
-          worker_id?: string
-          repo_id?: number
-          status?: string
-          current_task_id?: string | null
-          first_connected_at?: string
-          last_connected_at?: string
-          num_connections?: number
-          disconnected_at?: string | null
-          goodbye_at?: string | null
-          version?: string | null
-          protocol_version?: number | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "workers_repo_id_fkey"
-            columns: ["repo_id"]
-            isOneToOne: false
-            referencedRelation: "repos"
-            referencedColumns: ["id"]
-          }
-        ]
-      }
-      foreman_messages: {
-        Row: {
-          id: number
-          created_at: string
-          direction: string
-          worker_id: string | null
-          task_id: string | null
-          msg_type: string
-          payload: Json
-          repo_id: number | null
-        }
-        Insert: {
-          id?: never
-          created_at?: string
-          direction: string
-          worker_id?: string | null
-          task_id?: string | null
-          msg_type: string
-          payload: Json
-          repo_id?: number | null
-        }
-        Update: {
-          id?: never
-          created_at?: string
-          direction?: string
-          worker_id?: string | null
-          task_id?: string | null
-          msg_type?: string
-          payload?: Json
-          repo_id?: number | null
-        }
-        Relationships: []
       }
       tasks: {
         Row: {
-          task_id: string
+          assigned_at: string | null
+          body: string
+          branch: string | null
+          completed_at: string | null
+          cost_usd: number | null
+          created_at: string
+          input_tokens: number | null
+          issue_closed_at: string | null
           issue_number: number
+          labels: string[]
+          output_tokens: number | null
+          pr_merged_at: string | null
+          pr_number: number | null
           repo: string
           repo_id: number
+          task_id: string
           title: string
-          body: string
-          labels: string[]
           worker_id: string | null
-          pr_number: number | null
-          branch: string | null
-          created_at: string
-          assigned_at: string | null
-          completed_at: string | null
-          issue_closed_at: string | null
-          pr_merged_at: string | null
-          input_tokens: number | null
-          output_tokens: number | null
-          cost_usd: number | null
         }
         Insert: {
-          task_id: string
+          assigned_at?: string | null
+          body?: string
+          branch?: string | null
+          completed_at?: string | null
+          cost_usd?: number | null
+          created_at?: string
+          input_tokens?: number | null
+          issue_closed_at?: string | null
           issue_number: number
+          labels?: string[]
+          output_tokens?: number | null
+          pr_merged_at?: string | null
+          pr_number?: number | null
           repo: string
           repo_id: number
+          task_id: string
           title: string
-          body?: string
-          labels?: string[]
           worker_id?: string | null
-          pr_number?: number | null
-          branch?: string | null
-          created_at?: string
-          assigned_at?: string | null
-          completed_at?: string | null
-          issue_closed_at?: string | null
-          pr_merged_at?: string | null
-          input_tokens?: number | null
-          output_tokens?: number | null
-          cost_usd?: number | null
         }
         Update: {
-          task_id?: string
+          assigned_at?: string | null
+          body?: string
+          branch?: string | null
+          completed_at?: string | null
+          cost_usd?: number | null
+          created_at?: string
+          input_tokens?: number | null
+          issue_closed_at?: string | null
           issue_number?: number
+          labels?: string[]
+          output_tokens?: number | null
+          pr_merged_at?: string | null
+          pr_number?: number | null
           repo?: string
           repo_id?: number
+          task_id?: string
           title?: string
-          body?: string
-          labels?: string[]
           worker_id?: string | null
-          pr_number?: number | null
-          branch?: string | null
-          created_at?: string
-          assigned_at?: string | null
-          completed_at?: string | null
-          issue_closed_at?: string | null
-          pr_merged_at?: string | null
-          input_tokens?: number | null
-          output_tokens?: number | null
-          cost_usd?: number | null
         }
         Relationships: [
           {
@@ -219,53 +174,53 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "repos"
             referencedColumns: ["id"]
-          }
+          },
         ]
       }
       webhook_events: {
         Row: {
-          id: number
-          received_at: string
+          action: string | null
+          branch: string | null
           delivery_id: string | null
           event_name: string
-          action: string | null
+          id: number
+          issue_number: number | null
+          payload: Json
+          pr_number: number | null
+          received_at: string
           repo_id: number | null
           sender: string | null
-          issue_number: number | null
-          pr_number: number | null
-          branch: string | null
           task_id: string | null
-          payload: Json
           worker_id: string | null
         }
         Insert: {
-          id?: never
-          received_at?: string
+          action?: string | null
+          branch?: string | null
           delivery_id?: string | null
           event_name: string
-          action?: string | null
+          id?: never
+          issue_number?: number | null
+          payload: Json
+          pr_number?: number | null
+          received_at?: string
           repo_id?: number | null
           sender?: string | null
-          issue_number?: number | null
-          pr_number?: number | null
-          branch?: string | null
           task_id?: string | null
-          payload: Json
           worker_id?: string | null
         }
         Update: {
-          id?: never
-          received_at?: string
+          action?: string | null
+          branch?: string | null
           delivery_id?: string | null
           event_name?: string
-          action?: string | null
+          id?: never
+          issue_number?: number | null
+          payload?: Json
+          pr_number?: number | null
+          received_at?: string
           repo_id?: number | null
           sender?: string | null
-          issue_number?: number | null
-          pr_number?: number | null
-          branch?: string | null
           task_id?: string | null
-          payload?: Json
           worker_id?: string | null
         }
         Relationships: [
@@ -275,7 +230,57 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "repos"
             referencedColumns: ["id"]
-          }
+          },
+        ]
+      }
+      workers: {
+        Row: {
+          current_task_id: string | null
+          disconnected_at: string | null
+          first_connected_at: string
+          goodbye_at: string | null
+          last_connected_at: string
+          num_connections: number
+          protocol_version: number | null
+          repo_id: number
+          status: string
+          version: string | null
+          worker_id: string
+        }
+        Insert: {
+          current_task_id?: string | null
+          disconnected_at?: string | null
+          first_connected_at?: string
+          goodbye_at?: string | null
+          last_connected_at?: string
+          num_connections?: number
+          protocol_version?: number | null
+          repo_id: number
+          status?: string
+          version?: string | null
+          worker_id: string
+        }
+        Update: {
+          current_task_id?: string | null
+          disconnected_at?: string | null
+          first_connected_at?: string
+          goodbye_at?: string | null
+          last_connected_at?: string
+          num_connections?: number
+          protocol_version?: number | null
+          repo_id?: number
+          status?: string
+          version?: string | null
+          worker_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workers_repo_id_fkey"
+            columns: ["repo_id"]
+            isOneToOne: false
+            referencedRelation: "repos"
+            referencedColumns: ["id"]
+          },
         ]
       }
     }
@@ -294,21 +299,25 @@ export type Database = {
   }
 }
 
-type DefaultSchema = Database[Extract<keyof Database, "public">]
+type DatabaseWithoutInternals = Omit<Database, "__InternalSupabase">
+
+type DefaultSchema = DatabaseWithoutInternals[Extract<keyof Database, "public">]
 
 export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
-    | { schema: keyof Database },
+    | { schema: keyof DatabaseWithoutInternals },
   TableName extends DefaultSchemaTableNameOrOptions extends {
-    schema: keyof Database
+    schema: keyof DatabaseWithoutInternals
   }
-    ? keyof (Database[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
-        Database[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
+    ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
+        DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
     : never = never,
-> = DefaultSchemaTableNameOrOptions extends { schema: keyof Database }
-  ? (Database[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
-      Database[DefaultSchemaTableNameOrOptions["schema"]]["Views"])[TableName] extends {
+> = DefaultSchemaTableNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals
+}
+  ? (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
+      DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])[TableName] extends {
       Row: infer R
     }
     ? R
@@ -326,14 +335,16 @@ export type Tables<
 export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
-    | { schema: keyof Database },
+    | { schema: keyof DatabaseWithoutInternals },
   TableName extends DefaultSchemaTableNameOrOptions extends {
-    schema: keyof Database
+    schema: keyof DatabaseWithoutInternals
   }
-    ? keyof Database[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
+    ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
     : never = never,
-> = DefaultSchemaTableNameOrOptions extends { schema: keyof Database }
-  ? Database[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
+> = DefaultSchemaTableNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals
+}
+  ? DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
       Insert: infer I
     }
     ? I
@@ -349,14 +360,16 @@ export type TablesInsert<
 export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
-    | { schema: keyof Database },
+    | { schema: keyof DatabaseWithoutInternals },
   TableName extends DefaultSchemaTableNameOrOptions extends {
-    schema: keyof Database
+    schema: keyof DatabaseWithoutInternals
   }
-    ? keyof Database[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
+    ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
     : never = never,
-> = DefaultSchemaTableNameOrOptions extends { schema: keyof Database }
-  ? Database[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
+> = DefaultSchemaTableNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals
+}
+  ? DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
       Update: infer U
     }
     ? U
@@ -372,14 +385,40 @@ export type TablesUpdate<
 export type Enums<
   DefaultSchemaEnumNameOrOptions extends
     | keyof DefaultSchema["Enums"]
-    | { schema: keyof Database },
+    | { schema: keyof DatabaseWithoutInternals },
   EnumName extends DefaultSchemaEnumNameOrOptions extends {
-    schema: keyof Database
+    schema: keyof DatabaseWithoutInternals
   }
-    ? keyof Database[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
+    ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
     : never = never,
-> = DefaultSchemaEnumNameOrOptions extends { schema: keyof Database }
-  ? Database[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"][EnumName]
+> = DefaultSchemaEnumNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals
+}
+  ? DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"][EnumName]
   : DefaultSchemaEnumNameOrOptions extends keyof DefaultSchema["Enums"]
     ? DefaultSchema["Enums"][DefaultSchemaEnumNameOrOptions]
     : never
+
+export type CompositeTypes<
+  PublicCompositeTypeNameOrOptions extends
+    | keyof DefaultSchema["CompositeTypes"]
+    | { schema: keyof DatabaseWithoutInternals },
+  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+    schema: keyof DatabaseWithoutInternals
+  }
+    ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
+    : never = never,
+> = PublicCompositeTypeNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals
+}
+  ? DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"][CompositeTypeName]
+  : PublicCompositeTypeNameOrOptions extends keyof DefaultSchema["CompositeTypes"]
+    ? DefaultSchema["CompositeTypes"][PublicCompositeTypeNameOrOptions]
+    : never
+
+export const Constants = {
+  public: {
+    Enums: {},
+  },
+} as const
+
