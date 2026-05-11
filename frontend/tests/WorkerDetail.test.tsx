@@ -133,6 +133,55 @@ describe("WorkerDetail", () => {
     expect(screen.getAllByRole("row")).toHaveLength(2); // header + 1 only
   });
 
+  it("shows version from snapshot worker data", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ json: () => Promise.resolve([]) }));
+    renderWorkerDetail("worker-abc-def-123");
+
+    act(() => {
+      capturedHandler!({
+        type: "snapshot",
+        tasks: [],
+        workers: [{ workerId: "worker-abc-def-123", status: "ready", version: "0.1.0" }],
+      });
+    });
+
+    await waitFor(() => expect(screen.getByText(/v0\.1\.0/)).toBeInTheDocument());
+  });
+
+  it("shows protocol version as tooltip on the version span", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ json: () => Promise.resolve([]) }));
+    renderWorkerDetail("worker-abc-def-123");
+
+    act(() => {
+      capturedHandler!({
+        type: "snapshot",
+        tasks: [],
+        workers: [{ workerId: "worker-abc-def-123", status: "ready", version: "0.1.0", protocolVersion: 5 }],
+      });
+    });
+
+    await waitFor(() => {
+      const versionSpan = screen.getByText(/v0\.1\.0/);
+      expect(versionSpan).toHaveAttribute("title", "Protocol v5");
+    });
+  });
+
+  it("does not show version info when absent", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ json: () => Promise.resolve([]) }));
+    renderWorkerDetail("worker-abc-def-123");
+
+    act(() => {
+      capturedHandler!({
+        type: "snapshot",
+        tasks: [],
+        workers: [{ workerId: "worker-abc-def-123", status: "ready" }],
+      });
+    });
+
+    await waitFor(() => expect(screen.getByText(/Status: ready/)).toBeInTheDocument());
+    expect(screen.queryByText(/v\d/)).not.toBeInTheDocument();
+  });
+
   it("shows load-more button when first page is full (PAGE_SIZE messages)", async () => {
     const PAGE_SIZE = 50;
     const fullPage: LogEntry[] = Array.from({ length: PAGE_SIZE }, (_, i) => ({
