@@ -17,6 +17,8 @@ export default function App() {
         <NavLink to="/tasks">Tasks</NavLink>
         {" · "}
         <NavLink to="/log">Event Log</NavLink>
+        {" · "}
+        <a href="https://github.com/jasoncrawford/brunel" target="_blank" rel="noreferrer">GitHub</a>
       </header>
       <Routes>
         <Route path="/" element={<Dashboard />} />
