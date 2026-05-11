@@ -23,6 +23,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "smoke": "tsx tests/smoke.ts",
+    "test:worker-exit": "tsx tests/worker-exit.ts",
     "test:browser": "playwright test",
     "lint": "eslint src",
     "coverage": "vitest run --coverage"

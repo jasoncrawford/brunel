@@ -449,4 +449,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const config = await loadConfig(process.argv);
   const cliCommand = parseCommandFromArgs(process.argv);
   await new BrunelAgent(config).start(cliCommand);
+  // Force exit: after the routing loop ends, residual handles (WebSocket ping
+  // timer, open sockets) can keep the event loop alive indefinitely. SIGTERM
+  // already calls process.exit(0); this ensures the same for normal exits.
+  process.exit(0);
 }

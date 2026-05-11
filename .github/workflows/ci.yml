@@ -61,6 +61,9 @@ jobs:
 
       - run: npm run lint
 
+      - name: Run worker-exit integration test
+        run: npm run test:worker-exit
+
   browser-test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
