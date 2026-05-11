@@ -100,6 +100,17 @@ Config via `.env` or `brunel.config.ts` (CLI flags also accepted). See `src/conf
 
 All five run in CI on every PR (coverage, frontend tests, browser tests, lint, type check).
 
+## Releases
+
+To publish a new version to npm, bump the version and push the tag — CI handles the rest:
+
+```
+npm version patch   # or minor / major
+git push --tags
+```
+
+`.github/workflows/publish.yml` triggers on `v*` tags, builds the frontend, and runs `npm publish` using the `NPM_TOKEN` repo secret.
+
 ## Database
 
 Supabase (hosted Postgres). Migrations live in `supabase/migrations/`. After adding a migration, regenerate types with:
