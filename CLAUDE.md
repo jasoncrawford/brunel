@@ -113,7 +113,7 @@ git push --tags
 
 ## Database
 
-Supabase (hosted Postgres). Migrations live in `supabase/migrations/`. After adding a migration, regenerate types with:
+Supabase (hosted Postgres). Migrations live in `supabase/migrations/`. After adding a migration, `src/database.types.ts` is regenerated automatically by CI (`.github/workflows/regen-db-types.yml`) and committed back to the PR branch. To regenerate locally:
 
 ```
 supabase gen types typescript --local > src/database.types.ts
