@@ -90,6 +90,10 @@ export default function WorkerDetail() {
       {worker?.status && (
         <p style={{ fontSize: "0.9em", color: "#555" }}>
           Status: {worker.status}
+          {worker.version && ` · v${worker.version}`}
+          {worker.protocolVersion !== undefined && (
+            <span style={{ color: "#999" }}>{` (proto ${worker.protocolVersion})`}</span>
+          )}
           {worker.numConnections !== undefined && ` · ${worker.numConnections} connection${worker.numConnections !== 1 ? "s" : ""}`}
           {worker.disconnectedAt && ` · disconnected ${new Date(worker.disconnectedAt).toLocaleString()}`}
         </p>
