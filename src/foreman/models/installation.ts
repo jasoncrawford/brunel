@@ -15,7 +15,7 @@ export class Installation extends ActiveRecord {
   readonly githubId: number;
   readonly accountLogin: string;
   readonly accountType: "User" | "Organization";
-  readonly createdAt: string;
+  readonly createdAt: string | null;
 
   private constructor(row: DbRow) {
     super();
