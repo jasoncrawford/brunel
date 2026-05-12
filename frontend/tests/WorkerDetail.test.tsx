@@ -148,7 +148,7 @@ describe("WorkerDetail", () => {
     await waitFor(() => expect(screen.getByText(/v0\.1\.0/)).toBeInTheDocument());
   });
 
-  it("shows protocol version as tooltip on the version span", async () => {
+  it("shows protocol version inline when present", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ json: () => Promise.resolve([]) }));
     renderWorkerDetail("worker-abc-def-123");
 
@@ -161,8 +161,8 @@ describe("WorkerDetail", () => {
     });
 
     await waitFor(() => {
-      const versionSpan = screen.getByText(/v0\.1\.0/);
-      expect(versionSpan).toHaveAttribute("title", "Protocol v5");
+      expect(screen.getByText(/v0\.1\.0/)).toBeInTheDocument();
+      expect(screen.getByText(/proto 5/)).toBeInTheDocument();
     });
   });
 
