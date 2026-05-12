@@ -129,6 +129,7 @@ const FOLLOWUP_CHECKLIST = `Before we end this session, consider:
 * Are there any followup issues we should file?
 * Are there any updates to skills that we should make, or new skills to record?
 * Are there any updates to be made to project documentation?
+* Should we bump any version numbers, and at what level?
 
 Do not use project memories: they may not persist across sessions, and they aren't available to other users or projects. Capture general practices in skills, and project-specific information in project docs.`;
 
