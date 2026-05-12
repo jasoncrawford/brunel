@@ -54,21 +54,21 @@ export type Database = {
         Row: {
           account_login: string
           account_type: string
-          created_at: string | null
+          created_at: string
           github_id: number
           id: number
         }
         Insert: {
           account_login: string
           account_type: string
-          created_at?: string | null
+          created_at?: string
           github_id: number
           id?: number
         }
         Update: {
           account_login?: string
           account_type?: string
-          created_at?: string | null
+          created_at?: string
           github_id?: number
           id?: number
         }
