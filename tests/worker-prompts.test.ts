@@ -295,6 +295,14 @@ describe("buildInitialPrompt — status-dependent prompts", () => {
       );
       expect(p).not.toContain("Create a PR when done");
     });
+
+    it("prompts worker to consider version bump", () => {
+      const p = buildInitialPrompt(
+        { ...baseIssue, status: "closed", prNumber: 42, branch: "fix/my-task" },
+        true,
+      );
+      expect(p).toContain("bump any version numbers");
+    });
   });
 });
 

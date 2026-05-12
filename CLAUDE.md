@@ -110,7 +110,7 @@ npm version patch   # or minor / major
 git push --tags
 ```
 
-`.github/workflows/publish.yml` triggers on `v*` tags, builds the frontend, and runs `npm publish` using the `NPM_TOKEN` repo secret.
+`.github/workflows/publish.yml` triggers on `v*` tags, builds the frontend, and publishes to npm via OIDC trusted publishing.
 
 ## Database
 
