@@ -13,8 +13,9 @@ import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { ForemanMessage } from "../src/foreman/models/foreman-message.js";
 import { WebhookEvent } from "../src/foreman/models/webhook-event.js";
 import { Repo } from "../src/foreman/models/repo.js";
-import { fakeRepo, resetDb, seedTask, seedWebhookEvent, createTestTaskManager, createTestRepo } from "./helpers/task.js";
+import { fakeRepo, resetDb, seedTask, seedWebhookEvent, seedWorker, createTestTaskManager, createTestRepo } from "./helpers/task.js";
 import * as utils from "../src/utils.js";
+import * as Wire from "../shared/wire.js";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -808,7 +809,7 @@ describe("handleWorkerHello protocol version", () => {
       workerId: "w1",
       repo: "owner/repo",
       status: "ready",
-      protocolVersion: 1,
+      protocolVersion: Wire.PROTOCOL_VERSION,
     });
 
     expect(spy).toHaveBeenCalled();
@@ -840,15 +841,143 @@ describe("handleWorkerHello protocol version", () => {
       repo: "owner/repo",
       status: "ready",
       version: "0.1.0",
-      protocolVersion: 1,
+      protocolVersion: Wire.PROTOCOL_VERSION,
     });
 
     expect(spy).toHaveBeenCalledWith(
       "w1",
       expect.anything(),
       expect.anything(),
-      expect.objectContaining({ version: "0.1.0", protocolVersion: 1 }),
+      expect.objectContaining({ version: "0.1.0", protocolVersion: Wire.PROTOCOL_VERSION }),
     );
+  });
+});
+
+// ── handleResumeHello ──────────────────────────────────────────────────────────
+
+describe("handleResumeHello", () => {
+  it("fatal error when worker is currently connected", async () => {
+    const { wss } = makeDeps(taskManager);
+    // Register worker in the live registry
+    await wss.handleReadyHello("w1", fakeWs(), taskManager.repo);
+    expect(Worker.fromRegistry("w1")).toBeDefined(); // sanity: w1 is connected
+
+    // Now try to resume — should reject because w1 is connected
+    const ws2 = fakeWs();
+    await wss.handleResumeHello("w1", ws2, taskManager.repo);
+
+    const errorCalls = ws2.send.mock.calls.filter(([data]: [string]) => JSON.parse(data).type === "foreman_error");
+    expect(errorCalls).toHaveLength(1);
+    const err = JSON.parse(errorCalls[0][0]);
+    expect(err.fatal).toBe(true);
+    expect(err.message).toMatch(/currently connected/i);
+  });
+
+  it("fatal error when worker not found in DB", async () => {
+    const { wss } = makeDeps(taskManager);
+    const ws = fakeWs();
+    await wss.handleResumeHello("no-such-worker", ws, taskManager.repo);
+
+    const errorCalls = ws.send.mock.calls.filter(([data]: [string]) => JSON.parse(data).type === "foreman_error");
+    expect(errorCalls).toHaveLength(1);
+    const err = JSON.parse(errorCalls[0][0]);
+    expect(err.fatal).toBe(true);
+    expect(err.message).toMatch(/no worker found/i);
+  });
+
+  it("fatal error when repo does not match the worker's recorded repo", async () => {
+    // Seed a second repo and a worker linked to it
+    const otherRepo = await createTestRepo("other/repo");
+    await seedWorker({ worker_id: "w1", repo_id: otherRepo.id });
+
+    const { wss } = makeDeps(taskManager);
+    const ws = fakeWs();
+    // Try to resume as taskManager.repo (test/repo) but worker belongs to other/repo
+    await wss.handleResumeHello("w1", ws, taskManager.repo);
+
+    const errorCalls = ws.send.mock.calls.filter(([data]: [string]) => JSON.parse(data).type === "foreman_error");
+    expect(errorCalls).toHaveLength(1);
+    const err = JSON.parse(errorCalls[0][0]);
+    expect(err.fatal).toBe(true);
+    expect(err.message).toMatch(/repo/i);
+  });
+
+  it("disconnected worker with active task — sends assigned ack + task_assigned", async () => {
+    await seedWorker({ worker_id: "w1", repo_id: taskManager.repo.id });
+    await seedTask({
+      task_id: "20",
+      issue_number: 20,
+      repo_id: taskManager.repo.id,
+      worker_id: "w1",
+      assigned_at: new Date().toISOString(),
+    });
+
+    const { wss, sendMsg } = makeDeps(taskManager);
+    const ws = fakeWs();
+    await wss.handleResumeHello("w1", ws, taskManager.repo);
+
+    const ack = helloAck(sendMsg);
+    expect(ack?.status).toBe("assigned");
+
+    // Also expect task_assigned to be sent (so the resuming worker knows its task)
+    const taskAssignedCalls = sendMsg.mock.calls.filter(
+      ([, msg]) => (msg as { type: string }).type === "task_assigned",
+    );
+    expect(taskAssignedCalls).toHaveLength(1);
+    expect((taskAssignedCalls[0][1] as { taskId: string }).taskId).toBe("20");
+
+    // Worker should be in the registry
+    expect(Worker.fromRegistry("w1")).toBeDefined();
+  });
+
+  it("disconnected worker with no task — sends ready ack", async () => {
+    await seedWorker({ worker_id: "w1", repo_id: taskManager.repo.id });
+
+    const { wss, sendMsg } = makeDeps(taskManager);
+    const ws = fakeWs();
+    await wss.handleResumeHello("w1", ws, taskManager.repo);
+
+    const ack = helloAck(sendMsg);
+    expect(ack?.status).toBe("ready");
+    expect(Worker.fromRegistry("w1")).toBeDefined();
+
+    const taskAssignedCalls = sendMsg.mock.calls.filter(
+      ([, msg]) => (msg as { type: string }).type === "task_assigned",
+    );
+    expect(taskAssignedCalls).toHaveLength(0);
+  });
+
+  it("disconnected worker with completed task — sends ready ack (no task reclaim)", async () => {
+    await seedWorker({ worker_id: "w1", repo_id: taskManager.repo.id });
+    await seedTask({
+      task_id: "30",
+      issue_number: 30,
+      repo_id: taskManager.repo.id,
+      worker_id: "w1",
+      assigned_at: new Date().toISOString(),
+      completed_at: new Date().toISOString(),
+    });
+
+    const { wss, sendMsg } = makeDeps(taskManager);
+    await wss.handleResumeHello("w1", fakeWs(), taskManager.repo);
+
+    const ack = helloAck(sendMsg);
+    expect(ack?.status).toBe("ready");
+  });
+
+  it("routes status='resume' through handleWorkerHello to handleResumeHello", async () => {
+    const { wss } = makeDeps(taskManager);
+    vi.spyOn(Repo, "findOrCreate").mockResolvedValue(taskManager.repo as unknown as Repo);
+    const spy = vi.spyOn(wss, "handleResumeHello" as any).mockResolvedValue(undefined);
+
+    await wss.handleWorkerHello("w1", fakeWs(), {
+      type: "worker_hello",
+      workerId: "w1",
+      repo: "owner/repo",
+      status: "resume",
+    });
+
+    expect(spy).toHaveBeenCalled();
   });
 });
 

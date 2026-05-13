@@ -422,6 +422,76 @@ describe("Workspace.prune", () => {
   });
 });
 
+// ── attach ─────────────────────────────────────────────────────────────────────
+
+describe("Workspace.attach", () => {
+  it("marks isCreated, writes lockfile — skips clone and npm install", async () => {
+    const workerDir = path.join(BASE_DIR, WORKER_ID);
+    fs.mkdirSync(path.join(workerDir, ".git"), { recursive: true });
+
+    const ws = new Workspace(BASE_DIR, WORKER_ID, REPO_URL, "/original-cwd", async () => true);
+    await ws.attach();
+
+    expect(ws.isCreated).toBe(true);
+    expect(fs.existsSync(path.join(workerDir, ".brunel.lock"))).toBe(true);
+    expect(mockExecFile).not.toHaveBeenCalledWith("git", expect.arrayContaining(["clone"]), expect.anything(), expect.any(Function));
+    expect(mockExecFile).not.toHaveBeenCalledWith("npm", expect.anything(), expect.anything(), expect.any(Function));
+  });
+
+  it("throws when the directory does not exist", async () => {
+    const ws = new Workspace(BASE_DIR, "no-such-dir", REPO_URL, "/original-cwd", async () => true);
+    await expect(ws.attach()).rejects.toThrow(/not found/i);
+  });
+
+  it("throws when directory has no .git", async () => {
+    const workerDir = path.join(BASE_DIR, WORKER_ID);
+    fs.mkdirSync(workerDir, { recursive: true }); // no .git
+    const ws = new Workspace(BASE_DIR, WORKER_ID, REPO_URL, "/original-cwd", async () => true);
+    await expect(ws.attach()).rejects.toThrow(/not a git repository/i);
+  });
+
+  it("re-applies git auth when token is provided", async () => {
+    const workerDir = path.join(BASE_DIR, WORKER_ID);
+    fs.mkdirSync(path.join(workerDir, ".git"), { recursive: true });
+
+    const ws = new Workspace(BASE_DIR, WORKER_ID, REPO_URL, "/original-cwd", async () => true, "ghp_token");
+    await ws.attach();
+
+    expect(mockExecFile).toHaveBeenCalledWith(
+      "git",
+      ["config", "--local", "http.https://github.com/.extraheader", "Authorization: Bearer ghp_token"],
+      { cwd: workerDir },
+      expect.any(Function),
+    );
+  });
+
+  it("does not call git config when no token is provided", async () => {
+    const workerDir = path.join(BASE_DIR, WORKER_ID);
+    fs.mkdirSync(path.join(workerDir, ".git"), { recursive: true });
+
+    const ws = new Workspace(BASE_DIR, WORKER_ID, REPO_URL, "/original-cwd", async () => true);
+    await ws.attach();
+
+    const configCalls = mockExecFile.mock.calls.filter(
+      ([cmd, args]) => cmd === "git" && (args as string[])[0] === "config",
+    );
+    expect(configCalls).toHaveLength(0);
+  });
+
+  it("adds .brunel.lock to .git/info/exclude after attach", async () => {
+    const workerDir = path.join(BASE_DIR, WORKER_ID);
+    fs.mkdirSync(path.join(workerDir, ".git"), { recursive: true });
+
+    const ws = new Workspace(BASE_DIR, WORKER_ID, REPO_URL, "/original-cwd", async () => true);
+    await ws.attach();
+
+    const excludePath = path.join(workerDir, ".git", "info", "exclude");
+    expect(fs.existsSync(excludePath)).toBe(true);
+    const lines = fs.readFileSync(excludePath, "utf8").split("\n").map(l => l.trim());
+    expect(lines).toContain(".brunel.lock");
+  });
+});
+
 // ── http.extraHeader auth ─────────────────────────────────────────────────────
 
 const CLEAN_REPO_URL = "https://github.com/owner/repo.git";

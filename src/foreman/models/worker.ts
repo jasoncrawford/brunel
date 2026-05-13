@@ -45,6 +45,7 @@ export class Worker extends ActiveRecord {
   get isReady(): boolean { return this.status === "ready"; }
 
   // Fields populated from DB row (undefined for synthetic registry instances)
+  readonly repoId: number;
   readonly repoFullName?: string;
   readonly numConnections?: number;
   readonly firstConnectedAt?: string;
@@ -68,6 +69,7 @@ export class Worker extends ActiveRecord {
     super();
     this.workerId = row.worker_id;
     this.status = row.status as "ready" | "reserved" | "assigned" | "disconnected";
+    this.repoId = row.repo_id;
     this.repoFullName = (row as any).repos?.full_name ?? undefined;
     this.numConnections = row.num_connections ?? undefined;
     this.firstConnectedAt = row.first_connected_at ?? undefined;

@@ -212,4 +212,21 @@ describe("AgentStatus", () => {
     model.update({ model: "opus", effort: "medium" });
     expect(fmtStatus(model)).toContain("opus (medium)");
   });
+
+  describe("setAgentId", () => {
+    it("updates agentId", () => {
+      const model = new AgentStatus({ agentId: "original-id" });
+      expect(model.agentId).toBe("original-id");
+      model.setAgentId("new-dead-worker-id");
+      expect(model.agentId).toBe("new-dead-worker-id");
+    });
+
+    it("emits change after setAgentId", () => {
+      const model = new AgentStatus({ agentId: "original-id" });
+      const onChange = vi.fn();
+      model.on("change", onChange);
+      model.setAgentId("new-id");
+      expect(onChange).toHaveBeenCalledOnce();
+    });
+  });
 });

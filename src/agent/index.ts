@@ -326,7 +326,11 @@ export class BrunelAgent {
     const drainPendingPrompts = async (): Promise<void> => {
       while (workerController.hasPendingPrompts()) {
         const item = workerController.takeNextPrompt()!;
-        if (item.fresh) sessionId = undefined; // new task → fresh conversation
+        if (item.resumeSessionId) {
+          sessionId = item.resumeSessionId; // resume the dead worker's Claude session
+        } else if (item.fresh) {
+          sessionId = undefined; // new task → fresh conversation
+        }
         const ok = await runPrompt(item.prompt);
         if (!ok) break;
       }

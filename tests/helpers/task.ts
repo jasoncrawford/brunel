@@ -83,6 +83,32 @@ export async function seedWebhookEvent(
   }).single();
 }
 
+/**
+ * Seeds a worker directly into the DB shim (bypassing the in-memory registry).
+ * Use this to simulate a disconnected worker for resume-flow foreman tests.
+ */
+export async function seedWorker(
+  fields: { worker_id: string; repo_id: number } & Partial<{
+    status: string;
+    current_task_id: string | null;
+    disconnected_at: string | null;
+  }>,
+): Promise<void> {
+  const now = new Date().toISOString();
+  await (db.from as any)("workers").insert({
+    status: "disconnected",
+    current_task_id: null,
+    first_connected_at: now,
+    last_connected_at: now,
+    num_connections: 1,
+    disconnected_at: now,
+    goodbye_at: null,
+    version: null,
+    protocol_version: null,
+    ...fields,
+  });
+}
+
 export async function seedTask(
   fields: Partial<DbRow> & { task_id: string; issue_number: number },
 ): Promise<Task> {
