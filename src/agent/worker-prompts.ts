@@ -19,6 +19,10 @@ function formatCommentLocation(
 //   4. Action guidance, specific to task status
 //   5. Standing instructions (generic)
 
+export function buildResumePrompt(issue: Wire.TaskIssue): string {
+  return `You are resuming work on GitHub issue #${issue.number}: "${issue.title}". Please review the conversation history to recall the current state of the work, and continue from where the previous session left off.`;
+}
+
 export function buildInitialPrompt(issue: Wire.TaskIssue, isolatedCheckout: boolean): string {
   return [
     section1IssueHeader(issue),

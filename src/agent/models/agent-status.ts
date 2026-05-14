@@ -57,7 +57,7 @@ export type WorkerStatusPatch = {
  * Display subscribes to "change" events for reactive status bar redraws.
  */
 export class AgentStatus extends EventEmitter {
-  readonly agentId: string;
+  private _agentId: string;
   private _connectionStatus: WorkerConnectionStatus = "disconnected";
   private _disconnectCode: number | undefined;
   private _reconnectAt: number | undefined;
@@ -81,7 +81,7 @@ export class AgentStatus extends EventEmitter {
 
   constructor({ agentId, settings, ...initial }: { agentId?: string; settings?: Settings } & Omit<WorkerStatusPatch, "reconnectAt">) {
     super();
-    this.agentId = agentId ?? AgentStatus.generateAgentId();
+    this._agentId = agentId ?? AgentStatus.generateAgentId();
     if ("connectionStatus" in initial) this._connectionStatus = initial.connectionStatus!;
     if ("disconnectCode" in initial) this._disconnectCode = initial.disconnectCode;
     if ("taskNumber" in initial) this._taskNumber = initial.taskNumber;
@@ -102,6 +102,7 @@ export class AgentStatus extends EventEmitter {
 
   // ── Worker status getters ──────────────────────────────────────────────────
 
+  get agentId(): string { return this._agentId; }
   get connectionStatus(): WorkerConnectionStatus { return this._connectionStatus; }
   get disconnectCode(): number | undefined { return this._disconnectCode; }
   get reconnectAt(): number | undefined { return this._reconnectAt; }
@@ -144,6 +145,12 @@ export class AgentStatus extends EventEmitter {
     if (costUsd != null) {
       this._taskCostUsd = (this._taskCostUsd ?? 0) + costUsd;
     }
+    this.emit("change");
+  }
+
+  /** Change the agent ID (used by /worker:resume to assume a dead worker's identity) and emit "change". */
+  setAgentId(id: string): void {
+    this._agentId = id;
     this.emit("change");
   }
 

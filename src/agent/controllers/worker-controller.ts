@@ -1,10 +1,13 @@
 import { EventEmitter } from "node:events";
 import { createRequire } from "node:module";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { WebSocket } from "ws";
 import { c } from "../views/style.js";
 import { AgentStatus } from "../models/agent-status.js";
 import type { Display } from "../views/display.js";
-import { buildInitialPrompt, buildEventPrompt } from "../worker-prompts.js";
+import { buildInitialPrompt, buildResumePrompt, buildEventPrompt } from "../worker-prompts.js";
 import * as Wire from "../../../shared/wire.js";
 import { fmtError } from "../../utils.js";
 import { fmtNum, fmtTaskStats } from "../../../shared/formatters.js";
@@ -39,7 +42,7 @@ export type TaskConfirmInfo = {
 };
 
 /** A prompt queued by WorkerController for main() to execute. */
-export type QueuedPrompt = { prompt: string; fresh: boolean };
+export type QueuedPrompt = { prompt: string; fresh: boolean; resumeSessionId?: string };
 
 /** Options for overriding WorkerController internals, primarily for testing. */
 export type WorkerControllerOptions = {
@@ -141,6 +144,10 @@ export class WorkerController extends EventEmitter {
 
   // ── Pending claim (cleared by stop() and after sending) ───────────────────
   private _pendingClaimTaskId: string | undefined;
+
+  // ── Resume state ───────────────────────────────────────────────────────────
+  private _isResuming = false;
+  private _pendingResumeSessionId: string | undefined;
 
   // ── Connection state (cleared by stop()) ──────────────────────────────────
   private ws: WebSocket | undefined;
@@ -745,6 +752,94 @@ export class WorkerController extends EventEmitter {
         return undefined;
       },
     });
+    registry.register("resume", {
+      description: "Resume a dead worker's session by workspace directory prefix",
+      canRunFromArgs: true,
+      handler: async (args: string) => {
+        const prefix = args.trim();
+        if (!prefix) {
+          this.display.print(c.boldRed("Usage: /worker:resume <prefix>"));
+          return undefined;
+        }
+        if (this._isActive) {
+          this.display.print(c.amber("Worker mode is already active. Stop it first with /worker:stop."));
+          return undefined;
+        }
+
+        const workspaceDir = this.workspaceController?.workspace?.workspaceDir;
+        if (!workspaceDir) {
+          this.display.print(c.boldRed("No workspace directory configured."));
+          return undefined;
+        }
+
+        // Find workspace directories matching the prefix
+        let matches: string[] = [];
+        try {
+          matches = fs.readdirSync(workspaceDir, { withFileTypes: true })
+            .filter(e => e.isDirectory() && e.name.startsWith(prefix))
+            .map(e => e.name);
+        } catch (err) {
+          this.display.print(c.boldRed(`Error reading workspace directory: ${fmtError(err)}`));
+          return undefined;
+        }
+
+        if (matches.length === 0) {
+          this.display.print(c.boldRed("No worker workspace found matching the prefix."));
+          return undefined;
+        }
+        if (matches.length > 1) {
+          this.display.print(c.boldRed(`Ambiguous prefix "${prefix}": matches ${matches.join(", ")}`));
+          return undefined;
+        }
+
+        const agentId = matches[0];
+
+        // Refuse to take over a workspace whose worker process is still alive.
+        const lockPath = path.join(workspaceDir, agentId, ".brunel.lock");
+        if (fs.existsSync(lockPath)) {
+          const pid = parseInt(fs.readFileSync(lockPath, "utf8").trim(), 10);
+          if (!isNaN(pid)) {
+            try {
+              process.kill(pid, 0); // throws ESRCH if not running
+              this.display.print(c.boldRed(`Worker ${agentId} (PID ${pid}) is still running. Stop it first.`));
+              return undefined;
+            } catch { /* process is gone — safe to resume */ }
+          }
+        }
+
+        // Take on the dead worker's identity
+        this.agentStatus.setAgentId(agentId);
+
+        // Attach to the existing workspace directory
+        await this.workspaceController!.attachExisting(agentId, this.options?.githubToken);
+
+        // Look up the last Claude session for this workspace
+        const workspaceDir2 = this.workspaceController!.workspace!.dir;
+        this._pendingResumeSessionId = WorkerController._findLastClaudeSessionId(workspaceDir2);
+
+        // Connect with status="resume" on the first connection
+        this._isResuming = true;
+        await this.start();
+
+        return undefined;
+      },
+    });
+  }
+
+  /** Find the most recently used Claude session ID for a workspace directory. */
+  private static _findLastClaudeSessionId(workspaceDir: string): string | undefined {
+    const encoded = workspaceDir.replace(/\//g, "-");
+    const claudeProjectsDir = path.join(os.homedir(), ".claude", "projects", encoded);
+    try {
+      if (!fs.existsSync(claudeProjectsDir)) return undefined;
+      const entries = fs.readdirSync(claudeProjectsDir)
+        .filter(f => f.endsWith(".jsonl"))
+        .map(f => ({ name: f, mtime: fs.statSync(path.join(claudeProjectsDir, f)).mtimeMs }))
+        .sort((a, b) => b.mtime - a.mtime);
+      return entries.length > 0 ? path.basename(entries[0].name, ".jsonl") : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   // ── Private ───────────────────────────────────────────────────────────────
@@ -774,6 +869,8 @@ export class WorkerController extends EventEmitter {
     this.issueClosed = false;
     this._resetPromise = null;
     this._pendingClaimTaskId = undefined;
+    this._isResuming = false;
+    this._pendingResumeSessionId = undefined;
     this._isReserved = false;
     this.lastSeenEventSeqId = undefined;
     this.ws = undefined;
@@ -798,9 +895,10 @@ export class WorkerController extends EventEmitter {
    * Push a prompt to the queue and emit "prompts_ready" so index.ts's routing
    * loop can cancel any live ask() and drain the queue.
    * fresh=true means the session should reset its conversationId (new task).
+   * resumeSessionId, if set, causes index.ts to resume an existing Claude session.
    */
-  private enqueuePrompt(prompt: string, fresh: boolean): void {
-    this.pendingPrompts.push({ prompt, fresh });
+  private enqueuePrompt(prompt: string, fresh: boolean, resumeSessionId?: string): void {
+    this.pendingPrompts.push({ prompt, fresh, resumeSessionId });
     this.emit("prompts_ready");
   }
 
@@ -886,14 +984,21 @@ export class WorkerController extends EventEmitter {
       // auto-assign while we're about to claim a specific task. After hello_ack,
       // transitionToRegistered() will send the claim_task message automatically.
       // Do NOT put _pendingClaimTaskId in the hello — it will be sent as claim_task.
+      // If resuming, use "resume" status once (cleared immediately so reconnects use normal status).
+      const isResuming = this._isResuming;
+      this._isResuming = false;
       const hasPendingClaim = !!this._pendingClaimTaskId;
       const isAssigned = !!this.currentTaskId;
+      const status = isResuming ? "resume" as const
+        : isAssigned ? "assigned" as const
+        : hasPendingClaim ? "reserved" as const
+        : "ready" as const;
       ws.send(JSON.stringify({
         type: "worker_hello",
         workerId: this.agentStatus.agentId,
         repo: this.repo,
         ...(this.currentTaskId !== undefined && { taskId: this.currentTaskId }),
-        status: isAssigned ? "assigned" : (hasPendingClaim ? "reserved" : "ready"),
+        status,
         ...(isAssigned && this.lastSeenEventSeqId !== undefined && { lastSeenEventSeqId: this.lastSeenEventSeqId }),
         ...(this.options?.githubToken !== undefined && { githubToken: this.options.githubToken }),
         version: PACKAGE_VERSION,
@@ -1089,15 +1194,21 @@ export class WorkerController extends EventEmitter {
       this.agentStatus.resetTaskStats();
       this._syncPendingEventsStatus();
       void this.agentStatus.refreshBranch();
-      const initialPrompt = buildInitialPrompt(msg.issue, !!this.workspaceController?.workspace);
-      this.display.print(c.sageGreen(initialPrompt));
-      const enqueue = () => this.enqueuePrompt(initialPrompt, true);
+      const resumeSessionId = this._pendingResumeSessionId;
+      this._pendingResumeSessionId = undefined;
+      // Resume: use a short "pick up where you left off" prompt in the existing session.
+      // New task: use the full initial prompt and start a fresh session.
+      const prompt = resumeSessionId
+        ? buildResumePrompt(msg.issue)
+        : buildInitialPrompt(msg.issue, !!this.workspaceController?.workspace);
+      this.display.print(c.sageGreen(prompt));
+      const enqueue = () => this.enqueuePrompt(prompt, !resumeSessionId, resumeSessionId);
       // If a workspace reset is in progress (from a cancelled hello_ack), defer the
       // prompt until the reset finishes — otherwise the task could run in a dirty workspace.
       if (this._resetPromise) {
         void this._resetPromise.then(enqueue, enqueue);
       } else {
-        enqueue(); // fresh=true: new task, reset session
+        enqueue();
       }
     } else if (msg.type === "event_notification") {
       if (msg.taskId !== this.currentTaskId) {

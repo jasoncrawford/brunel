@@ -22,13 +22,28 @@ export class UserCancelledError extends Error {
  * methods are no-ops.
  */
 export class WorkspaceController {
+  private _workspace: Workspace | undefined;
+  private display: WorkerDisplay;
+  private config: { verbose: boolean };
+
+  get workspace(): Workspace | undefined {
+    return this._workspace;
+  }
+
   constructor(
-    readonly workspace: Workspace | undefined,
-    private display: WorkerDisplay,
-    private config: { verbose: boolean },
+    workspace: Workspace | undefined,
+    display: WorkerDisplay,
+    config: { verbose: boolean },
   ) {
-    if (!workspace) return;
-    const { verbose } = config;
+    this.display = display;
+    this.config = config;
+    this._workspace = workspace;
+    if (workspace) this._registerListeners(workspace);
+  }
+
+  private _registerListeners(workspace: Workspace): void {
+    const { verbose } = this.config;
+    const { display } = this;
     workspace.on("create-start", () => {
       if (!verbose) display.print(c.sageGreen("Creating workspace..."));
     });
@@ -59,15 +74,37 @@ export class WorkspaceController {
   }
 
   /**
+   * Attach to an existing workspace directory for a dead worker (resume flow).
+   * Creates a new Workspace for the given agentId, calls attach() on it, and
+   * replaces the current workspace. Registers event listeners on the new workspace.
+   */
+  async attachExisting(agentId: string, githubToken?: string): Promise<void> {
+    const current = this._workspace;
+    if (!current) return;
+    const newWorkspace = new Workspace(
+      current.workspaceDir,
+      agentId,
+      current.repoUrl,
+      current.originalCwd,
+      current.confirm,
+      githubToken,
+    );
+    await newWorkspace.attach();
+    this._registerListeners(newWorkspace);
+    this._workspace = newWorkspace;
+  }
+
+  /**
    * Register workspace commands into the given registry (which should already
    * be scoped, e.g. registry.scoped("workspace")). Call this once at startup.
    */
   registerCommands(registry: CommandRegistry): void {
-    const { workspace, display } = this;
+    const ctrl = this;
 
     registry.register("create", {
       description: "Create an isolated git checkout for this session",
       handler: async () => {
+        const { workspace, display } = ctrl;
         if (!workspace) {
           display.print(c.boldRed("Cannot create workspace: no GitHub repo configured."));
           return;
@@ -85,6 +122,7 @@ export class WorkspaceController {
     registry.register("reset", {
       description: "Reset workspace to clean main branch",
       handler: async () => {
+        const { workspace, display } = ctrl;
         if (!workspace?.isCreated) {
           display.print(c.boldRed("No workspace. Use /workspace:create first."));
           return;
@@ -99,6 +137,7 @@ export class WorkspaceController {
     registry.register("remove", {
       description: "Remove the workspace checkout for this session",
       handler: async () => {
+        const { workspace, display } = ctrl;
         if (!workspace?.isCreated) {
           display.print(c.boldRed("No workspace in this session."));
           return;
@@ -116,6 +155,7 @@ export class WorkspaceController {
       canRunFromArgs: true,
       exitAfterRunFromArgs: true,
       handler: async () => {
+        const { workspace, display } = ctrl;
         if (!workspace) {
           display.print(c.boldRed("Cannot prune: no workspace directory configured."));
           return;
@@ -132,13 +172,18 @@ export class WorkspaceController {
 
   /**
    * Create the workspace directory and change into it.
-   * Event listeners are registered once in the constructor.
-   * No-op if no workspace is configured.
+   * No-op if no workspace is configured or if workspace is already created
+   * (e.g. after attach() in the resume flow).
    */
   async onCreate(): Promise<void> {
-    if (!this.workspace) return;
-    await this.workspace.create();
-    process.chdir(this.workspace.dir);
+    const { workspace } = this;
+    if (!workspace) return;
+    if (workspace.isCreated) {
+      process.chdir(workspace.dir);
+      return;
+    }
+    await workspace.create();
+    process.chdir(workspace.dir);
   }
 
   /**

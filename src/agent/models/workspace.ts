@@ -34,7 +34,7 @@ export class Workspace extends EventEmitter {
   constructor(
     workspaceDir: string,
     readonly sessionId: string,
-    private readonly repoUrl: string,
+    readonly repoUrl: string,
     readonly originalCwd: string,
     readonly confirm: (msg: string) => Promise<boolean>,
     private readonly githubToken?: string,
@@ -59,6 +59,25 @@ export class Workspace extends EventEmitter {
       await this._configureAuth();
       await this._npmInstall();
     }
+    fs.writeFileSync(path.join(this.dir, ".brunel.lock"), String(process.pid));
+    this._ensureLocallyIgnored(".brunel.lock");
+    this.isCreated = true;
+  }
+
+  /**
+   * Attach to an existing workspace directory without cloning.
+   * Verifies the directory exists and contains a .git folder, re-applies
+   * git auth, writes a PID lockfile, and marks isCreated = true.
+   * Used by /worker:resume to take over a dead worker's checkout.
+   */
+  async attach(): Promise<void> {
+    if (!fs.existsSync(this.dir)) {
+      throw new Error(`Workspace not found: ${this.dir}`);
+    }
+    if (!fs.existsSync(path.join(this.dir, ".git"))) {
+      throw new Error(`${this.dir} is not a git repository`);
+    }
+    await this._configureAuth();
     fs.writeFileSync(path.join(this.dir, ".brunel.lock"), String(process.pid));
     this._ensureLocallyIgnored(".brunel.lock");
     this.isCreated = true;
