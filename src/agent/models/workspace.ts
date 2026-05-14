@@ -77,8 +77,15 @@ export class Workspace extends EventEmitter {
     if (!fs.existsSync(path.join(this.dir, ".git"))) {
       throw new Error(`${this.dir} is not a git repository`);
     }
+    const lockPath = path.join(this.dir, ".brunel.lock");
+    if (fs.existsSync(lockPath)) {
+      const existing = parseInt(fs.readFileSync(lockPath, "utf8").trim(), 10);
+      if (!isNaN(existing) && isProcessAlive(existing)) {
+        throw new Error(`Workspace is owned by process ${existing}, which is still running`);
+      }
+    }
     await this._configureAuth();
-    fs.writeFileSync(path.join(this.dir, ".brunel.lock"), String(process.pid));
+    fs.writeFileSync(lockPath, String(process.pid));
     this._ensureLocallyIgnored(".brunel.lock");
     this.isCreated = true;
   }
@@ -206,6 +213,17 @@ export class Workspace extends EventEmitter {
       removed.push(dir);
     }
     return removed;
+  }
+
+  /**
+   * Undo an attach() without deleting the directory. Removes the lock file and
+   * clears isCreated so the workspace is no longer considered owned by this process.
+   * Used when the foreman rejects a resume attempt after attach() has already run.
+   */
+  detach(): void {
+    const lockPath = path.join(this.dir, ".brunel.lock");
+    if (fs.existsSync(lockPath)) fs.rmSync(lockPath);
+    this.isCreated = false;
   }
 
   /** Remove the entire checkout directory. */

@@ -231,6 +231,55 @@ describe("/worker:resume — status in worker_hello", () => {
   });
 });
 
+// ── Foreman rejection rollback ─────────────────────────────────────────────────
+
+describe("/worker:resume — foreman rejection rollback", () => {
+  it("detaches workspace (removes lock) when foreman sends fatal error", async () => {
+    const agentId = "harold-aaaa-1111-2222-3333-bbbbccccdddd";
+    const workerDir = makeWorkspaceDir(agentId);
+
+    const { registry, getFakeWs } = makeSession(BASE_DIR);
+    await registry.execute("worker:resume", "harold-aaaa");
+
+    // Lock was written by attach() — confirm it exists
+    expect(fs.existsSync(path.join(workerDir, ".brunel.lock"))).toBe(true);
+
+    // Foreman rejects the resume
+    getFakeWs().emit("message", Buffer.from(JSON.stringify({
+      type: "foreman_error",
+      message: "Worker is currently connected — cannot resume",
+      fatal: true,
+    } satisfies Wire.ForemanMessage)));
+
+    // Lock should be gone — workspace detached
+    expect(fs.existsSync(path.join(workerDir, ".brunel.lock"))).toBe(false);
+    // Directory itself must still exist (not destroyed)
+    expect(fs.existsSync(workerDir)).toBe(true);
+  });
+
+  it("allows a second /worker:resume after a fatal rejection", async () => {
+    const agentId = "rufus-bbbb-1111-2222-3333-ccccddddeeee";
+    const workerDir = makeWorkspaceDir(agentId);
+
+    const { registry, getFakeWs, display } = makeSession(BASE_DIR);
+
+    // First attempt — foreman rejects
+    await registry.execute("worker:resume", "rufus-bbbb");
+    getFakeWs().emit("message", Buffer.from(JSON.stringify({
+      type: "foreman_error",
+      message: "Worker is currently connected",
+      fatal: true,
+    } satisfies Wire.ForemanMessage)));
+
+    // Second attempt — must not report "still running"
+    await registry.execute("worker:resume", "rufus-bbbb");
+    const printed = (display.print as ReturnType<typeof vi.fn>).mock.calls.map(([l]) => l as string).join("\n");
+    expect(printed).not.toMatch(/still running/i);
+    // Lock should exist again (written by the second attach)
+    expect(fs.existsSync(path.join(workerDir, ".brunel.lock"))).toBe(true);
+  });
+});
+
 // ── Wire protocol — PROTOCOL_VERSION ─────────────────────────────────────────
 
 describe("wire protocol — resume status", () => {

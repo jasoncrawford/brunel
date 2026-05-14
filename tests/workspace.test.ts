@@ -490,6 +490,57 @@ describe("Workspace.attach", () => {
     const lines = fs.readFileSync(excludePath, "utf8").split("\n").map(l => l.trim());
     expect(lines).toContain(".brunel.lock");
   });
+
+  it("throws without overwriting lock when existing lock PID is alive", async () => {
+    const workerDir = path.join(BASE_DIR, WORKER_ID);
+    fs.mkdirSync(path.join(workerDir, ".git"), { recursive: true });
+    fs.writeFileSync(path.join(workerDir, ".brunel.lock"), String(process.pid));
+
+    const ws = new Workspace(BASE_DIR, WORKER_ID, REPO_URL, "/original-cwd", async () => true);
+    await expect(ws.attach()).rejects.toThrow(/still running/i);
+    expect(ws.isCreated).toBe(false);
+    // Lock should still have original PID, not be overwritten
+    expect(fs.readFileSync(path.join(workerDir, ".brunel.lock"), "utf8").trim()).toBe(String(process.pid));
+  });
+
+  it("proceeds when existing lock PID is dead", async () => {
+    const workerDir = path.join(BASE_DIR, WORKER_ID);
+    fs.mkdirSync(path.join(workerDir, ".git"), { recursive: true });
+    fs.writeFileSync(path.join(workerDir, ".brunel.lock"), "2147483647");
+
+    const ws = new Workspace(BASE_DIR, WORKER_ID, REPO_URL, "/original-cwd", async () => true);
+    await ws.attach();
+    expect(ws.isCreated).toBe(true);
+    expect(fs.readFileSync(path.join(workerDir, ".brunel.lock"), "utf8").trim()).toBe(String(process.pid));
+  });
+});
+
+// ── detach ─────────────────────────────────────────────────────────────────────
+
+describe("Workspace.detach", () => {
+  it("clears isCreated and removes the lock file without deleting the directory", async () => {
+    const workerDir = path.join(BASE_DIR, WORKER_ID);
+    fs.mkdirSync(path.join(workerDir, ".git"), { recursive: true });
+
+    const ws = new Workspace(BASE_DIR, WORKER_ID, REPO_URL, "/original-cwd", async () => true);
+    await ws.attach();
+    expect(ws.isCreated).toBe(true);
+
+    ws.detach();
+
+    expect(ws.isCreated).toBe(false);
+    expect(fs.existsSync(path.join(workerDir, ".brunel.lock"))).toBe(false);
+    expect(fs.existsSync(workerDir)).toBe(true);
+  });
+
+  it("is a no-op when no lock file exists", async () => {
+    const workerDir = path.join(BASE_DIR, WORKER_ID);
+    fs.mkdirSync(path.join(workerDir, ".git"), { recursive: true });
+
+    const ws = new Workspace(BASE_DIR, WORKER_ID, REPO_URL, "/original-cwd", async () => true);
+    expect(() => ws.detach()).not.toThrow();
+    expect(ws.isCreated).toBe(false);
+  });
 });
 
 // ── http.extraHeader auth ─────────────────────────────────────────────────────

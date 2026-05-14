@@ -148,6 +148,9 @@ export class WorkerController extends EventEmitter {
   // ── Resume state ───────────────────────────────────────────────────────────
   private _isResuming = false;
   private _pendingResumeSessionId: string | undefined;
+  // True from attach() until the foreman accepts or rejects — lets the fatal
+  // error handler detach (not destroy) the workspace on rejection.
+  private _attachedViaResume = false;
 
   // ── Connection state (cleared by stop()) ──────────────────────────────────
   private ws: WebSocket | undefined;
@@ -812,6 +815,7 @@ export class WorkerController extends EventEmitter {
 
         // Attach to the existing workspace directory
         await this.workspaceController!.attachExisting(agentId, this.options?.githubToken);
+        this._attachedViaResume = true;
 
         // Look up the last Claude session for this workspace
         const workspaceDir2 = this.workspaceController!.workspace!.dir;
@@ -871,6 +875,7 @@ export class WorkerController extends EventEmitter {
     this._pendingClaimTaskId = undefined;
     this._isResuming = false;
     this._pendingResumeSessionId = undefined;
+    this._attachedViaResume = false;
     this._isReserved = false;
     this.lastSeenEventSeqId = undefined;
     this.ws = undefined;
@@ -1092,6 +1097,12 @@ export class WorkerController extends EventEmitter {
 
     if (msg.type === "foreman_error") {
       if (msg.fatal) {
+        // If we attached a workspace for this resume but the foreman rejected us,
+        // detach (release the lock) without destroying the directory.
+        if (this._attachedViaResume) {
+          this.workspaceController?.workspace?.detach();
+          this._attachedViaResume = false;
+        }
         this._deactivate();
         this.currentAc?.abort(); // abort any running query immediately
         this.ws?.close();
@@ -1111,6 +1122,7 @@ export class WorkerController extends EventEmitter {
 
     if (msg.type === "hello_ack") {
       this.reconnectAttempts = 0; // connection succeeded; reset backoff
+      this._attachedViaResume = false; // foreman accepted — workspace is legitimately ours
       if (msg.status === "cancelled") {
         // Task was reassigned while worker was disconnected — stop and reset.
         this.currentAc?.abort(); // abort any running query immediately
