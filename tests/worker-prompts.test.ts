@@ -386,13 +386,14 @@ describe("buildEventPrompt", () => {
   });
 
   it("issue_comment — preserves full multi-paragraph body including third paragraph", () => {
+    // Real GitHub webhooks deliver comment.body with CRLF (\r\n) line endings.
     const body = [
       "But in this case there *was* a comment, we just missed it somehow?",
       "",
       'It correctly shows up in the foreman dashboard: `issue_comment/created — "Closed by #54"`',
       "",
       "So we're just not looking in the right place for the comment body. The task here is to find the text, not to drop the event.",
-    ].join("\n");
+    ].join("\r\n");
     const evt: Wire.WebhookEvent = {
       id: "e1",
       name: "issue_comment",
@@ -401,6 +402,7 @@ describe("buildEventPrompt", () => {
     const p = buildEventPrompt([evt]);
     expect(p).toContain("So we're just not looking in the right place");
     expect(p).toContain("not to drop the event");
+    expect(p).not.toContain("\r");
   });
 
   it("unknown event type — returns empty string (unrecognised events are log_only, never reach prompt builder)", () => {
