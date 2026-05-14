@@ -91,6 +91,16 @@ describe("buildInitialPrompt", () => {
     expect(p).toContain("worktree");
   });
 
+  it("normalizes CRLF line endings in issue body", () => {
+    const p = buildInitialPrompt({
+      number: 1, title: "T",
+      body: "First paragraph.\r\n\r\nSecond paragraph.",
+      labels: [], repoUrl: "https://github.com/x/y", status: "assigned",
+    });
+    expect(p).toContain("Second paragraph.");
+    expect(p).not.toContain("\r");
+  });
+
 });
 
 describe("buildInitialPrompt — status-dependent prompts", () => {
@@ -586,6 +596,31 @@ describe("buildEventPrompt — pipeline behavior", () => {
     expect(p).toContain("Overall looks wrong");
     expect(p).toContain("src/foo.ts");
     expect(p).toContain("Fix this line");
+  });
+
+  it("_code_review — normalizes CRLF in review body and inline comment bodies", () => {
+    const events: Wire.WebhookEvent[] = [
+      {
+        id: "e1",
+        name: "pull_request_review",
+        payload: {
+          pull_request: { number: 9 },
+          review: { state: "changes_requested", body: "First line.\r\n\r\nSecond line." },
+        },
+      },
+      {
+        id: "e2",
+        name: "pull_request_review_comment",
+        payload: {
+          pull_request: { number: 9 },
+          comment: { path: "src/foo.ts", body: "Line one.\r\nLine two.", line: 42 },
+        },
+      },
+    ];
+    const p = buildEventPrompt(events);
+    expect(p).toContain("Second line.");
+    expect(p).toContain("Line two.");
+    expect(p).not.toContain("\r");
   });
 });
 

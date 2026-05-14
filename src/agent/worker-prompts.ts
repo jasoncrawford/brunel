@@ -43,7 +43,7 @@ function section1IssueHeader(issue: Wire.TaskIssue): string {
 Issue description:
 
 ---------------
-${issue.body || "(no description)"}
+${normalizeLineEndings(issue.body) || "(no description)"}
 ---------------
 
 Labels: ${issue.labels.join(", ") || "(none)"}`;
@@ -288,12 +288,12 @@ const EVENT_FMT: EventTemplateFmtTable = {
       `A review was submitted on PR #${pr?.number}: state=${review?.state}.`,
     ];
     if (review?.body) {
-      lines.push(`\n${review.body}`);
+      lines.push(`\n${normalizeLineEndings(review.body)}`);
     }
     if (comments && comments.length > 0) {
       lines.push("\nInline comments:");
       for (const c of comments) {
-        lines.push(`\n- ${formatCommentLocation(c.path, c.line, c.startLine)}: ${c.body}`);
+        lines.push(`\n- ${formatCommentLocation(c.path, c.line, c.startLine)}: ${normalizeLineEndings(c.body)}`);
       }
     }
     lines.push("\n\n" + CODE_REVIEW_PROMPT);
