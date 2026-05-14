@@ -234,15 +234,17 @@ describe("/worker:resume — status in worker_hello", () => {
 // ── Foreman rejection rollback ─────────────────────────────────────────────────
 
 describe("/worker:resume — foreman rejection rollback", () => {
-  it("detaches workspace (removes lock) when foreman sends fatal error", async () => {
+  it("detaches workspace (removes lock, restores cwd) when foreman sends fatal error", async () => {
     const agentId = "harold-aaaa-1111-2222-3333-bbbbccccdddd";
     const workerDir = makeWorkspaceDir(agentId);
+    const originalCwd = process.cwd();
 
     const { registry, getFakeWs } = makeSession(BASE_DIR);
     await registry.execute("worker:resume", "harold-aaaa");
 
-    // Lock was written by attach() — confirm it exists
+    // Lock was written by attach() and cwd was changed — confirm both
     expect(fs.existsSync(path.join(workerDir, ".brunel.lock"))).toBe(true);
+    expect(process.cwd()).toBe(workerDir);
 
     // Foreman rejects the resume
     getFakeWs().emit("message", Buffer.from(JSON.stringify({
@@ -255,6 +257,8 @@ describe("/worker:resume — foreman rejection rollback", () => {
     expect(fs.existsSync(path.join(workerDir, ".brunel.lock"))).toBe(false);
     // Directory itself must still exist (not destroyed)
     expect(fs.existsSync(workerDir)).toBe(true);
+    // cwd should be restored
+    expect(process.cwd()).toBe(originalCwd);
   });
 
   it("allows a second /worker:resume after a fatal rejection", async () => {
