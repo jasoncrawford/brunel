@@ -898,6 +898,7 @@ export class WorkerController extends EventEmitter {
    * resumeSessionId, if set, causes index.ts to resume an existing Claude session.
    */
   private enqueuePrompt(prompt: string, fresh: boolean, resumeSessionId?: string): void {
+    if (!prompt) return;
     this.pendingPrompts.push({ prompt, fresh, resumeSessionId });
     this.emit("prompts_ready");
   }
@@ -1253,6 +1254,17 @@ export class WorkerController extends EventEmitter {
         return;
       }
 
+      // Diagnostic: log payload structure when issue_comment arrives without a body
+      // so we can identify the "right place" to read it from (issue #1087).
+      if (event.name === "issue_comment") {
+        const comment = event.payload.comment as Record<string, unknown> | undefined;
+        if (!comment?.body) {
+          this.display.print(c.amber(
+            `[diag] issue_comment has no comment.body — payload keys: ${Object.keys(event.payload).join(", ")}; comment: ${JSON.stringify(comment)}`
+          ));
+        }
+      }
+
       const classification = classifyEvent(event);
       if (classification === "log_only") {
         // Already logged via printForemanMessage above; no further action.
@@ -1292,7 +1304,7 @@ export class WorkerController extends EventEmitter {
 
   private buildAndLogEventPrompt(events: Wire.WebhookEvent[]): string {
     const prompt = buildEventPrompt(events);
-    this.display.print(c.sageGreen(prompt));
+    if (prompt) this.display.print(c.sageGreen(prompt));
     return prompt;
   }
 }

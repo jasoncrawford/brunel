@@ -108,6 +108,13 @@ describe("classifyEvent", () => {
     it("is actionable when comment field is missing", () => {
       expect(classifyEvent(makeEvent("issue_comment", { action: "created" }))).toBe("actionable");
     });
+
+    it("is actionable when comment body is empty string", () => {
+      expect(classifyEvent(makeEvent("issue_comment", {
+        action: "created",
+        comment: { body: "" },
+      }))).toBe("actionable");
+    });
   });
 
   describe("unknown event names", () => {

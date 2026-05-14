@@ -395,6 +395,26 @@ describe("buildEventPrompt", () => {
     expect(p).toContain("Can you also handle edge case Y?");
   });
 
+  it("issue_comment with missing comment — contains issue number", () => {
+    const evt: Wire.WebhookEvent = {
+      id: "e1",
+      name: "issue_comment",
+      payload: { issue: { number: 53 } },
+    };
+    const p = buildEventPrompt([evt]);
+    expect(p).toContain("issue #53");
+  });
+
+  it("issue_comment with empty body — contains issue number", () => {
+    const evt: Wire.WebhookEvent = {
+      id: "e1",
+      name: "issue_comment",
+      payload: { issue: { number: 53 }, comment: { body: "" } },
+    };
+    const p = buildEventPrompt([evt]);
+    expect(p).toContain("issue #53");
+  });
+
   it("issue_comment — preserves full multi-paragraph body including third paragraph", () => {
     // Real GitHub webhooks deliver comment.body with CRLF (\r\n) line endings.
     const body = [
