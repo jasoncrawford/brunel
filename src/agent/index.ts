@@ -105,12 +105,15 @@ export class BrunelAgent {
     const workspaceController = new WorkspaceController(workspace, this.display, config);
 
     // doExit handles workspace cleanup and stdin/stdout teardown.
+    // Returns true if exit should proceed, false if the user cancelled.
     // Called on exit from pure REPL mode (no active worker session).
-    const doExit = async () => {
-      await workspaceController.onDestroy();
+    const doExit = async (): Promise<boolean> => {
+      const ok = await workspaceController.onDestroy();
+      if (!ok) return false;
       process.stdout.write("\x1b[?2004l\r\n");
       if (process.stdin.isTTY) process.stdin.setRawMode(false);
       process.stdin.pause();
+      return true;
     };
 
     // ── Routing queue ─────────────────────────────────────────────────────────
@@ -391,7 +394,7 @@ export class BrunelAgent {
           await workerController.stop();
           if (workerController.isActive) continue; // user cancelled — stay in loop
         }
-        await doExit();
+        if (!await doExit()) continue; // user cancelled data-loss confirmation — stay in loop
         break;
       }
 
@@ -430,7 +433,7 @@ export class BrunelAgent {
         // doExit() is always called here, never inside individual command handlers,
         // so every "exit" return value gets the same terminal cleanup regardless of source.
         if (result === "exit") {
-          await doExit();
+          if (!await doExit()) continue; // user cancelled data-loss confirmation — stay in loop
           break;
         }
         continue;

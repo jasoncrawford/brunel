@@ -256,6 +256,44 @@ describe("WorkspaceController constructor listeners", () => {
   });
 });
 
+// ── onDestroy ─────────────────────────────────────────────────────────────────
+
+describe("WorkspaceController.onDestroy", () => {
+  it("returns true and does not destroy when no workspace is configured", async () => {
+    const controller = new WorkspaceController(undefined, testDisplay, testConfig);
+    const result = await controller.onDestroy();
+    expect(result).toBe(true);
+  });
+
+  it("returns true and does not destroy when workspace is not yet created", async () => {
+    const ws = makeWorkspace();
+    const controller = new WorkspaceController(ws, testDisplay, testConfig);
+    const result = await controller.onDestroy();
+    expect(result).toBe(true);
+    expect(ws.destroy).not.toHaveBeenCalled();
+  });
+
+  it("destroys workspace and returns true when user confirms", async () => {
+    const ws = makeWorkspace(vi.fn().mockResolvedValue(true));
+    ws.isCreated = true;
+    vi.mocked(ws.checkSafety).mockResolvedValue({ uncommittedFiles: ["M foo.ts"], unpushedCommits: [], noUpstream: false });
+    const controller = new WorkspaceController(ws, testDisplay, testConfig);
+    const result = await controller.onDestroy();
+    expect(result).toBe(true);
+    expect(ws.destroy).toHaveBeenCalled();
+  });
+
+  it("returns false and does not destroy when user cancels", async () => {
+    const ws = makeWorkspace(vi.fn().mockResolvedValue(false));
+    ws.isCreated = true;
+    vi.mocked(ws.checkSafety).mockResolvedValue({ uncommittedFiles: ["M foo.ts"], unpushedCommits: [], noUpstream: false });
+    const controller = new WorkspaceController(ws, testDisplay, testConfig);
+    const result = await controller.onDestroy();
+    expect(result).toBe(false);
+    expect(ws.destroy).not.toHaveBeenCalled();
+  });
+});
+
 // ── workspace:prune ───────────────────────────────────────────────────────────
 
 describe("workspace:prune", () => {
