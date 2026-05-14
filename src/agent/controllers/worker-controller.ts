@@ -7,7 +7,7 @@ import { WebSocket } from "ws";
 import { c } from "../views/style.js";
 import { AgentStatus } from "../models/agent-status.js";
 import type { Display } from "../views/display.js";
-import { buildInitialPrompt, buildEventPrompt } from "../worker-prompts.js";
+import { buildInitialPrompt, buildResumePrompt, buildEventPrompt } from "../worker-prompts.js";
 import * as Wire from "../../../shared/wire.js";
 import { fmtError } from "../../utils.js";
 import { fmtNum, fmtTaskStats } from "../../../shared/formatters.js";
@@ -778,8 +778,8 @@ export class WorkerController extends EventEmitter {
           matches = fs.readdirSync(workspaceDir, { withFileTypes: true })
             .filter(e => e.isDirectory() && e.name.startsWith(prefix))
             .map(e => e.name);
-        } catch {
-          this.display.print(c.boldRed("No worker workspace found matching the prefix."));
+        } catch (err) {
+          this.display.print(c.boldRed(`Error reading workspace directory: ${fmtError(err)}`));
           return undefined;
         }
 
@@ -793,6 +793,19 @@ export class WorkerController extends EventEmitter {
         }
 
         const agentId = matches[0];
+
+        // Refuse to take over a workspace whose worker process is still alive.
+        const lockPath = path.join(workspaceDir, agentId, ".brunel.lock");
+        if (fs.existsSync(lockPath)) {
+          const pid = parseInt(fs.readFileSync(lockPath, "utf8").trim(), 10);
+          if (!isNaN(pid)) {
+            try {
+              process.kill(pid, 0); // throws ESRCH if not running
+              this.display.print(c.boldRed(`Worker ${agentId} (PID ${pid}) is still running. Stop it first.`));
+              return undefined;
+            } catch { /* process is gone — safe to resume */ }
+          }
+        }
 
         // Take on the dead worker's identity
         this.agentStatus.setAgentId(agentId);
@@ -1181,17 +1194,21 @@ export class WorkerController extends EventEmitter {
       this.agentStatus.resetTaskStats();
       this._syncPendingEventsStatus();
       void this.agentStatus.refreshBranch();
-      const initialPrompt = buildInitialPrompt(msg.issue, !!this.workspaceController?.workspace);
-      this.display.print(c.sageGreen(initialPrompt));
       const resumeSessionId = this._pendingResumeSessionId;
       this._pendingResumeSessionId = undefined;
-      const enqueue = () => this.enqueuePrompt(initialPrompt, true, resumeSessionId);
+      // Resume: use a short "pick up where you left off" prompt in the existing session.
+      // New task: use the full initial prompt and start a fresh session.
+      const prompt = resumeSessionId
+        ? buildResumePrompt(msg.issue)
+        : buildInitialPrompt(msg.issue, !!this.workspaceController?.workspace);
+      this.display.print(c.sageGreen(prompt));
+      const enqueue = () => this.enqueuePrompt(prompt, !resumeSessionId, resumeSessionId);
       // If a workspace reset is in progress (from a cancelled hello_ack), defer the
       // prompt until the reset finishes — otherwise the task could run in a dirty workspace.
       if (this._resetPromise) {
         void this._resetPromise.then(enqueue, enqueue);
       } else {
-        enqueue(); // fresh=true: new task, reset session
+        enqueue();
       }
     } else if (msg.type === "event_notification") {
       if (msg.taskId !== this.currentTaskId) {

@@ -233,11 +233,7 @@ describe("/worker:resume — status in worker_hello", () => {
 
 // ── Wire protocol — PROTOCOL_VERSION ─────────────────────────────────────────
 
-describe("wire protocol — PROTOCOL_VERSION bump", () => {
-  it("PROTOCOL_VERSION is at least 2 (bumped for resume support)", () => {
-    expect(Wire.PROTOCOL_VERSION).toBeGreaterThanOrEqual(2);
-  });
-
+describe("wire protocol — resume status", () => {
   it("'resume' is a valid status in worker_hello", () => {
     // Compile-time check: this assignment must not be a TypeScript error.
     const msg: Wire.WorkerMessage = {

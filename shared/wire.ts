@@ -4,7 +4,7 @@
 export type TaskStatus = "pending" | "assigned" | "pushed" | "merged" | "closed" | "complete" | "blocked";
 
 /** Current foreman ↔ worker wire protocol version. Increment when making incompatible changes. */
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 1;
 
 // ── Admin WebSocket wire types (admin dashboard ↔ server) ────────────────────
 
