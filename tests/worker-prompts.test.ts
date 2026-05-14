@@ -91,6 +91,16 @@ describe("buildInitialPrompt", () => {
     expect(p).toContain("worktree");
   });
 
+  it("normalizes CRLF line endings in issue body", () => {
+    const p = buildInitialPrompt({
+      number: 1, title: "T",
+      body: "First paragraph.\r\n\r\nSecond paragraph.",
+      labels: [], repoUrl: "https://github.com/x/y", status: "assigned",
+    });
+    expect(p).toContain("Second paragraph.");
+    expect(p).not.toContain("\r");
+  });
+
 });
 
 describe("buildInitialPrompt — status-dependent prompts", () => {
@@ -385,6 +395,26 @@ describe("buildEventPrompt", () => {
     expect(p).toContain("Can you also handle edge case Y?");
   });
 
+  it("issue_comment — preserves full multi-paragraph body including third paragraph", () => {
+    // Real GitHub webhooks deliver comment.body with CRLF (\r\n) line endings.
+    const body = [
+      "But in this case there *was* a comment, we just missed it somehow?",
+      "",
+      'It correctly shows up in the foreman dashboard: `issue_comment/created — "Closed by #54"`',
+      "",
+      "So we're just not looking in the right place for the comment body. The task here is to find the text, not to drop the event.",
+    ].join("\r\n");
+    const evt: Wire.WebhookEvent = {
+      id: "e1",
+      name: "issue_comment",
+      payload: { issue: { number: 1092 }, comment: { body } },
+    };
+    const p = buildEventPrompt([evt]);
+    expect(p).toContain("So we're just not looking in the right place");
+    expect(p).toContain("not to drop the event");
+    expect(p).not.toContain("\r");
+  });
+
   it("unknown event type — returns empty string (unrecognised events are log_only, never reach prompt builder)", () => {
     const evt: Wire.WebhookEvent = { id: "e1", name: "deployment", payload: {} };
     const p = buildEventPrompt([evt]);
@@ -566,6 +596,31 @@ describe("buildEventPrompt — pipeline behavior", () => {
     expect(p).toContain("Overall looks wrong");
     expect(p).toContain("src/foo.ts");
     expect(p).toContain("Fix this line");
+  });
+
+  it("_code_review — normalizes CRLF in review body and inline comment bodies", () => {
+    const events: Wire.WebhookEvent[] = [
+      {
+        id: "e1",
+        name: "pull_request_review",
+        payload: {
+          pull_request: { number: 9 },
+          review: { state: "changes_requested", body: "First line.\r\n\r\nSecond line." },
+        },
+      },
+      {
+        id: "e2",
+        name: "pull_request_review_comment",
+        payload: {
+          pull_request: { number: 9 },
+          comment: { path: "src/foo.ts", body: "Line one.\r\nLine two.", line: 42 },
+        },
+      },
+    ];
+    const p = buildEventPrompt(events);
+    expect(p).toContain("Second line.");
+    expect(p).toContain("Line two.");
+    expect(p).not.toContain("\r");
   });
 });
 

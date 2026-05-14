@@ -1,5 +1,9 @@
 import * as Wire from "../../shared/wire.js";
 
+function normalizeLineEndings(text: unknown): string {
+  return String(text ?? "").replace(/\r\n/g, "\n");
+}
+
 function formatCommentLocation(
   path: unknown,
   line?: unknown,
@@ -39,7 +43,7 @@ function section1IssueHeader(issue: Wire.TaskIssue): string {
 Issue description:
 
 ---------------
-${issue.body || "(no description)"}
+${normalizeLineEndings(issue.body) || "(no description)"}
 ---------------
 
 Labels: ${issue.labels.join(", ") || "(none)"}`;
@@ -284,12 +288,12 @@ const EVENT_FMT: EventTemplateFmtTable = {
       `A review was submitted on PR #${pr?.number}: state=${review?.state}.`,
     ];
     if (review?.body) {
-      lines.push(`\n${review.body}`);
+      lines.push(`\n${normalizeLineEndings(review.body)}`);
     }
     if (comments && comments.length > 0) {
       lines.push("\nInline comments:");
       for (const c of comments) {
-        lines.push(`\n- ${formatCommentLocation(c.path, c.line, c.startLine)}: ${c.body}`);
+        lines.push(`\n- ${formatCommentLocation(c.path, c.line, c.startLine)}: ${normalizeLineEndings(c.body)}`);
       }
     }
     lines.push("\n\n" + CODE_REVIEW_PROMPT);
@@ -319,11 +323,11 @@ ${FOLLOWUP_CHECKLIST}`;
   },
 
   pull_request_review: (p) =>
-    `A review was submitted on PR #${p.pull_request?.number}: state=${p.review?.state}.\n\n${p.review?.body ?? ""}\n\n${CODE_REVIEW_PROMPT}`.trim(),
+    `A review was submitted on PR #${p.pull_request?.number}: state=${p.review?.state}.\n\n${normalizeLineEndings(p.review?.body)}\n\n${CODE_REVIEW_PROMPT}`.trim(),
 
   pull_request_review_comment: (p) =>
-    `A review comment was added on PR #${p.pull_request?.number} at ${formatCommentLocation(p.comment?.path, p.comment?.line, p.comment?.start_line)}:\n\n${p.comment?.body ?? ""}\n\n${CODE_REVIEW_PROMPT}`.trim(),
+    `A review comment was added on PR #${p.pull_request?.number} at ${formatCommentLocation(p.comment?.path, p.comment?.line, p.comment?.start_line)}:\n\n${normalizeLineEndings(p.comment?.body)}\n\n${CODE_REVIEW_PROMPT}`.trim(),
 
   issue_comment: (p) =>
-    `A comment was added on issue #${p.issue?.number}:\n\n${p.comment?.body ?? ""}`.trim(),
+    `A comment was added on issue #${p.issue?.number}:\n\n${normalizeLineEndings(p.comment?.body)}`.trim(),
 };
