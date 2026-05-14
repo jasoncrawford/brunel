@@ -211,13 +211,15 @@ export class WorkspaceController {
 
   /**
    * Confirm if unsafe, then destroy the workspace. Used during clean shutdown
-   * (^D, /exit, SIGINT). No-op if no workspace is configured or not yet created.
+   * (^D, /exit). Returns true if the caller should proceed with exit (no workspace,
+   * workspace not yet created, or user confirmed), false if the user cancelled.
    */
-  async onDestroy(): Promise<void> {
+  async onDestroy(): Promise<boolean> {
     const { workspace } = this;
-    if (!workspace?.isCreated) return;
+    if (!workspace?.isCreated) return true;
     const ok = await confirmIfUnsafe(workspace, workspace.confirm);
     if (ok) await workspace.destroy();
+    return ok;
   }
 
   /**
