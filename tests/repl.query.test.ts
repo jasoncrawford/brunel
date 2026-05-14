@@ -953,3 +953,79 @@ describe("runQuery - first-message stall auto-retry", () => {
     expect(output).not.toContain("Interrupted");
   });
 });
+
+describe("runQuery - stall suppression during compaction", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("does NOT trigger stallRetry when silence exceeds threshold while compacting", async () => {
+    vi.useFakeTimers();
+
+    (query as any).mockImplementation((opts: any) => {
+      return (async function* () {
+        yield { type: "system", subtype: "status", status: "compacting" };
+        // Compaction takes longer than the stall threshold — hang until abort
+        await new Promise<void>((resolve) => {
+          opts.options.abortController.signal.addEventListener("abort", resolve, { once: true });
+        });
+      })();
+    });
+
+    const ac = new AbortController();
+    const cap = captureConsole();
+    const queryPromise = testController.runQuery("test", undefined, ac);
+
+    // Advance well past the stall threshold
+    await vi.advanceTimersByTimeAsync(130_000);
+
+    // The stall warning should NOT have been printed
+    const output = cap.lines.map(stripAnsi).join("\n");
+    expect(output).not.toContain("Connection stalled before receiving a response");
+
+    // Clean up — the query is still running (not auto-aborted)
+    ac.abort();
+    const result = await queryPromise;
+    cap.restore();
+
+    expect(result.stallRetry).toBe(false);
+  });
+
+  it("resumes normal stall detection after compaction ends", async () => {
+    vi.useFakeTimers();
+
+    let resolveCompaction!: () => void;
+    const compactionDone = new Promise<void>((resolve) => { resolveCompaction = resolve; });
+
+    (query as any).mockImplementation((opts: any) => {
+      return (async function* () {
+        yield { type: "system", subtype: "status", status: "compacting" };
+        await compactionDone;
+        yield { type: "system", subtype: "compact_boundary", compact_metadata: { trigger: "auto" } };
+        // Silence again after compaction — long enough to trigger stall
+        await new Promise<void>((resolve) => {
+          opts.options.abortController.signal.addEventListener("abort", resolve, { once: true });
+        });
+      })();
+    });
+
+    const cap = captureConsole();
+    const queryPromise = testController.runQuery("test", undefined);
+
+    // Advance into the compaction window — stall should NOT fire
+    await vi.advanceTimersByTimeAsync(130_000);
+    expect(cap.lines.map(stripAnsi).join("\n")).not.toContain("Connection stalled");
+
+    // Resolve compaction
+    resolveCompaction();
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Advance past stall threshold again, now after compaction
+    await vi.advanceTimersByTimeAsync(130_000);
+    await queryPromise;
+    cap.restore();
+
+    const output = cap.lines.map(stripAnsi).join("\n");
+    expect(output).toContain("Connection stalled before receiving a response");
+  });
+});

@@ -145,13 +145,15 @@ export class AgentController {
     let resultReceived = false;
     let receivedSubstantiveContent = false;
     let stallRetry = false;
+    let isCompacting = false;
 
     // Log a single warning when no SDK message has arrived for STALL_THRESHOLD_SECS.
     // This fires via a watchdog so it captures hangs inside the for-await wait itself.
     // If no substantive content has arrived yet, auto-abort and signal the caller to retry.
+    // Compaction can legitimately take longer than the stall threshold, so skip while compacting.
     let stallLogged = false;
     const stallWatcher = setInterval(() => {
-      if (!stallLogged && stats.secsSinceLastActivity >= STALL_THRESHOLD_SECS) {
+      if (!stallLogged && stats.secsSinceLastActivity >= STALL_THRESHOLD_SECS && !isCompacting) {
         stallLogged = true;
         logFull("STALL_DETECTED", {
           secsSinceLastActivity: stats.secsSinceLastActivity,
@@ -170,6 +172,16 @@ export class AgentController {
       for await (const message of iterable) {
         stats.noteActivity();
         if (message.type !== "system") receivedSubstantiveContent = true;
+
+        // Track compaction to suppress false stall during (potentially slow) context compaction.
+        const sysMsg = message as { type: string; subtype?: string; status?: string };
+        if (sysMsg.type === "system" && sysMsg.subtype === "status" && sysMsg.status === "compacting") {
+          isCompacting = true;
+        } else if (sysMsg.type === "system" && sysMsg.subtype === "compact_boundary") {
+          isCompacting = false;
+        } else if (sysMsg.type !== "system") {
+          isCompacting = false;
+        }
 
         if (!(message.type === "stream_event" && (message.event as { type?: string }).type === "content_block_delta")) {
           logFull("MESSAGE", message);
