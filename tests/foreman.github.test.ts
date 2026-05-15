@@ -254,7 +254,7 @@ describe("mintInstallationToken", () => {
     expect(payload.iss).toBe("app-99");
   });
 
-  it("JWT iat is ~60 seconds before now and exp is ~540 seconds after iat", async () => {
+  it("JWT iat is ~60 seconds before now and exp is iat + 600", async () => {
     const { privateKey } = makeTestKeyPair();
     getConfig().appId = "1";
     getConfig().appPrivateKey = privateKey;
