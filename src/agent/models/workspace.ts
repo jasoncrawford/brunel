@@ -31,6 +31,10 @@ export class Workspace extends EventEmitter {
   readonly workspaceDir: string;
   isCreated = false;
 
+  private get lockPath(): string {
+    return path.join(this.dir, ".brunel.lock");
+  }
+
   constructor(
     workspaceDir: string,
     readonly sessionId: string,
@@ -59,7 +63,7 @@ export class Workspace extends EventEmitter {
       await this._configureAuth();
       await this._npmInstall();
     }
-    fs.writeFileSync(path.join(this.dir, ".brunel.lock"), String(process.pid));
+    fs.writeFileSync(this.lockPath, String(process.pid));
     this._ensureLocallyIgnored(".brunel.lock");
     this.isCreated = true;
   }
@@ -77,8 +81,15 @@ export class Workspace extends EventEmitter {
     if (!fs.existsSync(path.join(this.dir, ".git"))) {
       throw new Error(`${this.dir} is not a git repository`);
     }
+    const { lockPath } = this;
+    if (fs.existsSync(lockPath)) {
+      const existing = parseInt(fs.readFileSync(lockPath, "utf8").trim(), 10);
+      if (!isNaN(existing) && isProcessAlive(existing)) {
+        throw new Error(`Workspace is owned by process ${existing}, which is still running`);
+      }
+    }
     await this._configureAuth();
-    fs.writeFileSync(path.join(this.dir, ".brunel.lock"), String(process.pid));
+    fs.writeFileSync(lockPath, String(process.pid));
     this._ensureLocallyIgnored(".brunel.lock");
     this.isCreated = true;
   }
@@ -106,7 +117,7 @@ export class Workspace extends EventEmitter {
       this.emit("clone-start", { repoUrl: this.repoUrl, dir: this.dir });
       await gitExec(["clone", this.repoUrl, this.dir], undefined);
       await this._configureAuth();
-      fs.writeFileSync(path.join(this.dir, ".brunel.lock"), String(process.pid));
+      fs.writeFileSync(this.lockPath, String(process.pid));
       this._ensureLocallyIgnored(".brunel.lock");
       await this._doReset(); // throws if still broken — propagates to caller
     }
@@ -206,6 +217,16 @@ export class Workspace extends EventEmitter {
       removed.push(dir);
     }
     return removed;
+  }
+
+  /**
+   * Undo an attach() without deleting the directory. Removes the lock file and
+   * clears isCreated so the workspace is no longer considered owned by this process.
+   * Used when the foreman rejects a resume attempt after attach() has already run.
+   */
+  detach(): void {
+    if (fs.existsSync(this.lockPath)) fs.rmSync(this.lockPath);
+    this.isCreated = false;
   }
 
   /** Remove the entire checkout directory. */

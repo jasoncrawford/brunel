@@ -210,6 +210,18 @@ export class WorkspaceController {
   }
 
   /**
+   * Detach from a resume-attached workspace without destroying it. Releases the
+   * lock file, clears isCreated, and returns to the original cwd. Called when
+   * the foreman rejects a resume attempt after attach() has already run.
+   */
+  onDetach(): void {
+    const { workspace } = this;
+    if (!workspace?.isCreated) return;
+    workspace.detach();
+    process.chdir(workspace.originalCwd);
+  }
+
+  /**
    * Confirm if unsafe, then destroy the workspace. Used during clean shutdown
    * (^D, /exit). Returns true if the caller should proceed with exit (no workspace,
    * workspace not yet created, or user confirmed), false if the user cancelled.

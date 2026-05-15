@@ -148,6 +148,9 @@ export class WorkerController extends EventEmitter {
   // ── Resume state ───────────────────────────────────────────────────────────
   private _isResuming = false;
   private _pendingResumeSessionId: string | undefined;
+  // True from attach() until the foreman accepts or rejects — lets the fatal
+  // error handler detach (not destroy) the workspace on rejection.
+  private _attachedViaResume = false;
 
   // ── Connection state (cleared by stop()) ──────────────────────────────────
   private ws: WebSocket | undefined;
@@ -794,24 +797,19 @@ export class WorkerController extends EventEmitter {
 
         const agentId = matches[0];
 
-        // Refuse to take over a workspace whose worker process is still alive.
-        const lockPath = path.join(workspaceDir, agentId, ".brunel.lock");
-        if (fs.existsSync(lockPath)) {
-          const pid = parseInt(fs.readFileSync(lockPath, "utf8").trim(), 10);
-          if (!isNaN(pid)) {
-            try {
-              process.kill(pid, 0); // throws ESRCH if not running
-              this.display.print(c.boldRed(`Worker ${agentId} (PID ${pid}) is still running. Stop it first.`));
-              return undefined;
-            } catch { /* process is gone — safe to resume */ }
-          }
-        }
-
         // Take on the dead worker's identity
         this.agentStatus.setAgentId(agentId);
 
-        // Attach to the existing workspace directory
-        await this.workspaceController!.attachExisting(agentId, this.options?.githubToken);
+        // Attach to the existing workspace directory. attach() enforces the
+        // live-lock check and throws if the workspace is still owned by a live
+        // process — no need to duplicate that check here.
+        try {
+          await this.workspaceController!.attachExisting(agentId, this.options?.githubToken);
+        } catch (err) {
+          this.display.print(c.boldRed(`Cannot resume: ${fmtError(err)}`));
+          return undefined;
+        }
+        this._attachedViaResume = true;
 
         // Look up the last Claude session for this workspace
         const workspaceDir2 = this.workspaceController!.workspace!.dir;
@@ -871,6 +869,7 @@ export class WorkerController extends EventEmitter {
     this._pendingClaimTaskId = undefined;
     this._isResuming = false;
     this._pendingResumeSessionId = undefined;
+    this._attachedViaResume = false;
     this._isReserved = false;
     this.lastSeenEventSeqId = undefined;
     this.ws = undefined;
@@ -1092,6 +1091,12 @@ export class WorkerController extends EventEmitter {
 
     if (msg.type === "foreman_error") {
       if (msg.fatal) {
+        // If we attached a workspace for this resume but the foreman rejected us,
+        // detach (release the lock) without destroying the directory.
+        if (this._attachedViaResume) {
+          this.workspaceController?.onDetach();
+          this._attachedViaResume = false;
+        }
         this._deactivate();
         this.currentAc?.abort(); // abort any running query immediately
         this.ws?.close();
@@ -1111,6 +1116,7 @@ export class WorkerController extends EventEmitter {
 
     if (msg.type === "hello_ack") {
       this.reconnectAttempts = 0; // connection succeeded; reset backoff
+      this._attachedViaResume = false; // foreman accepted — workspace is legitimately ours
       if (msg.status === "cancelled") {
         // Task was reassigned while worker was disconnected — stop and reset.
         this.currentAc?.abort(); // abort any running query immediately
