@@ -58,4 +58,8 @@ export class Installation extends ActiveRecord {
   }): Promise<Installation> {
     return super.insert(data) as Promise<Installation>;
   }
+
+  static async findByAccountLogin(login: string): Promise<Installation | null> {
+    return super.getBy("account_login", login) as Promise<Installation | null>;
+  }
 }
