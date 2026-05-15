@@ -10,7 +10,21 @@
 2. Install the Brunel client locally: `npm install -g brunel-agent`
 3. Strongly recommended: install the skills at [jasoncrawford/claude-skills](https://github.com/jasoncrawford/claude-skills) and also [obra/superpowers](https://github.com/obra/superpowers#claude-code)
 4. Put an Anthropic key/token in your env: `export ANTHROPIC_API_KEY=sk-ant-...` or `export CLAUDE_CODE_OAUTH_TOKEN=sk-ant-...`
-5. Run `brunel` in your repo
+5. Run `brunel worker:start` in your repo
 6. Tag issues `brunel:ready` in GitHub
 
 Go to [brunel.dev](https://brunel.dev) and find your repo in the dashboard to see the status of tasks and workers.
+
+## Configuration
+
+Optional: create a `brunel.config.ts` file in your repo, e.g.:
+
+```
+export default {
+  model: "sonnet",
+  effort: "high",
+  permissionMode: "acceptEdits",
+  verbose: false,
+  thinkOutLoud: true,
+};
+```
