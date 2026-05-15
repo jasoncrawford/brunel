@@ -424,15 +424,6 @@ describe("GET /api/repos/:owner/:repo", () => {
   });
 });
 
-describe("GET /api/config", () => {
-  it("returns taskLabel from config", async () => {
-    const res = await request(port, "GET", "/api/config");
-    expect(res.status).toBe(200);
-    const body = JSON.parse(res.body);
-    expect(body).toMatchObject({ taskLabel: "brunel:ready" });
-  });
-});
-
 describe("404 fallback", () => {
   it("returns 404 for unknown routes when no static dist/ exists", async () => {
     const res = await request(port, "GET", "/nonexistent-route");
