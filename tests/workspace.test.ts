@@ -457,9 +457,10 @@ describe("Workspace.attach", () => {
     const ws = new Workspace(BASE_DIR, WORKER_ID, REPO_URL, "/original-cwd", async () => true, "ghp_token");
     await ws.attach();
 
+    const expected = "Authorization: Basic " + Buffer.from("x-access-token:ghp_token").toString("base64");
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
-      ["config", "--local", "http.https://github.com/.extraheader", "Authorization: Bearer ghp_token"],
+      ["config", "--local", "http.https://github.com/.extraheader", expected],
       { cwd: workerDir },
       expect.any(Function),
     );
@@ -556,9 +557,10 @@ async function makeWorkspaceWithToken(token: string): Promise<Workspace> {
 describe("Workspace git auth via extraHeader", () => {
   it("sets http.extraHeader via git config after clone when token is provided", async () => {
     await makeWorkspaceWithToken("ghp_mytoken");
+    const expected = "Authorization: Basic " + Buffer.from("x-access-token:ghp_mytoken").toString("base64");
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
-      ["config", "--local", "http.https://github.com/.extraheader", "Authorization: Bearer ghp_mytoken"],
+      ["config", "--local", "http.https://github.com/.extraheader", expected],
       { cwd: path.join(BASE_DIR, WORKER_ID) },
       expect.any(Function),
     );
@@ -589,9 +591,10 @@ describe("Workspace git auth via extraHeader", () => {
     fetchCalls = 0;
     await ws.reset();
 
+    const expected = "Authorization: Basic " + Buffer.from("x-access-token:ghp_mytoken").toString("base64");
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
-      ["config", "--local", "http.https://github.com/.extraheader", "Authorization: Bearer ghp_mytoken"],
+      ["config", "--local", "http.https://github.com/.extraheader", expected],
       { cwd: path.join(BASE_DIR, WORKER_ID) },
       expect.any(Function),
     );
