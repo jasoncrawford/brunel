@@ -8,7 +8,7 @@ const supabase = createTestSupabase();
 initDb(supabase);
 
 // Use unique values to avoid collisions with other DB test files running in parallel.
-const OWN_GITHUB_IDS = [99001, 99002];
+const OWN_GITHUB_IDS = [99001, 99002, 99003];
 const OWN_REPO_NAMES = ["dbi-owner/repo-a"];
 
 beforeEach(async () => {
@@ -66,6 +66,25 @@ describe("Installation.list", () => {
     const all = await Installation.list();
     const ours = all.filter((i) => OWN_GITHUB_IDS.includes(i.githubId));
     expect(ours).toHaveLength(2);
+  });
+});
+
+describe("Installation.findByAccountLogin", () => {
+  it("returns null when no installation matches the login", async () => {
+    const found = await Installation.findByAccountLogin("nonexistent-org");
+    expect(found).toBeNull();
+  });
+
+  it("returns the installation when accountLogin matches", async () => {
+    const inst = await Installation.insert({
+      github_id: 99003,
+      account_login: "my-org",
+      account_type: "Organization",
+    });
+    const found = await Installation.findByAccountLogin("my-org");
+    expect(found).not.toBeNull();
+    expect(found!.id).toBe(inst.id);
+    expect(found!.githubId).toBe(99003);
   });
 });
 

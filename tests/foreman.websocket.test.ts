@@ -9,6 +9,8 @@ import { ForemanWss } from "../src/foreman/servers/wss.js";
 import { TaskManager } from "../src/foreman/models/task-manager.js";
 import { Task } from "../src/foreman/models/task.js";
 import { WebhookEvent } from "../src/foreman/models/webhook-event.js";
+import { Installation } from "../src/foreman/models/installation.js";
+import { Repo } from "../src/foreman/models/repo.js";
 import { fakeRepo, resetDb, createTestTaskManager, seedRepoWithInstallation } from "./helpers/task.js";
 import { loadDefaultConfig, getConfig } from "../src/config.js";
 const defaultCfg = await loadDefaultConfig();
@@ -1404,6 +1406,38 @@ describe("GitHub token auth in worker_hello", () => {
       await closeClient(ws);
       await new Promise<void>((r) => appWss.close(() => srv.close(r)));
     }
+  });
+
+  it("lazily activates a repo via org-level installation when worker connects to an unlinked repo", async () => {
+    const privateKey = makeTestPrivateKey();
+    getConfig().appId = "app-1";
+    getConfig().appPrivateKey = privateKey;
+
+    // Org-level installation exists but no repos are linked to it yet
+    await Installation.insert({ github_id: 855, account_login: "lazy-org", account_type: "Organization" });
+
+    // loadIssuesFromGithub is non-fatal; mock it to avoid extra fetch calls
+    vi.spyOn(TaskManager.prototype, "loadIssuesFromGithub").mockResolvedValue(undefined);
+
+    // Auth fetch calls: GET /user, POST installation token, GET permission
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ login: "alice" }) } as any)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ token: "ghs_inst" }) } as any)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ permission: "push" }) } as any);
+
+    const ws = await connect();
+    const q = makeQueue(ws);
+    send(ws, { type: "worker_hello", repo: "lazy-org/lazy-repo", workerId: "w-lazy-1", status: "ready", githubToken: "ghp_personal" });
+    const ack = await q.next();
+    expect(ack.type).toBe("hello_ack");
+    if (ack.type === "hello_ack") expect(ack.status).toBe("ready");
+    expect(Worker.fromRegistry("w-lazy-1")).toBeDefined();
+
+    // Verify the repo was lazily linked and activated
+    const repo = await Repo.findByFullName("lazy-org/lazy-repo");
+    expect(repo).not.toBeNull();
+    expect(repo!.installationId).not.toBeNull();
+    expect(repo!.status).toBe("active");
   });
 
   it("falls back to workerSecret auth when githubToken is absent", async () => {

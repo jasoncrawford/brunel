@@ -6,6 +6,7 @@ import { Worker } from "../models/worker.js";
 import { Repo } from "../models/repo.js";
 import { WebhookEvent } from "../models/webhook-event.js";
 import { TaskManager } from "../models/task-manager.js";
+import { Installation } from "../models/installation.js";
 import { GithubClient } from "../clients/github.js";
 import { fmtError, log } from "../../utils.js";
 import { shortWorkerId } from "../../../shared/utils.js";
@@ -126,9 +127,21 @@ export class WorkerController {
 
     if (msg.githubToken && appId && appPrivateKey) {
       if (repo.installationId === null) {
-        log(`[worker ${shortWorkerId(workerId)}] App not installed on ${msg.repo} — rejecting`);
-        this.messenger.sendError(ws, `Brunel is not installed on ${msg.repo}. Install it at: https://github.com/apps/brunel-foreman`, true, workerId, repo.id);
-        return;
+        const owner = msg.repo.split("/")[0];
+        const orgInstallation = await Installation.findByAccountLogin(owner);
+        if (!orgInstallation) {
+          log(`[worker ${shortWorkerId(workerId)}] App not installed on ${msg.repo} — rejecting`);
+          this.messenger.sendError(ws, `Brunel is not installed on ${msg.repo}. Install it at: https://github.com/apps/brunel-foreman`, true, workerId, repo.id);
+          return;
+        }
+        log(`[worker ${shortWorkerId(workerId)}] Lazily activating ${msg.repo} via org installation ${orgInstallation.id}`);
+        await repo.linkInstallation(orgInstallation.id);
+        await repo.activate();
+        try {
+          await repo.taskManager.loadIssuesFromGithub();
+        } catch (err) {
+          log(`[worker ${shortWorkerId(workerId)}] ERROR loading issues for ${msg.repo}: ${fmtError(err)}`);
+        }
       }
       let authorized: boolean;
       try {
