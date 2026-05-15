@@ -6,6 +6,9 @@ export type TaskStatus = "pending" | "assigned" | "pushed" | "merged" | "closed"
 /** Current foreman ↔ worker wire protocol version. Increment when making incompatible changes. */
 export const PROTOCOL_VERSION = 1;
 
+/** Default label that triggers task assignment. Shared so the frontend fallback matches the backend default. */
+export const DEFAULT_TASK_LABEL = "brunel:ready";
+
 // ── Admin WebSocket wire types (admin dashboard ↔ server) ────────────────────
 
 export interface BlockerInfo {

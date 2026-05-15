@@ -93,7 +93,7 @@ export class HttpServer {
     if (target.endsWith("index.html")) {
       const { taskLabel } = getConfig();
       const script = `<script>window.__BRUNEL_CONFIG__=${JSON.stringify({ taskLabel })};</script>`;
-      const html = readFileSync(target, "utf-8").replace("</head>", `${script}</head>`);
+      const html = readFileSync(target, "utf-8").replace("<!-- __BRUNEL_CONFIG__ -->", script);
       return new Response(html, { headers: { "Content-Type": "text/html" } });
     }
     const stream = createReadStream(target);
