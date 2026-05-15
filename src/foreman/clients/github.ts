@@ -13,11 +13,13 @@ function ghHeaders(token: string) {
 
 function mintAppJwt(appId: string, privateKey: string): string {
   const now = Math.floor(Date.now() / 1000);
+  const iat = now - 60;
+  const exp = iat + 600;
   const header = Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT" })).toString("base64url");
   const payload = Buffer.from(JSON.stringify({
     iss: appId,
-    iat: now - 60,
-    exp: now + 540,
+    iat,
+    exp,
   })).toString("base64url");
   const data = `${header}.${payload}`;
   const sign = createSign("RSA-SHA256");
