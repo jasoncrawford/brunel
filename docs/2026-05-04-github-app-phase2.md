@@ -80,10 +80,10 @@ Workers use their own personal GitHub token (already obtained for identity verif
 **Git authentication uses `http.extraHeader`, not a token-in-URL.** After cloning, the workspace sets:
 
 ```bash
-git config --local http.https://github.com/.extraheader "Authorization: Bearer {token}"
+git config --local http.https://github.com/.extraheader "Authorization: Basic $(echo -n 'x-access-token:{token}' | base64)"
 ```
 
-The remote URL stays clean (`https://github.com/owner/repo.git`). This is how GitHub Actions handles `GITHUB_TOKEN` internally — the token doesn't appear in `git remote -v` or process listings. The existing clone-URL approach in `Workspace` is replaced with this pattern as part of this work.
+Basic auth with `x-access-token` as the username works for both classic PATs and GitHub App installation tokens. The remote URL stays clean (`https://github.com/owner/repo.git`) — the token doesn't appear in `git remote -v` or process listings. The existing clone-URL approach in `Workspace` is replaced with this pattern as part of this work.
 
 ### App not installed: clear error
 
