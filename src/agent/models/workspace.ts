@@ -131,11 +131,12 @@ export class Workspace extends EventEmitter {
     await this._npmInstall();
   }
 
-  /** Set http.extraHeader so git auth uses a Bearer token instead of a token-in-URL. */
+  /** Set http.extraHeader so git auth uses Basic auth instead of a token-in-URL. */
   private async _configureAuth(): Promise<void> {
     if (!this.githubToken) return;
+    const encoded = Buffer.from(`x-access-token:${this.githubToken}`).toString("base64");
     await gitExec(
-      ["config", "--local", "http.https://github.com/.extraheader", `Authorization: Bearer ${this.githubToken}`],
+      ["config", "--local", "http.https://github.com/.extraheader", `Authorization: Basic ${encoded}`],
       this.dir,
     );
   }
