@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useAdminWs } from "../hooks/useAdminWs.ts";
 import { usePageTitle } from "../hooks/usePageTitle.ts";
+import { useConfig } from "../hooks/useConfig.ts";
 import type { Task, Worker, Repo, LogEntry, AdminMessage } from "../types.ts";
 import { shortWorkerId } from "../../../shared/utils.ts";
 
@@ -11,6 +12,7 @@ export default function RepoDetail() {
 
   const [repo, setRepo] = useState<Repo | null>(null);
   usePageTitle(repo ? `${repo.fullName} \u2013 Brunel` : "Brunel");
+  const { taskLabel } = useConfig();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [workers, setWorkers] = useState<Worker[]>([]);
   const [recentLog, setRecentLog] = useState<LogEntry[]>([]);
@@ -103,6 +105,7 @@ export default function RepoDetail() {
             </tbody>
           </table>
         )}
+        <p style={hint}>Tag <a href={`https://github.com/${fullName}/issues`} target="_blank" rel="noreferrer">GitHub issues</a> with <code>{taskLabel}</code> to assign them to workers.</p>
       </section>
 
       <section style={{ marginTop: "2rem" }}>
@@ -118,6 +121,7 @@ export default function RepoDetail() {
             ))}
           </ul>
         )}
+        <p style={hint}>To start a worker, run <code>brunel worker:start</code> in a repo (install <a href="https://www.npmjs.com/package/brunel-agent" target="_blank" rel="noreferrer">brunel-agent</a> first).</p>
       </section>
 
       <section style={{ marginTop: "2rem" }}>
@@ -153,3 +157,4 @@ export default function RepoDetail() {
 
 const th: React.CSSProperties = { textAlign: "left", borderBottom: "1px solid #ccc", padding: "4px 8px" };
 const td: React.CSSProperties = { padding: "4px 8px", borderBottom: "1px solid #eee" };
+const hint: React.CSSProperties = { fontSize: "0.85em", color: "#666", marginTop: "0.5rem" };

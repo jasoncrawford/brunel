@@ -5,9 +5,14 @@ import { Worker } from "../models/worker.js";
 import { queryActivityLog } from "../models/activity-log.js";
 import type { TaskStatus } from "../../../shared/wire.js";
 import { fmtError, log } from "../../utils.js";
+import { getConfig } from "../../config.js";
 
 export class ApiController {
   register(app: Hono): void {
+    app.get("/api/config", (c) => {
+      return c.json({ taskLabel: getConfig().taskLabel });
+    });
+
     app.get("/api/log", async (c) => {
       try {
         const before = c.req.query("before");
