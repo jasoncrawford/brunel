@@ -184,7 +184,7 @@ describe("workerMain startup banner", () => {
     vi.clearAllMocks();
   });
 
-  it("includes permissions, output mode, and logfile in the startup banner", async () => {
+  it("shows agent id, model, permissions, output mode, protocol version, and hint in the startup banner", async () => {
     installMocks();
     const exitSpy = vi.spyOn(process, "exit").mockImplementation((code?: number | string) => {
       throw new Error("__process_exit__");
@@ -199,9 +199,12 @@ describe("workerMain startup banner", () => {
       exitSpy.mockRestore();
     }
     const printed = printSpy.mock.calls.map(([s]: [unknown]) => stripAnsi(String(s))).join("\n");
-    expect(printed).toContain("Permissions: bypassPermissions");
-    expect(printed).toContain("Output: verbose");
-    expect(printed).toContain("Log: repl.log");
+    expect(printed).toContain("(protocol v");
+    expect(printed).toContain("bypassPermissions");
+    expect(printed).toContain("verbose");
+    expect(printed).toContain("/worker:start to accept tasks");
+    expect(printed).toContain("/help for other commands");
+    expect(printed).not.toContain("Log:");
   });
 });
 
