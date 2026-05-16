@@ -513,8 +513,7 @@ export class WorkerController extends EventEmitter {
         await this.runAfterTaskReset();
         this.sendWorkerReady();
         this._setIdleState();
-        const url = this._dashboardRepoUrl();
-        this.display.print(c.sageGreen(`Waiting for next task. See the task list at ${url}`));
+        this._printWaitingMessage("Waiting for next task");
         return "task-complete";
     }
   }
@@ -939,16 +938,16 @@ export class WorkerController extends EventEmitter {
     this.transitionToRegistered();
     this._setIdleState();
     if (!opts?.silent) {
-      const url = this._dashboardRepoUrl();
-      this.display.print(c.sageGreen(`Waiting for tasks. See the task list at ${url}`));
+      this._printWaitingMessage("Waiting for tasks");
     }
   }
 
-  private _dashboardRepoUrl(): string {
+  private _printWaitingMessage(prefix: string): void {
     const foremanUrl = getConfig().foremanUrl
       .replace(/^wss:\/\//, "https://")
       .replace(/^ws:\/\//, "http://");
-    return `${foremanUrl}/repos/${this.repo}`;
+    const url = `${foremanUrl}/repos/${this.repo}`;
+    this.display.print(c.sageGreen(`${prefix}. See the task list at ${url}`));
   }
 
   /**

@@ -2,7 +2,8 @@ import { cosmiconfig } from "cosmiconfig";
 import { z } from "zod";
 import type { PermissionMode } from "@anthropic-ai/claude-agent-sdk";
 import { fmtError } from "./utils.js";
-import { DEFAULT_TASK_LABEL } from "../shared/wire.js";
+
+const DEFAULT_TASK_LABEL = "brunel:ready";
 
 // ── Permission modes ──────────────────────────────────────────────────────────
 
