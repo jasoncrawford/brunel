@@ -513,7 +513,7 @@ export class WorkerController extends EventEmitter {
         await this.runAfterTaskReset();
         this.sendWorkerReady();
         this._setIdleState();
-        this._printWaitingMessage("Waiting for next task");
+        this._printWaitingMessage();
         return "task-complete";
     }
   }
@@ -938,16 +938,16 @@ export class WorkerController extends EventEmitter {
     this.transitionToRegistered();
     this._setIdleState();
     if (!opts?.silent) {
-      this._printWaitingMessage("Waiting for tasks");
+      this._printWaitingMessage();
     }
   }
 
-  private _printWaitingMessage(prefix: string): void {
+  private _printWaitingMessage(): void {
     const foremanUrl = getConfig().foremanUrl
       .replace(/^wss:\/\//, "https://")
       .replace(/^ws:\/\//, "http://");
     const url = `${foremanUrl}/repos/${this.repo}`;
-    this.display.print(c.sageGreen(`${prefix}. See the task list at ${url}`));
+    this.display.print(c.sageGreen(`Waiting for tasks. See the task list at ${url}`));
   }
 
   /**

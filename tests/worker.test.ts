@@ -1914,11 +1914,11 @@ describe("completeCurrentTask: post-completion prompt", () => {
     expect(sess.isActive).toBe(true);
   });
 
-  it("option 0 (wait for next task): prints 'Waiting for next task'", async () => {
+  it("option 0 (wait for next task): prints 'Waiting for tasks'", async () => {
     const { sess } = await makeSession(async () => 0);
     await sess.completeCurrentTask();
     const printed = display.print.mock.calls.map(([l]: [string]) => stripAnsi(l));
-    expect(printed.some(l => l.includes("Waiting for next task"))).toBe(true);
+    expect(printed.some(l => l.includes("Waiting for tasks"))).toBe(true);
   });
 
   it("option 2 (stop working): stops worker mode and returns 'task-complete'", async () => {
