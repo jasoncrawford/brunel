@@ -62,7 +62,7 @@ describe("listCommandNames", () => {
   it("returns only builtins when directory is missing", () => {
     const result = registry.listCommandNames(() => null);
     expect(result).toEqual([
-      "clear", "exit", "settings", "settings:effort", "settings:model",
+      "clear", "exit", "help", "settings", "settings:effort", "settings:model",
       "settings:permissions", "settings:think-out-loud", "settings:verbose",
       "worker:claim", "worker:complete", "worker:start", "worker:stop",
       "workspace:create", "workspace:prune", "workspace:remove", "workspace:reset",

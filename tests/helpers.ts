@@ -30,11 +30,12 @@ export async function registerTestCommands(): Promise<CommandController> {
   registry.register("clear",  { description: "Clear the conversation", handler: noop });
   registry.register("settings", { description: "View and edit all settings", handler: noop });
   const settingsRegistry = registry.scoped("settings");
-  settingsRegistry.register("model",       { description: "Select the Claude model to use", handler: noop });
-  settingsRegistry.register("effort",      { description: "Set the effort level for Claude's thinking", handler: noop });
-  settingsRegistry.register("permissions", { description: "Set the permission mode for tool use", handler: noop });
-  settingsRegistry.register("verbose",     { description: "Set verbose output mode", handler: noop });
+  settingsRegistry.register("model",          { description: "Select the Claude model to use", handler: noop });
+  settingsRegistry.register("effort",         { description: "Set the effort level for Claude's thinking", handler: noop });
+  settingsRegistry.register("permissions",    { description: "Set the permission mode for tool use", handler: noop });
+  settingsRegistry.register("verbose",        { description: "Set verbose output mode", handler: noop });
   settingsRegistry.register("think-out-loud", { description: "Set think-out-loud mode", handler: noop });
+  registry.register("help", { description: "List available commands", handler: noop });
   const workerRegistry = registry.scoped("worker");
   workerRegistry.register("complete", {
     description: "Mark the current task as done",

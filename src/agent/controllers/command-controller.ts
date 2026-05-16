@@ -309,6 +309,60 @@ function listSkillNames(
 }
 
 /**
+ * Format a help listing from the given registry entries.
+ * With no namespace: lists root-level canonical commands, then shows available
+ * namespaces with command counts and a hint to drill down.
+ * With a namespace: lists only canonical commands directly under that namespace.
+ */
+export function formatHelp(entries: CommandEntry[], namespace?: string): string {
+  const canonical = entries.filter(e => !e.aliasFor);
+
+  if (namespace) {
+    const prefix = `${namespace}:`;
+    const ns = canonical
+      .filter(e => e.name.startsWith(prefix) && !e.name.slice(prefix.length).includes(":"))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    if (ns.length === 0) return `No commands in namespace: ${namespace}`;
+    const maxLen = Math.max(...ns.map(e => e.name.length));
+    const lines = ns.map(e => `  /${e.name.padEnd(maxLen)}  ${e.description}`);
+    return `${namespace} commands:\n${lines.join("\n")}`;
+  }
+
+  const root = canonical
+    .filter(e => !e.name.includes(":"))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const namespaceCounts = new Map<string, number>();
+  for (const e of canonical) {
+    const colonIdx = e.name.indexOf(":");
+    if (colonIdx > 0) {
+      const ns = e.name.slice(0, colonIdx);
+      namespaceCounts.set(ns, (namespaceCounts.get(ns) ?? 0) + 1);
+    }
+  }
+
+  const parts: string[] = [];
+
+  if (root.length > 0) {
+    const maxLen = Math.max(...root.map(e => e.name.length));
+    const lines = root.map(e => `  /${e.name.padEnd(maxLen)}  ${e.description}`);
+    parts.push(`Commands:\n${lines.join("\n")}`);
+  }
+
+  if (namespaceCounts.size > 0) {
+    const nsList = [...namespaceCounts.keys()].sort();
+    const maxLen = Math.max(...nsList.map(n => n.length));
+    const lines = nsList.map(n => {
+      const count = namespaceCounts.get(n)!;
+      return `  ${n.padEnd(maxLen)}  (${count} command${count === 1 ? "" : "s"})`;
+    });
+    parts.push(`Namespaces:\n${lines.join("\n")}\n\nUse /help <namespace> to list commands in a namespace.`);
+  }
+
+  return parts.join("\n\n");
+}
+
+/**
  * Base registry of slash commands. Supports registration and lookup only.
  *
  * Supports scoped sub-registries via scoped(prefix): the returned registry

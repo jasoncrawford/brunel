@@ -18,7 +18,7 @@ import { Workspace } from "./models/workspace.js";
 import { GithubToken } from "./models/github-token.js";
 import { fmtError } from "../utils.js";
 import { Settings } from "./models/settings.js";
-import { CommandRegistry, CommandController } from "./controllers/command-controller.js";
+import { CommandRegistry, CommandController, formatHelp } from "./controllers/command-controller.js";
 import { SettingsController } from "./controllers/settings-controller.js";
 import { WorkspaceController } from "./controllers/workspace-controller.js";
 import { AgentController, logFull } from "./controllers/agent-controller.js";
@@ -219,6 +219,13 @@ export class BrunelAgent {
       exitAfterRunFromArgs: true,
       handler: async () => {
         process.stdout.write(`v${PACKAGE_VERSION} (protocol version ${PROTOCOL_VERSION})\n`);
+      },
+    });
+    registry.register("help", {
+      description: "List available commands",
+      handler: async (args) => {
+        const namespace = args.trim() || undefined;
+        this.display.print(formatHelp(registry.listAll(), namespace));
       },
     });
 
