@@ -343,3 +343,290 @@ describe("findModel", () => {
     expect(Settings.findModel(SDK_MODELS, "nope")).toBeUndefined();
   });
 });
+
+// ── Settings: verbose and thinkOutLoud ────────────────────────────────────────
+
+describe("Settings: verbose", () => {
+  it("defaults verbose to false", () => {
+    const s = new Settings();
+    expect(s.verbose).toBe(false);
+  });
+
+  it("initialises verbose from constructor", () => {
+    const s = new Settings({ verbose: true });
+    expect(s.verbose).toBe(true);
+  });
+
+  it("emits change when verbose is updated", () => {
+    const s = new Settings();
+    const onChange = vi.fn();
+    s.on("change", onChange);
+    s._setVerbose(true);
+    expect(onChange).toHaveBeenCalledOnce();
+  });
+});
+
+describe("Settings: thinkOutLoud", () => {
+  it("defaults thinkOutLoud to 'default'", () => {
+    const s = new Settings();
+    expect(s.thinkOutLoud).toBe("default");
+  });
+
+  it("initialises thinkOutLoud to 'default' when not passed", () => {
+    const s = new Settings({ verbose: true });
+    expect(s.thinkOutLoud).toBe("default");
+  });
+
+  it("initialises thinkOutLoud to true when passed true", () => {
+    const s = new Settings({ thinkOutLoud: true });
+    expect(s.thinkOutLoud).toBe(true);
+  });
+
+  it("initialises thinkOutLoud to false when passed false", () => {
+    const s = new Settings({ thinkOutLoud: false });
+    expect(s.thinkOutLoud).toBe(false);
+  });
+
+  it("emits change when thinkOutLoud is updated", () => {
+    const s = new Settings();
+    const onChange = vi.fn();
+    s.on("change", onChange);
+    s._setThinkOutLoud(true);
+    expect(onChange).toHaveBeenCalledOnce();
+  });
+});
+
+describe("Settings: effectiveThinkOutLoud", () => {
+  it("returns verbose value when thinkOutLoud is 'default'", () => {
+    expect(new Settings({ verbose: true }).effectiveThinkOutLoud).toBe(true);
+    expect(new Settings({ verbose: false }).effectiveThinkOutLoud).toBe(false);
+  });
+
+  it("returns thinkOutLoud value when explicitly set", () => {
+    expect(new Settings({ verbose: false, thinkOutLoud: true }).effectiveThinkOutLoud).toBe(true);
+    expect(new Settings({ verbose: true, thinkOutLoud: false }).effectiveThinkOutLoud).toBe(false);
+  });
+});
+
+// ── pickVerbose: direct set via argument ──────────────────────────────────────
+
+describe("pickVerbose <arg> (direct set)", () => {
+  it("sets verbose to true with 'true'", async () => {
+    const s = new Settings();
+    await makeCtrl(s).pickVerbose("true", noopPick);
+    expect(s.verbose).toBe(true);
+  });
+
+  it("sets verbose to true with alias 'on'", async () => {
+    const s = new Settings();
+    await makeCtrl(s).pickVerbose("on", noopPick);
+    expect(s.verbose).toBe(true);
+  });
+
+  it("sets verbose to true with alias 'yes'", async () => {
+    const s = new Settings();
+    await makeCtrl(s).pickVerbose("yes", noopPick);
+    expect(s.verbose).toBe(true);
+  });
+
+  it("sets verbose to true with alias 'y'", async () => {
+    const s = new Settings();
+    await makeCtrl(s).pickVerbose("y", noopPick);
+    expect(s.verbose).toBe(true);
+  });
+
+  it("sets verbose to false with 'false'", async () => {
+    const s = new Settings({ verbose: true });
+    await makeCtrl(s).pickVerbose("false", noopPick);
+    expect(s.verbose).toBe(false);
+  });
+
+  it("sets verbose to false with alias 'off'", async () => {
+    const s = new Settings({ verbose: true });
+    await makeCtrl(s).pickVerbose("off", noopPick);
+    expect(s.verbose).toBe(false);
+  });
+
+  it("sets verbose to false with alias 'no'", async () => {
+    const s = new Settings({ verbose: true });
+    await makeCtrl(s).pickVerbose("no", noopPick);
+    expect(s.verbose).toBe(false);
+  });
+
+  it("sets verbose to false with alias 'n'", async () => {
+    const s = new Settings({ verbose: true });
+    await makeCtrl(s).pickVerbose("n", noopPick);
+    expect(s.verbose).toBe(false);
+  });
+
+  it("is case-insensitive", async () => {
+    const s = new Settings();
+    await makeCtrl(s).pickVerbose("ON", noopPick);
+    expect(s.verbose).toBe(true);
+    await makeCtrl(s).pickVerbose("OFF", noopPick);
+    expect(s.verbose).toBe(false);
+    await makeCtrl(s).pickVerbose("True", noopPick);
+    expect(s.verbose).toBe(true);
+  });
+
+  it("rejects unknown values", async () => {
+    const s = new Settings();
+    await makeCtrl(s).pickVerbose("maybe", noopPick);
+    expect(s.verbose).toBe(false); // unchanged
+    const output = printed.join("");
+    expect(output).toMatch(/unknown|invalid/i);
+    expect(output).toContain("maybe");
+  });
+});
+
+// ── pickVerbose: interactive picker ──────────────────────────────────────────
+
+describe("pickVerbose (interactive picker)", () => {
+  it("shows picker with all verbose options", async () => {
+    const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickResult>>()
+      .mockResolvedValue({ type: "cancelled" });
+    const s = new Settings();
+    await makeCtrl(s).pickVerbose("", pickFn);
+    const options = pickFn.mock.calls[0][0] as string[];
+    expect(options.length).toBe(Settings.VERBOSE_OPTIONS.length);
+  });
+
+  it("passes currentIdx matching the active verbose value", async () => {
+    const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickResult>>()
+      .mockResolvedValue({ type: "cancelled" });
+    const s = new Settings({ verbose: true });
+    await makeCtrl(s).pickVerbose("", pickFn);
+    const onIdx = Settings.VERBOSE_OPTIONS.findIndex(o => o.value === "true");
+    expect(pickFn.mock.calls[0][1]).toBe(onIdx);
+  });
+
+  it("cancel preserves current verbose", async () => {
+    const s = new Settings({ verbose: true });
+    await makeCtrl(s).pickVerbose("", cancelPick);
+    expect(s.verbose).toBe(true);
+  });
+
+  it("selecting an option changes verbose", async () => {
+    const offIdx = Settings.VERBOSE_OPTIONS.findIndex(o => o.value === "false");
+    const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickResult>>()
+      .mockResolvedValue({ type: "selected", index: offIdx });
+    const s = new Settings({ verbose: true });
+    await makeCtrl(s).pickVerbose("", pickFn);
+    expect(s.verbose).toBe(false);
+  });
+});
+
+// ── pickThinkOutLoud: direct set via argument ─────────────────────────────────
+
+describe("pickThinkOutLoud <arg> (direct set)", () => {
+  it("sets thinkOutLoud to 'default' with 'default'", async () => {
+    const s = new Settings({ thinkOutLoud: true });
+    await makeCtrl(s).pickThinkOutLoud("default", noopPick);
+    expect(s.thinkOutLoud).toBe("default");
+  });
+
+  it("sets thinkOutLoud to true with 'true'", async () => {
+    const s = new Settings();
+    await makeCtrl(s).pickThinkOutLoud("true", noopPick);
+    expect(s.thinkOutLoud).toBe(true);
+  });
+
+  it("sets thinkOutLoud to true with alias 'on'", async () => {
+    const s = new Settings();
+    await makeCtrl(s).pickThinkOutLoud("on", noopPick);
+    expect(s.thinkOutLoud).toBe(true);
+  });
+
+  it("sets thinkOutLoud to false with 'false'", async () => {
+    const s = new Settings({ thinkOutLoud: true });
+    await makeCtrl(s).pickThinkOutLoud("false", noopPick);
+    expect(s.thinkOutLoud).toBe(false);
+  });
+
+  it("sets thinkOutLoud to false with alias 'off'", async () => {
+    const s = new Settings({ thinkOutLoud: true });
+    await makeCtrl(s).pickThinkOutLoud("off", noopPick);
+    expect(s.thinkOutLoud).toBe(false);
+  });
+
+  it("is case-insensitive", async () => {
+    const s = new Settings();
+    await makeCtrl(s).pickThinkOutLoud("ON", noopPick);
+    expect(s.thinkOutLoud).toBe(true);
+    await makeCtrl(s).pickThinkOutLoud("Default", noopPick);
+    expect(s.thinkOutLoud).toBe("default");
+  });
+
+  it("rejects unknown values", async () => {
+    const s = new Settings();
+    await makeCtrl(s).pickThinkOutLoud("sometimes", noopPick);
+    expect(s.thinkOutLoud).toBe("default"); // unchanged
+    const output = printed.join("");
+    expect(output).toMatch(/unknown|invalid/i);
+    expect(output).toContain("sometimes");
+  });
+});
+
+// ── pickThinkOutLoud: interactive picker ───────────────────────────────────────
+
+describe("pickThinkOutLoud (interactive picker)", () => {
+  it("shows picker with all think-out-loud options", async () => {
+    const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickResult>>()
+      .mockResolvedValue({ type: "cancelled" });
+    const s = new Settings();
+    await makeCtrl(s).pickThinkOutLoud("", pickFn);
+    const options = pickFn.mock.calls[0][0] as string[];
+    expect(options.length).toBe(Settings.THINK_OUT_LOUD_OPTIONS.length);
+  });
+
+  it("passes currentIdx for 'default'", async () => {
+    const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickResult>>()
+      .mockResolvedValue({ type: "cancelled" });
+    const s = new Settings();
+    await makeCtrl(s).pickThinkOutLoud("", pickFn);
+    const defaultIdx = Settings.THINK_OUT_LOUD_OPTIONS.findIndex(o => o.value === "default");
+    expect(pickFn.mock.calls[0][1]).toBe(defaultIdx);
+  });
+
+  it("passes currentIdx for true", async () => {
+    const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickResult>>()
+      .mockResolvedValue({ type: "cancelled" });
+    const s = new Settings({ thinkOutLoud: true });
+    await makeCtrl(s).pickThinkOutLoud("", pickFn);
+    const trueIdx = Settings.THINK_OUT_LOUD_OPTIONS.findIndex(o => o.value === "true");
+    expect(pickFn.mock.calls[0][1]).toBe(trueIdx);
+  });
+
+  it("cancel preserves current thinkOutLoud", async () => {
+    const s = new Settings({ thinkOutLoud: true });
+    await makeCtrl(s).pickThinkOutLoud("", cancelPick);
+    expect(s.thinkOutLoud).toBe(true);
+  });
+
+  it("selecting 'default' sets thinkOutLoud to 'default'", async () => {
+    const defaultIdx = Settings.THINK_OUT_LOUD_OPTIONS.findIndex(o => o.value === "default");
+    const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickResult>>()
+      .mockResolvedValue({ type: "selected", index: defaultIdx });
+    const s = new Settings({ thinkOutLoud: true });
+    await makeCtrl(s).pickThinkOutLoud("", pickFn);
+    expect(s.thinkOutLoud).toBe("default");
+  });
+
+  it("selecting 'true' sets thinkOutLoud to true", async () => {
+    const trueIdx = Settings.THINK_OUT_LOUD_OPTIONS.findIndex(o => o.value === "true");
+    const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickResult>>()
+      .mockResolvedValue({ type: "selected", index: trueIdx });
+    const s = new Settings();
+    await makeCtrl(s).pickThinkOutLoud("", pickFn);
+    expect(s.thinkOutLoud).toBe(true);
+  });
+
+  it("selecting 'false' sets thinkOutLoud to false", async () => {
+    const falseIdx = Settings.THINK_OUT_LOUD_OPTIONS.findIndex(o => o.value === "false");
+    const pickFn = vi.fn<(options: string[], currentIdx: number) => Promise<PickResult>>()
+      .mockResolvedValue({ type: "selected", index: falseIdx });
+    const s = new Settings({ thinkOutLoud: true });
+    await makeCtrl(s).pickThinkOutLoud("", pickFn);
+    expect(s.thinkOutLoud).toBe(false);
+  });
+});

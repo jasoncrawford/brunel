@@ -82,7 +82,8 @@ const BrunelConfigSchema = z.object({
 });
 
 export type BrunelConfig = Omit<z.infer<typeof BrunelConfigSchema>, "thinkOutLoud" | "effort"> & {
-  thinkOutLoud: boolean;
+  /** Explicit think-out-loud setting from config. undefined = use verbose as default. */
+  thinkOutLoud?: boolean;
   allowDangerouslySkipPermissions: boolean;
   /** Resolved effort level. "auto" in config is normalized to undefined here. */
   effort?: "low" | "medium" | "high" | "max";
@@ -321,7 +322,7 @@ export async function loadConfig(
 
   const result: BrunelConfig = {
     ...parsed,
-    thinkOutLoud: parsed.thinkOutLoud ?? parsed.verbose,
+    thinkOutLoud: parsed.thinkOutLoud,
     allowDangerouslySkipPermissions: parsed.permissionMode === "bypassPermissions",
     effort: parsed.effort === "auto" ? undefined : parsed.effort,
   };

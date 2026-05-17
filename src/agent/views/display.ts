@@ -9,6 +9,7 @@ import type {
   ContentBlock,
 } from "./renderer.js";
 import { AgentStatus } from "../models/agent-status.js";
+import type { Settings } from "../models/settings.js";
 
 // ── Display class ──────────────────────────────────────────────────────────
 
@@ -77,7 +78,7 @@ export class Display {
   // prompt area including any leading blank line (see issue #418).
   inputClear: (() => void) | null = null;
 
-  constructor(readonly config: BrunelConfig, readonly agentStatus: AgentStatus) {
+  constructor(readonly config: BrunelConfig, readonly agentStatus: AgentStatus, private readonly _settings?: Settings) {
     this.renderer = new Renderer(this);
     // Subscribe to agentStatus changes for reactive status bar redraws.
     agentStatus.on("change", () => {
@@ -88,7 +89,13 @@ export class Display {
   /** Public accessor for tests to clear tool-use state between tests. */
   get toolUseNames(): Map<string, string> { return this._toolUseNames; }
 
-  get verbose(): boolean { return this.config.verbose; }
+  get verbose(): boolean { return this._settings?.verbose ?? this.config.verbose; }
+
+  /** The resolved think-out-loud value: uses Settings when available, falls back to config. */
+  get effectiveThinkOutLoud(): boolean {
+    if (this._settings) return this._settings.effectiveThinkOutLoud;
+    return this.config.thinkOutLoud ?? this.config.verbose;
+  }
 
   effectiveWidth(fallback = W): number {
     return (this.getColumns() ?? fallback) - (this.verbose ? VERBOSE_PREFIX_LEN : 0);
@@ -146,7 +153,7 @@ export class Display {
       this.agentStatus.fireOnToolResult(name);
       return;
     }
-    this.print(this.renderer.formatContentBlock(b, role, !!(msg?.isSynthetic), this.config.thinkOutLoud));
+    this.print(this.renderer.formatContentBlock(b, role, !!(msg?.isSynthetic), this.effectiveThinkOutLoud));
   }
 
   /** Print a full SDK message (system, assistant, user, result, etc.). */

@@ -30,6 +30,16 @@ export type PickResult =
   | { type: "other"; text: string }
   | { type: "cancelled" };
 
+export type SettingsMenuEntry = {
+  label: string;
+  display: string;
+  cycleValues?: string[];
+};
+
+export type SettingsMenuResult =
+  | { type: "selected"; index: number }
+  | { type: "cancelled" };
+
 export type PickQuestionResult =
   | { type: "answer"; value: string }
   | { type: "other"; text: string }
@@ -402,6 +412,100 @@ export class Picker {
               if (n < count) { navigateTo(n); }
             }
           }
+        }
+      }
+
+      process.stdin.on("data", onData);
+    });
+  }
+
+  /**
+   * Settings overview picker: shows all settings with current values.
+   * Up/down arrows navigate; Tab cycles through valid values for the current
+   * setting (calling onCycle immediately); Enter selects; Escape cancels.
+   * The menu erases itself before returning in all cases.
+   */
+  pickSettingsMenu(
+    entries: SettingsMenuEntry[],
+    onCycle: (entryIndex: number, newValue: string) => void,
+  ): Promise<SettingsMenuResult> {
+    this.onStart?.();
+    this.display?.clearBar();
+
+    return new Promise((resolve) => {
+      let idx = 0;
+      let done = false;
+      const count = entries.length;
+
+      // Internal current display values (mutable via Tab)
+      const displays = entries.map(e => e.display);
+      // Track position within cycleValues for each entry
+      const tabPositions = entries.map((e) => {
+        if (!e.cycleValues || e.cycleValues.length === 0) return 0;
+        const pos = e.cycleValues.indexOf(e.display);
+        return pos >= 0 ? pos : 0;
+      });
+
+      const labelWidth = Math.max(...entries.map(e => e.label.length));
+
+      const renderLine = (i: number): string => {
+        const entry = entries[i];
+        const label = entry.label.padEnd(labelWidth);
+        const value = displays[i];
+        const marker = i === idx ? "▶ " : "  ";
+        const full = `${marker}${label}  ${value}`;
+        return i === idx ? full : s.dim(full);
+      };
+
+      for (let i = 0; i < count; i++) {
+        process.stdout.write(renderLine(i) + "\r\n");
+      }
+
+      function redraw() {
+        process.stdout.write(`\x1b[${count}A\r`);
+        for (let i = 0; i < count; i++) {
+          process.stdout.write(renderLine(i) + "\x1b[K\r\n");
+        }
+      }
+
+      function eraseMenu() {
+        process.stdout.write(`\x1b[${count}A\r`);
+        for (let i = 0; i < count; i++) process.stdout.write("\x1b[K\r\n");
+        process.stdout.write(`\x1b[${count}A\r`);
+      }
+
+      const { display } = this;
+      function finish(result: SettingsMenuResult) {
+        done = true;
+        process.stdin.removeListener("data", onData);
+        eraseMenu();
+        display?.drawBar();
+        resolve(result);
+      }
+
+      function onData(raw: string) {
+        if (done) return;
+        let data = raw;
+        data = data.replace(/\x1b\[A/g, "\x10"); // up arrow
+        data = data.replace(/\x1b\[B/g, "\x11"); // down arrow
+        data = data.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
+        data = data.replace(/\x1b./gs, "");
+
+        for (const ch of data) {
+          if (ch === "\x10") { idx = (idx - 1 + count) % count; redraw(); }
+          else if (ch === "\x11") { idx = (idx + 1) % count; redraw(); }
+          else if (ch === "\x09") { // Tab
+            const entry = entries[idx];
+            if (entry.cycleValues && entry.cycleValues.length > 0) {
+              tabPositions[idx] = (tabPositions[idx] + 1) % entry.cycleValues.length;
+              const newValue = entry.cycleValues[tabPositions[idx]];
+              displays[idx] = newValue;
+              onCycle(idx, newValue);
+              redraw();
+            }
+          }
+          else if (ch === "\r" || ch === "\n") { finish({ type: "selected", index: idx }); return; }
+          else if (ch === "\x1b" || ch === "\x03") { finish({ type: "cancelled" }); return; }
         }
       }
 

@@ -5,11 +5,12 @@ import type { PermissionMode } from "@anthropic-ai/claude-agent-sdk";
 
 export type ModelInfo = { value: string; displayName: string; description: string };
 export type FetchModelsFn = () => Promise<ModelInfo[]>;
+export type ThinkOutLoudValue = boolean | "default";
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 
-/** Owns the runtime-settable preferences (model, effort, and permissionMode) and operations on them.
- * Emits "change" whenever any setting is updated. */
+/** Owns the runtime-settable preferences (model, effort, permissionMode, verbose, thinkOutLoud)
+ * and operations on them. Emits "change" whenever any setting is updated. */
 export class Settings extends EventEmitter {
   // ── Effort levels ──────────────────────────────────────────────────────────
 
@@ -34,6 +35,21 @@ export class Settings extends EventEmitter {
     { value: "bypassPermissions" as PermissionMode, displayName: "Bypass",            description: "Auto-approve all tools without asking" },
   ] as const;
 
+  // ── Verbose options ────────────────────────────────────────────────────────
+
+  static readonly VERBOSE_OPTIONS = [
+    { value: "false" as const, displayName: "Off", description: "Quiet output" },
+    { value: "true" as const,  displayName: "On",  description: "Show full Claude message stream" },
+  ] as const;
+
+  // ── Think-out-loud options ─────────────────────────────────────────────────
+
+  static readonly THINK_OUT_LOUD_OPTIONS = [
+    { value: "default" as const, displayName: "Default", description: "Same as verbose" },
+    { value: "false" as const,   displayName: "Off",     description: "Never show thinking" },
+    { value: "true" as const,    displayName: "On",      description: "Always show thinking" },
+  ] as const;
+
   // ── Matching ───────────────────────────────────────────────────────────────
 
   /**
@@ -49,22 +65,41 @@ export class Settings extends EventEmitter {
   private _model: string | undefined;
   private _effort: EffortValue | undefined;
   private _permissionMode: PermissionMode | undefined;
+  private _verbose: boolean;
+  private _thinkOutLoud: ThinkOutLoudValue;
   private _cachedModels: ModelInfo[] | null = null;
 
-  constructor(initial: { model?: string; effort?: EffortValue; permissionMode?: PermissionMode } = {}) {
+  constructor(initial: {
+    model?: string;
+    effort?: EffortValue;
+    permissionMode?: PermissionMode;
+    verbose?: boolean;
+    thinkOutLoud?: boolean;
+  } = {}) {
     super();
     this._model = initial.model;
     this._effort = initial.effort;
     this._permissionMode = initial.permissionMode;
+    this._verbose = initial.verbose ?? false;
+    this._thinkOutLoud = initial.thinkOutLoud !== undefined ? initial.thinkOutLoud : "default";
   }
 
   get model(): string | undefined { return this._model; }
   get effort(): EffortValue | undefined { return this._effort; }
   get permissionMode(): PermissionMode | undefined { return this._permissionMode; }
+  get verbose(): boolean { return this._verbose; }
+  get thinkOutLoud(): ThinkOutLoudValue { return this._thinkOutLoud; }
+
+  /** The resolved thinkOutLoud value: uses verbose when set to "default". */
+  get effectiveThinkOutLoud(): boolean {
+    return this._thinkOutLoud === "default" ? this._verbose : this._thinkOutLoud;
+  }
 
   _setModel(v: string | undefined): void { this._model = v; this.emit("change"); }
   _setEffort(v: EffortValue | undefined): void { this._effort = v; this.emit("change"); }
   _setPermissionMode(v: PermissionMode | undefined): void { this._permissionMode = v; this.emit("change"); }
+  _setVerbose(v: boolean): void { this._verbose = v; this.emit("change"); }
+  _setThinkOutLoud(v: ThinkOutLoudValue): void { this._thinkOutLoud = v; this.emit("change"); }
 
   /** Returns the cached model list, or null if no query has been run yet. */
   getCachedModels(): ModelInfo[] | null { return this._cachedModels; }

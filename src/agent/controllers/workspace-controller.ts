@@ -42,31 +42,30 @@ export class WorkspaceController {
   }
 
   private _registerListeners(workspace: Workspace): void {
-    const { verbose } = this.config;
     const { display } = this;
     workspace.on("create-start", () => {
-      if (!verbose) display.print(c.sageGreen("Creating workspace..."));
+      if (!this.config.verbose) display.print(c.sageGreen("Creating workspace..."));
     });
     workspace.on("clone-start", ({ repoUrl: url, dir }: { repoUrl: string; dir: string }) => {
-      if (verbose) display.print(c.sageGreen(`Cloning ${url} → ${dir}`));
+      if (this.config.verbose) display.print(c.sageGreen(`Cloning ${url} → ${dir}`));
     });
     workspace.on("npm-install", ({ dir }: { dir: string }) => {
-      if (verbose) display.print(c.sageGreen(`Installing dependencies in ${dir}`));
+      if (this.config.verbose) display.print(c.sageGreen(`Installing dependencies in ${dir}`));
     });
     workspace.on("reset-start", ({ dir }: { dir: string }) => {
-      display.print(c.sageGreen(verbose ? `Resetting ${dir}` : "Resetting workspace..."));
+      display.print(c.sageGreen(this.config.verbose ? `Resetting ${dir}` : "Resetting workspace..."));
     });
     workspace.on("reset-retry", ({ error }: { dir: string; error: string }) => {
       display.print(c.amber(`Reset failed, retrying: ${error}`));
     });
     workspace.on("reset-reclone", ({ dir, error }: { dir: string; error: string; repoUrl: string }) => {
-      display.print(c.amber(verbose ? `Reset failed again, re-cloning ${dir}: ${error}` : `Reset failed again, re-cloning: ${error}`));
+      display.print(c.amber(this.config.verbose ? `Reset failed again, re-cloning ${dir}: ${error}` : `Reset failed again, re-cloning: ${error}`));
     });
     workspace.on("destroy", ({ dir }: { dir: string }) => {
-      display.print(c.sageGreen(verbose ? `Destroying ${dir}` : "Destroying workspace..."));
+      display.print(c.sageGreen(this.config.verbose ? `Destroying ${dir}` : "Destroying workspace..."));
     });
     workspace.on("prune-start", ({ workspaceDir: dir }: { workspaceDir: string }) => {
-      display.print(c.sageGreen(verbose ? `Pruning orphaned workspaces in ${dir}` : "Pruning orphaned workspaces..."));
+      display.print(c.sageGreen(this.config.verbose ? `Pruning orphaned workspaces in ${dir}` : "Pruning orphaned workspaces..."));
     });
     workspace.on("prune-remove", ({ dir }: { dir: string }) => {
       display.print(c.darkGray(`  Removed: ${dir}`));

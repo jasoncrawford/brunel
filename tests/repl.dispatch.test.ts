@@ -96,14 +96,14 @@ describe("dispatchInput", () => {
     expect(result).toEqual({ type: "command", name: "workspace:prune", args: "" });
   });
 
-  it("/model returns command with args", async () => {
+  it("/model resolves to settings:model via suffix match", async () => {
     const result = await registry.dispatch("/model", () => null);
-    expect(result).toEqual({ type: "command", name: "model", args: "" });
+    expect(result).toEqual({ type: "command", name: "settings:model", args: "" });
   });
 
-  it("/model opus passes args to command", async () => {
+  it("/model opus resolves to settings:model passing args", async () => {
     const result = await registry.dispatch("/model opus", () => null);
-    expect(result).toEqual({ type: "command", name: "model", args: "opus" });
+    expect(result).toEqual({ type: "command", name: "settings:model", args: "opus" });
   });
 
   it("/worker:complete returns canonical command", async () => {
