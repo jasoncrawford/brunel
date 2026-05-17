@@ -34,6 +34,7 @@ export async function registerTestCommands(): Promise<CommandController> {
   settingsRegistry.register("permissions",    { description: "Set the permission mode for tool use", handler: noop });
   settingsRegistry.register("verbose",        { description: "Set verbose output mode", handler: noop });
   settingsRegistry.register("think-out-loud", { description: "Set think-out-loud mode", handler: noop });
+  registry.register("version", { description: "Print version information", handler: noop });
   registry.register("help", { description: "List available commands", handler: noop });
   registry.register("exit", { description: "Exit", aliases: ["quit"], handler: noop });
   const workerRegistry = registry.scoped("worker");

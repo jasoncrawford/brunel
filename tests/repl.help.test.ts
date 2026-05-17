@@ -136,6 +136,13 @@ describe("root command registration order", () => {
     helpText = formatHelp(controller.registry.listAll());
   });
 
+  it("/version appears before /help in the root commands section", () => {
+    const versionPos = helpText.indexOf("/version");
+    const helpPos    = helpText.indexOf("/help");
+    expect(versionPos).toBeGreaterThan(0);
+    expect(helpPos).toBeGreaterThan(versionPos);
+  });
+
   it("/exit appears after /help in the root commands section", () => {
     const helpPos = helpText.indexOf("/help");
     const exitPos = helpText.indexOf("/exit");
