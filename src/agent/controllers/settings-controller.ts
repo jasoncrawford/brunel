@@ -1,22 +1,25 @@
 import type { PermissionMode } from "@anthropic-ai/claude-agent-sdk";
 import { c } from "../views/style.js";
 import type { WorkerDisplay } from "./worker-controller.js";
-import type { PickResult, SettingsMenuEntry, SettingsMenuResult } from "../views/picker.js";
+import type { PickConfig, PickResult, SettingsMenuEntry, SettingsMenuResult } from "../views/picker.js";
 import { Settings } from "../models/settings.js";
 import type { FetchModelsFn, EffortValue, ThinkOutLoudValue } from "../models/settings.js";
 import type { CommandRegistry } from "./command-controller.js";
 
-type PickFn = (options: string[], currentIdx: number) => Promise<PickResult>;
-type SettingsPickFn = (entries: SettingsMenuEntry[], onCycle: (i: number, v: string) => void) => Promise<SettingsMenuResult>;
+type SettingsPicker = {
+  pick(options: string[], config: PickConfig): Promise<PickResult>;
+  pickSettingsMenu(entries: SettingsMenuEntry[], onCycle: (i: number, v: string) => void): Promise<SettingsMenuResult>;
+};
 
 /**
  * Handles interactive selection for all settings commands (/settings:*).
- * Receives a Settings model and a display for output.
+ * Receives a Settings model, a display for output, and a picker for menus.
  */
 export class SettingsController {
   constructor(
     private readonly settings: Settings,
     private readonly display: WorkerDisplay,
+    private readonly picker: SettingsPicker,
   ) {}
 
   /** Parse a boolean alias. Accepts true/on/yes/y and false/off/no/n (case-insensitive). */
@@ -31,7 +34,6 @@ export class SettingsController {
   /** Handle the /model command: show a picker or set directly from an argument. */
   async pickModel(
     args: string,
-    pickFn: PickFn,
     fetchModelsFn: FetchModelsFn | undefined,
   ): Promise<void> {
     // Ensure models are loaded
@@ -83,13 +85,13 @@ export class SettingsController {
     let currentIdx = -1;
     for (let i = 0; i < models.length; i++) {
       const m = models[i];
-      const desc = m.description ? ` \u00b7 ${m.description}` : "";
+      const desc = m.description ? ` · ${m.description}` : "";
       options.push(`${m.displayName}${desc}`);
       if (m.value === this.settings.model) currentIdx = i;
     }
 
     this.display.print(c.yellow("\nSelect model:"));
-    const result = await pickFn(options, currentIdx);
+    const result = await this.picker.pick(options, { currentIdx, escapable: true });
 
     if (result.type !== "selected") return;
 
@@ -99,10 +101,7 @@ export class SettingsController {
   }
 
   /** Handle the /effort command: show a picker or set directly from an argument. */
-  async pickEffort(
-    args: string,
-    pickFn: PickFn,
-  ): Promise<void> {
+  async pickEffort(args: string): Promise<void> {
     // Direct set: /effort <level>
     if (args) {
       if (args === "auto") {
@@ -133,7 +132,7 @@ export class SettingsController {
     }
 
     this.display.print(c.yellow("\nSelect effort level:"));
-    const result = await pickFn(options, currentIdx);
+    const result = await this.picker.pick(options, { currentIdx, escapable: true });
 
     if (result.type !== "selected") return;
 
@@ -149,10 +148,7 @@ export class SettingsController {
   }
 
   /** Handle the /permissions command: show a picker or set directly from an argument. */
-  async pickPermissions(
-    args: string,
-    pickFn: PickFn,
-  ): Promise<void> {
+  async pickPermissions(args: string): Promise<void> {
     // Direct set: /permissions <mode>
     if (args) {
       if (args === "default") {
@@ -183,7 +179,7 @@ export class SettingsController {
     }
 
     this.display.print(c.yellow("\nSelect permission mode:"));
-    const result = await pickFn(options, currentIdx);
+    const result = await this.picker.pick(options, { currentIdx, escapable: true });
 
     if (result.type !== "selected") return;
 
@@ -199,7 +195,7 @@ export class SettingsController {
   }
 
   /** Handle the /settings:verbose command: show a picker or set directly from an argument. */
-  async pickVerbose(args: string, pickFn: PickFn): Promise<void> {
+  async pickVerbose(args: string): Promise<void> {
     if (args) {
       const val = SettingsController.parseBool(args);
       if (val === undefined) {
@@ -223,7 +219,7 @@ export class SettingsController {
     }
 
     this.display.print(c.yellow("\nSelect verbose:"));
-    const result = await pickFn(options, currentIdx);
+    const result = await this.picker.pick(options, { currentIdx, escapable: true });
     if (result.type !== "selected") return;
 
     const chosen = Settings.VERBOSE_OPTIONS[result.index];
@@ -234,7 +230,7 @@ export class SettingsController {
   }
 
   /** Handle the /settings:think-out-loud command: show a picker or set directly from an argument. */
-  async pickThinkOutLoud(args: string, pickFn: PickFn): Promise<void> {
+  async pickThinkOutLoud(args: string): Promise<void> {
     if (args) {
       const lower = args.toLowerCase();
       if (lower === "default") {
@@ -266,7 +262,7 @@ export class SettingsController {
     }
 
     this.display.print(c.yellow("\nSelect think-out-loud:"));
-    const result = await pickFn(options, currentIdx);
+    const result = await this.picker.pick(options, { currentIdx, escapable: true });
     if (result.type !== "selected") return;
 
     const chosen = Settings.THINK_OUT_LOUD_OPTIONS[result.index];
@@ -279,7 +275,7 @@ export class SettingsController {
   }
 
   /** Show the /settings overview picker: all settings with current values, Tab to cycle. */
-  async pickSettings(settingsPickFn: SettingsPickFn, fetchModelsFn?: FetchModelsFn): Promise<void> {
+  async pickSettings(fetchModelsFn?: FetchModelsFn): Promise<void> {
     // Ensure model list is loaded for display
     let models = this.settings.getCachedModels();
     if (!models && fetchModelsFn) {
@@ -335,7 +331,7 @@ export class SettingsController {
       }
     };
 
-    await settingsPickFn(entries, onCycle);
+    await this.picker.pickSettingsMenu(entries, onCycle);
   }
 
   /**
@@ -346,33 +342,31 @@ export class SettingsController {
   registerAll(
     scopedRegistry: CommandRegistry,
     rootRegistry: CommandRegistry,
-    pickFn: PickFn,
-    settingsPickFn: SettingsPickFn,
     fetchModelsFn?: FetchModelsFn,
   ): void {
     scopedRegistry.register("model", {
       description: "Select the Claude model to use",
-      handler: async (args) => { await this.pickModel(args, pickFn, fetchModelsFn); },
+      handler: async (args) => { await this.pickModel(args, fetchModelsFn); },
     });
     scopedRegistry.register("effort", {
       description: "Set the effort level for Claude's thinking",
-      handler: async (args) => { await this.pickEffort(args, pickFn); },
+      handler: async (args) => { await this.pickEffort(args); },
     });
     scopedRegistry.register("permissions", {
       description: "Set the permission mode for tool use",
-      handler: async (args) => { await this.pickPermissions(args, pickFn); },
+      handler: async (args) => { await this.pickPermissions(args); },
     });
     scopedRegistry.register("verbose", {
       description: "Set verbose output mode",
-      handler: async (args) => { await this.pickVerbose(args, pickFn); },
+      handler: async (args) => { await this.pickVerbose(args); },
     });
     scopedRegistry.register("think-out-loud", {
       description: "Set think-out-loud mode (show agent thinking text)",
-      handler: async (args) => { await this.pickThinkOutLoud(args, pickFn); },
+      handler: async (args) => { await this.pickThinkOutLoud(args); },
     });
     rootRegistry.register("settings", {
       description: "View and edit all settings",
-      handler: async () => { await this.pickSettings(settingsPickFn, fetchModelsFn); },
+      handler: async () => { await this.pickSettings(fetchModelsFn); },
     });
   }
 }

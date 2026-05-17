@@ -59,7 +59,7 @@ export class BrunelAgent {
       return idx === 0;
     };
 
-    this.settingsController = new SettingsController(this.settings, this.display);
+    this.settingsController = new SettingsController(this.settings, this.display, this.picker);
     const registry = new CommandRegistry();
     this.controller = new CommandController(registry);
   }
@@ -216,17 +216,9 @@ export class BrunelAgent {
         this.display.print(this.display.renderer.clearBreak());
       },
     });
-    const pickFn = (opts: string[], idx: number) =>
-      this.picker.pick(opts, { currentIdx: idx, escapable: true });
-    const settingsPickFn = (
-      entries: import("./views/picker.js").SettingsMenuEntry[],
-      onCycle: (i: number, v: string) => void,
-    ) => this.picker.pickSettingsMenu(entries, onCycle);
     this.settingsController.registerAll(
       registry.scoped("settings"),
       registry,
-      pickFn,
-      settingsPickFn,
       () => this.agentController.fetchModels(),
     );
 
