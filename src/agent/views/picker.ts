@@ -464,9 +464,10 @@ export class Picker {
         const label = entry.label.padEnd(labelWidth);
         const marker = i === idx ? "▶ " : "  ";
         if (i === idx && entry.cycleValues && entry.cycleValues.length > 0) {
-          // Show all values inline: bold for current, dim for others
-          const valuesStr = entry.cycleValues.map(v =>
-            v === displays[i] ? s.bold(v) : s.dim(v)
+          // Show all values inline: bold for current position, dim for others
+          const currentPos = tabPositions[i];
+          const valuesStr = entry.cycleValues.map((v, vi) =>
+            vi === currentPos ? s.bold(v) : s.dim(v)
           ).join("  ");
           return `${marker}${label}  ${valuesStr}`;
         }

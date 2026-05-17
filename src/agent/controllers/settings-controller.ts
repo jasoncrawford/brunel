@@ -294,7 +294,7 @@ export class SettingsController {
       : this.settings.thinkOutLoud === false ? "off"
       : "default";
 
-    const modelCycle = models ? ["default", ...models.map(m => m.value)] : undefined;
+    const modelCycle = models ? models.map(m => m.value) : undefined;
     const effortCycle = Settings.EFFORT_LEVELS.map(l => l.value);
     const permCycle = Settings.PERMISSION_MODES.map(m => m.value as string);
     const verboseCycle = ["off", "on"];
