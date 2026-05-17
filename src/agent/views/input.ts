@@ -233,6 +233,11 @@ export class Input extends EventEmitter {
   private _drawFresh() {
     if (this._done) return;
     this._totalDrawnRows = 0; // reset: we're drawing from a new position
+    // The blank prefix rows (from the leading \n in promptStr) were cleared by
+    // _clearForPrint() and are now occupied by printed content. The prompt is
+    // redrawn at the new position without any prefix above it, so cancel() must
+    // not try to navigate up into the content to clear a prefix that no longer exists.
+    this._prefixRows = 0;
     const displayStr = this._buffer.replace(/\n/g, "\x1b[K\r\n    ");
     // print() already moved the cursor to a new line via console.log's
     // trailing \n; \r ensures we're at column 0 without adding an extra blank line.
