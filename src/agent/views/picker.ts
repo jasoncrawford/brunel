@@ -30,13 +30,21 @@ export type PickResult =
   | { type: "other"; text: string }
   | { type: "cancelled" };
 
+export type SettingsMenuEntry = {
+  label: string;
+  display: string;
+  cycleValues?: string[];
+};
+
+export type SettingsMenuResult = { type: "cancelled" };
+
 export type PickQuestionResult =
   | { type: "answer"; value: string }
   | { type: "other"; text: string }
   | { type: "discuss" };
 
 /** Minimal display interface needed to clear/restore the status bar around picker menus. */
-export type PickerDisplay = { clearBar(): void; drawBar(): void };
+export type PickerDisplay = { startPicker(): void; stopPicker(): void };
 
 // ── Picker class ──────────────────────────────────────────────────────────────
 
@@ -80,7 +88,7 @@ export class Picker {
     const { display } = this;
 
     this.onStart?.();
-    display?.clearBar();
+    display?.startPicker();
 
     return new Promise((resolve, reject) => {
       let idx = hasConfig && currentIdx >= 0 ? currentIdx : 0;
@@ -135,7 +143,7 @@ export class Picker {
       function finish(result: number | PickResult) {
         done = true;
         process.stdin.removeListener("data", onData);
-        display?.drawBar();
+        display?.stopPicker();
         resolve(result);
       }
 
@@ -203,7 +211,7 @@ export class Picker {
   pickMultiple(options: string[], promptStr?: string): Promise<number[]> {
     const { display } = this;
     this.onStart?.();
-    display?.clearBar();
+    display?.startPicker();
 
     return new Promise((resolve, reject) => {
       let idx = 0;
@@ -242,12 +250,12 @@ export class Picker {
           } else if (ch === "\r" || ch === "\n") {
             done = true;
             process.stdin.removeListener("data", onData);
-            display?.drawBar();
+            display?.stopPicker();
             resolve([...selected].sort((a, b) => a - b));
           } else if (ch === "\x03") {
             done = true;
             process.stdin.removeListener("data", onData);
-            display?.drawBar();
+            display?.stopPicker();
             reject(new PickerCancelledError());
             return;
           }
@@ -270,7 +278,7 @@ export class Picker {
   ): Promise<PickQuestionResult> {
     const { display } = this;
     this.onStart?.();
-    display?.clearBar();
+    display?.startPicker();
 
     return new Promise((resolve, reject) => {
       const extras = [
@@ -344,7 +352,7 @@ export class Picker {
       function finish(result: PickQuestionResult) {
         done = true;
         process.stdin.removeListener("data", onData);
-        display?.drawBar();
+        display?.stopPicker();
         resolve(result);
       }
 
@@ -371,7 +379,7 @@ export class Picker {
             } else if (ch === "\x03") {
               done = true;
               process.stdin.removeListener("data", onData);
-              display?.drawBar();
+              display?.stopPicker();
               reject(new PickerCancelledError());
               return;
             } else if (ch.charCodeAt(0) >= 32) {
@@ -394,7 +402,7 @@ export class Picker {
             } else if (ch === "\x03") {
               done = true;
               process.stdin.removeListener("data", onData);
-              display?.drawBar();
+              display?.stopPicker();
               reject(new PickerCancelledError());
               return;
             } else if (ch >= "1" && ch <= "9") {
@@ -402,6 +410,126 @@ export class Picker {
               if (n < count) { navigateTo(n); }
             }
           }
+        }
+      }
+
+      process.stdin.on("data", onData);
+    });
+  }
+
+  /**
+   * Settings overview picker: shows all settings with current values.
+   * Up/down arrows navigate; Tab/Right cycles through valid values forward;
+   * Shift-Tab/Left cycles backward (calling onCycle immediately).
+   *
+   * Opens with a heading row selected. Arrowing into a setting expands it
+   * inline showing all cycle values. Enter leaves the menu in place showing
+   * the final un-highlighted state. Escape/Ctrl-C erases the menu.
+   */
+  pickSettingsMenu(
+    entries: SettingsMenuEntry[],
+    onCycle: (entryIndex: number, newValue: string) => void,
+  ): Promise<SettingsMenuResult> {
+    this.onStart?.();
+    this.display?.startPicker();
+
+    return new Promise((resolve) => {
+      let idx = -1; // -1 = heading row, 0..count-1 = settings entry
+      let done = false;
+      const count = entries.length;
+      const totalRows = 1 + count; // heading row + settings rows
+
+      const displays = entries.map(e => e.display);
+      const tabPositions = entries.map((e) => {
+        if (!e.cycleValues || e.cycleValues.length === 0) return 0;
+        const pos = e.cycleValues.indexOf(e.display);
+        return pos >= 0 ? pos : 0;
+      });
+
+      const labelWidth = Math.max(...entries.map(e => e.label.length));
+      const HEADING = "Arrows to choose settings, Enter when done";
+
+      const renderLine = (row: number, finished: boolean): string => {
+        if (row === 0) {
+          if (finished) return `  ${HEADING}`;
+          const selected = idx === -1;
+          return selected ? `▶ ${HEADING}` : s.dim(`  ${HEADING}`);
+        }
+        const i = row - 1;
+        const entry = entries[i];
+        const label = entry.label.padEnd(labelWidth);
+        if (finished) return `  ${label}  ${displays[i]}`;
+        const selected = idx === i;
+        if (selected && entry.cycleValues && entry.cycleValues.length > 0) {
+          const currentPos = tabPositions[i];
+          const valuesStr = entry.cycleValues.map((v, vi) =>
+            vi === currentPos ? s.bold(v) : s.dim(v)
+          ).join("  ");
+          return `▶ ${label}  ${valuesStr}`;
+        }
+        const full = `  ${label}  ${displays[i]}`;
+        return selected ? `▶ ${label}  ${displays[i]}` : s.dim(full);
+      };
+
+      for (let row = 0; row < totalRows; row++) {
+        process.stdout.write(renderLine(row, false) + "\r\n");
+      }
+
+      function redraw(finished = false) {
+        process.stdout.write(`\x1b[${totalRows}A\r`);
+        for (let row = 0; row < totalRows; row++) {
+          process.stdout.write(renderLine(row, finished) + "\x1b[K\r\n");
+        }
+      }
+
+      function eraseMenu() {
+        process.stdout.write(`\x1b[${totalRows}A\r`);
+        for (let row = 0; row < totalRows; row++) process.stdout.write("\x1b[K\r\n");
+        process.stdout.write(`\x1b[${totalRows}A\r`);
+      }
+
+      function cycle(direction: 1 | -1) {
+        if (idx < 0) return;
+        const entry = entries[idx];
+        if (!entry?.cycleValues?.length) return;
+        tabPositions[idx] = (tabPositions[idx] + direction + entry.cycleValues.length) % entry.cycleValues.length;
+        const newValue = entry.cycleValues[tabPositions[idx]];
+        displays[idx] = newValue;
+        onCycle(idx, newValue);
+        redraw();
+      }
+
+      const { display } = this;
+      function finish(erase: boolean) {
+        done = true;
+        process.stdin.removeListener("data", onData);
+        if (erase) { eraseMenu(); } else { redraw(true); }
+        display?.stopPicker();
+        resolve({ type: "cancelled" });
+      }
+
+      function onData(raw: string) {
+        if (done) return;
+        let data = raw;
+        data = data.replace(/\x1b\[A/g, "\x10"); // up arrow
+        data = data.replace(/\x1b\[B/g, "\x11"); // down arrow
+        data = data.replace(/\x1b\[C/g, "\x12"); // right arrow → cycle forward
+        data = data.replace(/\x1b\[D/g, "\x13"); // left arrow → cycle backward
+        data = data.replace(/\x1b\[Z/g, "\x14"); // shift-tab → cycle backward
+        data = data.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
+        data = data.replace(/\x1b./gs, "");
+
+        for (const ch of data) {
+          if (ch === "\x10") {
+            idx = idx === -1 ? count - 1 : idx - 1;
+            redraw();
+          } else if (ch === "\x11") {
+            idx = idx === count - 1 ? -1 : idx + 1;
+            redraw();
+          } else if (ch === "\x09" || ch === "\x12") { cycle(1); }  // Tab / Right
+          else if (ch === "\x13" || ch === "\x14") { cycle(-1); }   // Left / Shift-Tab
+          else if (ch === "\r" || ch === "\n") { finish(false); return; }
+          else if (ch === "\x1b" || ch === "\x03") { finish(true); return; }
         }
       }
 

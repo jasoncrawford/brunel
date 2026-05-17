@@ -43,8 +43,9 @@ describe("listAll", () => {
     const names = registry.registry.listAll().map(e => e.name);
     expect(names).toContain("clear");
     expect(names).toContain("exit");
-    expect(names).toContain("model");
-    expect(names).toContain("effort");
+    expect(names).toContain("settings");
+    expect(names).toContain("settings:model");
+    expect(names).toContain("settings:effort");
     expect(names).toContain("worker:complete");
   });
 
@@ -334,10 +335,11 @@ describe("filterCommands alias priority", () => {
 
 describe("each registered entry shape", () => {
   beforeEach(() => {
-    registry.registry.register("clear",  { description: "Clear", handler: async () => {} });
-    registry.registry.register("exit",   { description: "Exit", handler: async () => "exit" });
-    registry.registry.register("model",  { description: "Model", handler: async () => {} });
-    registry.registry.register("effort", { description: "Effort", handler: async () => {} });
+    registry.registry.register("clear",           { description: "Clear", handler: async () => {} });
+    registry.registry.register("exit",            { description: "Exit", handler: async () => "exit" });
+    registry.registry.register("settings",        { description: "View and edit all settings", handler: async () => {} });
+    registry.registry.register("settings:model",  { description: "Model", handler: async () => {} });
+    registry.registry.register("settings:effort", { description: "Effort", handler: async () => {} });
     registry.registry.register("worker:complete", { description: "Task done", handler: async () => "task-complete" });
   });
 

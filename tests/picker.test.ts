@@ -10,10 +10,10 @@ import { getConfig } from "../src/config.js";
 // position, which is the blank separator row immediately above the status bar.
 // Without bar management, picker options overwrite the status bar lines.
 //
-// The fix: display.clearBar() is called before any options are written to
-// stdout, and display.drawBar() is called after the user selects. These tests
-// verify that the option text appears in stdout *after* clearBar fires and
-// *before* drawBar fires — confirming options land on freshly-cleared lines.
+// The fix: display.startPicker() is called before any options are written to
+// stdout, and display.stopPicker() is called after the user selects. These tests
+// verify that the option text appears in stdout *after* startPicker fires and
+// *before* stopPicker fires — confirming options land on freshly-cleared lines.
 
 describe("Picker bar management", () => {
   afterEach(() => {
@@ -23,7 +23,7 @@ describe("Picker bar management", () => {
 
   /** Returns a tracking display and a spy on stdout.write. */
   function setup(optionText: string) {
-    const events: Array<"clearBar" | "option" | "drawBar"> = [];
+    const events: Array<"startPicker" | "option" | "stopPicker"> = [];
 
     vi.spyOn(process.stdout, "write").mockImplementation((chunk: unknown) => {
       if (String(chunk).includes(optionText)) events.push("option");
@@ -31,14 +31,14 @@ describe("Picker bar management", () => {
     });
 
     const display = {
-      clearBar: vi.fn(() => { events.push("clearBar"); }),
-      drawBar:  vi.fn(() => { events.push("drawBar"); }),
+      startPicker: vi.fn(() => { events.push("startPicker"); }),
+      stopPicker:  vi.fn(() => { events.push("stopPicker"); }),
     };
 
     return { events, display };
   }
 
-  it("pick(): options are written to stdout after clearBar and before drawBar", async () => {
+  it("pick(): options are written to stdout after startPicker and before stopPicker", async () => {
     const { events, display } = setup("Option A");
     const picker = new Picker(display);
 
@@ -46,10 +46,10 @@ describe("Picker bar management", () => {
     process.stdin.emit("data", "\r");
     await promise;
 
-    expect(events).toEqual(["clearBar", "option", "drawBar"]);
+    expect(events).toEqual(["startPicker", "option", "stopPicker"]);
   });
 
-  it("pickMultiple(): options are written to stdout after clearBar and before drawBar", async () => {
+  it("pickMultiple(): options are written to stdout after startPicker and before stopPicker", async () => {
     const { events, display } = setup("Choice A");
     const picker = new Picker(display);
 
@@ -57,10 +57,10 @@ describe("Picker bar management", () => {
     process.stdin.emit("data", "\r");
     await promise;
 
-    expect(events).toEqual(["clearBar", "option", "drawBar"]);
+    expect(events).toEqual(["startPicker", "option", "stopPicker"]);
   });
 
-  it("pickQuestion(): options are written to stdout after clearBar and before drawBar", async () => {
+  it("pickQuestion(): options are written to stdout after startPicker and before stopPicker", async () => {
     const { events, display } = setup("Yes");
     const picker = new Picker(display);
     const opts = [{ label: "Yes", description: "Proceed" }];
@@ -69,7 +69,7 @@ describe("Picker bar management", () => {
     process.stdin.emit("data", "\r");
     await promise;
 
-    expect(events).toEqual(["clearBar", "option", "drawBar"]);
+    expect(events).toEqual(["startPicker", "option", "stopPicker"]);
   });
 
   it("works with no display (no bar methods called, pick still resolves)", async () => {
@@ -89,13 +89,13 @@ describe("Picker bar management", () => {
 // picker, drawBar() routes through the no-op inputPrint callback and never
 // redraws the status bar below the options.
 //
-// Fix: Picker accepts an optional onStart callback called before clearBar().
+// Fix: Picker accepts an optional onStart callback called before startPicker().
 // The composition root wires this to input.cancel(), which nulls inputPrint so
-// clearBar() erases the old bar and drawBar() redraws it below the options.
+// startPicker() erases the old bar and stopPicker() redraws it below the options.
 //
 // Behavioral test: start a real persistent status bar, simulate ask() being
 // active, run a picker, then verify that the status bar text appears in stdout
-// *after* the picker options. Without the fix, drawBar() routes through the
+// *after* the picker options. Without the fix, stopPicker() routes through the
 // no-op inputPrint and never writes status bar text after the options — meaning
 // the bar was not redrawn below the picker (it was left on top of it, corrupted).
 
@@ -380,15 +380,15 @@ describe("Picker: ^C cancels cleanly without calling process.exit (issue #887)",
     await expect(promise).rejects.toBeInstanceOf(PickerCancelledError);
   });
 
-  it("pick() without config: drawBar() is called after ^C cancellation", async () => {
+  it("pick() without config: stopPicker() is called after ^C cancellation", async () => {
     vi.spyOn(process.stdout, "write").mockReturnValue(true);
-    const display = { clearBar: vi.fn(), drawBar: vi.fn() };
+    const display = { startPicker: vi.fn(), stopPicker: vi.fn() };
     const picker = new Picker(display);
 
     const promise = picker.pick(["Allow", "Deny"]);
     process.stdin.emit("data", "\x03");
     await promise;
 
-    expect(display.drawBar).toHaveBeenCalled();
+    expect(display.stopPicker).toHaveBeenCalled();
   });
 });

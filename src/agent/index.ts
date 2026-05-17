@@ -12,7 +12,7 @@ import { AgentStatus } from "./models/agent-status.js";
 import { Input } from "./views/input.js";
 import { Picker } from "./views/picker.js";
 import { WorkerController } from "./controllers/worker-controller.js";
-import { loadConfig, getConfig, parseCommandFromArgs, type BrunelConfig } from "../config.js";
+import { loadConfig, parseCommandFromArgs, type BrunelConfig } from "../config.js";
 import { Workspace } from "./models/workspace.js";
 import { GithubToken } from "./models/github-token.js";
 import { fmtError } from "../utils.js";
@@ -47,7 +47,7 @@ export class BrunelAgent {
     this.config = config;
     this.settings = new Settings(config);
     this.agentStatus = new AgentStatus({ settings: this.settings });
-    this.display = new Display(config, this.agentStatus);
+    this.display = new Display(config, this.agentStatus, this.settings);
     this.input = new Input(this.display);
     this.picker = new Picker(this.display, () => this.input.cancel());
     this.agentController = new AgentController(this.display, this.picker, this.settings);
@@ -59,7 +59,7 @@ export class BrunelAgent {
       return idx === 0;
     };
 
-    this.settingsController = new SettingsController(this.settings, this.display);
+    this.settingsController = new SettingsController(this.settings, this.display, this.picker);
     const registry = new CommandRegistry();
     this.controller = new CommandController(registry);
   }
@@ -183,7 +183,7 @@ export class BrunelAgent {
     // Print the startup banner.
     this.display.print(c.sageGreen(hr("═")));
     this.display.print(c.skyBlue(this.display.s.bold(`  brunel-agent v${PACKAGE_VERSION}`)));
-    this.display.print(c.lavender(`  Permissions: ${this.settings.permissionMode ?? "default"} | Model: ${this.settings.model ?? "default"} | Effort: ${this.settings.effort ?? "auto"} | Output: ${getConfig().verbose ? "verbose" : "quiet"} | Log: repl.log`));
+    this.display.print(c.lavender(`  Permissions: ${this.settings.permissionMode ?? "default"} | Model: ${this.settings.model ?? "default"} | Effort: ${this.settings.effort ?? "auto"} | Output: ${this.settings.verbose ? "verbose" : "quiet"} | Log: repl.log`));
     this.display.print(c.sageGreen(hr("═")));
 
     process.stdout.write("\x1b[?2004h"); // enable bracketed paste mode
@@ -216,34 +216,11 @@ export class BrunelAgent {
         this.display.print(this.display.renderer.clearBreak());
       },
     });
-    registry.register("model", {
-      description: "Select the Claude model to use",
-      handler: async (args) => {
-        await this.settingsController.pickModel(
-          args,
-          (opts, idx) => this.picker.pick(opts, { currentIdx: idx, escapable: true }),
-          () => this.agentController.fetchModels(),
-        );
-      },
-    });
-    registry.register("effort", {
-      description: "Set the effort level for Claude's thinking",
-      handler: async (args) => {
-        await this.settingsController.pickEffort(
-          args,
-          (opts, idx) => this.picker.pick(opts, { currentIdx: idx, escapable: true }),
-        );
-      },
-    });
-    registry.register("permissions", {
-      description: "Set the permission mode for tool use",
-      handler: async (args) => {
-        await this.settingsController.pickPermissions(
-          args,
-          (opts, idx) => this.picker.pick(opts, { currentIdx: idx, escapable: true }),
-        );
-      },
-    });
+    this.settingsController.registerAll(
+      registry.scoped("settings"),
+      registry,
+      () => this.agentController.fetchModels(),
+    );
 
     // ── CLI command dispatch ──────────────────────────────────────────────────
     //

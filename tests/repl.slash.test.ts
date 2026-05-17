@@ -62,12 +62,20 @@ describe("parseSlashCommand", () => {
     expect(registry.parseSlashCommand("/workspace:prune")).toEqual({ type: "command", name: "workspace:prune" });
   });
 
-  it("recognizes /model", () => {
-    expect(registry.parseSlashCommand("/model")).toEqual({ type: "command", name: "model" });
+  it("recognizes /settings:model", () => {
+    expect(registry.parseSlashCommand("/settings:model")).toEqual({ type: "command", name: "settings:model" });
   });
 
-  it("recognizes /effort", () => {
-    expect(registry.parseSlashCommand("/effort")).toEqual({ type: "command", name: "effort" });
+  it("resolves /model to settings:model via suffix match", () => {
+    expect(registry.parseSlashCommand("/model")).toEqual({ type: "command", name: "settings:model" });
+  });
+
+  it("resolves /effort to settings:effort via suffix match", () => {
+    expect(registry.parseSlashCommand("/effort")).toEqual({ type: "command", name: "settings:effort" });
+  });
+
+  it("recognizes /settings", () => {
+    expect(registry.parseSlashCommand("/settings")).toEqual({ type: "command", name: "settings" });
   });
 });
 

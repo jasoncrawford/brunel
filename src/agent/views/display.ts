@@ -9,6 +9,7 @@ import type {
   ContentBlock,
 } from "./renderer.js";
 import { AgentStatus } from "../models/agent-status.js";
+import type { Settings } from "../models/settings.js";
 
 // ── Display class ──────────────────────────────────────────────────────────
 
@@ -57,6 +58,11 @@ export class Display {
   private _getText: (() => string) | null = null;
   private _interval: ReturnType<typeof setInterval> | null = null;
 
+  // ── Picker coordination ────────────────────────────────────────────────────
+  /** Set while a Picker is active. Prevents interval/resize/status-change redraws from
+   * corrupting the picker's cursor position tracking. */
+  private _pickerActive = false;
+
   // ── Persistent (worker) bar ────────────────────────────────────────────────
   /** Whether the persistent worker status bar is currently active. */
   persistentActive = false;
@@ -77,7 +83,7 @@ export class Display {
   // prompt area including any leading blank line (see issue #418).
   inputClear: (() => void) | null = null;
 
-  constructor(readonly config: BrunelConfig, readonly agentStatus: AgentStatus) {
+  constructor(readonly config: BrunelConfig, readonly agentStatus: AgentStatus, private readonly _settings?: Settings) {
     this.renderer = new Renderer(this);
     // Subscribe to agentStatus changes for reactive status bar redraws.
     agentStatus.on("change", () => {
@@ -88,7 +94,13 @@ export class Display {
   /** Public accessor for tests to clear tool-use state between tests. */
   get toolUseNames(): Map<string, string> { return this._toolUseNames; }
 
-  get verbose(): boolean { return this.config.verbose; }
+  get verbose(): boolean { return this._settings?.verbose ?? this.config.verbose; }
+
+  /** The resolved think-out-loud value: uses Settings when available, falls back to config. */
+  get effectiveThinkOutLoud(): boolean {
+    if (this._settings) return this._settings.effectiveThinkOutLoud;
+    return this.config.thinkOutLoud ?? this.config.verbose;
+  }
 
   effectiveWidth(fallback = W): number {
     return (this.getColumns() ?? fallback) - (this.verbose ? VERBOSE_PREFIX_LEN : 0);
@@ -146,7 +158,7 @@ export class Display {
       this.agentStatus.fireOnToolResult(name);
       return;
     }
-    this.print(this.renderer.formatContentBlock(b, role, !!(msg?.isSynthetic), this.config.thinkOutLoud));
+    this.print(this.renderer.formatContentBlock(b, role, !!(msg?.isSynthetic), this.effectiveThinkOutLoud));
   }
 
   /** Print a full SDK message (system, assistant, user, result, etc.). */
@@ -201,6 +213,7 @@ export class Display {
    */
   clearBar(): void {
     if (this.inputPrint || this.inputStatus) return; // ask() owns the screen
+    if (this._pickerActive) return; // picker owns the screen
     const n = this._lineCount();
     if (n === 0) return;
     // Cursor rests on the blank separator row above the status lines.
@@ -229,6 +242,7 @@ export class Display {
       this.inputPrint();
       return;
     }
+    if (this._pickerActive) return; // picker owns the screen
     const n = this._lineCount();
     if (n === 0) return;
     // Cursor is on the blank separator row. Draw each status line below it,
@@ -240,6 +254,21 @@ export class Display {
     seq += `\x1b[${n}A\r`;
     seq += "\x1b[?25l";  // hide cursor
     process.stdout.write(seq);
+  }
+
+  /** Called by Picker at the start of any pick operation: clears the status bar
+   * and marks the picker as active so interval/resize/status-change redraws are
+   * suppressed until stopPicker() is called. */
+  startPicker(): void {
+    this.clearBar(); // _pickerActive is still false here, so the clear runs
+    this._pickerActive = true;
+  }
+
+  /** Called by Picker when a pick operation finishes: re-enables status bar redraws
+   * and immediately restores the bar. */
+  stopPicker(): void {
+    this._pickerActive = false;
+    this.drawBar();
   }
 
   /**
