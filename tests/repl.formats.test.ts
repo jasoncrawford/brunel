@@ -3,7 +3,7 @@ import { stripAnsi } from "./helpers.js";
 import { Display } from "../src/agent/views/display.js";
 import { resolve } from "../src/agent/views/renderer.js";
 import type { FmtTable } from "../src/agent/views/renderer.js";
-import { fmtStats } from "../shared/formatters.js";
+import { fmtStats, fmtTimestamp } from "../shared/formatters.js";
 import { getConfig } from "../src/config.js";
 import { AgentStatus } from "../src/agent/models/agent-status.js";
 
@@ -1076,5 +1076,48 @@ describe("fmtStats - cost formatting", () => {
   it("places cost at the end of the string", () => {
     const result = fmtStats(60, 2, 100, 50, 0.50);
     expect(result).toMatch(/cost: \$0\.50$/);
+  });
+});
+
+describe("fmtTimestamp", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("formats date portion as YYYY-MM-DD followed by a space", () => {
+    const d = new Date(2026, 4, 17, 14, 30, 56); // May 17, 2026
+    expect(fmtTimestamp(d)).toMatch(/^2026-05-17 /);
+  });
+
+  it("includes hours, minutes, and seconds in the time portion", () => {
+    const d = new Date(2026, 4, 17, 14, 30, 56);
+    expect(fmtTimestamp(d)).toMatch(/\d+:\d{2}:\d{2}/);
+  });
+
+  it("includes a timezone abbreviation (uppercase letters)", () => {
+    const d = new Date(2026, 4, 17, 14, 30, 56);
+    expect(fmtTimestamp(d)).toMatch(/[A-Z]{2,}/);
+  });
+
+  it("uses current time when called with no argument", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 4, 17, 9, 0, 0));
+    expect(fmtTimestamp()).toMatch(/^2026-05-17 /);
+  });
+});
+
+describe("MESSAGE_FMT result — timestamp", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("result message includes the current date", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 4, 17, 14, 30, 56));
+    const raw = captureOutput(() => {
+      testDisplay.printMessage({
+        type: "result",
+        duration_ms: 5000,
+        num_turns: 2,
+        usage: { output_tokens: 150, input_tokens: 800 },
+      });
+    });
+    expect(stripAnsi(raw)).toContain("2026-05-17");
   });
 });
