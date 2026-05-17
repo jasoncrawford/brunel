@@ -58,6 +58,11 @@ export class Display {
   private _getText: (() => string) | null = null;
   private _interval: ReturnType<typeof setInterval> | null = null;
 
+  // ── Picker coordination ────────────────────────────────────────────────────
+  /** Set while a Picker is active. Prevents interval/resize/status-change redraws from
+   * corrupting the picker's cursor position tracking. */
+  private _pickerActive = false;
+
   // ── Persistent (worker) bar ────────────────────────────────────────────────
   /** Whether the persistent worker status bar is currently active. */
   persistentActive = false;
@@ -208,6 +213,7 @@ export class Display {
    */
   clearBar(): void {
     if (this.inputPrint || this.inputStatus) return; // ask() owns the screen
+    if (this._pickerActive) return; // picker owns the screen
     const n = this._lineCount();
     if (n === 0) return;
     // Cursor rests on the blank separator row above the status lines.
@@ -236,6 +242,7 @@ export class Display {
       this.inputPrint();
       return;
     }
+    if (this._pickerActive) return; // picker owns the screen
     const n = this._lineCount();
     if (n === 0) return;
     // Cursor is on the blank separator row. Draw each status line below it,
@@ -247,6 +254,21 @@ export class Display {
     seq += `\x1b[${n}A\r`;
     seq += "\x1b[?25l";  // hide cursor
     process.stdout.write(seq);
+  }
+
+  /** Called by Picker at the start of any pick operation: clears the status bar
+   * and marks the picker as active so interval/resize/status-change redraws are
+   * suppressed until stopPicker() is called. */
+  startPicker(): void {
+    this.clearBar(); // _pickerActive is still false here, so the clear runs
+    this._pickerActive = true;
+  }
+
+  /** Called by Picker when a pick operation finishes: re-enables status bar redraws
+   * and immediately restores the bar. */
+  stopPicker(): void {
+    this._pickerActive = false;
+    this.drawBar();
   }
 
   /**

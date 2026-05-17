@@ -294,21 +294,26 @@ export class SettingsController {
       : this.settings.thinkOutLoud === false ? "off"
       : "default";
 
+    const modelCycle = models ? ["default", ...models.map(m => m.value)] : undefined;
     const effortCycle = Settings.EFFORT_LEVELS.map(l => l.value);
     const permCycle = Settings.PERMISSION_MODES.map(m => m.value as string);
     const verboseCycle = ["off", "on"];
     const tolCycle = ["default", "off", "on"];
 
     const entries: SettingsMenuEntry[] = [
-      { label: "Model",          display: modelDisplay },
-      { label: "Effort",         display: effortDisplay, cycleValues: effortCycle },
-      { label: "Permissions",    display: permDisplay,   cycleValues: permCycle },
+      { label: "Model",          display: modelDisplay,   cycleValues: modelCycle },
+      { label: "Effort",         display: effortDisplay,  cycleValues: effortCycle },
+      { label: "Permissions",    display: permDisplay,    cycleValues: permCycle },
       { label: "Verbose",        display: verboseDisplay, cycleValues: verboseCycle },
-      { label: "Think-out-loud", display: tolDisplay,    cycleValues: tolCycle },
+      { label: "Think-out-loud", display: tolDisplay,     cycleValues: tolCycle },
     ];
 
     const onCycle = (i: number, newValue: string): void => {
       switch (i) {
+        case 0: { // Model
+          this.settings._setModel(newValue === "default" ? undefined : newValue);
+          break;
+        }
         case 1: { // Effort
           const match = Settings.EFFORT_LEVELS.find(l => l.value === newValue);
           if (match) this.settings._setEffort(match.value === "auto" ? undefined : match.value as EffortValue);
@@ -334,11 +339,6 @@ export class SettingsController {
     if (result.type !== "selected") return;
 
     // On Enter, invoke the sub-command for the selected setting
-    const subCommands = ["settings:model", "settings:effort", "settings:permissions", "settings:verbose", "settings:think-out-loud"];
-    const sub = subCommands[result.index];
-    if (!sub) return;
-
-    // Invoke the sub-command handlers
     switch (result.index) {
       case 0: await this.pickModel("", pickFn, fetchModelsFn); break;
       case 1: await this.pickEffort("", pickFn); break;

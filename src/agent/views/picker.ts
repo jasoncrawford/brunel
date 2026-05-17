@@ -46,7 +46,7 @@ export type PickQuestionResult =
   | { type: "discuss" };
 
 /** Minimal display interface needed to clear/restore the status bar around picker menus. */
-export type PickerDisplay = { clearBar(): void; drawBar(): void };
+export type PickerDisplay = { startPicker(): void; stopPicker(): void };
 
 // ── Picker class ──────────────────────────────────────────────────────────────
 
@@ -90,7 +90,7 @@ export class Picker {
     const { display } = this;
 
     this.onStart?.();
-    display?.clearBar();
+    display?.startPicker();
 
     return new Promise((resolve, reject) => {
       let idx = hasConfig && currentIdx >= 0 ? currentIdx : 0;
@@ -145,7 +145,7 @@ export class Picker {
       function finish(result: number | PickResult) {
         done = true;
         process.stdin.removeListener("data", onData);
-        display?.drawBar();
+        display?.stopPicker();
         resolve(result);
       }
 
@@ -213,7 +213,7 @@ export class Picker {
   pickMultiple(options: string[], promptStr?: string): Promise<number[]> {
     const { display } = this;
     this.onStart?.();
-    display?.clearBar();
+    display?.startPicker();
 
     return new Promise((resolve, reject) => {
       let idx = 0;
@@ -252,12 +252,12 @@ export class Picker {
           } else if (ch === "\r" || ch === "\n") {
             done = true;
             process.stdin.removeListener("data", onData);
-            display?.drawBar();
+            display?.stopPicker();
             resolve([...selected].sort((a, b) => a - b));
           } else if (ch === "\x03") {
             done = true;
             process.stdin.removeListener("data", onData);
-            display?.drawBar();
+            display?.stopPicker();
             reject(new PickerCancelledError());
             return;
           }
@@ -280,7 +280,7 @@ export class Picker {
   ): Promise<PickQuestionResult> {
     const { display } = this;
     this.onStart?.();
-    display?.clearBar();
+    display?.startPicker();
 
     return new Promise((resolve, reject) => {
       const extras = [
@@ -354,7 +354,7 @@ export class Picker {
       function finish(result: PickQuestionResult) {
         done = true;
         process.stdin.removeListener("data", onData);
-        display?.drawBar();
+        display?.stopPicker();
         resolve(result);
       }
 
@@ -381,7 +381,7 @@ export class Picker {
             } else if (ch === "\x03") {
               done = true;
               process.stdin.removeListener("data", onData);
-              display?.drawBar();
+              display?.stopPicker();
               reject(new PickerCancelledError());
               return;
             } else if (ch.charCodeAt(0) >= 32) {
@@ -404,7 +404,7 @@ export class Picker {
             } else if (ch === "\x03") {
               done = true;
               process.stdin.removeListener("data", onData);
-              display?.drawBar();
+              display?.stopPicker();
               reject(new PickerCancelledError());
               return;
             } else if (ch >= "1" && ch <= "9") {
@@ -434,7 +434,7 @@ export class Picker {
     onCycle: (entryIndex: number, newValue: string) => void,
   ): Promise<SettingsMenuResult> {
     this.onStart?.();
-    this.display?.clearBar();
+    this.display?.startPicker();
 
     return new Promise((resolve) => {
       let idx = 0;
@@ -506,7 +506,7 @@ export class Picker {
         done = true;
         process.stdin.removeListener("data", onData);
         eraseMenu();
-        display?.drawBar();
+        display?.stopPicker();
         resolve(result);
       }
 
