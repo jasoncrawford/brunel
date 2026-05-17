@@ -18,7 +18,7 @@ import { Workspace } from "./models/workspace.js";
 import { GithubToken } from "./models/github-token.js";
 import { fmtError } from "../utils.js";
 import { Settings } from "./models/settings.js";
-import { CommandRegistry, CommandController } from "./controllers/command-controller.js";
+import { CommandRegistry, CommandController, formatHelp } from "./controllers/command-controller.js";
 import { SettingsController } from "./controllers/settings-controller.js";
 import { WorkspaceController } from "./controllers/workspace-controller.js";
 import { AgentController, logFull } from "./controllers/agent-controller.js";
@@ -190,17 +190,6 @@ export class BrunelAgent {
     const registry = this.controller.registry;
     workspaceController.registerCommands(registry.scoped("workspace"));
     workerController.registerCommands(registry.scoped("worker"));
-    registry.register("exit", {
-      description: "Exit",
-      aliases: ["quit"],
-      handler: async () => {
-        if (workerController.isActive) {
-          await workerController.stop();
-          if (workerController.isActive) return undefined; // user cancelled
-        }
-        return "exit";
-      },
-    });
     registry.register("clear", {
       description: "Clear the conversation",
       handler: async () => {
@@ -219,6 +208,25 @@ export class BrunelAgent {
       exitAfterRunFromArgs: true,
       handler: async () => {
         process.stdout.write(`v${PACKAGE_VERSION} (protocol version ${PROTOCOL_VERSION})\n`);
+      },
+    });
+    registry.register("help", {
+      description: "List available commands",
+      handler: async () => {
+        const wsUrl = config.foremanUrl;
+        const dashboardUrl = wsUrl.replace(/^wss:\/\//, "https://").replace(/^ws:\/\//, "http://");
+        this.display.print(formatHelp(registry.listAll(), { dashboardUrl }));
+      },
+    });
+    registry.register("exit", {
+      description: "Exit",
+      aliases: ["quit"],
+      handler: async () => {
+        if (workerController.isActive) {
+          await workerController.stop();
+          if (workerController.isActive) return undefined; // user cancelled
+        }
+        return "exit";
       },
     });
 

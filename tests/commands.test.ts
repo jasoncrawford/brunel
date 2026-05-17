@@ -46,6 +46,7 @@ describe("listAll", () => {
     expect(names).toContain("settings");
     expect(names).toContain("settings:model");
     expect(names).toContain("settings:effort");
+    expect(names).toContain("help");
     expect(names).toContain("worker:complete");
   });
 

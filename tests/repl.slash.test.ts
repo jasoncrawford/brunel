@@ -77,6 +77,14 @@ describe("parseSlashCommand", () => {
   it("recognizes /settings", () => {
     expect(registry.parseSlashCommand("/settings")).toEqual({ type: "command", name: "settings" });
   });
+
+  it("recognizes /help", () => {
+    expect(registry.parseSlashCommand("/help")).toEqual({ type: "command", name: "help" });
+  });
+
+  it("recognizes /version", () => {
+    expect(registry.parseSlashCommand("/version")).toEqual({ type: "command", name: "version" });
+  });
 });
 
 // ── Unambiguous namespace-less resolution ─────────────────────────────────────
