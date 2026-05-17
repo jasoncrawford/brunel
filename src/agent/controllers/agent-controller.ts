@@ -1,4 +1,6 @@
 import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { CanUseTool, PermissionResult } from "@anthropic-ai/claude-agent-sdk";
 import { c } from "../views/style.js";
@@ -8,6 +10,12 @@ import type { PickQuestionResult } from "../views/picker.js";
 import { Settings } from "../models/settings.js";
 import type { ModelInfo } from "../models/settings.js";
 import { QueryStats, STALL_THRESHOLD_SECS } from "../models/query-stats.js";
+
+// ── Plugin path ───────────────────────────────────────────────────────────────
+
+// Resolve the bundled .claude-plugin directory relative to this file's location.
+// This file lives at src/agent/controllers/; the package root is three levels up.
+const PLUGIN_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..", ".claude-plugin");
 
 // ── Log file ──────────────────────────────────────────────────────────────────
 
@@ -119,6 +127,7 @@ export class AgentController {
         includePartialMessages: true,
         canUseTool,
         abortController: ac,
+        plugins: [{ type: "local", path: PLUGIN_PATH }],
         ...(allowDangerouslySkipPerms ? { allowDangerouslySkipPermissions: true } : {}),
         ...(sessionId ? { resume: sessionId } : {}),
         ...(this.settings.model ? { model: this.settings.model } : {}),

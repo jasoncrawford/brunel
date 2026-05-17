@@ -6,6 +6,7 @@
     "brunel": "bin/brunel.cjs"
   },
   "files": [
+    ".claude-plugin/",
     "bin/",
     "dist/",
     "shared/",

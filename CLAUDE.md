@@ -38,6 +38,10 @@ Follows MVC with three subdirectories:
 - `src/` root — `config.ts` (unified config loader with `getConfig()` singleton; also exports `parseCommandFromArgs()` which extracts the first positional CLI arg as a command name for direct CLI invocation), `wire.ts` (re-exports from `shared/wire.ts`)
 - `shared/` — utilities needed by both Node backend and Vite frontend: `wire.ts` (wire protocol types and `PROTOCOL_VERSION`), `formatters.ts` (pure data-to-string helpers)
 
+### Bundled skills (`.claude-plugin/`)
+
+A Claude Code local plugin bundled with the npm package. `AgentController.runQuery()` loads it via the `plugins` SDK option so every worker session gets these skills automatically, without any user setup. Skills are in `.claude-plugin/skills/` (one subdirectory per skill, each with a `SKILL.md`). The plugin path is resolved at runtime relative to `agent-controller.ts` using `import.meta.url`. When adding or updating a skill, edit the file in `.claude-plugin/skills/` directly.
+
 ## Task lifecycle
 
 Status is **derived from timestamps**, not stored: `completedAt` → complete, `issueClosedAt` → closed, `prMergedAt` → merged, `workerId` → assigned, `prNumber` → pushed, open blockers → blocked, else → pending.
