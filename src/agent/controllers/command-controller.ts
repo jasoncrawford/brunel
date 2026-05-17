@@ -367,7 +367,7 @@ export function formatHelp(entries: CommandEntry[], opts: FormatHelpOptions = {}
   const parts: string[] = [];
 
   if (root.length > 0) {
-    parts.push(fmtCommandList(root));
+    parts.push(`commands:\n${fmtCommandList(root)}`);
   }
 
   for (const [ns, cmds] of namespaceMap) {

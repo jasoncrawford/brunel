@@ -223,11 +223,10 @@ export class BrunelAgent {
     });
     registry.register("help", {
       description: "List available commands",
-      handler: async (args) => {
-        const namespace = args.trim() || undefined;
+      handler: async () => {
         const wsUrl = config.foremanUrl;
         const dashboardUrl = wsUrl.replace(/^wss:\/\//, "https://").replace(/^ws:\/\//, "http://");
-        this.display.print(formatHelp(registry.listAll(), { namespace, dashboardUrl }));
+        this.display.print(formatHelp(registry.listAll(), { dashboardUrl }));
       },
     });
 

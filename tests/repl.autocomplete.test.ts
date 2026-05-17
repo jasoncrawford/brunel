@@ -64,7 +64,7 @@ describe("listCommandNames", () => {
     expect(result).toEqual([
       "clear", "exit", "help", "settings", "settings:effort", "settings:model",
       "settings:permissions", "settings:think-out-loud", "settings:verbose",
-      "worker:claim", "worker:complete", "worker:start", "worker:stop",
+      "worker:claim", "worker:complete", "worker:resume-events", "worker:start", "worker:stop",
       "workspace:create", "workspace:prune", "workspace:remove", "workspace:reset",
     ]);
   });

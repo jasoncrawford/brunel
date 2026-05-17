@@ -604,22 +604,8 @@ export class WorkerController extends EventEmitter {
     await this.agentStatus.refreshBranch();
   }
 
-  /** Register /worker:complete, /worker:start, /worker:stop, /worker:claim into the given (already-scoped) registry. */
+  /** Register worker slash commands into the given (already-scoped) registry. */
   registerCommands(registry: CommandRegistry): void {
-    registry.register("complete", {
-      description: "Mark the current task as done",
-      aliases: ["done"],
-      handler: async () => {
-        if (!this._isActive) {
-          this.display.print(c.boldRed("Not connected to a foreman."));
-          return undefined;
-        }
-        try { return await this.completeCurrentTask(); } catch (err) {
-          if (err instanceof UserCancelledError) return undefined;
-          throw err;
-        }
-      },
-    });
     registry.register("start", {
       description: "Start accepting tasks from the foreman",
       aliases: ["ready"],
@@ -671,28 +657,6 @@ export class WorkerController extends EventEmitter {
         await this.stop();
       },
     });
-    registry.register("resume-events", {
-      description: "Resume processing of GitHub events, when paused, and process queued events",
-      handler: async () => {
-        if (!this._isActive) {
-          this.display.print(c.boldRed("Not connected to a foreman."));
-          return undefined;
-        }
-        if (!this._eventsPaused) {
-          this.display.print(c.amber("Event processing is not paused."));
-          return undefined;
-        }
-        const events = this.pendingEvents.splice(0);
-        this._eventsPaused = false;
-        this._syncPendingEventsStatus();
-        if (events.length === 0) {
-          this.display.print(c.amber("Event processing resumed — no events queued."));
-        } else if (this.currentTaskId && this.currentIssue) {
-          this.enqueuePrompt(this.buildAndLogEventPrompt(events), false);
-        }
-        return undefined;
-      },
-    });
     registry.register("claim", {
       description: "Claim a specific task by ID",
       canRunFromArgs: true,
@@ -739,6 +703,42 @@ export class WorkerController extends EventEmitter {
           this.sendClaimTask(taskId);
         } else {
           this._pendingClaimTaskId = taskId;
+        }
+        return undefined;
+      },
+    });
+    registry.register("complete", {
+      description: "Mark the current task as done",
+      aliases: ["done"],
+      handler: async () => {
+        if (!this._isActive) {
+          this.display.print(c.boldRed("Not connected to a foreman."));
+          return undefined;
+        }
+        try { return await this.completeCurrentTask(); } catch (err) {
+          if (err instanceof UserCancelledError) return undefined;
+          throw err;
+        }
+      },
+    });
+    registry.register("resume-events", {
+      description: "Resume processing of GitHub events, when paused, and process queued events",
+      handler: async () => {
+        if (!this._isActive) {
+          this.display.print(c.boldRed("Not connected to a foreman."));
+          return undefined;
+        }
+        if (!this._eventsPaused) {
+          this.display.print(c.amber("Event processing is not paused."));
+          return undefined;
+        }
+        const events = this.pendingEvents.splice(0);
+        this._eventsPaused = false;
+        this._syncPendingEventsStatus();
+        if (events.length === 0) {
+          this.display.print(c.amber("Event processing resumed — no events queued."));
+        } else if (this.currentTaskId && this.currentIssue) {
+          this.enqueuePrompt(this.buildAndLogEventPrompt(events), false);
         }
         return undefined;
       },

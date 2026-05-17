@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { formatHelp, type CommandEntry } from "../src/agent/controllers/command-controller.js";
+import { registerTestCommands } from "./helpers.js";
 
 function makeEntry(name: string, description: string, extra: Partial<CommandEntry> = {}): CommandEntry {
   return { name, description, handler: async () => {}, ...extra };
@@ -17,12 +18,21 @@ const ENTRIES: CommandEntry[] = [
   makeEntry("workspace:reset",  "Reset to clean main branch"),
 ];
 
-// ── formatHelp — no namespace (show all) ──────────────────────────────────────
+// ── formatHelp — layout ───────────────────────────────────────────────────────
 
-describe("formatHelp — no namespace", () => {
+describe("formatHelp — layout", () => {
   it("starts with a blank line", () => {
     const text = formatHelp(ENTRIES);
     expect(text.startsWith("\n")).toBe(true);
+  });
+
+  it("has a 'commands:' header above root commands", () => {
+    const text = formatHelp(ENTRIES);
+    expect(text).toContain("commands:");
+    // header appears before the root command lines
+    const headerPos  = text.indexOf("commands:");
+    const clearPos   = text.indexOf("/clear");
+    expect(headerPos).toBeLessThan(clearPos);
   });
 
   it("includes root-level canonical commands", () => {
@@ -46,22 +56,19 @@ describe("formatHelp — no namespace", () => {
 
   it("root commands appear before namespace sections", () => {
     const text = formatHelp(ENTRIES);
-    const clearPos    = text.indexOf("/clear");
-    const workerPos   = text.indexOf("worker:");
+    const clearPos  = text.indexOf("/clear");
+    const workerPos = text.indexOf("worker:");
     expect(clearPos).toBeLessThan(workerPos);
   });
 
   it("excludes alias entries from the listing", () => {
     const text = formatHelp(ENTRIES);
     const lines = text.split("\n");
-    // /quit is an alias for exit — should not appear as a top-level command
     expect(lines.some(l => l.match(/^\s+\/quit\s/))).toBe(false);
-    // /worker:done is an alias — should not appear as a section entry
     expect(lines.some(l => l.match(/^\s+\/worker:done\s/))).toBe(false);
   });
 
-  it("preserves registration order for root commands (no alphabetizing)", () => {
-    // Registration order: clear, exit, help — so clear before exit before help
+  it("preserves registration order for root commands", () => {
     const text = formatHelp(ENTRIES);
     const clearPos = text.indexOf("/clear");
     const exitPos  = text.indexOf("/exit");
@@ -71,7 +78,6 @@ describe("formatHelp — no namespace", () => {
   });
 
   it("preserves registration order within namespaces", () => {
-    // worker:complete registered before worker:start
     const text = formatHelp(ENTRIES);
     const completePos = text.indexOf("/worker:complete");
     const startPos    = text.indexOf("/worker:start");
@@ -101,52 +107,6 @@ describe("formatHelp — no namespace", () => {
   });
 });
 
-// ── formatHelp — with namespace ───────────────────────────────────────────────
-
-describe("formatHelp — with namespace", () => {
-  it("starts with a blank line", () => {
-    const text = formatHelp(ENTRIES, { namespace: "workspace" });
-    expect(text.startsWith("\n")).toBe(true);
-  });
-
-  it("shows only commands in the given namespace", () => {
-    const text = formatHelp(ENTRIES, { namespace: "workspace" });
-    expect(text).toContain("/workspace:create");
-    expect(text).toContain("/workspace:reset");
-    expect(text).not.toContain("/worker:");
-    expect(text).not.toContain("/clear");
-  });
-
-  it("excludes alias entries from namespace listing", () => {
-    const text = formatHelp(ENTRIES, { namespace: "worker" });
-    expect(text).toContain("/worker:complete");
-    const lines = text.split("\n");
-    expect(lines.some(l => l.match(/^\s+\/worker:done\s/))).toBe(false);
-  });
-
-  it("includes descriptions for namespace commands", () => {
-    const text = formatHelp(ENTRIES, { namespace: "workspace" });
-    expect(text).toContain("Create an isolated git checkout");
-  });
-
-  it("returns a 'no commands' message for unknown namespace", () => {
-    const text = formatHelp(ENTRIES, { namespace: "nonexistent" });
-    expect(text).toContain("nonexistent");
-    expect(text).toMatch(/no commands/i);
-  });
-
-  it("includes footer with README link", () => {
-    const text = formatHelp(ENTRIES, { namespace: "workspace" });
-    expect(text).toContain("README:");
-    expect(text).toContain("https://github.com/jasoncrawford/brunel#readme");
-  });
-
-  it("includes dashboard URL when provided", () => {
-    const text = formatHelp(ENTRIES, { namespace: "workspace", dashboardUrl: "https://brunel.dev" });
-    expect(text).toContain("Foreman dashboard: https://brunel.dev");
-  });
-});
-
 // ── formatHelp — edge cases ───────────────────────────────────────────────────
 
 describe("formatHelp — edge cases", () => {
@@ -163,5 +123,32 @@ describe("formatHelp — edge cases", () => {
     const text = formatHelp(entries);
     expect(text).toContain("worker:");
     expect(text).toContain("/worker:start");
+  });
+});
+
+// ── Worker command registration order ─────────────────────────────────────────
+
+describe("worker command registration order", () => {
+  let helpText: string;
+
+  beforeEach(async () => {
+    const controller = await registerTestCommands();
+    helpText = formatHelp(controller.registry.listAll());
+  });
+
+  it("worker:start appears before worker:stop", () => {
+    expect(helpText.indexOf("/worker:start")).toBeLessThan(helpText.indexOf("/worker:stop"));
+  });
+
+  it("worker:stop appears before worker:claim", () => {
+    expect(helpText.indexOf("/worker:stop")).toBeLessThan(helpText.indexOf("/worker:claim"));
+  });
+
+  it("worker:claim appears before worker:complete", () => {
+    expect(helpText.indexOf("/worker:claim")).toBeLessThan(helpText.indexOf("/worker:complete"));
+  });
+
+  it("worker:complete appears before worker:resume-events", () => {
+    expect(helpText.indexOf("/worker:complete")).toBeLessThan(helpText.indexOf("/worker:resume-events"));
   });
 });

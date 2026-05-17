@@ -37,13 +37,10 @@ export async function registerTestCommands(): Promise<CommandController> {
   settingsRegistry.register("think-out-loud", { description: "Set think-out-loud mode", handler: noop });
   registry.register("help", { description: "List available commands", handler: noop });
   const workerRegistry = registry.scoped("worker");
-  workerRegistry.register("complete", {
-    description: "Mark the current task as done",
-    aliases: ["done"],
-    handler: async () => "task-complete",
-  });
-  workerRegistry.register("start", { description: "Connect to the foreman and start accepting tasks", handler: noop });
-  workerRegistry.register("stop", { description: "Disconnect from the foreman", handler: noop });
-  workerRegistry.register("claim", { description: "Claim a specific task by ID", handler: noop });
+  workerRegistry.register("start",         { description: "Start accepting tasks from the foreman", handler: noop });
+  workerRegistry.register("stop",          { description: "Disconnect from the foreman", handler: noop });
+  workerRegistry.register("claim",         { description: "Claim a specific task by ID", handler: noop });
+  workerRegistry.register("complete",      { description: "Mark the current task as done", aliases: ["done"], handler: async () => "task-complete" });
+  workerRegistry.register("resume-events", { description: "Resume processing of GitHub events", handler: noop });
   return controller;
 }
