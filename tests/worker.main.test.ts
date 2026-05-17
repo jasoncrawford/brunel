@@ -733,4 +733,44 @@ describe("CLI command dispatch", () => {
     // The routing loop ran — ask() was called (got __eof__ and exited)
     expect(mockInput.ask).toHaveBeenCalled();
   });
+
+  it("version command prints version string to stdout and exits", async () => {
+    installMocks();
+    const stdoutWrites: string[] = [];
+    const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation((s: unknown) => {
+      stdoutWrites.push(String(s));
+      return true;
+    });
+
+    let startCalled = false;
+    try {
+      await new BrunelAgent(getConfig()).start({ command: "version", args: "" });
+      startCalled = true;
+    } finally {
+      stdoutSpy.mockRestore();
+    }
+
+    expect(startCalled).toBe(true);
+    expect(mockInput.ask).not.toHaveBeenCalled();
+    const output = stdoutWrites.join("");
+    expect(output).toMatch(/^v\d+\.\d+\.\d+ \(protocol version \d+\)\n/);
+  });
+
+  it("version command does not print the startup banner", async () => {
+    installMocks();
+    const agent = new BrunelAgent(getConfig());
+    const printSpy = vi.spyOn(agent.display, "print").mockImplementation(() => {});
+    const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+
+    try {
+      await agent.start({ command: "version", args: "" });
+    } finally {
+      printSpy.mockRestore();
+      stdoutSpy.mockRestore();
+    }
+
+    const printed = printSpy.mock.calls.map(([s]: [unknown]) => stripAnsi(String(s))).join("\n");
+    expect(printed).not.toContain("brunel-agent");
+    expect(printed).not.toContain("Permissions:");
+  });
 });

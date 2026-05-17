@@ -218,6 +218,8 @@ const BOOLEAN_CLI_FLAGS = new Set(["--verbose", "--dangerously-skip-permissions"
  *   → { command: "worker:claim", args: "512" }
  */
 export function parseCommandFromArgs(argv: string[]): { command: string; args: string } | null {
+  if (argv.includes("--version")) return { command: "version", args: "" };
+
   const args = argv.slice(2);
   const consumed = new Set<number>();
 

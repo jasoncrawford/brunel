@@ -13,6 +13,7 @@ import { Input } from "./views/input.js";
 import { Picker } from "./views/picker.js";
 import { WorkerController } from "./controllers/worker-controller.js";
 import { loadConfig, parseCommandFromArgs, type BrunelConfig } from "../config.js";
+import { PROTOCOL_VERSION } from "../../shared/wire.js";
 import { Workspace } from "./models/workspace.js";
 import { GithubToken } from "./models/github-token.js";
 import { fmtError } from "../utils.js";
@@ -107,12 +108,15 @@ export class BrunelAgent {
     // doExit handles workspace cleanup and stdin/stdout teardown.
     // Returns true if exit should proceed, false if the user cancelled.
     // Called on exit from pure REPL mode (no active worker session).
+    let tuiStarted = false;
     const doExit = async (): Promise<boolean> => {
       const ok = await workspaceController.onDestroy();
       if (!ok) return false;
-      process.stdout.write("\x1b[?2004l\r\n");
-      if (process.stdin.isTTY) process.stdin.setRawMode(false);
-      process.stdin.pause();
+      if (tuiStarted) {
+        process.stdout.write("\x1b[?2004l\r\n");
+        if (process.stdin.isTTY) process.stdin.setRawMode(false);
+        process.stdin.pause();
+      }
       return true;
     };
 
@@ -177,24 +181,12 @@ export class BrunelAgent {
       process.exit(0);
     });
 
-    // Status bar is always shown.
-    this.display.startPersistentBar();
-
-    // Print the startup banner.
-    this.display.print(c.sageGreen(hr("═")));
-    this.display.print(c.skyBlue(this.display.s.bold(`  brunel-agent v${PACKAGE_VERSION}`)));
-    this.display.print(c.lavender(`  Permissions: ${this.settings.permissionMode ?? "default"} | Model: ${this.settings.model ?? "default"} | Effort: ${this.settings.effort ?? "auto"} | Output: ${this.settings.verbose ? "verbose" : "quiet"} | Log: repl.log`));
-    this.display.print(c.sageGreen(hr("═")));
-
-    process.stdout.write("\x1b[?2004h"); // enable bracketed paste mode
-    process.stdin.setRawMode?.(true);
-    process.stdin.resume();
-    process.stdin.setEncoding("utf8");
-
     let sessionId: string | undefined;
 
     // Register all commands. All commands are present in both REPL and worker
     // modes; commands that require a foreman connection degrade gracefully.
+    // Registered before the startup banner so exitAfterRunFromArgs commands
+    // can be detected and the banner suppressed for non-interactive invocations.
     const registry = this.controller.registry;
     workspaceController.registerCommands(registry.scoped("workspace"));
     workerController.registerCommands(registry.scoped("worker"));
@@ -221,6 +213,37 @@ export class BrunelAgent {
       registry,
       () => this.agentController.fetchModels(),
     );
+    registry.register("version", {
+      description: "Print version information",
+      canRunFromArgs: true,
+      exitAfterRunFromArgs: true,
+      handler: async () => {
+        process.stdout.write(`v${PACKAGE_VERSION} (protocol version ${PROTOCOL_VERSION})\n`);
+      },
+    });
+
+    // exitAfterRunFromArgs commands run non-interactively; skip the startup banner,
+    // status bar, and stdin setup so they produce only their own output.
+    const skipStartupUI = (() => {
+      if (!cliCommand) return false;
+      const slashResult = this.controller.parseSlashCommand(`/${cliCommand.command}`);
+      if (!slashResult || slashResult.type !== "command") return false;
+      const entry = registry.lookup(slashResult.name);
+      return !!(entry?.exitAfterRunFromArgs);
+    })();
+
+    if (!skipStartupUI) {
+      tuiStarted = true;
+      this.display.startPersistentBar();
+      this.display.print(c.sageGreen(hr("═")));
+      this.display.print(c.skyBlue(this.display.s.bold(`  brunel-agent v${PACKAGE_VERSION}`)));
+      this.display.print(c.lavender(`  Permissions: ${this.settings.permissionMode ?? "default"} | Model: ${this.settings.model ?? "default"} | Effort: ${this.settings.effort ?? "auto"} | Output: ${this.settings.verbose ? "verbose" : "quiet"} | Log: repl.log`));
+      this.display.print(c.sageGreen(hr("═")));
+      process.stdout.write("\x1b[?2004h"); // enable bracketed paste mode
+      process.stdin.setRawMode?.(true);
+      process.stdin.resume();
+      process.stdin.setEncoding("utf8");
+    }
 
     // ── CLI command dispatch ──────────────────────────────────────────────────
     //
