@@ -308,58 +308,74 @@ function listSkillNames(
   return [...new Set(results)].sort();
 }
 
+export interface FormatHelpOptions {
+  /** Limit output to a single namespace. */
+  namespace?: string;
+  /** Foreman dashboard URL shown in the footer. Omitted when not provided. */
+  dashboardUrl?: string;
+}
+
+const README_URL = "https://github.com/jasoncrawford/brunel#readme";
+
+function fmtCommandList(cmds: CommandEntry[]): string {
+  const maxLen = Math.max(...cmds.map(e => e.name.length));
+  return cmds.map(e => `  /${e.name.padEnd(maxLen)}  ${e.description}`).join("\n");
+}
+
+function fmtFooter(dashboardUrl?: string): string {
+  const lines: string[] = [];
+  if (dashboardUrl) lines.push(`Foreman dashboard: ${dashboardUrl}`);
+  lines.push(`README: ${README_URL}`);
+  return lines.join("\n");
+}
+
 /**
  * Format a help listing from the given registry entries.
- * With no namespace: lists root-level canonical commands, then shows available
- * namespaces with command counts and a hint to drill down.
+ * Starts with a blank line to visually separate output from the prompt.
+ * With no namespace: lists root-level canonical commands first, then each
+ * namespace in its own labeled section, all in registration order.
  * With a namespace: lists only canonical commands directly under that namespace.
+ * Always ends with a footer containing the README URL and optional dashboard URL.
  */
-export function formatHelp(entries: CommandEntry[], namespace?: string): string {
+export function formatHelp(entries: CommandEntry[], opts: FormatHelpOptions = {}): string {
+  const { namespace, dashboardUrl } = opts;
   const canonical = entries.filter(e => !e.aliasFor);
+  const footer = fmtFooter(dashboardUrl);
 
   if (namespace) {
     const prefix = `${namespace}:`;
-    const ns = canonical
-      .filter(e => e.name.startsWith(prefix) && !e.name.slice(prefix.length).includes(":"))
-      .sort((a, b) => a.name.localeCompare(b.name));
-    if (ns.length === 0) return `No commands in namespace: ${namespace}`;
-    const maxLen = Math.max(...ns.map(e => e.name.length));
-    const lines = ns.map(e => `  /${e.name.padEnd(maxLen)}  ${e.description}`);
-    return `${namespace} commands:\n${lines.join("\n")}`;
+    const ns = canonical.filter(
+      e => e.name.startsWith(prefix) && !e.name.slice(prefix.length).includes(":"),
+    );
+    if (ns.length === 0) return `\nNo commands in namespace: ${namespace}\n\n${footer}`;
+    return `\n${fmtCommandList(ns)}\n\n${footer}`;
   }
 
-  const root = canonical
-    .filter(e => !e.name.includes(":"))
-    .sort((a, b) => a.name.localeCompare(b.name));
+  const root = canonical.filter(e => !e.name.includes(":"));
 
-  const namespaceCounts = new Map<string, number>();
+  // Collect namespaces in first-seen order (Map preserves insertion order).
+  const namespaceMap = new Map<string, CommandEntry[]>();
   for (const e of canonical) {
     const colonIdx = e.name.indexOf(":");
     if (colonIdx > 0) {
       const ns = e.name.slice(0, colonIdx);
-      namespaceCounts.set(ns, (namespaceCounts.get(ns) ?? 0) + 1);
+      if (!namespaceMap.has(ns)) namespaceMap.set(ns, []);
+      namespaceMap.get(ns)!.push(e);
     }
   }
 
   const parts: string[] = [];
 
   if (root.length > 0) {
-    const maxLen = Math.max(...root.map(e => e.name.length));
-    const lines = root.map(e => `  /${e.name.padEnd(maxLen)}  ${e.description}`);
-    parts.push(`Commands:\n${lines.join("\n")}`);
+    parts.push(fmtCommandList(root));
   }
 
-  if (namespaceCounts.size > 0) {
-    const nsList = [...namespaceCounts.keys()].sort();
-    const maxLen = Math.max(...nsList.map(n => n.length));
-    const lines = nsList.map(n => {
-      const count = namespaceCounts.get(n)!;
-      return `  ${n.padEnd(maxLen)}  (${count} command${count === 1 ? "" : "s"})`;
-    });
-    parts.push(`Namespaces:\n${lines.join("\n")}\n\nUse /help <namespace> to list commands in a namespace.`);
+  for (const [ns, cmds] of namespaceMap) {
+    parts.push(`${ns}:\n${fmtCommandList(cmds)}`);
   }
 
-  return parts.join("\n\n");
+  parts.push(footer);
+  return "\n" + parts.join("\n\n");
 }
 
 /**

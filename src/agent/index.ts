@@ -225,7 +225,9 @@ export class BrunelAgent {
       description: "List available commands",
       handler: async (args) => {
         const namespace = args.trim() || undefined;
-        this.display.print(formatHelp(registry.listAll(), namespace));
+        const wsUrl = config.foremanUrl;
+        const dashboardUrl = wsUrl.replace(/^wss:\/\//, "https://").replace(/^ws:\/\//, "http://");
+        this.display.print(formatHelp(registry.listAll(), { namespace, dashboardUrl }));
       },
     });
 
