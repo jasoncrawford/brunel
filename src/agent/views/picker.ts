@@ -36,9 +36,7 @@ export type SettingsMenuEntry = {
   cycleValues?: string[];
 };
 
-export type SettingsMenuResult =
-  | { type: "selected"; index: number }
-  | { type: "cancelled" };
+export type SettingsMenuResult = { type: "cancelled" };
 
 export type PickQuestionResult =
   | { type: "answer"; value: string }
@@ -422,12 +420,11 @@ export class Picker {
   /**
    * Settings overview picker: shows all settings with current values.
    * Up/down arrows navigate; Tab/Right cycles through valid values forward;
-   * Shift-Tab/Left cycles backward (calling onCycle immediately); Enter
-   * selects; Escape/Ctrl-C cancels. A "Done" row at the end closes the menu
-   * without drilling into a sub-picker. The menu erases itself in all cases.
+   * Shift-Tab/Left cycles backward (calling onCycle immediately).
    *
-   * When a setting row is focused its cycleValues are shown inline: dim for
-   * non-current values, bold for the current selection.
+   * Opens with a heading row selected. Arrowing into a setting expands it
+   * inline showing all cycle values. Enter leaves the menu in place showing
+   * the final un-highlighted state. Escape/Ctrl-C erases the menu.
    */
   pickSettingsMenu(
     entries: SettingsMenuEntry[],
@@ -437,15 +434,12 @@ export class Picker {
     this.display?.startPicker();
 
     return new Promise((resolve) => {
-      let idx = 0;
+      let idx = -1; // -1 = heading row, 0..count-1 = settings entry
       let done = false;
       const count = entries.length;
-      const doneIdx = count; // synthetic "Done" row
-      const totalRows = count + 1;
+      const totalRows = 1 + count; // heading row + settings rows
 
-      // Internal current display values (mutable via cycling)
       const displays = entries.map(e => e.display);
-      // Track position within cycleValues for each entry
       const tabPositions = entries.map((e) => {
         if (!e.cycleValues || e.cycleValues.length === 0) return 0;
         const pos = e.cycleValues.indexOf(e.display);
@@ -453,46 +447,49 @@ export class Picker {
       });
 
       const labelWidth = Math.max(...entries.map(e => e.label.length));
+      const HEADING = "Arrows to choose settings, Enter when done";
 
-      const renderLine = (i: number): string => {
-        if (i === doneIdx) {
-          const marker = i === idx ? "▶ " : "  ";
-          const full = `${marker}Done`;
-          return i === idx ? full : s.dim(full);
+      const renderLine = (row: number, finished: boolean): string => {
+        if (row === 0) {
+          if (finished) return `  ${HEADING}`;
+          const selected = idx === -1;
+          return selected ? `▶ ${HEADING}` : s.dim(`  ${HEADING}`);
         }
+        const i = row - 1;
         const entry = entries[i];
         const label = entry.label.padEnd(labelWidth);
-        const marker = i === idx ? "▶ " : "  ";
-        if (i === idx && entry.cycleValues && entry.cycleValues.length > 0) {
-          // Show all values inline: bold for current position, dim for others
+        if (finished) return `  ${label}  ${displays[i]}`;
+        const selected = idx === i;
+        if (selected && entry.cycleValues && entry.cycleValues.length > 0) {
           const currentPos = tabPositions[i];
           const valuesStr = entry.cycleValues.map((v, vi) =>
             vi === currentPos ? s.bold(v) : s.dim(v)
           ).join("  ");
-          return `${marker}${label}  ${valuesStr}`;
+          return `▶ ${label}  ${valuesStr}`;
         }
-        const full = `${marker}${label}  ${displays[i]}`;
-        return i === idx ? full : s.dim(full);
+        const full = `  ${label}  ${displays[i]}`;
+        return selected ? `▶ ${label}  ${displays[i]}` : s.dim(full);
       };
 
-      for (let i = 0; i < totalRows; i++) {
-        process.stdout.write(renderLine(i) + "\r\n");
+      for (let row = 0; row < totalRows; row++) {
+        process.stdout.write(renderLine(row, false) + "\r\n");
       }
 
-      function redraw() {
+      function redraw(finished = false) {
         process.stdout.write(`\x1b[${totalRows}A\r`);
-        for (let i = 0; i < totalRows; i++) {
-          process.stdout.write(renderLine(i) + "\x1b[K\r\n");
+        for (let row = 0; row < totalRows; row++) {
+          process.stdout.write(renderLine(row, finished) + "\x1b[K\r\n");
         }
       }
 
       function eraseMenu() {
         process.stdout.write(`\x1b[${totalRows}A\r`);
-        for (let i = 0; i < totalRows; i++) process.stdout.write("\x1b[K\r\n");
+        for (let row = 0; row < totalRows; row++) process.stdout.write("\x1b[K\r\n");
         process.stdout.write(`\x1b[${totalRows}A\r`);
       }
 
       function cycle(direction: 1 | -1) {
+        if (idx < 0) return;
         const entry = entries[idx];
         if (!entry?.cycleValues?.length) return;
         tabPositions[idx] = (tabPositions[idx] + direction + entry.cycleValues.length) % entry.cycleValues.length;
@@ -503,12 +500,12 @@ export class Picker {
       }
 
       const { display } = this;
-      function finish(result: SettingsMenuResult) {
+      function finish(erase: boolean) {
         done = true;
         process.stdin.removeListener("data", onData);
-        eraseMenu();
+        if (erase) { eraseMenu(); } else { redraw(true); }
         display?.stopPicker();
-        resolve(result);
+        resolve({ type: "cancelled" });
       }
 
       function onData(raw: string) {
@@ -523,16 +520,16 @@ export class Picker {
         data = data.replace(/\x1b./gs, "");
 
         for (const ch of data) {
-          if (ch === "\x10") { idx = (idx - 1 + totalRows) % totalRows; redraw(); }
-          else if (ch === "\x11") { idx = (idx + 1) % totalRows; redraw(); }
-          else if (ch === "\x09" || ch === "\x12") { cycle(1); }  // Tab / Right
-          else if (ch === "\x13" || ch === "\x14") { cycle(-1); } // Left / Shift-Tab
-          else if (ch === "\r" || ch === "\n") {
-            if (idx === doneIdx) { finish({ type: "cancelled" }); }
-            else { finish({ type: "selected", index: idx }); }
-            return;
-          }
-          else if (ch === "\x1b" || ch === "\x03") { finish({ type: "cancelled" }); return; }
+          if (ch === "\x10") {
+            idx = idx === -1 ? count - 1 : idx - 1;
+            redraw();
+          } else if (ch === "\x11") {
+            idx = idx === count - 1 ? -1 : idx + 1;
+            redraw();
+          } else if (ch === "\x09" || ch === "\x12") { cycle(1); }  // Tab / Right
+          else if (ch === "\x13" || ch === "\x14") { cycle(-1); }   // Left / Shift-Tab
+          else if (ch === "\r" || ch === "\n") { finish(false); return; }
+          else if (ch === "\x1b" || ch === "\x03") { finish(true); return; }
         }
       }
 

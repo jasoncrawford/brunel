@@ -279,7 +279,7 @@ export class SettingsController {
   }
 
   /** Show the /settings overview picker: all settings with current values, Tab to cycle. */
-  async pickSettings(settingsPickFn: SettingsPickFn, pickFn: PickFn, fetchModelsFn?: FetchModelsFn): Promise<void> {
+  async pickSettings(settingsPickFn: SettingsPickFn, fetchModelsFn?: FetchModelsFn): Promise<void> {
     // Ensure model list is loaded for display
     let models = this.settings.getCachedModels();
     if (!models && fetchModelsFn) {
@@ -335,17 +335,7 @@ export class SettingsController {
       }
     };
 
-    const result = await settingsPickFn(entries, onCycle);
-    if (result.type !== "selected") return;
-
-    // On Enter, invoke the sub-command for the selected setting
-    switch (result.index) {
-      case 0: await this.pickModel("", pickFn, fetchModelsFn); break;
-      case 1: await this.pickEffort("", pickFn); break;
-      case 2: await this.pickPermissions("", pickFn); break;
-      case 3: await this.pickVerbose("", pickFn); break;
-      case 4: await this.pickThinkOutLoud("", pickFn); break;
-    }
+    await settingsPickFn(entries, onCycle);
   }
 
   /**
@@ -382,7 +372,7 @@ export class SettingsController {
     });
     rootRegistry.register("settings", {
       description: "View and edit all settings",
-      handler: async () => { await this.pickSettings(settingsPickFn, pickFn, fetchModelsFn); },
+      handler: async () => { await this.pickSettings(settingsPickFn, fetchModelsFn); },
     });
   }
 }
