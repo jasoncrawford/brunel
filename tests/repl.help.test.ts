@@ -126,6 +126,24 @@ describe("formatHelp — edge cases", () => {
   });
 });
 
+// ── Root command registration order ──────────────────────────────────────────
+
+describe("root command registration order", () => {
+  let helpText: string;
+
+  beforeEach(async () => {
+    const controller = await registerTestCommands();
+    helpText = formatHelp(controller.registry.listAll());
+  });
+
+  it("/exit appears after /help in the root commands section", () => {
+    const helpPos = helpText.indexOf("/help");
+    const exitPos = helpText.indexOf("/exit");
+    expect(helpPos).toBeGreaterThan(0);
+    expect(exitPos).toBeGreaterThan(helpPos);
+  });
+});
+
 // ── Worker command registration order ─────────────────────────────────────────
 
 describe("worker command registration order", () => {

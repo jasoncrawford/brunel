@@ -26,7 +26,6 @@ export async function registerTestCommands(): Promise<CommandController> {
   const noopDisplay = { print: () => {}, printForemanMessage: () => {} } as WorkerDisplay;
   new WorkspaceController(undefined, noopDisplay, { verbose: false }).registerCommands(registry.scoped("workspace"));
   const noop = async () => {};
-  registry.register("exit",   { description: "Exit", aliases: ["quit"], handler: noop });
   registry.register("clear",  { description: "Clear the conversation", handler: noop });
   registry.register("settings", { description: "View and edit all settings", handler: noop });
   const settingsRegistry = registry.scoped("settings");
@@ -36,6 +35,7 @@ export async function registerTestCommands(): Promise<CommandController> {
   settingsRegistry.register("verbose",        { description: "Set verbose output mode", handler: noop });
   settingsRegistry.register("think-out-loud", { description: "Set think-out-loud mode", handler: noop });
   registry.register("help", { description: "List available commands", handler: noop });
+  registry.register("exit", { description: "Exit", aliases: ["quit"], handler: noop });
   const workerRegistry = registry.scoped("worker");
   workerRegistry.register("start",         { description: "Start accepting tasks from the foreman", handler: noop });
   workerRegistry.register("stop",          { description: "Disconnect from the foreman", handler: noop });
