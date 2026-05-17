@@ -421,9 +421,13 @@ export class Picker {
 
   /**
    * Settings overview picker: shows all settings with current values.
-   * Up/down arrows navigate; Tab cycles through valid values for the current
-   * setting (calling onCycle immediately); Enter selects; Escape cancels.
-   * The menu erases itself before returning in all cases.
+   * Up/down arrows navigate; Tab/Right cycles through valid values forward;
+   * Shift-Tab/Left cycles backward (calling onCycle immediately); Enter
+   * selects; Escape/Ctrl-C cancels. A "Done" row at the end closes the menu
+   * without drilling into a sub-picker. The menu erases itself in all cases.
+   *
+   * When a setting row is focused its cycleValues are shown inline: dim for
+   * non-current values, bold for the current selection.
    */
   pickSettingsMenu(
     entries: SettingsMenuEntry[],
@@ -436,8 +440,10 @@ export class Picker {
       let idx = 0;
       let done = false;
       const count = entries.length;
+      const doneIdx = count; // synthetic "Done" row
+      const totalRows = count + 1;
 
-      // Internal current display values (mutable via Tab)
+      // Internal current display values (mutable via cycling)
       const displays = entries.map(e => e.display);
       // Track position within cycleValues for each entry
       const tabPositions = entries.map((e) => {
@@ -449,29 +455,50 @@ export class Picker {
       const labelWidth = Math.max(...entries.map(e => e.label.length));
 
       const renderLine = (i: number): string => {
+        if (i === doneIdx) {
+          const marker = i === idx ? "▶ " : "  ";
+          const full = `${marker}Done`;
+          return i === idx ? full : s.dim(full);
+        }
         const entry = entries[i];
         const label = entry.label.padEnd(labelWidth);
-        const value = displays[i];
         const marker = i === idx ? "▶ " : "  ";
-        const full = `${marker}${label}  ${value}`;
+        if (i === idx && entry.cycleValues && entry.cycleValues.length > 0) {
+          // Show all values inline: bold for current, dim for others
+          const valuesStr = entry.cycleValues.map(v =>
+            v === displays[i] ? s.bold(v) : s.dim(v)
+          ).join("  ");
+          return `${marker}${label}  ${valuesStr}`;
+        }
+        const full = `${marker}${label}  ${displays[i]}`;
         return i === idx ? full : s.dim(full);
       };
 
-      for (let i = 0; i < count; i++) {
+      for (let i = 0; i < totalRows; i++) {
         process.stdout.write(renderLine(i) + "\r\n");
       }
 
       function redraw() {
-        process.stdout.write(`\x1b[${count}A\r`);
-        for (let i = 0; i < count; i++) {
+        process.stdout.write(`\x1b[${totalRows}A\r`);
+        for (let i = 0; i < totalRows; i++) {
           process.stdout.write(renderLine(i) + "\x1b[K\r\n");
         }
       }
 
       function eraseMenu() {
-        process.stdout.write(`\x1b[${count}A\r`);
-        for (let i = 0; i < count; i++) process.stdout.write("\x1b[K\r\n");
-        process.stdout.write(`\x1b[${count}A\r`);
+        process.stdout.write(`\x1b[${totalRows}A\r`);
+        for (let i = 0; i < totalRows; i++) process.stdout.write("\x1b[K\r\n");
+        process.stdout.write(`\x1b[${totalRows}A\r`);
+      }
+
+      function cycle(direction: 1 | -1) {
+        const entry = entries[idx];
+        if (!entry?.cycleValues?.length) return;
+        tabPositions[idx] = (tabPositions[idx] + direction + entry.cycleValues.length) % entry.cycleValues.length;
+        const newValue = entry.cycleValues[tabPositions[idx]];
+        displays[idx] = newValue;
+        onCycle(idx, newValue);
+        redraw();
       }
 
       const { display } = this;
@@ -488,23 +515,22 @@ export class Picker {
         let data = raw;
         data = data.replace(/\x1b\[A/g, "\x10"); // up arrow
         data = data.replace(/\x1b\[B/g, "\x11"); // down arrow
+        data = data.replace(/\x1b\[C/g, "\x12"); // right arrow → cycle forward
+        data = data.replace(/\x1b\[D/g, "\x13"); // left arrow → cycle backward
+        data = data.replace(/\x1b\[Z/g, "\x14"); // shift-tab → cycle backward
         data = data.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
         data = data.replace(/\x1b./gs, "");
 
         for (const ch of data) {
-          if (ch === "\x10") { idx = (idx - 1 + count) % count; redraw(); }
-          else if (ch === "\x11") { idx = (idx + 1) % count; redraw(); }
-          else if (ch === "\x09") { // Tab
-            const entry = entries[idx];
-            if (entry.cycleValues && entry.cycleValues.length > 0) {
-              tabPositions[idx] = (tabPositions[idx] + 1) % entry.cycleValues.length;
-              const newValue = entry.cycleValues[tabPositions[idx]];
-              displays[idx] = newValue;
-              onCycle(idx, newValue);
-              redraw();
-            }
+          if (ch === "\x10") { idx = (idx - 1 + totalRows) % totalRows; redraw(); }
+          else if (ch === "\x11") { idx = (idx + 1) % totalRows; redraw(); }
+          else if (ch === "\x09" || ch === "\x12") { cycle(1); }  // Tab / Right
+          else if (ch === "\x13" || ch === "\x14") { cycle(-1); } // Left / Shift-Tab
+          else if (ch === "\r" || ch === "\n") {
+            if (idx === doneIdx) { finish({ type: "cancelled" }); }
+            else { finish({ type: "selected", index: idx }); }
+            return;
           }
-          else if (ch === "\r" || ch === "\n") { finish({ type: "selected", index: idx }); return; }
           else if (ch === "\x1b" || ch === "\x03") { finish({ type: "cancelled" }); return; }
         }
       }
