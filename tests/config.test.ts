@@ -645,6 +645,27 @@ describe("parseCommandFromArgs", () => {
       args: "",
     });
   });
+
+  it("--version flag returns version command", () => {
+    expect(parseCommandFromArgs(["node", "brunel.js", "--version"])).toEqual({
+      command: "version",
+      args: "",
+    });
+  });
+
+  it("--version flag takes precedence over positional args", () => {
+    expect(parseCommandFromArgs(["node", "brunel.js", "--version", "worker:start"])).toEqual({
+      command: "version",
+      args: "",
+    });
+  });
+
+  it("--version can appear with other flags", () => {
+    expect(parseCommandFromArgs(["node", "brunel.js", "--verbose", "--version"])).toEqual({
+      command: "version",
+      args: "",
+    });
+  });
 });
 
 // ── GitHub App credentials ────────────────────────────────────────────────────

@@ -31,7 +31,7 @@ Follows MVC with three subdirectories:
 
 - **Models** (`models/`) — `Workspace` (git/npm workspace management), `Settings` (runtime-settable preferences: model, effort, permissions, verbose, thinkOutLoud — seeded from config at startup, then owned by settings for runtime changes), `QueryStats` (token usage/turn counts and API cost from SDK messages), `AgentStatus` (pure state model for worker status — emits `"change"` on updates, subscribed to by `Display` for reactive redraws; also owns static git/id utilities `getCurrentBranch`, `getRemoteRepo`, `generateAgentId`)
 - **Views** (`views/`) — `Display` (TUI terminal I/O — the single doorway to stdout), `Renderer` (pure string producers, no I/O), `Input` (readline-based REPL), `Picker` (arrow-key menus), `style.ts` (terminal color/style constants)
-- **Controllers** (`controllers/`) — `AgentController` (runs queries), `WorkerController` (consolidated worker mode lifecycle: WebSocket protocol, task state, reconnect/heartbeat, `/worker:*` commands; maintains an explicit three-state model: stopped / waiting / active — `transitionToIdle()` is the canonical entry point for the waiting state), `WorkspaceController` (workspace lifecycle + `/workspace:*` slash commands; event listeners are registered once in the constructor, not in `onCreate()` or other per-operation methods), `CommandRegistry`/`CommandController` (slash command registration and dispatch; commands registered with `canRunFromArgs: true` can be invoked directly from CLI args, e.g. `brunel worker:start`; `exitAfterRunFromArgs: true` causes the process to exit after the command completes rather than entering the REPL), `SettingsController` (all `/settings:*` commands and the `/settings` overview picker; call `registerAll()` from the composition root to register commands)
+- **Controllers** (`controllers/`) — `AgentController` (runs queries), `WorkerController` (consolidated worker mode lifecycle: WebSocket protocol, task state, reconnect/heartbeat, `/worker:*` commands; maintains an explicit three-state model: stopped / waiting / active — `transitionToIdle()` is the canonical entry point for the waiting state), `WorkspaceController` (workspace lifecycle + `/workspace:*` slash commands; event listeners are registered once in the constructor, not in `onCreate()` or other per-operation methods), `CommandRegistry`/`CommandController` (slash command registration and dispatch; commands registered with `canRunFromArgs: true` can be invoked directly from CLI args, e.g. `brunel worker:start`; `exitAfterRunFromArgs: true` causes the process to exit after the command completes rather than entering the REPL and also suppresses the startup banner), `SettingsController` (all `/settings:*` commands and the `/settings` overview picker; call `registerAll()` from the composition root to register commands)
 
 ### Shared
 
@@ -88,7 +88,7 @@ npm start
 npm run worker
 ```
 
-Config via `.env` or `brunel.config.ts` (CLI flags also accepted). See `src/config.ts` for all options. Positional args that aren't flag values are treated as command invocations (e.g. `brunel worker:start`, `brunel workspace:prune`, `brunel worker:claim 512`).
+Config via `.env` or `brunel.config.ts` (CLI flags also accepted). See `src/config.ts` for all options. Positional args that aren't flag values are treated as command invocations (e.g. `brunel worker:start`, `brunel workspace:prune`, `brunel worker:claim 512`, `brunel version`). The `--version` flag is a shorthand for `brunel version`.
 
 ## Useful scripts
 
