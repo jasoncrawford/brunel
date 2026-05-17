@@ -1,8 +1,8 @@
 /**
- * Tests for the /worker:resume command:
+ * Tests for the /worker:revive command:
  * - prefix resolution (no match, ambiguous, unique)
  * - correct agent ID extracted from directory name
- * - correct status: "resume" sent in the worker_hello
+ * - correct status: "revive" sent in the worker_hello
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "events";
@@ -47,7 +47,7 @@ function makeDisplay() {
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-const BASE_DIR = path.join(os.tmpdir(), `brunel-resume-test-${process.pid}`);
+const BASE_DIR = path.join(os.tmpdir(), `brunel-revive-test-${process.pid}`);
 
 /** Create a fake workspace directory with .git to pass attach() validation. */
 function makeWorkspaceDir(agentId: string): string {
@@ -127,10 +127,10 @@ function helloFromWs(ws: FakeWs): (Wire.WorkerMessage & { type: "worker_hello" }
 
 // ── Prefix resolution ──────────────────────────────────────────────────────────
 
-describe("/worker:resume — prefix resolution", () => {
+describe("/worker:revive — prefix resolution", () => {
   it("prints error when no workspace matches the prefix", async () => {
     const { registry, display } = makeSession(BASE_DIR);
-    await registry.execute("worker:resume", "nonexistent-prefix");
+    await registry.execute("worker:revive", "nonexistent-prefix");
     expect(display.print).toHaveBeenCalledWith(expect.stringMatching(/no worker workspace found/i));
   });
 
@@ -139,14 +139,14 @@ describe("/worker:resume — prefix resolution", () => {
     makeWorkspaceDir("albert-uuid-2");
 
     const { registry, display } = makeSession(BASE_DIR);
-    await registry.execute("worker:resume", "albert");
+    await registry.execute("worker:revive", "albert");
     expect(display.print).toHaveBeenCalledWith(expect.stringMatching(/ambiguous/i));
   });
 
   it("proceeds when exactly one workspace matches", async () => {
     makeWorkspaceDir("harold-abc123");
     const { registry, display } = makeSession(BASE_DIR);
-    await registry.execute("worker:resume", "harold");
+    await registry.execute("worker:revive", "harold");
     // Should NOT print an error
     const printed = (display.print as ReturnType<typeof vi.fn>).mock.calls.map(([line]) => line).join("\n");
     expect(printed).not.toMatch(/no worker workspace found/i);
@@ -156,7 +156,7 @@ describe("/worker:resume — prefix resolution", () => {
 
 // ── Agent ID assumption ────────────────────────────────────────────────────────
 
-describe("/worker:resume — agent ID assumption", () => {
+describe("/worker:revive — agent ID assumption", () => {
   it("sets agentId to the full directory name", async () => {
     const agentId = "harold-6ee65735-aaaa-bbbb-cccc-ddddeeeeffffgggg";
     makeWorkspaceDir(agentId);
@@ -164,24 +164,24 @@ describe("/worker:resume — agent ID assumption", () => {
     const { registry, agentStatus } = makeSession(BASE_DIR);
     // Stop start() from actually connecting
     vi.spyOn(agentStatus, "setWorkerModeActive");
-    await registry.execute("worker:resume", "harold");
+    await registry.execute("worker:revive", "harold");
 
     expect(agentStatus.agentId).toBe(agentId);
   });
 });
 
-// ── Resume status in worker_hello ──────────────────────────────────────────────
+// ── Revive status in worker_hello ──────────────────────────────────────────────
 
-describe("/worker:resume — status in worker_hello", () => {
-  it("sends status='resume' in the first worker_hello", async () => {
+describe("/worker:revive — status in worker_hello", () => {
+  it("sends status='revive' in the first worker_hello", async () => {
     const agentId = "patience-aabbccdd-1111-2222-3333-444455556666";
     makeWorkspaceDir(agentId);
 
     const { registry, getFakeWs } = makeSession(BASE_DIR);
-    await registry.execute("worker:resume", "patience");
+    await registry.execute("worker:revive", "patience");
 
     const hello = helloFromWs(getFakeWs());
-    expect(hello?.status).toBe("resume");
+    expect(hello?.status).toBe("revive");
   });
 
   it("workerId in the hello matches the dead worker's agent ID", async () => {
@@ -189,22 +189,22 @@ describe("/worker:resume — status in worker_hello", () => {
     makeWorkspaceDir(agentId);
 
     const { registry, getFakeWs } = makeSession(BASE_DIR);
-    await registry.execute("worker:resume", "mercy");
+    await registry.execute("worker:revive", "mercy");
 
     const hello = helloFromWs(getFakeWs());
     expect(hello?.workerId).toBe(agentId);
   });
 
-  it("uses ready status on reconnect after resume (not resume again)", async () => {
+  it("uses ready status on reconnect after revive (not revive again)", async () => {
     const agentId = "caleb-aabbccdd-1111-2222-3333-444455556666";
     makeWorkspaceDir(agentId);
 
     const { registry, session, getFakeWs } = makeSession(BASE_DIR);
-    await registry.execute("worker:resume", "caleb");
+    await registry.execute("worker:revive", "caleb");
 
     const firstWs = getFakeWs();
     const firstHello = helloFromWs(firstWs);
-    expect(firstHello?.status).toBe("resume");
+    expect(firstHello?.status).toBe("revive");
 
     // Simulate a disconnect and reconnect — foreman replies with ready
     firstWs.emit("message", Buffer.from(JSON.stringify({
@@ -220,12 +220,12 @@ describe("/worker:resume — status in worker_hello", () => {
     // Wait briefly for reconnect to fire (uses setTimeout(0) via jitter)
     await new Promise(r => setTimeout(r, 50));
 
-    // The second WebSocket's hello should NOT say "resume"
+    // The second WebSocket's hello should NOT say "revive"
     const reconnectWs = getFakeWs();
     if (reconnectWs !== firstWs) {
       const secondHello = helloFromWs(reconnectWs);
       if (secondHello) {
-        expect(secondHello.status).not.toBe("resume");
+        expect(secondHello.status).not.toBe("revive");
       }
     }
   });
@@ -233,23 +233,23 @@ describe("/worker:resume — status in worker_hello", () => {
 
 // ── Foreman rejection rollback ─────────────────────────────────────────────────
 
-describe("/worker:resume — foreman rejection rollback", () => {
+describe("/worker:revive — foreman rejection rollback", () => {
   it("detaches workspace (removes lock, restores cwd) when foreman sends fatal error", async () => {
     const agentId = "harold-aaaa-1111-2222-3333-bbbbccccdddd";
     const workerDir = makeWorkspaceDir(agentId);
     const originalCwd = process.cwd();
 
     const { registry, getFakeWs } = makeSession(BASE_DIR);
-    await registry.execute("worker:resume", "harold-aaaa");
+    await registry.execute("worker:revive", "harold-aaaa");
 
     // Lock was written by attach() and cwd was changed — confirm both
     expect(fs.existsSync(path.join(workerDir, ".brunel.lock"))).toBe(true);
     expect(process.cwd()).toBe(workerDir);
 
-    // Foreman rejects the resume
+    // Foreman rejects the revive
     getFakeWs().emit("message", Buffer.from(JSON.stringify({
       type: "foreman_error",
-      message: "Worker is currently connected — cannot resume",
+      message: "Worker is currently connected — cannot revive",
       fatal: true,
     } satisfies Wire.ForemanMessage)));
 
@@ -261,14 +261,14 @@ describe("/worker:resume — foreman rejection rollback", () => {
     expect(process.cwd()).toBe(originalCwd);
   });
 
-  it("allows a second /worker:resume after a fatal rejection", async () => {
+  it("allows a second /worker:revive after a fatal rejection", async () => {
     const agentId = "rufus-bbbb-1111-2222-3333-ccccddddeeee";
     const workerDir = makeWorkspaceDir(agentId);
 
     const { registry, getFakeWs, display } = makeSession(BASE_DIR);
 
     // First attempt — foreman rejects
-    await registry.execute("worker:resume", "rufus-bbbb");
+    await registry.execute("worker:revive", "rufus-bbbb");
     getFakeWs().emit("message", Buffer.from(JSON.stringify({
       type: "foreman_error",
       message: "Worker is currently connected",
@@ -276,7 +276,7 @@ describe("/worker:resume — foreman rejection rollback", () => {
     } satisfies Wire.ForemanMessage)));
 
     // Second attempt — must not report "still running"
-    await registry.execute("worker:resume", "rufus-bbbb");
+    await registry.execute("worker:revive", "rufus-bbbb");
     const printed = (display.print as ReturnType<typeof vi.fn>).mock.calls.map(([l]) => l as string).join("\n");
     expect(printed).not.toMatch(/still running/i);
     // Lock should exist again (written by the second attach)
@@ -286,14 +286,14 @@ describe("/worker:resume — foreman rejection rollback", () => {
 
 // ── Wire protocol — PROTOCOL_VERSION ─────────────────────────────────────────
 
-describe("wire protocol — resume status", () => {
-  it("'resume' is a valid status in worker_hello", () => {
+describe("wire protocol — revive status", () => {
+  it("'revive' is a valid status in worker_hello", () => {
     // Compile-time check: this assignment must not be a TypeScript error.
     const msg: Wire.WorkerMessage = {
       type: "worker_hello",
       workerId: "w1",
       repo: "owner/repo",
-      status: "resume",
+      status: "revive",
     };
     expect(msg.type).toBe("worker_hello");
   });

@@ -7,7 +7,7 @@ import { WebSocket } from "ws";
 import { c } from "../views/style.js";
 import { AgentStatus } from "../models/agent-status.js";
 import type { Display } from "../views/display.js";
-import { buildInitialPrompt, buildResumePrompt, buildEventPrompt } from "../worker-prompts.js";
+import { buildInitialPrompt, buildRevivePrompt, buildEventPrompt } from "../worker-prompts.js";
 import * as Wire from "../../../shared/wire.js";
 import { fmtError } from "../../utils.js";
 import { fmtNum, fmtTaskStats } from "../../../shared/formatters.js";
@@ -42,7 +42,7 @@ export type TaskConfirmInfo = {
 };
 
 /** A prompt queued by WorkerController for main() to execute. */
-export type QueuedPrompt = { prompt: string; fresh: boolean; resumeSessionId?: string };
+export type QueuedPrompt = { prompt: string; fresh: boolean; reviveSessionId?: string };
 
 /** Options for overriding WorkerController internals, primarily for testing. */
 export type WorkerControllerOptions = {
@@ -145,12 +145,12 @@ export class WorkerController extends EventEmitter {
   // ── Pending claim (cleared by stop() and after sending) ───────────────────
   private _pendingClaimTaskId: string | undefined;
 
-  // ── Resume state ───────────────────────────────────────────────────────────
-  private _isResuming = false;
-  private _pendingResumeSessionId: string | undefined;
+  // ── Revive state ───────────────────────────────────────────────────────────
+  private _isReviving = false;
+  private _pendingReviveSessionId: string | undefined;
   // True from attach() until the foreman accepts or rejects — lets the fatal
   // error handler detach (not destroy) the workspace on rejection.
-  private _attachedViaResume = false;
+  private _attachedViaRevive = false;
 
   // ── Connection state (cleared by stop()) ──────────────────────────────────
   private ws: WebSocket | undefined;
@@ -755,13 +755,13 @@ export class WorkerController extends EventEmitter {
         return undefined;
       },
     });
-    registry.register("resume", {
-      description: "Resume a dead worker's session by workspace directory prefix",
+    registry.register("revive", {
+      description: "Revive a dead worker's session by workspace directory prefix",
       canRunFromArgs: true,
       handler: async (args: string) => {
         const prefix = args.trim();
         if (!prefix) {
-          this.display.print(c.boldRed("Usage: /worker:resume <prefix>"));
+          this.display.print(c.boldRed("Usage: /worker:revive <prefix>"));
           return undefined;
         }
         if (this._isActive) {
@@ -806,17 +806,17 @@ export class WorkerController extends EventEmitter {
         try {
           await this.workspaceController!.attachExisting(agentId, this.options?.githubToken);
         } catch (err) {
-          this.display.print(c.boldRed(`Cannot resume: ${fmtError(err)}`));
+          this.display.print(c.boldRed(`Cannot revive: ${fmtError(err)}`));
           return undefined;
         }
-        this._attachedViaResume = true;
+        this._attachedViaRevive = true;
 
         // Look up the last Claude session for this workspace
         const workspaceDir2 = this.workspaceController!.workspace!.dir;
-        this._pendingResumeSessionId = WorkerController._findLastClaudeSessionId(workspaceDir2);
+        this._pendingReviveSessionId = WorkerController._findLastClaudeSessionId(workspaceDir2);
 
-        // Connect with status="resume" on the first connection
-        this._isResuming = true;
+        // Connect with status="revive" on the first connection
+        this._isReviving = true;
         await this.start();
 
         return undefined;
@@ -867,9 +867,9 @@ export class WorkerController extends EventEmitter {
     this.issueClosed = false;
     this._resetPromise = null;
     this._pendingClaimTaskId = undefined;
-    this._isResuming = false;
-    this._pendingResumeSessionId = undefined;
-    this._attachedViaResume = false;
+    this._isReviving = false;
+    this._pendingReviveSessionId = undefined;
+    this._attachedViaRevive = false;
     this._isReserved = false;
     this.lastSeenEventSeqId = undefined;
     this.ws = undefined;
@@ -894,10 +894,10 @@ export class WorkerController extends EventEmitter {
    * Push a prompt to the queue and emit "prompts_ready" so index.ts's routing
    * loop can cancel any live ask() and drain the queue.
    * fresh=true means the session should reset its conversationId (new task).
-   * resumeSessionId, if set, causes index.ts to resume an existing Claude session.
+   * reviveSessionId, if set, causes index.ts to resume an existing Claude session.
    */
-  private enqueuePrompt(prompt: string, fresh: boolean, resumeSessionId?: string): void {
-    this.pendingPrompts.push({ prompt, fresh, resumeSessionId });
+  private enqueuePrompt(prompt: string, fresh: boolean, reviveSessionId?: string): void {
+    this.pendingPrompts.push({ prompt, fresh, reviveSessionId });
     this.emit("prompts_ready");
   }
 
@@ -993,12 +993,12 @@ export class WorkerController extends EventEmitter {
       // auto-assign while we're about to claim a specific task. After hello_ack,
       // transitionToRegistered() will send the claim_task message automatically.
       // Do NOT put _pendingClaimTaskId in the hello — it will be sent as claim_task.
-      // If resuming, use "resume" status once (cleared immediately so reconnects use normal status).
-      const isResuming = this._isResuming;
-      this._isResuming = false;
+      // If reviving, use "revive" status once (cleared immediately so reconnects use normal status).
+      const isReviving = this._isReviving;
+      this._isReviving = false;
       const hasPendingClaim = !!this._pendingClaimTaskId;
       const isAssigned = !!this.currentTaskId;
-      const status = isResuming ? "resume" as const
+      const status = isReviving ? "revive" as const
         : isAssigned ? "assigned" as const
         : hasPendingClaim ? "reserved" as const
         : "ready" as const;
@@ -1101,11 +1101,11 @@ export class WorkerController extends EventEmitter {
 
     if (msg.type === "foreman_error") {
       if (msg.fatal) {
-        // If we attached a workspace for this resume but the foreman rejected us,
+        // If we attached a workspace for this revive but the foreman rejected us,
         // detach (release the lock) without destroying the directory.
-        if (this._attachedViaResume) {
+        if (this._attachedViaRevive) {
           this.workspaceController?.onDetach();
-          this._attachedViaResume = false;
+          this._attachedViaRevive = false;
         }
         this._deactivate();
         this.currentAc?.abort(); // abort any running query immediately
@@ -1126,7 +1126,7 @@ export class WorkerController extends EventEmitter {
 
     if (msg.type === "hello_ack") {
       this.reconnectAttempts = 0; // connection succeeded; reset backoff
-      this._attachedViaResume = false; // foreman accepted — workspace is legitimately ours
+      this._attachedViaRevive = false; // foreman accepted — workspace is legitimately ours
       if (msg.status === "cancelled") {
         // Task was reassigned while worker was disconnected — stop and reset.
         this.currentAc?.abort(); // abort any running query immediately
@@ -1210,15 +1210,15 @@ export class WorkerController extends EventEmitter {
       this.agentStatus.resetTaskStats();
       this._syncPendingEventsStatus();
       void this.agentStatus.refreshBranch();
-      const resumeSessionId = this._pendingResumeSessionId;
-      this._pendingResumeSessionId = undefined;
-      // Resume: use a short "pick up where you left off" prompt in the existing session.
+      const reviveSessionId = this._pendingReviveSessionId;
+      this._pendingReviveSessionId = undefined;
+      // Revive: use a short "pick up where you left off" prompt in the existing session.
       // New task: use the full initial prompt and start a fresh session.
-      const prompt = resumeSessionId
-        ? buildResumePrompt(msg.issue)
+      const prompt = reviveSessionId
+        ? buildRevivePrompt(msg.issue)
         : buildInitialPrompt(msg.issue, !!this.workspaceController?.workspace);
       this.display.print(c.sageGreen(prompt));
-      const enqueue = () => this.enqueuePrompt(prompt, !resumeSessionId, resumeSessionId);
+      const enqueue = () => this.enqueuePrompt(prompt, !reviveSessionId, reviveSessionId);
       // If a workspace reset is in progress (from a cancelled hello_ack), defer the
       // prompt until the reset finishes — otherwise the task could run in a dirty workspace.
       if (this._resetPromise) {

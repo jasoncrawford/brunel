@@ -176,8 +176,8 @@ export class WorkerController {
 
     const versionInfo = { version: msg.version, protocolVersion: msg.protocolVersion };
 
-    if (msg.status === "resume") {
-      await this.handleResumeHello(workerId, ws, repo, versionInfo);
+    if (msg.status === "revive") {
+      await this.handleReviveHello(workerId, ws, repo, versionInfo);
     } else if (msg.status === "assigned" && msg.taskId) {
       await this.handleAssignedHello(workerId, msg.taskId, ws, repo, msg.lastSeenEventSeqId, versionInfo);
     } else if (msg.status === "reserved") {
@@ -311,32 +311,32 @@ export class WorkerController {
   }
 
   /**
-   * Handles the "resume" branch of a worker_hello — a new process is taking
+   * Handles the "revive" branch of a worker_hello — a new process is taking
    * over the identity of a dead worker. Validates the worker exists in the DB
    * and belongs to the connecting repo, then either reclaims the active task
    * (sending both hello_ack and task_assigned) or registers fresh (ready).
    */
-  async handleResumeHello(workerId: string, ws: WebSocket, repo: Repo, versionInfo?: { version?: string; protocolVersion?: number }): Promise<void> {
+  async handleReviveHello(workerId: string, ws: WebSocket, repo: Repo, versionInfo?: { version?: string; protocolVersion?: number }): Promise<void> {
     try {
       // Fatal if the worker is currently connected
       if (Worker.fromRegistry(workerId)) {
-        this._workerLog(workerId, "resume rejected — worker is currently connected");
-        this.messenger.sendError(ws, `Worker ${workerId} is currently connected — cannot resume`, true, workerId, repo.id);
+        this._workerLog(workerId, "revive rejected — worker is currently connected");
+        this.messenger.sendError(ws, `Worker ${workerId} is currently connected — cannot revive`, true, workerId, repo.id);
         return;
       }
 
       // Fatal if not found in DB
       const dbWorker = await Worker.get(workerId);
       if (!dbWorker) {
-        this._workerLog(workerId, "resume rejected — no DB record found");
-        this.messenger.sendError(ws, `No worker found with ID ${workerId} — cannot resume`, true, workerId, repo.id);
+        this._workerLog(workerId, "revive rejected — no DB record found");
+        this.messenger.sendError(ws, `No worker found with ID ${workerId} — cannot revive`, true, workerId, repo.id);
         return;
       }
 
       // Fatal if the connecting repo doesn't match the worker's recorded repo
       if (dbWorker.repoId !== repo.id) {
-        this._workerLog(workerId, `resume rejected — repo mismatch (worker repo_id=${dbWorker.repoId}, connecting repo_id=${repo.id})`);
-        this.messenger.sendError(ws, `Worker ${workerId} belongs to a different repo — cannot resume as ${repo.fullName}`, true, workerId, repo.id);
+        this._workerLog(workerId, `revive rejected — repo mismatch (worker repo_id=${dbWorker.repoId}, connecting repo_id=${repo.id})`);
+        this.messenger.sendError(ws, `Worker ${workerId} belongs to a different repo — cannot revive as ${repo.fullName}`, true, workerId, repo.id);
         return;
       }
 
@@ -344,11 +344,11 @@ export class WorkerController {
       // which may be null even if the task is assigned to this worker).
       const task = await Task.getByWorker(workerId);
       if (task && task.status !== "complete") {
-        this._workerLog(workerId, `resume: reclaiming active task #${task.issueNumber}`);
+        this._workerLog(workerId, `revive: reclaiming active task #${task.issueNumber}`);
         const worker = Worker.register(workerId, ws, repo, versionInfo);
         await this.reclaimWorker(worker, task);
         // reclaimWorker sends hello_ack { status: "assigned" }.
-        // Also send task_assigned so the resuming worker learns its task details.
+        // Also send task_assigned so the reviving worker learns its task details.
         const baseSeqId = await WebhookEvent.currentMaxId();
         this.messenger.send(worker, {
           type: "task_assigned",
@@ -356,7 +356,7 @@ export class WorkerController {
           issue: task.toAssignmentPayload(),
           baseSeqId,
         });
-        this._workerLog(workerId, `resume → task_assigned #${task.issueNumber}`);
+        this._workerLog(workerId, `revive → task_assigned #${task.issueNumber}`);
         return;
       }
 
@@ -364,11 +364,11 @@ export class WorkerController {
       // _registerFresh reverts any stale complete task assignment.
       const worker = await this._registerFresh(workerId, ws, repo, versionInfo);
       if (!worker) return;
-      this._workerLog(workerId, "resume: no active task, registering fresh");
+      this._workerLog(workerId, "revive: no active task, registering fresh");
       this.messenger.send(worker, { type: "hello_ack", workerId: worker.workerId, status: "ready", repoStatus: repo.status });
     } catch (err) {
-      log(`ERROR handleResumeHello ${workerId}: ${fmtError(err)}`);
-      this.messenger.sendError(ws, `Internal error during resume: ${fmtError(err)}`, false, workerId, repo.id);
+      log(`ERROR handleReviveHello ${workerId}: ${fmtError(err)}`);
+      this.messenger.sendError(ws, `Internal error during revive: ${fmtError(err)}`, false, workerId, repo.id);
     }
   }
 

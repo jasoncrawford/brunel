@@ -72,7 +72,7 @@ export class Workspace extends EventEmitter {
    * Attach to an existing workspace directory without cloning.
    * Verifies the directory exists and contains a .git folder, re-applies
    * git auth, writes a PID lockfile, and marks isCreated = true.
-   * Used by /worker:resume to take over a dead worker's checkout.
+   * Used by /worker:revive to take over a dead worker's checkout.
    */
   async attach(): Promise<void> {
     if (!fs.existsSync(this.dir)) {

@@ -148,7 +148,7 @@ export class AgentStatus extends EventEmitter {
     this.emit("change");
   }
 
-  /** Change the agent ID (used by /worker:resume to assume a dead worker's identity) and emit "change". */
+  /** Change the agent ID (used by /worker:revive to assume a dead worker's identity) and emit "change". */
   setAgentId(id: string): void {
     this._agentId = id;
     this.emit("change");
