@@ -853,18 +853,18 @@ describe("handleWorkerHello protocol version", () => {
   });
 });
 
-// ── handleResumeHello ──────────────────────────────────────────────────────────
+// ── handleReviveHello ──────────────────────────────────────────────────────────
 
-describe("handleResumeHello", () => {
+describe("handleReviveHello", () => {
   it("fatal error when worker is currently connected", async () => {
     const { wss } = makeDeps(taskManager);
     // Register worker in the live registry
     await wss.handleReadyHello("w1", fakeWs(), taskManager.repo);
     expect(Worker.fromRegistry("w1")).toBeDefined(); // sanity: w1 is connected
 
-    // Now try to resume — should reject because w1 is connected
+    // Now try to revive — should reject because w1 is connected
     const ws2 = fakeWs();
-    await wss.handleResumeHello("w1", ws2, taskManager.repo);
+    await wss.handleReviveHello("w1", ws2, taskManager.repo);
 
     const errorCalls = ws2.send.mock.calls.filter(([data]: [string]) => JSON.parse(data).type === "foreman_error");
     expect(errorCalls).toHaveLength(1);
@@ -876,7 +876,7 @@ describe("handleResumeHello", () => {
   it("fatal error when worker not found in DB", async () => {
     const { wss } = makeDeps(taskManager);
     const ws = fakeWs();
-    await wss.handleResumeHello("no-such-worker", ws, taskManager.repo);
+    await wss.handleReviveHello("no-such-worker", ws, taskManager.repo);
 
     const errorCalls = ws.send.mock.calls.filter(([data]: [string]) => JSON.parse(data).type === "foreman_error");
     expect(errorCalls).toHaveLength(1);
@@ -892,8 +892,8 @@ describe("handleResumeHello", () => {
 
     const { wss } = makeDeps(taskManager);
     const ws = fakeWs();
-    // Try to resume as taskManager.repo (test/repo) but worker belongs to other/repo
-    await wss.handleResumeHello("w1", ws, taskManager.repo);
+    // Try to revive as taskManager.repo (test/repo) but worker belongs to other/repo
+    await wss.handleReviveHello("w1", ws, taskManager.repo);
 
     const errorCalls = ws.send.mock.calls.filter(([data]: [string]) => JSON.parse(data).type === "foreman_error");
     expect(errorCalls).toHaveLength(1);
@@ -914,12 +914,12 @@ describe("handleResumeHello", () => {
 
     const { wss, sendMsg } = makeDeps(taskManager);
     const ws = fakeWs();
-    await wss.handleResumeHello("w1", ws, taskManager.repo);
+    await wss.handleReviveHello("w1", ws, taskManager.repo);
 
     const ack = helloAck(sendMsg);
     expect(ack?.status).toBe("assigned");
 
-    // Also expect task_assigned to be sent (so the resuming worker knows its task)
+    // Also expect task_assigned to be sent (so the reviving worker knows its task)
     const taskAssignedCalls = sendMsg.mock.calls.filter(
       ([, msg]) => (msg as { type: string }).type === "task_assigned",
     );
@@ -935,7 +935,7 @@ describe("handleResumeHello", () => {
 
     const { wss, sendMsg } = makeDeps(taskManager);
     const ws = fakeWs();
-    await wss.handleResumeHello("w1", ws, taskManager.repo);
+    await wss.handleReviveHello("w1", ws, taskManager.repo);
 
     const ack = helloAck(sendMsg);
     expect(ack?.status).toBe("ready");
@@ -959,22 +959,22 @@ describe("handleResumeHello", () => {
     });
 
     const { wss, sendMsg } = makeDeps(taskManager);
-    await wss.handleResumeHello("w1", fakeWs(), taskManager.repo);
+    await wss.handleReviveHello("w1", fakeWs(), taskManager.repo);
 
     const ack = helloAck(sendMsg);
     expect(ack?.status).toBe("ready");
   });
 
-  it("routes status='resume' through handleWorkerHello to handleResumeHello", async () => {
+  it("routes status='revive' through handleWorkerHello to handleReviveHello", async () => {
     const { wss } = makeDeps(taskManager);
     vi.spyOn(Repo, "findOrCreate").mockResolvedValue(taskManager.repo as unknown as Repo);
-    const spy = vi.spyOn(wss, "handleResumeHello" as any).mockResolvedValue(undefined);
+    const spy = vi.spyOn(wss, "handleReviveHello" as any).mockResolvedValue(undefined);
 
     await wss.handleWorkerHello("w1", fakeWs(), {
       type: "worker_hello",
       workerId: "w1",
       repo: "owner/repo",
-      status: "resume",
+      status: "revive",
     });
 
     expect(spy).toHaveBeenCalled();
