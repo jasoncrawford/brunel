@@ -26,6 +26,20 @@ export function fmtTime(): string {
   return `${h}:${m}:${sec}`;
 }
 
+export function fmtTimestamp(date = new Date()): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const datePart = `${year}-${month}-${day}`;
+  const timePart = new Intl.DateTimeFormat(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+    timeZoneName: "short",
+  }).format(date);
+  return `${datePart} ${timePart}`;
+}
+
 export function fmtDuration(secs: number): string {
   if (secs < 60) return `${secs}s`;
   const m = Math.floor(secs / 60);

@@ -12,6 +12,7 @@ import {
   fmtTime,
   fmtNum,
   fmtStats,
+  fmtTimestamp,
   fmtEvent,
   fmtArgs,
   toRelativePath,
@@ -386,7 +387,7 @@ export class Renderer {
 
   private readonly MESSAGE_FMT: FmtTable = {
     _empty:           (m) => c.darkGray(`[${m.type} — empty]`),
-    result:           (m) => c.darkGray(`\n${fmtStats(Math.round(m.duration_ms / 1000), m.num_turns, m.usage.output_tokens, m.usage.input_tokens, m.total_cost_usd)}`),
+    result:           (m) => c.darkGray(`\n${fmtTimestamp()}, ${fmtStats(Math.round(m.duration_ms / 1000), m.num_turns, m.usage.output_tokens, m.usage.input_tokens, m.total_cost_usd)}`),
     rate_limit_event: (m) => {
       const info = m.rate_limit_info;
       if (!info || info.status === "allowed") return null;
