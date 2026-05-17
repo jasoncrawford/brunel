@@ -7,7 +7,8 @@ import { createRequire } from "node:module";
 const _require = createRequire(import.meta.url);
 const { version: PACKAGE_VERSION } = _require("../../package.json") as { version: string };
 import { Display } from "./views/display.js";
-import { c, hr } from "./views/style.js";
+import { c, s, hr } from "./views/style.js";
+import { shortWorkerId } from "../../shared/utils.js";
 import { AgentStatus } from "./models/agent-status.js";
 import { Input } from "./views/input.js";
 import { Picker } from "./views/picker.js";
@@ -243,9 +244,19 @@ export class BrunelAgent {
     if (!skipStartupUI) {
       tuiStarted = true;
       this.display.startPersistentBar();
+      const _modelName = (!this.settings.model || this.settings.model === "default") ? "sonnet" : this.settings.model;
+      const _effortStr = this.settings.effort ? ` (${this.settings.effort})` : "";
+      const _permPart = this.settings.permissionMode && this.settings.permissionMode !== "default"
+        ? ` ∙ ${this.settings.permissionMode}`
+        : "";
+      const _outputPart = this.settings.verbose ? " ∙ verbose" : this.settings.effectiveThinkOutLoud ? " ∙ think out loud" : "";
       this.display.print(c.sageGreen(hr("═")));
-      this.display.print(c.skyBlue(this.display.s.bold(`  brunel-agent v${PACKAGE_VERSION}`)));
-      this.display.print(c.lavender(`  Permissions: ${this.settings.permissionMode ?? "default"} | Model: ${this.settings.model ?? "default"} | Effort: ${this.settings.effort ?? "auto"} | Output: ${this.settings.verbose ? "verbose" : "quiet"} | Log: repl.log`));
+      this.display.print(
+        c.skyBlue(s.bold(`  brunel-agent v${PACKAGE_VERSION}`)) +
+        c.gray(` (protocol v${PROTOCOL_VERSION})`)
+      );
+      this.display.print(c.lavender(`  ${shortWorkerId(this.agentStatus.agentId)} ∙ ${_modelName}${_effortStr}${_permPart}${_outputPart}`));
+      this.display.print(c.lavender(`  /worker:start to accept tasks, /help for other commands`));
       this.display.print(c.sageGreen(hr("═")));
       process.stdout.write("\x1b[?2004h"); // enable bracketed paste mode
       process.stdin.setRawMode?.(true);
