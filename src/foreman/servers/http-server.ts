@@ -1,12 +1,13 @@
 import { Webhooks } from "@octokit/webhooks";
 import http from "http";
-import { createReadStream, existsSync } from "fs";
+import { createReadStream, existsSync, readFileSync } from "fs";
 import { join, extname } from "path";
 import { fileURLToPath } from "url";
 import { Hono } from "hono";
 import { getRequestListener } from "@hono/node-server";
 import { ApiController } from "../controllers/api-controller.js";
 import { fmtError, log } from "../../utils.js";
+import { getConfig } from "../../config.js";
 
 export interface HttpServerOptions {
   webhookSecret?: string;
@@ -89,6 +90,12 @@ export class HttpServer {
       ".svg": "image/svg+xml",
       ".ico": "image/x-icon",
     };
+    if (target.endsWith("index.html")) {
+      const { taskLabel } = getConfig();
+      const script = `<script>window.__BRUNEL_CONFIG__=${JSON.stringify({ taskLabel })};</script>`;
+      const html = readFileSync(target, "utf-8").replace("<!-- __BRUNEL_CONFIG__ -->", script);
+      return new Response(html, { headers: { "Content-Type": "text/html" } });
+    }
     const stream = createReadStream(target);
     return new Response(stream as unknown as ReadableStream, {
       headers: { "Content-Type": mime[extname(target)] ?? "application/octet-stream" },

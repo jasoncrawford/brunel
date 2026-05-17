@@ -1914,11 +1914,11 @@ describe("completeCurrentTask: post-completion prompt", () => {
     expect(sess.isActive).toBe(true);
   });
 
-  it("option 0 (wait for next task): prints 'Waiting for next task'", async () => {
+  it("option 0 (wait for next task): prints 'Waiting for tasks'", async () => {
     const { sess } = await makeSession(async () => 0);
     await sess.completeCurrentTask();
     const printed = display.print.mock.calls.map(([l]: [string]) => stripAnsi(l));
-    expect(printed.some(l => l.includes("Waiting for next task"))).toBe(true);
+    expect(printed.some(l => l.includes("Waiting for tasks"))).toBe(true);
   });
 
   it("option 2 (stop working): stops worker mode and returns 'task-complete'", async () => {
@@ -2659,6 +2659,17 @@ describe("transitionToIdle — Waiting for tasks message", () => {
       resolveReset();
       chdirSpy.mockRestore();
     }
+  });
+
+  it("includes dashboard repo URL in waiting message", () => {
+    const issue = makeIssue();
+    sendMsg(fakeWs, { type: "task_assigned", taskId: "42", issue });
+    session.takeNextPrompt();
+    display.print.mockClear();
+    sendMsg(fakeWs, { type: "hello_ack", workerId: AGENT_ID, status: "cancelled" });
+    const printed = display.print.mock.calls.map(([l]: [string]) => stripAnsi(l)).join("\n");
+    // Default foremanUrl is wss://brunel.dev → https://brunel.dev
+    expect(printed).toContain("https://brunel.dev/repos/owner/repo");
   });
 
   it("prints 'Waiting for tasks...' after reset completes on hello_ack cancelled with workspace", async () => {

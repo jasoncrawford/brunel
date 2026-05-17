@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useAdminWs } from "../hooks/useAdminWs.ts";
+import { useConfig } from "../hooks/useConfig.ts";
 import type { Task, Worker, Repo, LogEntry, AdminMessage } from "../types.ts";
 import { shortWorkerId } from "../../../shared/utils.ts";
 
@@ -9,6 +10,7 @@ export default function Dashboard() {
   const [workers, setWorkers] = useState<Worker[]>([]);
   const [repos, setRepos] = useState<Repo[]>([]);
   const [recentLog, setRecentLog] = useState<LogEntry[]>([]);
+  const { taskLabel } = useConfig();
 
   const handleMessage = useCallback((msg: AdminMessage) => {
     if (msg.type === "snapshot") {
@@ -42,9 +44,9 @@ export default function Dashboard() {
     <div>
       <h2>Dashboard</h2>
 
-      {repos.length > 0 && (
-        <section style={{ marginBottom: "2rem" }}>
-          <h3>Repos ({repos.length})</h3>
+      <section style={{ marginBottom: "2rem" }}>
+        <h3>Repos ({repos.length})</h3>
+        {repos.length === 0 ? <p>No repos.</p> : (
           <ul>
             {repos.map((r) => (
               <li key={r.repoId}>
@@ -55,8 +57,9 @@ export default function Dashboard() {
               </li>
             ))}
           </ul>
-        </section>
-      )}
+        )}
+        <p style={hint}>Install the <a href="https://github.com/apps/brunel-foreman" target="_blank" rel="noreferrer">Brunel Foreman GitHub app</a> on a repo to get started.</p>
+      </section>
 
       <section>
         <h3>Tasks ({statsText})</h3>
@@ -90,6 +93,7 @@ export default function Dashboard() {
             </tbody>
           </table>
         )}
+        <p style={hint}>Tag GitHub issues with <code>{taskLabel}</code> to assign them to workers.</p>
       </section>
 
       <section style={{ marginTop: "2rem" }}>
@@ -106,6 +110,7 @@ export default function Dashboard() {
             ))}
           </ul>
         )}
+        <p style={hint}>To start a worker, run <code>brunel worker:start</code> in a repo (install <a href="https://www.npmjs.com/package/brunel-agent" target="_blank" rel="noreferrer">brunel-agent</a> first).</p>
       </section>
 
       <section style={{ marginTop: "2rem" }}>
@@ -156,3 +161,4 @@ function repoLink(fullName: string | undefined, repos: Repo[]): React.ReactNode 
 
 const th: React.CSSProperties = { textAlign: "left", borderBottom: "1px solid #ccc", padding: "4px 8px" };
 const td: React.CSSProperties = { padding: "4px 8px", borderBottom: "1px solid #eee" };
+const hint: React.CSSProperties = { fontSize: "0.85em", color: "#666", marginTop: "0.5rem" };

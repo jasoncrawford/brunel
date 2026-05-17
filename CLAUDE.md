@@ -36,7 +36,7 @@ Follows MVC with three subdirectories:
 ### Shared
 
 - `src/` root — `config.ts` (unified config loader with `getConfig()` singleton; also exports `parseCommandFromArgs()` which extracts the first positional CLI arg as a command name for direct CLI invocation), `wire.ts` (re-exports from `shared/wire.ts`)
-- `shared/` — utilities needed by both Node backend and Vite frontend: `wire.ts` (wire protocol types and the `PROTOCOL_VERSION` integer constant), `formatters.ts` (pure data-to-string helpers)
+- `shared/` — utilities needed by both Node backend and Vite frontend: `wire.ts` (wire protocol types and `PROTOCOL_VERSION`), `formatters.ts` (pure data-to-string helpers)
 
 ## Task lifecycle
 

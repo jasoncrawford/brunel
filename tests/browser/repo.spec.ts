@@ -207,5 +207,5 @@ test("repo detail page: shows activation banner for new (unactivated) repo", asy
 
   // Repo detail should show the activation banner
   await expect(page.getByText(/This repo is not yet activated/)).toBeVisible();
-  await expect(page.getByText(/run.*brunel/)).toBeVisible();
+  await expect(page.getByText(/run.*brunel.*in this repo/)).toBeVisible();
 });

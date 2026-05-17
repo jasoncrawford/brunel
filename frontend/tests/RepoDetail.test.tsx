@@ -12,6 +12,10 @@ vi.mock("../src/hooks/useAdminWs.ts", () => ({
   },
 }));
 
+vi.mock("../src/hooks/useConfig.ts", () => ({
+  useConfig: () => ({ taskLabel: "brunel:ready" }),
+}));
+
 function renderRepoDetail(fullName = "user/my-repo") {
   return render(
     <MemoryRouter initialEntries={[`/repos/${fullName}`]}>
@@ -164,5 +168,32 @@ describe("RepoDetail", () => {
 
     expect(screen.getAllByRole("row")).toHaveLength(2); // header + 1 only
     expect(screen.queryByText("worker_hello from other repo")).not.toBeInTheDocument();
+  });
+
+  it("shows tasks label hint with link to GitHub issues page", () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn()
+        .mockResolvedValueOnce({ json: () => Promise.resolve(mockRepo) })
+        .mockResolvedValueOnce({ json: () => Promise.resolve([]) })
+    );
+    renderRepoDetail();
+    expect(screen.getByText(/Tag/)).toBeInTheDocument();
+    const link = screen.getByRole("link", { name: "GitHub issues" });
+    expect(link).toHaveAttribute("href", "https://github.com/user/my-repo/issues");
+    expect(screen.getByText("brunel:ready")).toBeInTheDocument();
+  });
+
+  it("shows workers start hint with brunel-agent link", () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn()
+        .mockResolvedValueOnce({ json: () => Promise.resolve(mockRepo) })
+        .mockResolvedValueOnce({ json: () => Promise.resolve([]) })
+    );
+    renderRepoDetail();
+    expect(screen.getByText(/To start a worker/)).toBeInTheDocument();
+    const link = screen.getByRole("link", { name: "brunel-agent" });
+    expect(link).toHaveAttribute("href", "https://www.npmjs.com/package/brunel-agent");
   });
 });

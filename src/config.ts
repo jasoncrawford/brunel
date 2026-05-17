@@ -3,15 +3,13 @@ import { z } from "zod";
 import type { PermissionMode } from "@anthropic-ai/claude-agent-sdk";
 import { fmtError } from "./utils.js";
 
+const DEFAULT_TASK_LABEL = "brunel:ready";
+
 // ── Permission modes ──────────────────────────────────────────────────────────
 
 export const VALID_PERMISSION_MODES = [
   "default", "acceptEdits", "bypassPermissions", "plan", "dontAsk",
 ] as const satisfies readonly PermissionMode[];
-
-// ── Schema defaults (exported so other modules don't duplicate these values) ──
-
-const DEFAULT_TASK_LABEL = "brunel:ready";
 
 // ── Schema ────────────────────────────────────────────────────────────────────
 

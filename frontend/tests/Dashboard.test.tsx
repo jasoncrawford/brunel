@@ -13,6 +13,10 @@ vi.mock("../src/hooks/useAdminWs.ts", () => ({
   },
 }));
 
+vi.mock("../src/hooks/useConfig.ts", () => ({
+  useConfig: () => ({ taskLabel: "brunel:ready" }),
+}));
+
 function renderDashboard() {
   return render(
     <MemoryRouter>
@@ -111,6 +115,35 @@ describe("Dashboard", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     renderDashboard();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/log");
+  });
+
+  it("shows repos install hint", () => {
+    renderDashboard();
+    expect(screen.getByText(/Install the/)).toBeInTheDocument();
+    const link = screen.getByRole("link", { name: "Brunel Foreman GitHub app" });
+    expect(link).toHaveAttribute("href", "https://github.com/apps/brunel-foreman");
+  });
+
+  it("shows tasks label hint with taskLabel", () => {
+    renderDashboard();
+    expect(screen.getByText(/Tag GitHub issues with/)).toBeInTheDocument();
+    expect(screen.getByText("brunel:ready")).toBeInTheDocument();
+  });
+
+  it("shows workers start hint with brunel-agent link", () => {
+    renderDashboard();
+    expect(screen.getByText(/To start a worker/)).toBeInTheDocument();
+    const link = screen.getByRole("link", { name: "brunel-agent" });
+    expect(link).toHaveAttribute("href", "https://www.npmjs.com/package/brunel-agent");
+  });
+
+  it("shows repos section even when repos list is empty", () => {
+    renderDashboard();
+    act(() => {
+      capturedHandler!({ type: "snapshot", tasks: [], workers: [] });
+    });
+    expect(screen.getByText(/Repos \(0\)/)).toBeInTheDocument();
+    expect(screen.getByText("No repos.")).toBeInTheDocument();
   });
 });
