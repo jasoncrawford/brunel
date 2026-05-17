@@ -621,6 +621,34 @@ describe("ask() - blank line suppression with \\n prefix prompt", () => {
       await p;
     });
   });
+
+  it("cancel() after print() with \\n prefix does NOT go up into printed content (issue #1146)", async () => {
+    // Regression test for issue #1146: when display.print() fires while ask() with
+    // a \n prefix is active, _drawFresh() redraws the prompt below the new content
+    // without the blank prefix row above it. cancel() must NOT move up by _prefixRows
+    // (those rows are now content), or it erases the last line of the printed text.
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const writeSpy = vi.mocked(process.stdout.write);
+
+    await withFakeStdin(async () => {
+      const p = testInput.ask("\n[agent] > ", () => []);
+
+      // Simulate an external print arriving while the prompt is visible
+      testDisplay.print("line one\nline two\nlast line");
+
+      // Clear spy to isolate only cancel()'s writes
+      writeSpy.mockClear();
+
+      testInput.cancel();
+      await p;
+    });
+
+    // cancel() must NOT write any cursor-up escape — the prefix blank row was
+    // consumed by printed content, so going up would erase content, not blank space.
+    const writes = writeSpy.mock.calls.map((c) => String(c[0]));
+    const hasCursorUp = writes.some((w) => /\x1b\[\d+A/.test(w));
+    expect(hasCursorUp).toBe(false);
+  });
 });
 
 describe("ask() - status bar repositioning on start (issue #757)", () => {
