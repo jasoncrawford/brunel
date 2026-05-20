@@ -20,7 +20,7 @@ jobs:
         with:
           node-version: 20
 
-      - run: npm install -g npm@11.5.1  # version pinned, see engines.npm in package.json
+      - run: corepack enable  # use npm version from packageManager field in package.json
 
       - run: npm ci
 
