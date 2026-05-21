@@ -15,6 +15,7 @@
   "publishConfig": {
     "access": "public"
   },
+  "packageManager": "npm@11.5.1",
   "scripts": {
     "build": "cd frontend && npm install && npm run build",
     "start": "tsx src/foreman/index.ts",
