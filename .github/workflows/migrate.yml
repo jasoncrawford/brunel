@@ -13,7 +13,7 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: supabase/setup-cli@03559d0a6c2f0163187cadab1412d6dce3a6a481 # node24-compatible (post-v1.6.0)
         with:
