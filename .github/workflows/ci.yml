@@ -16,7 +16,7 @@ jobs:
         with:
           node-version: 20
 
-      - uses: supabase/setup-cli@03559d0a6c2f0163187cadab1412d6dce3a6a481 # node24-compatible (post-v1.6.0)
+      - uses: supabase/setup-cli@23ef4b04161f23662fd6245e6bdbf644e6e1fae7 # node24-compatible (post-v1.6.0)
         with:
           version: latest
 
