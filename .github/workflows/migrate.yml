@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: supabase/setup-cli@03559d0a6c2f0163187cadab1412d6dce3a6a481 # node24-compatible (post-v1.6.0)
+      - uses: supabase/setup-cli@6ffe784b57613e98e0c04651e5fde0cec28cb1c9 # node24-compatible (post-v1.6.0)
         with:
           version: latest
 
